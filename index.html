@@ -282,7 +282,7 @@ select option{background:var(--c2)}
   .wft-ko{font-size:11px!important}
   .wft-en{font-size:9px!important}
 
-  /* 캔버스: 사이드바 아래 고정 높이 */
+  /* 캔버스: 결과 없을 때 숨김, 결과 있을 때 표시 */
   .main{
     width:100%!important;
     height:50vh!important;
@@ -293,6 +293,7 @@ select option{background:var(--c2)}
     overflow:hidden!important;
     order:2!important;
   }
+  .main.mob-hidden{display:none!important}
   .cnv{height:100%!important;position:relative!important;overflow:hidden!important}
   .hist-s{position:absolute!important;inset:0!important;overflow-y:auto!important}
   #canvas-upload-box{position:absolute!important;inset:0!important}
@@ -328,6 +329,7 @@ select option{background:var(--c2)}
   .ss{margin-bottom:6px!important}
   .lbl{font-size:11px!important}
   .sdiv{display:none!important}
+  .tb{display:none!important}
   .note-box{font-size:11px!important}
 }
 
@@ -1679,20 +1681,23 @@ function runHunyuanWorld(imgDataUrl, prompt, onDone, onErr){
       labels_fg2 = '';
       classes_str = prompt;
     }
-    var worldInput = {image_url: imgUrl, labels_fg1: labels_fg1, classes: classes_str};
-    if(labels_fg2) worldInput.labels_fg2 = labels_fg2;
+    // labels_fg2 required 파라미터
+    if(!labels_fg2) labels_fg2 = 'room, space, depth';
+    var worldInput = {
+      image_url: imgUrl,
+      labels_fg1: labels_fg1||'wall, floor, ceiling, furniture',
+      labels_fg2: labels_fg2,
+      classes: classes_str||'interior, architecture, space'
+    };
     falRun('fal-ai/hunyuan_world/image-to-world', worldInput, function(d){
-      console.log('[HunyuanWorld image-to-world] result:', JSON.stringify(Object.keys(d||{})));
-      // 결과에서 3D 데이터 URL 추출
+      console.log('[HunyuanWorld] full result:', JSON.stringify(d).slice(0,300));
+      // ★ 실제 응답: { world_file: { url, content_type, file_name } }
       var url=null;
-      // 가능한 키들 순서대로 시도
-      if(d&&d.video&&d.video.url) url=d.video.url;
+      if(d&&d.world_file&&d.world_file.url) url=d.world_file.url;
+      else if(d&&d.video&&d.video.url) url=d.video.url;
       else if(d&&d.images&&d.images[0]&&d.images[0].url) url=d.images[0].url;
       else if(d&&d.image&&d.image.url) url=d.image.url;
-      else if(d&&d.world_url) url=d.world_url;
-      else if(d&&d.output&&d.output.url) url=d.output.url;
       else if(d&&d.url) url=d.url;
-      else if(d&&d.video_url) url=d.video_url;
       // 비디오면 그대로, 이미지면 파노라마 뷰어
       if(url) onDone(url);
       else {
@@ -2100,6 +2105,11 @@ function finishPolygon(cv,polyOv){
 // ── File loading ──────────────────────────────────────────────
 function loadF(f,key){
   if(!f||!f.type.startsWith('image/'))return;
+  // 모바일: 이미지 업로드 시 캔버스 표시 (업로드 미리보기)
+  if(window.innerWidth<=768 && key==='main'){
+    var mainEl=document.querySelector('.main');
+    if(mainEl)mainEl.classList.remove('mob-hidden');
+  }
   var r=new FileReader();
   r.onload=function(ev){
     var v=ev.target.result;
@@ -2256,6 +2266,11 @@ function loadHistFromStorage(){
   }
 }
 function addHistEl(item, scroll){
+  // 모바일: 결과 나오면 캔버스 표시
+  if(window.innerWidth<=768){
+    var mainEl=document.querySelector('.main');
+    if(mainEl)mainEl.classList.remove('mob-hidden');
+  }
   var hs=gE('hist-s');if(!hs)return;
 
   // 로딩 중 아이템 — 로딩 카드로 표시
@@ -4548,6 +4563,11 @@ document.addEventListener('DOMContentLoaded',function(){try{
   // 홈화면 명시적으로 표시
   var homeEl=gE('home-s');
   if(homeEl)homeEl.style.display='flex';
+  // 모바일: 초기 캔버스 숨김 (결과 없을 때)
+  if(window.innerWidth<=768){
+    var mainEl=document.querySelector('.main');
+    if(mainEl)mainEl.classList.add('mob-hidden');
+  }
   updBtn();
 
   // ── 버튼 이벤트 연결 ─────────────────────────────────────────
@@ -4765,9 +4785,7 @@ var _lastMobTab = '';
 
 function mobTab(wf){
   try{
-    // selectWF가 G.wf 설정, home-s 숨김, 탭 UI 전환, renderSB 모두 처리
     selectWF(wf);
-    // 탭바 버튼 활성화
     document.querySelectorAll('.mob-tab').forEach(function(t){t.classList.remove('on');});
     var bt=gE('mobt-'+wf);
     if(bt){
@@ -4775,13 +4793,19 @@ function mobTab(wf){
       bt.style.transform='scale(0.85)';
       setTimeout(function(){if(bt)bt.style.transform='scale(1)';},150);
     }
-    // 모바일: 사이드바 상단으로 스크롤
+    // 모바일: 결과/이미지 있으면 캔버스 표시, 없으면 숨김
     if(window.innerWidth<=768){
+      var mainEl=document.querySelector('.main');
+      if(mainEl){
+        var tab=getTab(wf);
+        var hasContent=tab&&(tab.inputImg||(G.HIST[wf]&&G.HIST[wf].length>0));
+        if(hasContent) mainEl.classList.remove('mob-hidden');
+        else mainEl.classList.add('mob-hidden');
+      }
       window.scrollTo({top:0,behavior:'smooth'});
     }
   }catch(e){
     console.error('[mobTab error]',e);
-    // 최소한 G.wf라도 설정
     G.wf=wf;
   }
 }
