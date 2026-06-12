@@ -268,6 +268,8 @@ select option{background:var(--c2)}
   .chips{flex-wrap:wrap!important}
 }
 
+  #mob-run-wrap{display:block!important}
+  .sb-btm{display:none!important}
 .mob-tabbar{display:none}
 /* 모바일 탭바 스타일 */
 .mob-tabbar{position:fixed;bottom:0;left:0;right:0;height:56px;background:#07070a;border-top:1px solid var(--bd);z-index:9000;justify-content:space-around;align-items:stretch}
@@ -386,6 +388,11 @@ select option{background:var(--c2)}
       <div id="brush-hint" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.72);color:#fff;font-size:12px;padding:6px 14px;border-radius:20px;pointer-events:none;z-index:31;white-space:nowrap;backdrop-filter:blur(4px)">✏️ 수정할 오브젝트 위에 칠하세요</div>
 
 <!-- 모바일 하단 탭바 -->
+<div id="mob-run-wrap" style="display:none;position:fixed;bottom:56px;left:0;right:0;z-index:8999;padding:8px 10px;background:var(--sb);border-top:1px solid var(--bd);box-shadow:0 -4px 16px rgba(0,0,0,.5)">
+  <button id="mob-actbtn" style="width:100%;padding:14px;border:none;border-radius:10px;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;background:var(--c2);color:var(--m1)">
+    <span id="mob-aclbl">실행</span>&nbsp;<span id="mob-accr" style="font-size:12px;opacity:.8">20 cr</span>
+  </button>
+</div>
 <div class="mob-tabbar" id="mob-tabbar">
   <button class="mob-tab" id="mobt-space"   onclick="mobTab('space')">  <span>🏠</span>현장사진</button>
   <button class="mob-tab" id="mobt-render"  onclick="mobTab('render')"> <span>✨</span>렌더</button>
@@ -716,9 +723,25 @@ function updBtn(){
     if(al)al.textContent=WFL[G.wf]||'실행';
   }
   var ac=gE('accr');if(ac)ac.textContent=cost+' cr';
-  // 모바일: 탭 선택 안 됐을 때 sb-btm 숨김
+  // 모바일 전용 버튼 동기화
+  var mb=gE('mob-actbtn');
+  var mw=gE('mob-run-wrap');
+  var mal=gE('mob-aclbl');
+  var mac=gE('mob-accr');
+  if(mb&&mw){
+    if(!G.wf){
+      mw.style.display='none';
+    } else {
+      mw.style.display='block';
+      mb.style.background=ok?'linear-gradient(135deg,var(--ac3),var(--ac))':'var(--c2)';
+      mb.style.color=ok?'#000':'var(--m1)';
+      if(mal)mal.textContent=WFL[G.wf]||'실행';
+      if(mac)mac.textContent=cost+' cr';
+    }
+  }
+  // PC: 탭 선택 안 됐을 때 sb-btm 숨김
   var sbtm=document.querySelector('.sb-btm');
-  if(sbtm&&window.innerWidth<=768){
+  if(sbtm&&window.innerWidth>768){
     sbtm.style.display=G.wf?'':'none';
   }
 }
@@ -3516,6 +3539,234 @@ function openMd(id){
   var m=gE('m'+id);if(m)m.classList.add('open');
 }
 function closeMd(id){var m=gE('m'+id);if(m)m.classList.remove('open');}
+
+// ══════════════════════════════════════════════════════════════
+// 관리자 대시보드
+// ══════════════════════════════════════════════════════════════
+var _adminTab='dashboard';
+
+function buildAdminDashboard(){
+  if(G.supaRole!=='admin')return;
+  var b=gE('adm-b');if(!b)return;
+  var tabs=[
+    {k:'dashboard',l:'📊 대시보드'},
+    {k:'members',l:'👥 회원 관리'},
+    {k:'credit',l:'💰 크레딧 지급'},
+    {k:'coupon',l:'🎫 쿠폰 관리'},
+    {k:'logs',l:'📋 지급 이력'}
+  ];
+  var tabBar='<div style="display:flex;border-bottom:1px solid var(--bd);background:var(--c2)">';
+  tabs.forEach(function(t){
+    var on=_adminTab===t.k;
+    tabBar+='<button onclick="admSetTab(\''+t.k+'\')" style="flex:1;padding:10px 4px;border:none;background:'+(on?'var(--acg)':'none')+';color:'+(on?'var(--ac)':'var(--m2)')+';font-size:11px;font-weight:'+(on?'700':'400')+';cursor:pointer;font-family:inherit;border-bottom:2px solid '+(on?'var(--ac)':'transparent')+'">'+t.l+'</button>';
+  });
+  tabBar+='</div>';
+  b.innerHTML=tabBar;
+  var content=document.createElement('div');
+  content.id='adm-content';
+  content.style.cssText='padding:16px;max-height:72vh;overflow-y:auto';
+  b.appendChild(content);
+  admRenderTab();
+}
+
+function admSetTab(tab){_adminTab=tab;buildAdminDashboard();}
+
+function admRenderTab(){
+  var c=gE('adm-content');if(!c)return;
+  c.innerHTML='<div style="text-align:center;padding:20px;color:var(--m2)">불러오는 중...</div>';
+  if(_adminTab==='dashboard') admDashboard(c);
+  else if(_adminTab==='members') admMembers(c);
+  else if(_adminTab==='credit') admCreditGive(c);
+  else if(_adminTab==='coupon') admCoupon(c);
+  else if(_adminTab==='logs') admLogs(c);
+}
+
+function admDashboard(c){
+  if(!_supa){c.innerHTML='<div style="color:#fca5a5;padding:20px">Supabase 미연결</div>';return;}
+  Promise.all([
+    _supa.from('profiles').select('id,created_at,plan',{count:'exact'}),
+    _supa.from('credit_logs').select('amount')
+  ]).then(function(results){
+    var profilesRes=results[0],logsRes=results[1];
+    var total=profilesRes.count||0;
+    var todayStr=new Date().toISOString().slice(0,10);
+    var todayJoins=(profilesRes.data||[]).filter(function(p){return(p.created_at||'').slice(0,10)===todayStr;}).length;
+    var paidPlans=(profilesRes.data||[]).filter(function(p){return p.plan&&p.plan!=='free';}).length;
+    var logs=logsRes.data||[];
+    var totalGiven=logs.filter(function(l){return l.amount>0;}).reduce(function(s,l){return s+l.amount;},0);
+    var totalUsed=Math.abs(logs.filter(function(l){return l.amount<0;}).reduce(function(s,l){return s+l.amount;},0));
+    c.innerHTML='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">'+
+      [{l:'총 회원',v:total+'명',col:'var(--ac)'},{l:'오늘 가입',v:todayJoins+'명',col:'#60a5fa'},
+       {l:'유료 플랜',v:paidPlans+'명',col:'#a78bfa'},{l:'지급 크레딧',v:totalGiven.toLocaleString()+'cr',col:'#f59e0b'},
+       {l:'사용 크레딧',v:totalUsed.toLocaleString()+'cr',col:'#10b981'},{l:'결제 연동',v:'준비 중',col:'var(--m2)'}
+      ].map(function(s){return '<div style="background:var(--c2);border:1px solid var(--bd);border-radius:9px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--m2);margin-bottom:5px">'+s.l+'</div><div style="font-size:20px;font-weight:800;color:'+s.col+'">'+s.v+'</div></div>';}).join('')+
+      '</div><div style="font-size:11px;color:var(--m2);text-align:center">'+new Date().toLocaleString('ko-KR')+'</div>'+
+      '<button onclick="admRenderTab()" style="display:block;margin:8px auto 0;padding:5px 14px;background:var(--acg);border:1px solid var(--acb);color:var(--ac);border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit">새로고침</button>';
+  }).catch(function(){c.innerHTML='<div style="color:#fca5a5">데이터 로드 실패</div>';});
+}
+
+function admMembers(c){
+  if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
+  c.innerHTML='<div style="display:flex;gap:8px;margin-bottom:12px"><input id="adm-search" type="text" placeholder="이메일 검색..." style="flex:1;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:7px;outline:none"><button onclick="admSearchMembers()" style="padding:8px 14px;background:var(--ac);color:#000;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">검색</button></div><div id="adm-members-list">불러오는 중...</div>';
+  admLoadMembers('');
+}
+
+function admSearchMembers(){admLoadMembers((gE('adm-search')?gE('adm-search').value:'').trim());}
+
+function admLoadMembers(query){
+  var el=gE('adm-members-list');if(!el)return;
+  el.innerHTML='<div style="color:var(--m2);text-align:center;padding:12px">불러오는 중...</div>';
+  var req=_supa.from('profiles').select('*').order('created_at',{ascending:false}).limit(50);
+  if(query)req=req.ilike('email','%'+query+'%');
+  req.then(function(res){
+    var rows=res.data||[];
+    if(!rows.length){el.innerHTML='<div style="color:var(--m2);text-align:center;padding:20px">회원 없음</div>';return;}
+    var planColor={'free':'#888','basic':'#60a5fa','pro':'#a78bfa','studio':'#f59e0b','agency':'#10b981','admin':'var(--ac)'};
+    el.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px 8px;text-align:left">이메일</th><th style="padding:6px 4px;text-align:center">플랜</th><th style="padding:6px 4px;text-align:center">크레딧</th><th style="padding:6px 4px;text-align:center">가입일</th><th style="padding:6px 4px;text-align:center">관리</th></tr></thead><tbody>'+
+      rows.map(function(u){
+        var pc=planColor[u.plan||'free']||'#888';
+        var tr=document.createElement('tr');
+        tr.style.borderBottom='1px solid rgba(255,255,255,.04)';
+        tr.innerHTML='<td style="padding:7px 8px;color:var(--t)">'+u.email+'</td><td style="padding:7px 4px;text-align:center"><span style="color:'+pc+';font-weight:700;font-size:10px">'+(u.plan||'free').toUpperCase()+'</span></td><td style="padding:7px 4px;text-align:center;color:var(--ac);font-weight:700">'+(u.credits||0).toLocaleString()+'</td><td style="padding:7px 4px;text-align:center;color:var(--m2)">'+(u.created_at||'').slice(0,10)+'</td><td style="padding:7px 4px;text-align:center"></td>';
+        var btn=document.createElement('button');
+        btn.textContent='크레딧';btn.style.cssText='padding:3px 8px;background:var(--acg);border:1px solid var(--acb);color:var(--ac);border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit';
+        (function(uid,email,cr){btn.onclick=function(){admQuickCredit(uid,email,cr);};})(u.id,u.email,u.credits||0);
+        tr.lastElementChild.appendChild(btn);
+        return tr.outerHTML;
+      }).join('')+'</tbody></table></div>';
+  });
+}
+
+function admCreditGive(c){
+  c.innerHTML='<div style="margin-bottom:14px"><div style="font-size:11px;color:var(--m2);margin-bottom:6px">회원 이메일</div><div style="display:flex;gap:8px"><input id="adm-cr-email" type="text" placeholder="user@email.com" style="flex:1;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:7px;outline:none"><button onclick="admFindUser()" style="padding:8px 14px;background:var(--ac);color:#000;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">검색</button></div><div id="adm-cr-user-info" style="margin-top:6px;font-size:12px;color:var(--m2)"></div></div><div style="font-size:11px;color:var(--m2);margin-bottom:6px">빠른 선택</div><div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">'+[100,500,1000,2000].map(function(v){return '<button onclick="admSetCrAmount('+v+')" style="padding:6px 14px;background:var(--c2);border:1px solid var(--bd2);color:var(--t);border-radius:7px;font-size:12px;cursor:pointer;font-family:inherit">+'+v+'</button>';}).join('')+'<button onclick="admSetCrAmount(-100)" style="padding:6px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);color:#fca5a5;border-radius:7px;font-size:12px;cursor:pointer;font-family:inherit">-100</button></div><input id="adm-cr-amount" type="number" placeholder="직접 입력 (음수=차감)" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:7px;outline:none;box-sizing:border-box;margin-bottom:8px"><input id="adm-cr-reason" type="text" placeholder="지급 사유 (예: 베타테스터 보상)" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:7px;outline:none;box-sizing:border-box;margin-bottom:12px"><button onclick="admGiveCredit()" style="width:100%;padding:12px;background:var(--ac);color:#000;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">크레딧 지급/차감 실행</button><div id="adm-cr-result" style="margin-top:10px;font-size:12px;text-align:center;min-height:18px"></div>';
+}
+
+var _admTargetUserId=null;
+
+function admFindUser(){
+  var email=(gE('adm-cr-email')?gE('adm-cr-email').value:'').trim();
+  var info=gE('adm-cr-user-info');
+  if(!email||!_supa){if(info)info.textContent='이메일을 입력하세요.';return;}
+  if(info)info.textContent='검색 중...';
+  _supa.from('profiles').select('*').eq('email',email).single().then(function(res){
+    if(res.error||!res.data){_admTargetUserId=null;if(info)info.innerHTML='<span style="color:#fca5a5">회원을 찾을 수 없습니다.</span>';return;}
+    var u=res.data;_admTargetUserId=u.id;
+    if(info)info.innerHTML='<span style="color:var(--ac);font-weight:700">'+u.email+'</span> | 크레딧: <strong style="color:var(--ac)">'+(u.credits||0).toLocaleString()+'cr</strong> | 플랜: <strong>'+(u.plan||'free').toUpperCase()+'</strong>';
+  });
+}
+
+function admSetCrAmount(v){var i=gE('adm-cr-amount');if(i)i.value=v;}
+
+function admGiveCredit(){
+  var amount=parseInt((gE('adm-cr-amount')?gE('adm-cr-amount').value:0)||0,10);
+  var reason=(gE('adm-cr-reason')?gE('adm-cr-reason').value:'관리자 지급').trim()||'관리자 지급';
+  var res=gE('adm-cr-result');
+  if(!_admTargetUserId){if(res){res.style.color='#fca5a5';res.textContent='먼저 회원을 검색하세요.';}return;}
+  if(!amount||isNaN(amount)){if(res){res.style.color='#fca5a5';res.textContent='크레딧 수량을 입력하세요.';}return;}
+  if(!_supa){if(res){res.style.color='#fca5a5';res.textContent='Supabase 미연결';}return;}
+  if(res){res.style.color='var(--m2)';res.textContent='처리 중...';}
+  _supa.from('profiles').select('credits').eq('id',_admTargetUserId).single().then(function(r){
+    var newCr=Math.max(0,(r.data?r.data.credits:0)+amount);
+    return _supa.from('profiles').update({credits:newCr}).eq('id',_admTargetUserId).then(function(){
+      return _supa.from('credit_logs').insert({user_id:_admTargetUserId,amount:amount,reason:reason,admin_id:_supaUser.id});
+    }).then(function(){
+      if(res){res.style.color='var(--ac)';res.textContent='✓ '+(amount>0?'+':'')+amount+'cr 완료. 새 잔액: '+newCr.toLocaleString()+'cr';}
+      if(gE('adm-cr-amount'))gE('adm-cr-amount').value='';
+      if(gE('adm-cr-reason'))gE('adm-cr-reason').value='';
+    });
+  }).catch(function(e){if(res){res.style.color='#fca5a5';res.textContent='오류: '+e.message;}});
+}
+
+function admQuickCredit(uid,email,currentCr){
+  _admTargetUserId=uid;admSetTab('credit');
+  setTimeout(function(){
+    var ei=gE('adm-cr-email'),info=gE('adm-cr-user-info');
+    if(ei)ei.value=email;
+    if(info)info.innerHTML='<span style="color:var(--ac);font-weight:700">'+email+'</span> | 크레딧: <strong style="color:var(--ac)">'+currentCr.toLocaleString()+'cr</strong>';
+  },100);
+}
+
+function admCoupon(c){
+  c.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"><div><div style="font-size:13px;font-weight:700;color:var(--t);margin-bottom:10px">새 쿠폰 생성</div><div style="margin-bottom:8px"><div style="font-size:11px;color:var(--m2);margin-bottom:4px">쿠폰 코드</div><input id="cp-code" type="text" placeholder="WELCOME100" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:7px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box"></div><div style="margin-bottom:8px"><div style="font-size:11px;color:var(--m2);margin-bottom:4px">지급 크레딧</div><input id="cp-credits" type="number" placeholder="100" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:7px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px"><div><div style="font-size:11px;color:var(--m2);margin-bottom:4px">최대 사용 횟수</div><input id="cp-maxuses" type="number" placeholder="1" value="1" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:7px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box"></div><div><div style="font-size:11px;color:var(--m2);margin-bottom:4px">만료일</div><input id="cp-expires" type="date" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:7px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box"></div></div><button onclick="admCreateCoupon()" style="width:100%;padding:10px;background:var(--ac);color:#000;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">쿠폰 생성</button><div id="cp-result" style="margin-top:8px;font-size:11px;text-align:center;min-height:16px"></div></div><div><div style="font-size:13px;font-weight:700;color:var(--t);margin-bottom:10px">쿠폰 목록</div><div id="cp-list">불러오는 중...</div></div></div>';
+  admLoadCoupons();
+}
+
+function admLoadCoupons(){
+  var el=gE('cp-list');if(!el||!_supa)return;
+  _supa.from('coupons').select('*').order('created_at',{ascending:false}).limit(30).then(function(res){
+    var rows=res.data||[];
+    if(!rows.length){el.innerHTML='<div style="color:var(--m2);font-size:12px">쿠폰 없음</div>';return;}
+    el.innerHTML='';
+    rows.forEach(function(cp){
+      var active=cp.is_active&&(!cp.expires_at||new Date(cp.expires_at)>new Date());
+      var div=document.createElement('div');
+      div.style.cssText='background:var(--c2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center';
+      var info=document.createElement('div');
+      info.innerHTML='<div style="font-size:12px;font-weight:700;color:'+(active?'var(--ac)':'var(--m2)')+'">'+cp.code+'</div><div style="font-size:10px;color:var(--m2)">'+cp.credits+'cr · '+cp.used_count+'/'+cp.max_uses+'회'+(cp.expires_at?' · '+cp.expires_at.slice(0,10):'')+'</div>';
+      var btn=document.createElement('button');
+      btn.textContent=active?'비활성':'활성화';
+      btn.style.cssText='padding:3px 8px;background:'+(active?'rgba(239,68,68,.1)':'rgba(0,229,204,.1)')+';border:1px solid '+(active?'rgba(239,68,68,.3)':'var(--acb)')+';color:'+(active?'#fca5a5':'var(--ac)')+';border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit';
+      (function(id,cur){btn.onclick=function(){if(_supa)_supa.from('coupons').update({is_active:!cur}).eq('id',id).then(function(){admLoadCoupons();});};})(cp.id,cp.is_active);
+      div.appendChild(info);div.appendChild(btn);el.appendChild(div);
+    });
+  });
+}
+
+function admCreateCoupon(){
+  var code=(gE('cp-code')?gE('cp-code').value:'').trim().toUpperCase();
+  var credits=parseInt((gE('cp-credits')?gE('cp-credits').value:0)||0,10);
+  var maxuses=parseInt((gE('cp-maxuses')?gE('cp-maxuses').value:1)||1,10);
+  var expires=gE('cp-expires')?gE('cp-expires').value:'';
+  var res=gE('cp-result');
+  if(!code||!credits){if(res){res.style.color='#fca5a5';res.textContent='코드와 크레딧을 입력하세요.';}return;}
+  if(!_supa){if(res){res.style.color='#fca5a5';res.textContent='Supabase 미연결';}return;}
+  var obj={code:code,credits:credits,max_uses:maxuses,created_by:_supaUser?_supaUser.id:null};
+  if(expires)obj.expires_at=new Date(expires).toISOString();
+  _supa.from('coupons').insert(obj).then(function(r){
+    if(r.error){if(res){res.style.color='#fca5a5';res.textContent='오류: '+(r.error.message||'중복 코드');}return;}
+    if(res){res.style.color='var(--ac)';res.textContent='✓ '+code+' 생성 완료!';}
+    if(gE('cp-code'))gE('cp-code').value='';if(gE('cp-credits'))gE('cp-credits').value='';
+    admLoadCoupons();
+  });
+}
+
+function admLogs(c){
+  if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
+  _supa.from('credit_logs').select('*,profiles!user_id(email)').order('created_at',{ascending:false}).limit(50).then(function(res){
+    var rows=res.data||[];
+    if(!rows.length){c.innerHTML='<div style="color:var(--m2);text-align:center;padding:20px">이력 없음</div>';return;}
+    c.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px 8px;text-align:left">회원</th><th style="padding:6px 4px;text-align:center">수량</th><th style="padding:6px 8px;text-align:left">사유</th><th style="padding:6px 4px;text-align:center">일시</th></tr></thead><tbody>'+
+      rows.map(function(l){var ip=l.amount>0;var em=l.profiles?l.profiles.email:'unknown';return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t2)">'+em+'</td><td style="padding:6px 4px;text-align:center;font-weight:700;color:'+(ip?'var(--ac)':'#fca5a5)')+'">'+(ip?'+':'')+l.amount+'cr</td><td style="padding:6px 8px;color:var(--m2)">'+(l.reason||'-')+'</td><td style="padding:6px 4px;text-align:center;color:var(--m2)">'+(l.created_at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table></div>';
+  });
+}
+
+function useCoupon(code){
+  if(!_supa||!_supaUser){alert('로그인이 필요합니다.');return;}
+  code=(code||'').toUpperCase().trim();
+  if(!code){alert('쿠폰 코드를 입력하세요.');return;}
+  _supa.from('coupons').select('*').eq('code',code).eq('is_active',true).single().then(function(res){
+    if(res.error||!res.data){alert('유효하지 않은 쿠폰입니다.');return;}
+    var cp=res.data;
+    if(cp.expires_at&&new Date(cp.expires_at)<new Date()){alert('만료된 쿠폰입니다.');return;}
+    if(cp.used_count>=cp.max_uses){alert('이미 모두 사용된 쿠폰입니다.');return;}
+    _supa.from('coupon_uses').select('id').eq('coupon_id',cp.id).eq('user_id',_supaUser.id).then(function(ur){
+      if(ur.data&&ur.data.length>0){alert('이미 사용한 쿠폰입니다.');return;}
+      var newCr=(G.cr||0)+cp.credits;
+      _supa.from('profiles').update({credits:newCr}).eq('id',_supaUser.id).then(function(){
+        return Promise.all([
+          _supa.from('coupons').update({used_count:cp.used_count+1}).eq('id',cp.id),
+          _supa.from('coupon_uses').insert({coupon_id:cp.id,user_id:_supaUser.id}),
+          _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:cp.credits,reason:'쿠폰: '+cp.code})
+        ]);
+      }).then(function(){
+        G.cr=newCr;localStorage.setItem('clover_cr',newCr);
+        var crn=gE('cr-n');if(crn)crn.textContent=newCr.toLocaleString();
+        alert('✓ +'+cp.credits+'cr 지급! 잔액: '+newCr.toLocaleString()+'cr');
+        buildCredits();
+      });
+    });
+  }).catch(function(e){alert('오류: '+e.message);});
+}
 function bypassLogin(){
   // 개발자 모드: Supabase 없이 진행
   _supaUser = {email:'dev@clover-ai.io', id:'dev'};
@@ -3952,6 +4203,41 @@ document.addEventListener('DOMContentLoaded',function(){try{
       alert('오류: '+e.message);
     }
   };
+
+  // ── 모바일 전용 실행 버튼 ─────────────────────────────────
+  var mobBtn=gE('mob-actbtn');
+  if(mobBtn){
+    mobBtn.addEventListener('touchend',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[mob-actbtn] touchend G.wf='+G.wf);
+      if(!G.wf){ alert('탭을 먼저 선택하세요.'); return; }
+      var tab=getTab(G.wf);
+      console.log('[mob-actbtn] inputImg='+!!tab.inputImg+' supaUser='+!!_supaUser+' cr='+G.cr);
+      if(!tab.inputImg && G.wf!=='video'){ alert('이미지를 업로드해주세요.'); return; }
+      if(!_supaUser){ openMd('account'); return; }
+      if(G.supaRole!=='admin'){
+        var cost=getCost();
+        if(G.cr<cost){ alert('크레딧 부족. 현재:'+G.cr+'cr 필요:'+cost+'cr'); openMd('credits'); return; }
+      }
+      console.log('[mob-actbtn] calling _runToolWithPrompt');
+      try{ _runToolWithPrompt(tab.prompt||''); }
+      catch(e){ alert('오류: '+e.message); console.error(e); }
+    },{passive:false});
+    mobBtn.addEventListener('click',function(e){
+      console.log('[mob-actbtn] click G.wf='+G.wf);
+      if(!G.wf){ alert('탭을 먼저 선택하세요.'); return; }
+      var tab=getTab(G.wf);
+      if(!tab.inputImg && G.wf!=='video'){ alert('이미지를 업로드해주세요.'); return; }
+      if(!_supaUser){ openMd('account'); return; }
+      if(G.supaRole!=='admin'){
+        var cost=getCost();
+        if(G.cr<cost){ alert('크레딧 부족. 현재:'+G.cr+'cr 필요:'+cost+'cr'); openMd('credits'); return; }
+      }
+      try{ _runToolWithPrompt(tab.prompt||''); }
+      catch(e){ alert('오류: '+e.message); }
+    });
+  }
   gE('wfl').onclick=function(e){
     var t=e.target.closest('.wft');
     if(t&&t.dataset.w){
