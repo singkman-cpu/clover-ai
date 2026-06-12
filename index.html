@@ -702,8 +702,8 @@ function canRun(){
   var tab=getTab(G.wf);
   if(G.wf==='video'&&tab.vidMode==='prompt')return (tab.prompt||'').length>2;
   if(!tab.inputImg)return false;
-  // 관리자는 크레딧 무제한
-  if(G.supaRole==='admin') return true;
+  // 관리자는 크레딧 무제한 (이미지만 있으면 실행 가능)
+  if(G.supaRole==='admin'||G.plan==='admin') return true;
   // 크레딧 부족 체크
   var cost=getCost();
   if(G.cr<cost)return false;
@@ -2967,7 +2967,7 @@ function executeSingleRender(task){
       function _finishItem(){
         // ── 크레딧 차감 ──────────────────────────────────────────
         var finalCost = cost;
-        if(finalCost>0){
+        if(finalCost>0 && G.supaRole!=='admin' && G.plan!=='admin'){
           G.cr=Math.max(0, G.cr-finalCost);
           localStorage.setItem('clover_cr', G.cr);
           var _mKey='clover_cr_used_'+new Date().toISOString().slice(0,7);
@@ -2980,6 +2980,11 @@ function executeSingleRender(task){
             setTimeout(function(){crn.style.color='';crn.textContent=G.cr.toLocaleString();},1200);
           }
           if(G.cr<50){gE('stl').textContent='크레딧이 부족합니다 ('+G.cr+'cr) — 충전이 필요합니다';}
+          // ★ Supabase DB 업데이트 (재로그인 시 복원용)
+          if(_supa&&_supaUser){
+            _supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id);
+            _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-finalCost,reason:'서비스 사용: '+task.wf}).catch(function(){});
+          }
         }
         if(!G.HIST[task.wf])G.HIST[task.wf]=[];
         G.HIST[task.wf].unshift(item);
@@ -4227,7 +4232,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // 로그인 체크
       if(!_supaUser){ openMd('account'); return; }
       // 크레딧 체크 (관리자 제외)
-      if(G.supaRole!=='admin'){
+      if(G.supaRole!=='admin'&&G.plan!=='admin'){
         var cost=getCost();
         if(G.cr<cost){
           alert('크레딧이 부족합니다. 현재: '+G.cr+'cr, 필요: '+cost+'cr');
@@ -4492,18 +4497,28 @@ function onSupaLogin(user){
   if(!_supa)return;
   _supa.from('profiles').select('*').eq('id',user.id).single()
   .then(function(res){
-    if(res.error&&res.error.code==='PGRST116'){
-      // 진짜 신규 사용자 (row not found) → 생성
-      return _supa.from('profiles').insert({
-        id:user.id, email:user.email, credits:50, role:'user'
-      }).select().single().then(function(r){return r;});
+    if(res.error){
+      if(res.error.code==='PGRST116'){
+        // 진짜 신규 사용자 (row not found) → 생성
+        return _supa.from('profiles').insert({
+          id:user.id, email:user.email, credits:50, role:'user'
+        }).select().single().then(function(r){return r;});
+      }
+      // 다른 에러 (RLS 등) → localStorage 크레딧 그대로, 빈 객체 반환
+      console.warn('[Supabase] profiles 조회 오류:', res.error.message);
+      var cachedCr = parseInt(localStorage.getItem('clover_cr')||'0',10);
+      return {data:{credits:cachedCr, role:'user', plan:localStorage.getItem('clover_plan')||'free'}};
     }
-    // 기존 사용자 또는 조회 성공 → 그대로 반환
+    // 기존 사용자 조회 성공 → 그대로 반환
     return res;
   })
   .then(function(res){
     if(res&&res.data){
-      G.cr = res.data.credits||0;
+      // DB값이 있으면 사용, 없으면 localStorage 유지
+      var dbCr = (res.data.credits!=null) ? res.data.credits : null;
+      if(dbCr!==null) G.cr = dbCr;
+      // localStorage도 DB값으로 동기화
+      if(dbCr!==null) localStorage.setItem('clover_cr', dbCr);
       // role이 admin이면 admin, 아니면 plan 컬럼 사용 (없으면 free)
       var dbRole = res.data.role||'user';
       var dbPlan = res.data.plan||'free';
