@@ -570,19 +570,6 @@ var EV=[
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
 var WFC={space:20,render:20,edit:20,video:60,upscale:20};
 var WFL={space:'AI 공간 변환',render:'렌더 실사화',edit:'AI 편집',video:'영상 생성',upscale:'업스케일'};
-var RES_OPTS=[
-  {k:'1K',label:'1K',apiRes:'1K',w:1024,h:1024,mult:1.0},
-  {k:'2K',label:'2K',apiRes:'2K',w:2048,h:2048,mult:1.5}
-];
-function getResObj(){return RES_OPTS.find(function(r){return r.k===(getTab(G.wf).resolution||'1K');})||RES_OPTS[0];}
-function getCost(){
-  var base;
-  if(G.wf==='video') base=getCE().cost||60;
-  else if(G.wf==='upscale') base=SCR[G.tabs.upscale.scale]||10;
-  else base=WFC[G.wf]||50;
-  if(G.wf!=='video'&&G.wf!=='upscale') base=Math.round(base*getResObj().mult);
-  return base;
-}
 var SCR={'2x':{'clarity':20,'topaz':15}};
 var OPTIMIZED=['Standard','Portraits (Soft)','Portraits (Hard)','Art & Illustrations','Nature & Landscapes','Films & Photography','3d Renders','Science Fiction'];
 var FAQS=[
@@ -922,6 +909,307 @@ function renderSB(){
 
 
 
+function mkEng(p,vid){
+  var e=getCE(),l=vid?EV:EL;
+  var w=dv('ss');w.innerHTML='<div class="lbl">AI 엔진 <span class="lbl-en">Engine</span></div>';
+  var box=dv('eng-box');
+  var left=dv('eng-left');
+  left.appendChild(eLogo(e.lg));
+  var ns=mk('span','eng-n');ns.textContent=e.n;left.appendChild(ns);
+  (e.t||'').split(',').forEach(function(t){var s2=mk('span','eng-t');s2.textContent=t.trim();left.appendChild(s2);});
+  box.appendChild(left);
+  var arr=dv('');arr.style.cssText='font-size:9px;color:var(--m2)';arr.textContent='\u25BC';
+  box.appendChild(arr);
+  box.onclick=function(ev){ev.stopPropagation();togEngDrop(l,box,w,vid);};
+  w.appendChild(box);p.appendChild(w);
+}
+function togEngDrop(l,box,par,vid){
+  var ex=par.querySelector('.eng-drop');if(ex){ex.remove();G.eOpen=false;return;}
+  G.eOpen=true;var d=dv('eng-drop');
+  l.forEach(function(eng){
+    var ck=vid?G.vidEng:G.eng;
+    var o=dv('eopt'+(eng.k===ck?' on':''));
+    o.appendChild(eLogo(eng.lg,true));
+    var info=dv('');info.innerHTML='<div class="eopt-n">'+eng.n+(eng.t?(' <span class="eng-t">'+eng.t.split(',').join('</span><span class="eng-t">')+'</span>'):'')+'</div>'+(eng.d?'<div class="eopt-d">'+eng.d+'</div>':'');
+    o.appendChild(info);
+    o.onclick=function(){if(vid)G.vidEng=eng.k;else G.eng=eng.k;d.remove();G.eOpen=false;renderSB();};
+    d.appendChild(o);
+  });par.appendChild(d);
+}
+function mkUB(p,lbl,key){
+  var w=dv('ss');w.innerHTML='<div class="lbl">'+lbl+'</div>';
+  var b=dv('');b.id='ub-'+key;rUB(b,key);w.appendChild(b);p.appendChild(w);
+}
+function rUB(b,key){
+  var v=key==='main'?getTab(G.wf).inputImg:G.tabs.video.endImg;
+  if(v){
+    var th=dv('uthumb');var im=mk('img','');im.src=v;var db=mk('button','uth-del');db.textContent='\u2715';
+    db.onclick=function(){if(key==='main'){getTab(G.wf).inputImg=null;getTab(G.wf).status='idle';}else{G.tabs.video.endImg=null;}rUB(b,key);updBtn();};
+    th.appendChild(im);th.appendChild(db);b.innerHTML='';b.appendChild(th);
+  } else {
+    var lbl2=key==='end'?'End Frame':'이미지 업로드';
+    var ub=dv('ubox');ub.id='ubox-'+key;
+    ub.innerHTML='<div class="ubox-ic">'+(key==='end'?'&#128308;':'&#128247;')+'</div><div class="ubox-t"><strong>'+lbl2+'</strong><span>클릭 또는 드래그</span></div>';
+    ub.onclick=function(){gE(key==='end'?'fi2':'fi').click();};
+    ub.ondragover=function(e){e.preventDefault();ub.style.borderColor='var(--acb)';};
+    ub.ondragleave=function(){ub.style.borderColor='';};
+    ub.ondrop=function(e){
+      e.preventDefault();ub.style.borderColor='';
+      // 갤러리 드래그 이미지
+      var imgSrc=e.dataTransfer.getData('clover/imgSrc');
+      if(imgSrc&&key==='main'){
+        getTab(G.wf).inputImg=imgSrc;
+        getTab(G.wf).status='idle';
+        if(!G.HIST[G.wf])G.HIST[G.wf]=[];
+        G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
+        G.HIST[G.wf].unshift({id:Date.now(),orig:imgSrc,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
+        renderMain(G.wf);
+        rUB(ub,key);
+        gE('stl').textContent='이미지 적용됨 - 실행하세요';
+        updBtn();
+        return;
+      }
+      var f=e.dataTransfer.files[0];if(f)loadF(f,key);
+    };
+    b.innerHTML='';b.appendChild(ub);
+  }
+}
+function mkRef(p,cnt,title){
+  var maxRef=getMaxRefs();
+  var planLabel={'free':'Free·1장','starter':'Starter·1장','pro':'Pro·3장','studio':'Studio·6장','agency':'Agency·14장','admin':''}[G.plan]||'';
+  var w=dv('ss');
+  w.innerHTML='<div class="lbl">'+(title||'레퍼런스')
+    +'<span class="lbl-en"> ('+cnt+')</span>'
+    +(planLabel?'<span style="font-size:9px;color:var(--ac);margin-left:6px;background:var(--acg);padding:1px 6px;border-radius:4px">'+planLabel+'</span>':'')
+    +'</div>';
+  var g=dv('ref-grid');
+  for(var i=0;i<cnt;i++){
+    var sl=dv('rs');sl.id='rs-'+i;
+    if(i<maxRef){
+      rSlot(sl,i);
+    } else {
+      sl.innerHTML='<span style="font-size:10px;color:var(--t3);display:flex;flex-direction:column;align-items:center;gap:2px"><span>&#128274;</span><span style="font-size:8px">업그레이드</span></span>';
+      sl.style.opacity='0.35';sl.style.cursor='not-allowed';sl.style.flexDirection='column';sl.style.gap='2px';
+      (function(mr){sl.onclick=function(){gE('stl').textContent='Pro 이상 플랜에서 레퍼런스 '+mr+'장까지 사용 가능합니다.';};})(maxRef);
+    }
+    g.appendChild(sl);
+  }
+  w.appendChild(g);p.appendChild(w);
+}
+function rSlot(sl,i){
+  var _refs=getTab(G.wf).refs||[];
+  if(_refs[i]){
+    sl.innerHTML='<img src="'+_refs[i]+'"><button class="rs-del" type="button">&#10005;</button>';
+    sl.onclick=null;
+    sl.querySelector('.rs-del').onclick=function(e){e.stopPropagation();var _r2=getTab(G.wf).refs||[];_r2[i]=null;rSlot(sl,i);};
+  } else {
+    sl.innerHTML='<span style="font-size:10px;font-weight:700;color:var(--ac);line-height:1">'+(i+1)+'</span><span style="font-size:16px;color:var(--t2);line-height:1">+</span>';
+    sl.style.flexDirection='column';sl.style.gap='2px';sl.style.opacity='';sl.style.cursor='';
+    sl.onclick=function(){G.refIdx=i;gE('fi-ref').click();};
+  }
+}
+function mkTA(p,ph){
+  var w=dv('ss');w.innerHTML='<div class="lbl">프롬프트 <span class="lbl-en">Prompt</span></div>';
+  var ta=mk('textarea','ta');ta.id='sb-ta';ta.rows=3;ta.style.minHeight='75px';
+  ta.placeholder=ph||'원하는 결과를 설명하세요...';ta.value=getTab(G.wf).prompt||'';
+  ta.oninput=function(){getTab(G.wf).prompt=ta.value;updBtn();};
+  w.appendChild(ta);p.appendChild(w);
+}
+function mkSl(p,lbl,key,mn,mx){
+  var koDesc={
+    'Creativity':'창의성 · 높을수록 원본과 멀어지고 새로운 요소 생성',
+    'HDR':'명암대비 · 높을수록 밝고 선명한 하이라이트',
+    'Resemblance':'원본 유사도 · 높을수록 원본 구조를 더 유지',
+    'Fractality':'세부 질감 · 높을수록 디테일과 텍스처 강화'
+  };
+  var w=dv('sl-w'),row=dv('sl-row');
+  var lb=mk('span','sl-lbl');
+  lb.innerHTML=lbl+(koDesc[lbl]?'<span style="font-size:9px;color:var(--t2);font-weight:400;display:block;line-height:1.3;margin-top:1px">'+koDesc[lbl]+'</span>':'');
+  var ni=mk('input','sl-v');ni.type='number';ni.min=mn;ni.max=mx;ni.step=1;ni.value=G[key];
+  var rng=mk('input','');rng.type='range';rng.min=mn;rng.max=mx;rng.value=G[key];
+  slBg(rng,G[key],mn,mx);
+  function sv(v){G[key]=v;ni.value=v;ni.style.color=v>0?'#80ffcc':v<0?'#fca5a5':'var(--t)';slBg(rng,v,mn,mx);updParamTags();}
+  ni.onchange=function(){sv(Math.max(mn,Math.min(mx,Math.round(+ni.value))));};
+  rng.oninput=function(){sv(Math.round(+rng.value));};
+  row.appendChild(lb);row.appendChild(ni);w.appendChild(row);w.appendChild(rng);p.appendChild(w);
+}
+function updParamTags(){
+  var rt=gE('rtags');if(!rt)return;
+  rt.innerHTML='';
+  var params=[['C',G.c0],['H',G.h0],['R',G.r0],['F',G.f0]];
+  params.forEach(function(pv){
+    if(pv[1]!==0){
+      var t=mk('span','otag');
+      t.style.cssText='font-size:10px;padding:2px 7px;border-radius:4px;background:var(--acg);border:1px solid var(--acb);color:var(--ac)';
+      t.textContent=pv[0]+':'+(pv[1]>0?'+':'')+pv[1];
+      rt.appendChild(t);
+    }
+  });
+}
+function mkPre(p,list){
+  if(!list||!list.length)return;
+  var w=dv('ss');w.innerHTML='<div class="lbl">스타일 프리셋 <span class="lbl-en">단일 선택</span></div>';
+  var g=dv('pre-grid');
+  list.forEach(function(q){
+    var pi=dv('pi'+(getTab(G.wf).selK===q.k?' on':''));
+    var ck=dv('pi-ck');ck.textContent='\u2713';
+    var ic=dv('pi-ic');ic.innerHTML=q.s||'<svg class="pi-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>';
+    var lb=mk('span','pi-l');lb.textContent=q.l;
+    pi.appendChild(ck);pi.appendChild(ic);pi.appendChild(lb);
+    pi.onclick=function(){
+      var _tab=getTab(G.wf);_tab.selK=_tab.selK===q.k?null:q.k;
+      g.querySelectorAll('.pi').forEach(function(x){
+        var on=false;
+        list.forEach(function(qq){if(qq.k===getTab(G.wf).selK&&qq.l===x.querySelector('.pi-l').textContent)on=true;});
+        x.classList.toggle('on',on);
+        var xck=x.querySelector('.pi-ck');if(xck)xck.style.display=on?'flex':'none';
+      });
+      var _t3=getTab(G.wf);_t3.prompt=_t3.selK?q.pt||q.l:'';
+      var ta=gE('sb-ta');if(ta)ta.value=_t3.prompt;
+      updBtn();
+    };
+    g.appendChild(pi);
+  });
+  w.appendChild(g);p.appendChild(w);
+}
+function mkChips(p,lbl,opts,key){
+  var w=dv('ss');w.innerHTML='<div class="lbl">'+lbl+'</div>';
+  var row=dv('chips');
+  opts.forEach(function(o){
+    var b=mk('button','chip'+(G[key]===o?' on':''));b.textContent=o;
+    b.onclick=function(){G[key]=o;row.querySelectorAll('.chip').forEach(function(x,i){x.classList.toggle('on',opts[i]===o);});};
+    row.appendChild(b);
+  });
+  w.appendChild(row);p.appendChild(w);
+}
+function mkOptFor(p){
+  var w=dv('ss');w.innerHTML='<div class="lbl">Optimized For</div>';
+  var s=mk('select','sel');
+  OPTIMIZED.forEach(function(o){var op=document.createElement('option');op.value=o;op.textContent=o;if(G.optimFor===o)op.selected=true;s.appendChild(op);});
+  s.onchange=function(){G.optimFor=s.value;};
+  w.appendChild(s);p.appendChild(w);
+}
+function mkNote(p,html){var n=dv('note');n.innerHTML=html;p.appendChild(n);}
+// Resolution prices: 1K=base, 2K=1.5x, 4K=2.5x, 6K=3.5x, 8K=5x
+// fal NB2 API valid: "1K"=1024px, "2K"=2048px, "4K"=4096px
+// 6K/8K mapped to 4K on API side (displayed as target resolution)
+var RES_OPTS = [
+  {k:'1K', label:'1K',  apiRes:'1K',  w:1024, h:1024, mult:1.0},
+  {k:'2K', label:'2K',  apiRes:'2K',  w:2048, h:2048, mult:1.5},
+];
+function getResObj(){ return RES_OPTS.find(function(r){return r.k===(getTab(G.wf).resolution||'1K');})||RES_OPTS[0]; }
+function getCost(){
+  var base;
+  if(G.wf==='video')  base=getCE().cost||60;
+  else if(G.wf==='upscale') base=SCR[G.tabs.upscale.scale]||10;
+  else base=WFC[G.wf]||50;
+  if(G.wf!=='video'&&G.wf!=='upscale') base=Math.round(base*getResObj().mult);
+  return base;
+}
+
+// ── 플랜 권한 함수들 ─────────────────────────────────────────────
+var PLAN_ORDER=['free','starter','pro','studio','agency','admin'];
+function planGte(required){
+  // 현재 플랜이 required 이상인지
+  var cur=PLAN_ORDER.indexOf(G.plan||'free');
+  var req=PLAN_ORDER.indexOf(required);
+  return cur>=req;
+}
+function getMaxRefs(){
+  if(G.plan==='admin'||G.plan==='agency') return 14;
+  if(G.plan==='studio') return 6;
+  if(G.plan==='pro') return 3;
+  if(G.plan==='starter'||G.plan==='free') return 1;
+  return 14; // 기본 admin
+}
+function canUseFeature(feat){
+  // feat: 'video','magnific','upscale_8x','ai_edit','hd_2k','hd_4k'
+  if(G.plan==='admin') return true;
+  switch(feat){
+    case 'ai_edit':   return planGte('starter');
+    case 'video':     return planGte('pro');
+    case 'magnific':  return planGte('pro');
+    case 'upscale_8x':return planGte('pro');
+    case 'hd_2k':     return planGte('starter');
+    case 'hd_4k':     return planGte('pro');
+    default: return true;
+  }
+}
+function mkResolution(p){
+  var w=dv('ss');
+  w.innerHTML='<div class="lbl">렌더링 해상도 <span class="lbl-en">Resolution</span></div>';
+  var g=dv('');g.style.cssText='display:flex;gap:5px;flex-wrap:wrap';
+  RES_OPTS.forEach(function(ro){
+    var b=mk('button','');
+    b.style.cssText='padding:5px 0;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;flex:1;border:1.5px solid '+(getTab(G.wf).resolution===ro.k?'var(--acb)':'var(--bd2)')+';background:'+(getTab(G.wf).resolution===ro.k?'var(--acg)':'var(--card)')+';color:'+(getTab(G.wf).resolution===ro.k?'var(--ac)':'var(--t2)');
+    b.innerHTML=ro.label+'<br><span style="font-size:9px;color:'+(getTab(G.wf).resolution===ro.k?'var(--ac)':'var(--m2)')+'">'+Math.round(WFC[G.wf]*ro.mult)+'cr</span>';
+    b.onclick=function(){
+      getTab(G.wf).resolution=ro.k;
+      g.querySelectorAll('button').forEach(function(x,i){
+        x.style.borderColor=RES_OPTS[i].k===getTab(G.wf).resolution?'var(--acb)':'var(--bd2)';
+        x.style.background=RES_OPTS[i].k===getTab(G.wf).resolution?'var(--acg)':'var(--card)';
+        x.style.color=RES_OPTS[i].k===getTab(G.wf).resolution?'var(--ac)':'var(--t2)';
+        x.querySelector('span').style.color=RES_OPTS[i].k===getTab(G.wf).resolution?'var(--ac)':'var(--m2)';
+      });
+      updBtn();
+    };
+    g.appendChild(b);
+  });
+  w.appendChild(g);
+  // Show pixel count
+  var info=dv('');info.id='res-info-'+G.wf;
+  info.style.cssText='font-size:9px;color:var(--m2);margin-top:4px;text-align:right';
+  var ro=getResObj();
+  info.textContent=ro.w+'×'+ro.h+' px';
+  w.appendChild(info);
+  p.appendChild(w);
+}
+function sbSpace(p){
+  mkNote(p,'<strong style="color:var(--ac)">실제 현장사진 &#8594; 새로운 디자인</strong><br>현장 사진을 레퍼런스와 함께 AI로 변환합니다.');
+  mkEng(p,false);mkUB(p,'현장사진 업로드','main');mkRef(p,6,'디자인 레퍼런스');
+  mkResolution(p);
+  mkTA(p,'예: 모던 미니멀, 북유럽 스타일, 조명 따뜻하게...');
+  mkPre(p,PS_SPACE);
+  mkSl(p,'Creativity','c0',-10,10);mkSl(p,'HDR','h0',-10,10);mkSl(p,'Resemblance','r0',-10,10);mkSl(p,'Fractality','f0',-10,10);
+}
+function sbRender(p){
+  mkNote(p,'<strong style="color:#a78bfa">3D 렌더/도면 &#8594; 실사 이미지</strong><br>3D 렌더링·스케치·도면을 실사 사진 수준으로.');
+  mkEng(p,false);mkUB(p,'렌더/도면 업로드','main');mkRef(p,6,'실사 참고 이미지');
+  mkResolution(p);
+  mkTA(p,'예: 실사 사진처럼, 조명 자연스럽게...');
+  mkPre(p,PS_RENDER);
+  mkSl(p,'Creativity','c0',-10,10);mkSl(p,'HDR','h0',-10,10);mkSl(p,'Resemblance','r0',-10,10);mkSl(p,'Fractality','f0',-10,10);
+}
+function sbEdit(p){
+  mkNote(p,'<strong style="color:#a78bfa">건축·인테리어 AI 포토샵</strong><br>가구·벽·바닥·조명·재질 부분 수정<br><span style="font-size:11px;color:var(--ac)">레퍼런스 이미지 업로드 → 원하는 오브젝트로 교체</span>');
+  mkEng(p,false);mkUB(p,'수정할 이미지','main');
+  mkRef(p,6,'교체 레퍼런스 이미지 <span style="font-size:10px;color:var(--m2)">(소파·문·창문 등 교체할 오브젝트 사진)</span>');
+  mkTA(p,'무엇을 수정할지 자세히...\n예) 소파를 베이지 패브릭으로\n예) 벽을 트라버틴 마감으로');
+  mkPre(p,PS_EDIT);
+}
+function sbVideo(p){
+  mkNote(p,'<strong style="color:#a5b4fc">이미지 &#8594; 카메라 무빙 영상</strong>');
+  var vmw=dv('ss');vmw.innerHTML='<div class="lbl">영상 방식</div>';
+  var vmr=dv('chips');
+  [['image','이미지&#8594;영상'],['prompt','텍스트&#8594;영상'],['startend','Start/End']].forEach(function(m){
+    var b=mk('button','chip'+(G.vidMode===m[0]?' on':''));b.innerHTML=m[1];
+    b.onclick=function(){G.vidMode=m[0];renderSB();};vmr.appendChild(b);
+  });
+  vmw.appendChild(vmr);p.appendChild(vmw);
+  mkEng(p,true);
+  if(G.vidMode==='image')mkUB(p,'이미지 업로드','main');
+  else if(G.vidMode==='startend'){mkUB(p,'Start Frame','main');mkUB(p,'End Frame','end');}
+  else mkNote(p,'텍스트로 영상 생성');
+  mkRef(p,6,'레퍼런스');
+  mkTA(p,'예: 드론 상승, 워크스루, 오빗 회전...');
+  mkPre(p,PS_VIDEO);mkChips(p,'해상도',['720p','1080p','2K','4K'],'vres');
+  var dw=dv('sl-w'),dr=dv('sl-row');
+  var dlb=mk('span','sl-lbl');dlb.textContent='영상 길이';
+  var dvl=mk('span','sl-v');dvl.textContent=G.vdur+'s';
+  var drng=mk('input','');drng.type='range';drng.min=3;drng.max=15;drng.value=G.vdur;slBg(drng,G.vdur,3,15);
+  drng.oninput=function(){G.vdur=+drng.value;dvl.textContent=G.vdur+'s';slBg(drng,G.vdur,3,15);};
+  dr.appendChild(dlb);dr.appendChild(dvl);dw.appendChild(dr);dw.appendChild(drng);p.appendChild(dw);
+}
 function sbUpscale(p){
   mkNote(p,'<strong style="color:#6ee7b7">&#8593; 이미지 고해상도 업스케일</strong><br>원본 구도·오브제 <strong style="color:var(--ac)">100% 유지</strong> · 해상도만 향상');
   var ew=dv('ss');ew.innerHTML='<div class="lbl">업스케일 엔진</div>';
