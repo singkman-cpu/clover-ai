@@ -568,9 +568,9 @@ var EL=[
   {k:'seedream',n:'Seedream v4.5',t:'Cheap',d:'경제적',lg:'s'}
 ];
 var EV=[
-  {k:'kling3',   n:'Kling 3.0 Pro', cost:200, t:'Cinematic',   d:'$0.84/5초 · 1080p · 시네마틱 · 오디오', lg:'k', res:['720p','1080p'], audio:true},
-  {k:'veo31',    n:'Veo 3.1 Fast',  cost:220, t:'Quality',     d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true},
-  {k:'seedance2',n:'Seedance 2.0',  cost:360, t:'Premium,Best',d:'$1.52/5초 · 480p/720p · 최고품질 · 오디오', lg:'s', res:['480p','720p'], audio:true}
+  {k:'kling3',   n:'Kling 3.0 Pro', cost:70, t:'Cinematic',   d:'$0.84/5초 · 1080p · 시네마틱 · 오디오', lg:'k', res:['720p','1080p'], audio:true},
+  {k:'veo31',    n:'Veo 3.1 Fast',  cost:114, t:'Quality',     d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true},
+  {k:'seedance2',n:'Seedance 2.0',  cost:190, t:'Premium,Best',d:'$1.52/5초 · 480p/720p · 최고품질 · 오디오', lg:'s', res:['480p','720p'], audio:true}
 ];
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
 var WFC={space:20,render:20,edit:20,video:60,upscale:20};
@@ -702,6 +702,8 @@ function canRun(){
   var tab=getTab(G.wf);
   if(G.wf==='video'&&tab.vidMode==='prompt')return (tab.prompt||'').length>2;
   if(!tab.inputImg)return false;
+  // 관리자는 크레딧 무제한
+  if(G.supaRole==='admin') return true;
   // 크레딧 부족 체크
   var cost=getCost();
   if(G.cr<cost)return false;
@@ -1105,9 +1107,29 @@ var RES_OPTS = [
 function getResObj(){ return RES_OPTS.find(function(r){return r.k===(getTab(G.wf).resolution||'1K');})||RES_OPTS[0]; }
 function getCost(){
   var base;
-  if(G.wf==='video')  base=getCE().cost||60;
-  else if(G.wf==='upscale'){var _sc=G.tabs.upscale.scale||'2x';base=(SCR[_sc]&&SCR[_sc][G_UPSCALE_ENG])||(_sc==='4x'?30:15);}
-  else base=WFC[G.wf]||50;
+  if(G.wf==='video'){
+    var dur=G.vdur||5;
+    var eng=G.vidEng||'kling3';
+    // 엔진별 기본 크레딧 + 초당 추가
+    // Kling: 5초=200cr 기준, 초당 40cr 추가
+    // Veo31: 6초=220cr 기준, 초당 37cr 추가
+    // Seedance: 5초=360cr 기준, 초당 72cr 추가
+    if(eng==='kling3'){
+      base = 200 + Math.max(0, dur-5)*40;
+    } else if(eng==='veo31'){
+      var vDur=Math.max(6,dur);
+      base = 220 + Math.max(0, vDur-6)*37;
+    } else if(eng==='seedance2'){
+      base = 360 + Math.max(0, dur-5)*72;
+    } else {
+      base = 200 + Math.max(0, dur-5)*40;
+    }
+  } else if(G.wf==='upscale'){
+    var _sc=G.tabs.upscale.scale||'2x';
+    base=(SCR[_sc]&&SCR[_sc][G_UPSCALE_ENG])||(_sc==='4x'?30:15);
+  } else {
+    base=WFC[G.wf]||50;
+  }
   if(G.wf!=='video'&&G.wf!=='upscale') base=Math.round(base*getResObj().mult);
   return base;
 }
@@ -1220,8 +1242,8 @@ function sbVideo(p){
   var dw=dv('sl-w'),dr=dv('sl-row');
   var dlb=mk('span','sl-lbl');dlb.textContent='영상 길이';
   var dvl=mk('span','sl-v');dvl.textContent=G.vdur+'s';
-  var drng=mk('input','');drng.type='range';drng.min=3;drng.max=15;drng.value=G.vdur;slBg(drng,G.vdur,3,15);
-  drng.oninput=function(){G.vdur=+drng.value;dvl.textContent=G.vdur+'s';slBg(drng,G.vdur,3,15);};
+  var drng=mk('input','');drng.type='range';drng.min=5;drng.max=15;drng.value=Math.max(5,G.vdur||5);slBg(drng,Math.max(5,G.vdur||5),5,15);
+  drng.oninput=function(){G.vdur=+drng.value;dvl.textContent=G.vdur+'s';slBg(drng,G.vdur,5,15);updBtn();};
   dr.appendChild(dlb);dr.appendChild(dvl);dw.appendChild(dr);dw.appendChild(drng);p.appendChild(dw);
 }
 function sbUpscale(p){
@@ -1929,7 +1951,6 @@ function addHistEl(item, scroll){
     pw.appendChild(img2);pw.appendChild(ib2);
     var hint=dv('');
     hint.setAttribute('style','padding:8px 12px;font-size:11px;color:var(--ac);text-align:center;border-top:1px solid var(--bd);background:rgba(0,229,204,.05)');
-    hint.innerHTML='<strong>&#9998; 브러시 또는 폴리곤으로 수정 영역을 선택하고 프롬프트 입력 후 AI 편집 실행</strong>';
     w.appendChild(pw);w.appendChild(hint);
   }
 
@@ -2661,7 +2682,7 @@ function runVeo31(imgDataUrl, prompt, duration, onDone, onErr){
   var finalPrompt = (prompt&&prompt.trim()) ? prompt : autoVideoPrompt();
   if(ldst)ldst.textContent='Veo 3.1 영상 생성 중 (60~180초)...';
   _doUpload(imgDataUrl, function(imgUrl){
-    var vDur = duration <= 4 ? '4s' : duration <= 7 ? '6s' : '8s';
+    var vDur = duration <= 6 ? '6s' : duration <= 7 ? '7s' : '8s';
     var vRes = G.vres||'720p';
     // Veo 3.1: 720p, 1080p, 4k 지원
     if(['720p','1080p','4k'].indexOf(vRes)<0) vRes='720p';
