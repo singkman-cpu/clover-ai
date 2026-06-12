@@ -575,7 +575,7 @@ var EV=[
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
 var WFC={space:20,render:20,edit:20,video:60,upscale:20};
 var WFL={space:'AI 공간 변환',render:'렌더 실사화',edit:'AI 편집',video:'영상 생성',upscale:'업스케일'};
-var SCR={'2x':{'clarity':20,'topaz':15}};
+var SCR={'2x':{'clarity':20,'topaz':15},'4x':{'clarity':40,'topaz':30}};
 var OPTIMIZED=['Standard','Portraits (Soft)','Portraits (Hard)','Art & Illustrations','Nature & Landscapes','Films & Photography','3d Renders','Science Fiction'];
 var FAQS=[
   // ── 서비스 소개 ──
@@ -694,7 +694,7 @@ function getBaseCost(wf,scale,resolution){
     var editRes=getTab('edit').resolution||'1K';
     return Math.round(baseEdit*(editRes==='2K'?1.5:1.0));
   }
-  var base=wf==='video'?60:wf==='upscale'?((SCR['2x']&&SCR['2x'][G_UPSCALE_ENG])||20):(({'space':20,'render':20})[wf]||20);
+  var base=wf==='video'?60:wf==='upscale'?((SCR[scale||'2x']&&SCR[scale||'2x'][G_UPSCALE_ENG])||(scale==='4x'?30:20)):(({'space':20,'render':20})[wf]||20);
   var mult=({'1K':1.0,'2K':1.5})[res]||1.0;
   return Math.round(base*mult);
 }
@@ -781,6 +781,8 @@ function translateToEnglish(text, cb){
   });
 }
 function goHome(){gE('home-s').style.display='flex';
+  var sbtm=document.querySelector('.sb-btm');
+  if(sbtm)sbtm.style.display='none';
   if(window.innerWidth<=768){window.scrollTo({top:0,behavior:'smooth'});}
   document.getElementById('canvas-upload-box').classList.remove('active');
   gE('hist-s').style.display='none';document.getElementById('canvas-upload-box').classList.remove('active');
@@ -814,6 +816,8 @@ function selectWF(wf){// 1. home-s 숨김
   // 6. 중앙 화면 결정
   renderMain(wf);
   // 7. 사이드바 + 버튼
+  var sbtm2=document.querySelector('.sb-btm');
+  if(sbtm2)sbtm2.style.display='';
   renderSB();updBtn();
   // 8. 상태 표시
   var tab=getTab(wf);
@@ -1102,7 +1106,7 @@ function getResObj(){ return RES_OPTS.find(function(r){return r.k===(getTab(G.wf
 function getCost(){
   var base;
   if(G.wf==='video')  base=getCE().cost||60;
-  else if(G.wf==='upscale') base=SCR[G.tabs.upscale.scale]||10;
+  else if(G.wf==='upscale'){var _sc=G.tabs.upscale.scale||'2x';base=(SCR[_sc]&&SCR[_sc][G_UPSCALE_ENG])||(_sc==='4x'?30:15);}
   else base=WFC[G.wf]||50;
   if(G.wf!=='video'&&G.wf!=='upscale') base=Math.round(base*getResObj().mult);
   return base;
@@ -1275,7 +1279,24 @@ function sbUpscale(p){
   ew.appendChild(egrid);p.appendChild(ew);
   var slArea=dv('');slArea.id='upscale-sl-area';buildUpscaleSliders(G_UPSCALE_ENG,slArea);p.appendChild(slArea);
   mkUB(p,'업스케일할 이미지 업로드','main');
-  G.tabs.upscale.scale='2x'; // 항상 2x 고정
+  // 배율 선택 (2x / 4x)
+  var sw=dv('ss');sw.innerHTML='<div class="lbl">배율 Scale</div>';
+  var sr=dv('sc-row');
+  [['2x',2],['4x',4]].forEach(function(pair){
+    var key=pair[0];
+    var cr=(SCR[key]&&SCR[key][G_UPSCALE_ENG])||(key==='4x'?30:15);
+    var btn=mk('button','sc-btn'+(G.tabs.upscale.scale===key?' on':''));
+    btn.innerHTML=key+'<small>'+cr+'cr</small>';
+    btn.onclick=function(){
+      G.tabs.upscale.scale=key;
+      sr.querySelectorAll('.sc-btn').forEach(function(b){b.classList.remove('on');});
+      btn.classList.add('on');
+      updBtn();
+    };
+    sr.appendChild(btn);
+  });
+  if(!G.tabs.upscale.scale)G.tabs.upscale.scale='2x';
+  sw.appendChild(sr);p.appendChild(sw);
   // 엔진별 단가 안내
   var notew=dv('note');notew.style.cssText='margin-top:6px;font-size:11px;color:var(--m2)';
   notew.innerHTML='· Topaz 2x: <strong style="color:var(--t)">₩116 원가 · 15cr</strong>&nbsp;&nbsp;· Clarity 2x: <strong style="color:var(--t)">₩176 원가 · 20cr</strong><br>실제 출력은 입력 해상도 기준 2배로 고정됩니다.';
@@ -3074,13 +3095,15 @@ function procImgWithTask(task, onDone, onErr){
     if(upEng==='topaz'){
       if(ldst)ldst.textContent='Topaz 업스케일 중 (10~30초)...';
       _doUpload(img, function(imgUrl){
-        falRun('fal-ai/topaz/upscale/image',{image_url:imgUrl,scale_factor:2,model:'High Fidelity V2'},
+        var _sf={'2x':2,'4x':4}[task.scale||'2x']||2;
+        falRun('fal-ai/topaz/upscale/image',{image_url:imgUrl,scale_factor:_sf,model:'High Fidelity V2'},
           function(d){var u=falExtractImageUrl(d);if(u)onDone(u);else onErr('Topaz URL 없음');},
-          function(err){console.warn('[Topaz 실패]→Clarity',err);runClarityUpscale(img,2,onDone,onErr);}
+          function(err){console.warn('[Topaz 실패]→Clarity',err);runClarityUpscale(img,_sf,onDone,onErr);}
         );
       });
     } else {
-      runClarityUpscale(img, 2, onDone, function(err){
+      var _sf2={'2x':2,'4x':4}[task.scale||'2x']||2;
+      runClarityUpscale(img, _sf2, onDone, function(err){
         console.warn('[Clarity 오류]',err);onErr(err);
       });
     }
