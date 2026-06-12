@@ -207,35 +207,93 @@ select option{background:var(--c2)}
 /* ── 모바일 반응형 ─────────────────────────────────────────── */
 @media(max-width:768px){
   /* 네비 */
-  .nav{padding:0 10px;height:48px}
+  .nav{padding:0 8px;height:48px}
   .logo-s,.beta,.cr-l{display:none}
-  .nbtn{padding:5px 8px;font-size:11px}
+  .nbtn{padding:4px 8px;font-size:11px}
   .nbtn.up{padding:5px 10px;font-size:11px}
-  /* 사이드바 숨김 */
-  .sb{display:none!important}
-  /* body: 탭바 56px 미리 제외 */
-  .body{height:calc(100vh - 48px - 56px)}
-  .main{width:100%;height:100%;position:relative;overflow:hidden}
-  /* ★ 핵심: hist-s와 canvas-upload-box가 탭바(56px) 침범 금지 */
-  .hist-s{bottom:56px!important;top:0!important;left:0!important;right:0!important}
-  #canvas-upload-box{bottom:56px!important}
-  /* 이미지 크기 */
-  .cmpw img{max-height:42vh!important;object-fit:contain}
-  video{max-height:42vh!important}
+
+  /* 전체 레이아웃: 세로 스크롤 페이지로 전환 */
+  .body{
+    flex-direction:column;
+    height:auto;
+    min-height:calc(100vh - 48px);
+    overflow-y:auto;
+    overflow-x:hidden;
+    padding-bottom:64px; /* 탭바 높이 + 여유 */
+  }
+
+  /* 사이드바: 전체 너비, 높이 자동 */
+  .sb{
+    width:100%!important;
+    min-width:0!important;
+    height:auto!important;
+    border-right:none!important;
+    border-bottom:1px solid var(--bd);
+    flex-direction:column;
+    overflow:visible;
+  }
+  .sb-scroll{overflow:visible;height:auto}
+  .sb-btm{position:relative;border-top:1px solid var(--bd)}
+
+  /* 탭 목록 가로 스크롤 */
+  .sb-tabs{
+    display:flex!important;
+    flex-direction:row!important;
+    overflow-x:auto;
+    border-right:none;
+    border-bottom:1px solid var(--bd);
+    height:auto;
+    min-height:0;
+    -webkit-overflow-scrolling:touch;
+  }
+  .wft{
+    flex-shrink:0;
+    padding:10px 12px;
+    border-left:none;
+    border-bottom:3px solid transparent;
+    white-space:nowrap;
+  }
+  .wft.on{border-bottom-color:var(--ac);border-left-color:transparent}
+  .wft-ic{display:none}
+
+  /* 캔버스: 사이드바 아래에 배치 */
+  .main{
+    width:100%;
+    height:60vh;
+    min-height:300px;
+    position:relative;
+    flex-shrink:0;
+  }
+  .cnv{height:100%}
+  .hist-s{bottom:0!important;top:0;left:0;right:0}
+  #canvas-upload-box{bottom:0!important}
+  .cmpw img{max-height:55vh!important;object-fit:contain}
+  video{max-height:55vh!important}
+
   /* 홈 그리드 */
   .hgrid{grid-template-columns:repeat(2,1fr);gap:8px;padding:0 8px;max-width:100%}
   .hc{padding:10px}
-  /* 모달 하단 시트 */
+  .hc-t{font-size:12px}
+
+  /* 모달 → 하단 시트 */
   .mbg{align-items:flex-end}
-  .md{width:100%!important;max-width:100%!important;border-radius:16px 16px 0 0;max-height:88vh}
+  .md{width:100%!important;max-width:100%!important;border-radius:16px 16px 0 0;max-height:90vh}
   .mdb{padding:12px}
-  /* 탭바/패널 표시 */
+
+  /* 하단 탭바 */
   .mob-tabbar{display:flex!important}
-  .mob-panel{display:block!important}
-  .pre-grid{grid-template-columns:repeat(4,1fr);max-height:160px}
+  .mob-panel{display:none!important} /* 패널 완전 비활성 */
+
+  /* 기타 */
+  .pre-grid{grid-template-columns:repeat(4,1fr);max-height:180px}
   .stbar{display:none}
-  .tb{overflow-x:auto;flex-wrap:nowrap}
+  .tb{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
   .tbb{white-space:nowrap;flex-shrink:0;font-size:10px;padding:2px 6px}
+  .lbl{font-size:11px}
+  .lbl-en{display:none}
+  .note-box{font-size:11px}
+  .sc-row{flex-wrap:wrap;gap:4px}
+  .sc-btn{flex:1;min-width:60px}
 }
 
 .mob-tabbar{display:none}
@@ -4413,63 +4471,18 @@ var _mobPanelOpen = false;
 var _lastMobTab = '';
 
 function mobTab(wf){
-    var isMobile = window.innerWidth <= 768;
-    if(!isMobile){ switchTab(wf); return; }
-    if(_lastMobTab === wf && _mobPanelOpen){ closeMobPanel(); return; }
-    _lastMobTab = wf;
-
-    // 탭 전환 — G.wf 먼저 설정
-    G.wf = wf;
-    switchTab(wf);
-    document.querySelectorAll('.mob-tab').forEach(function(t){t.classList.remove('on');});
-    var bt=gE('mobt-'+wf); if(bt)bt.classList.add('on');
-
-    // 패널에 직접 사이드바 렌더링
-    var panelContent=gE('mob-panel-content');
-    if(panelContent){
-      panelContent.innerHTML='';
-
-      // renderSB를 패널 컨테이너에 직접 실행
-      var sbMap={space:sbSpace,render:sbRender,edit:sbEdit,video:sbVideo,upscale:sbUpscale};
-      var sbFn=sbMap[wf];
-      if(sbFn){
-        var p=dv('');
-        sbFn(p);
-        panelContent.appendChild(p);
-      }
-
-      // 생성 버튼 고정
-      var runCost=getCost();
-      var runBtn=document.createElement('button');
-      runBtn.id='mob-run-btn';
-      runBtn.style.cssText='width:100%;padding:14px;border-radius:10px;border:none;'+
-        'background:var(--ac);color:#000;font-size:15px;font-weight:800;'+
-        'cursor:pointer;font-family:inherit;margin-top:14px;'+
-        'position:sticky;bottom:0;z-index:10;box-shadow:0 -8px 20px rgba(7,7,10,.8)';
-      runBtn.innerHTML='&#9654; AI 생성&nbsp;&nbsp;<span style="font-size:12px;opacity:.8">'+runCost+'cr</span>';
-      runBtn.onclick=function(){
-        // 로그인 체크
-        if(!_supaUser){ openMd('login'); return; }
-        // 이미지 체크
-        var tab=getTab(G.wf);
-        if(!tab.inputImg && G.wf!=='video'){
-          alert('이미지를 먼저 업로드해주세요.');
-          return;
-        }
-        closeMobPanel();
-        // canRun 우회하고 직접 실행
-        var rawPrompt=tab.prompt||'';
-        _runToolWithPrompt(rawPrompt);
-      };
-      panelContent.appendChild(runBtn);
-    }
-
-    var panel=gE('mob-panel');
-    if(panel){panel.classList.add('open');_mobPanelOpen=true;}
-    // switchTab으로 탭 상태 동기화 (이미지/결과 유지)
-    switchTab(wf);
-    updBtn();
+  G.wf=wf;
+  switchTab(wf);
+  document.querySelectorAll('.mob-tab').forEach(function(t){t.classList.remove('on');});
+  var bt=gE('mobt-'+wf);if(bt)bt.classList.add('on');
+  if(window.innerWidth<=768){
+    // 사이드바로 스크롤
+    var sb=document.querySelector('.sb');
+    if(sb)sb.scrollIntoView({behavior:'smooth',block:'start'});
   }
+  updBtn();
+}
+
 
 function closeMobPanel(){
     var panel=gE('mob-panel');
