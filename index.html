@@ -4820,10 +4820,19 @@ function onSupaLogin(user){
   .then(function(res){
     if(res.error){
       if(res.error.code==='PGRST116'){
-        // 진짜 신규 사용자 (row not found) → 생성
+        // 신규 사용자 → insert 후 50cr 지급
+        console.log('[Supabase] 신규 사용자 → profiles 생성 (50cr)');
         return _supa.from('profiles').insert({
-          id:user.id, email:user.email, credits:50, role:'user'
-        }).select().single().then(function(r){return r;});
+          id:user.id, email:user.email, credits:50, role:'user', plan:'free'
+        }).select().single().then(function(r){
+          if(r&&r.data) return r;
+          // insert 성공했지만 select 실패 → 직접 50cr 세팅
+          return {data:{credits:50, role:'user', plan:'free'}};
+        }).catch(function(){
+          // insert 자체 실패 (RLS) → 50cr 직접 세팅
+          console.warn('[Supabase] insert 실패 → 50cr 로컬 적용');
+          return {data:{credits:50, role:'user', plan:'free'}};
+        });
       }
       // 다른 에러 (RLS 등) → 재시도 1회
       console.warn('[Supabase] profiles 조회 오류:', res.error.message, '→ 1초 후 재시도');
@@ -4831,16 +4840,17 @@ function onSupaLogin(user){
         setTimeout(function(){
           _supa.from('profiles').select('id,email,credits,role,plan,fal_key').eq('id',user.id).single()
           .then(function(r2){
-            if(r2&&r2.data) resolve(r2);
-            else {
-              var cachedCr=parseInt(localStorage.getItem('clover_cr')||'0',10);
-              var fallbackRole=ADMIN_EMAILS.indexOf(user.email)>-1?'admin':'user';
-              resolve({data:{credits:cachedCr,role:fallbackRole,plan:localStorage.getItem('clover_plan')||'free'}});
-            }
+            if(r2&&r2.data){ resolve(r2); return; }
+            // 재시도도 실패 → 신규로 간주하고 insert 시도
+            _supa.from('profiles').insert({
+              id:user.id, email:user.email, credits:50, role:'user', plan:'free'
+            }).select().single().then(function(r3){
+              resolve((r3&&r3.data)?r3:{data:{credits:50,role:'user',plan:'free'}});
+            }).catch(function(){
+              resolve({data:{credits:50,role:'user',plan:'free'}});
+            });
           }).catch(function(){
-            var cachedCr=parseInt(localStorage.getItem('clover_cr')||'0',10);
-            var fallbackRole=ADMIN_EMAILS.indexOf(user.email)>-1?'admin':'user';
-            resolve({data:{credits:cachedCr,role:fallbackRole,plan:localStorage.getItem('clover_plan')||'free'}});
+            resolve({data:{credits:50,role:'user',plan:'free'}});
           });
         },1000);
       });
@@ -4927,7 +4937,13 @@ function supaEmailLogin(){
   _supa.auth.signInWithPassword({email:email,password:pw})
   .then(function(res){
     if(res.error){
-      if(msg){msg.style.color='#fca5a5';msg.textContent=res.error.message.indexOf('Invalid')>-1?'이메일 또는 비밀번호가 올바르지 않습니다.':res.error.message;}
+      var errMsg = res.error.message;
+      var friendlyMsg = errMsg.indexOf('Invalid')>-1 || errMsg.indexOf('invalid')>-1
+        ? '이메일 또는 비밀번호가 올바르지 않습니다.'
+        : errMsg.indexOf('confirm')>-1 || errMsg.indexOf('verified')>-1 || errMsg.indexOf('Email not confirmed')>-1
+        ? '이메일 인증이 필요합니다. 받은편지함에서 인증 메일을 확인해주세요.'
+        : errMsg;
+      if(msg){msg.style.color='#fca5a5';msg.textContent=friendlyMsg;}
     } else {
       if(msg){msg.style.color='var(--ac)';msg.textContent='로그인 성공!';}
       setTimeout(function(){closeMd('login');},500);
@@ -4948,7 +4964,24 @@ function supaEmailSignup(){
     if(res.error){
       if(msg){msg.style.color='#fca5a5';msg.textContent=res.error.message.indexOf('already')>-1?'이미 가입된 이메일입니다. 로그인해주세요.':res.error.message;}
     } else {
-      if(msg){msg.style.color='var(--ac)';msg.textContent='✓ 가입 완료! 이메일 확인 후 로그인하세요.';}
+      // 이메일 인증 안내 박스로 교체
+      var b=gE('ac-b')||document.querySelector('#mlogin .mdb');
+      var loginMdb=document.querySelector('#mlogin .mdb');
+      if(loginMdb){
+        loginMdb.innerHTML=
+          '<div style="text-align:center;padding:20px 10px">'+
+          '<div style="font-size:40px;margin-bottom:12px">📧</div>'+
+          '<div style="font-size:16px;font-weight:700;color:var(--t);margin-bottom:10px">인증 메일을 발송했습니다!</div>'+
+          '<div style="font-size:13px;color:var(--m2);line-height:1.8;margin-bottom:16px">'+
+            '<strong style="color:var(--ac)">'+(gE('login-email')?gE('login-email').value:'')+'</strong>으로<br>'+
+            '인증 메일이 발송됐습니다.<br><br>'+
+            '📌 메일함에서 <strong style="color:var(--t)">이메일 주소 확인하기</strong> 버튼을 클릭해<br>'+
+            '인증을 완료한 후 로그인해주세요.<br><br>'+
+            '<span style="font-size:11px;color:var(--m1)">메일이 안 보이면 스팸함도 확인해보세요</span>'+
+          '</div>'+
+          '<button onclick="closeMd('login')" style="padding:10px 24px;background:var(--ac);border:none;color:#000;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">확인</button>'+
+          '</div>';
+      }
     }
   }).catch(function(e){if(msg){msg.style.color='#fca5a5';msg.textContent='오류: '+e.message;}});
 }
