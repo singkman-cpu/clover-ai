@@ -4769,6 +4769,8 @@ function initSupabase(){
 
 function onSupaLogin(user){
   console.log('[Supabase] 로그인:', user.email);
+  // 로딩 중 표시
+  var crn=gE('cr-n');if(crn)crn.textContent='...';
   // profiles 테이블 조회/생성
   if(!_supa)return;
   _supa.from('profiles').select('id,email,credits,role,plan,fal_key').eq('id',user.id).single()
@@ -4780,11 +4782,25 @@ function onSupaLogin(user){
           id:user.id, email:user.email, credits:50, role:'user'
         }).select().single().then(function(r){return r;});
       }
-      // 다른 에러 (RLS 등) → localStorage 크레딧 그대로, 빈 객체 반환
-      console.warn('[Supabase] profiles 조회 오류:', res.error.message);
-      var cachedCr = parseInt(localStorage.getItem('clover_cr')||'0',10);
-      var fallbackRole = ADMIN_EMAILS.indexOf(user.email)>-1 ? 'admin' : 'user';
-      return {data:{credits:cachedCr, role:fallbackRole, plan:localStorage.getItem('clover_plan')||'free'}};
+      // 다른 에러 (RLS 등) → 재시도 1회
+      console.warn('[Supabase] profiles 조회 오류:', res.error.message, '→ 1초 후 재시도');
+      return new Promise(function(resolve){
+        setTimeout(function(){
+          _supa.from('profiles').select('id,email,credits,role,plan,fal_key').eq('id',user.id).single()
+          .then(function(r2){
+            if(r2&&r2.data) resolve(r2);
+            else {
+              var cachedCr=parseInt(localStorage.getItem('clover_cr')||'0',10);
+              var fallbackRole=ADMIN_EMAILS.indexOf(user.email)>-1?'admin':'user';
+              resolve({data:{credits:cachedCr,role:fallbackRole,plan:localStorage.getItem('clover_plan')||'free'}});
+            }
+          }).catch(function(){
+            var cachedCr=parseInt(localStorage.getItem('clover_cr')||'0',10);
+            var fallbackRole=ADMIN_EMAILS.indexOf(user.email)>-1?'admin':'user';
+            resolve({data:{credits:cachedCr,role:fallbackRole,plan:localStorage.getItem('clover_plan')||'free'}});
+          });
+        },1000);
+      });
     }
     // 기존 사용자 조회 성공 → 그대로 반환
     return res;
@@ -4839,6 +4855,9 @@ function updateAccountBtn(){
     var email=_supaUser.email||'';
     btn.textContent=email.split('@')[0].slice(0,8);
     btn.title=email;
+    // 크레딧이 0이고 아직 DB에서 안 불러왔으면 로딩 표시
+    var crn=gE('cr-n');
+    if(crn&&G.cr===0&&!G.supaRole){crn.textContent='...';}
   } else {
     btn.textContent='로그인';
   }
