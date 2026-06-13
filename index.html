@@ -4862,16 +4862,9 @@ function initSupabase(){
   try{
     _supa = supabase.createClient(SUPA_URL, SUPA_KEY);
     // 세션 복원
-    _supa.auth.getSession().then(function(res){
-      var session = res.data&&res.data.session;
-      if(session&&session.user){
-        _supaUser = session.user;
-        onSupaLogin(session.user);
-      }
-    });
-    // 로그인/로그아웃 이벤트
+    // onAuthStateChange 하나만 사용 (중복 호출 방지)
     _supa.auth.onAuthStateChange(function(event, session){
-      if(event==='SIGNED_IN'&&session){
+      if((event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session&&session.user){
         _supaUser=session.user;
         onSupaLogin(session.user);
       } else if(event==='SIGNED_OUT'){
@@ -4882,7 +4875,10 @@ function initSupabase(){
   }catch(e){console.warn('[Supabase] 초기화 실패:',e.message);}
 }
 
+var _loginInProgress = false;
 function onSupaLogin(user){
+  if(_loginInProgress){ console.log('[Supabase] 로그인 중복 호출 무시'); return; }
+  _loginInProgress = true;
   console.log('[Supabase] 로그인:', user.email);
   // 로딩 중 표시
   var crn=gE('cr-n');if(crn)crn.textContent='...';
@@ -4955,6 +4951,7 @@ function onSupaLogin(user){
       }
       localStorage.setItem('clover_cr', G.cr);
       localStorage.setItem('clover_plan', G.plan);
+      _loginInProgress = false;
       var crn=gE('cr-n');
       if(crn)crn.textContent=(G.supaRole==='admin'?'999,999':G.cr.toLocaleString());
       // 사이드바 재렌더링 (레퍼런스 슬롯 반영)
