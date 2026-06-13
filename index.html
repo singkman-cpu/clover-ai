@@ -2982,7 +2982,7 @@ function executeSingleRender(task){
           }
           if(G.cr<50){gE('stl').textContent='크레딧이 부족합니다 ('+G.cr+'cr) — 충전이 필요합니다';}
           // ★ Supabase DB 업데이트 (재로그인 시 복원용)
-          if(_supa&&_supaUser){
+          if(_supa&&_supaUser&&G.supaRole!=='admin'){
             _supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id);
             _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-finalCost,reason:'서비스 사용: '+task.wf}).catch(function(){});
           }
@@ -3595,7 +3595,8 @@ function buildAdminDashboard(){
     {k:'members',l:'👥 회원 관리'},
     {k:'credit',l:'💰 크레딧 지급'},
     {k:'coupon',l:'🎫 쿠폰 관리'},
-    {k:'logs',l:'📋 지급 이력'}
+    {k:'logs',l:'📋 지급 이력'},
+    {k:'mail',l:'📧 단체 메일'}
   ];
   var tabBar='<div style="display:flex;border-bottom:1px solid var(--bd);background:var(--c2)">';
   tabs.forEach(function(t){
@@ -3621,6 +3622,7 @@ function admRenderTab(){
   else if(_adminTab==='credit') admCreditGive(c);
   else if(_adminTab==='coupon') admCoupon(c);
   else if(_adminTab==='logs') admLogs(c);
+  else if(_adminTab==='mail') admMail(c);
 }
 
 function admDashboard(c){
@@ -3781,6 +3783,226 @@ function admLogs(c){
       rows.map(function(l){var ip=l.amount>0;var em=l.profiles?l.profiles.email:'unknown';return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t2)">'+em+'</td><td style="padding:6px 4px;text-align:center;font-weight:700;color:'+(ip?'var(--ac)':'#fca5a5)')+'">'+(ip?'+':'')+l.amount+'cr</td><td style="padding:6px 8px;color:var(--m2)">'+(l.reason||'-')+'</td><td style="padding:6px 4px;text-align:center;color:var(--m2)">'+(l.created_at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table></div>';
   });
 }
+
+
+function admMail(c){
+  if(!_supa){c.innerHTML='<div style="color:#fca5a5;padding:20px">Supabase 미연결</div>';return;}
+  var RESEND_KEY=localStorage.getItem('clover_resend_key')||'';
+  c.innerHTML=
+    '<div style="font-size:12px;font-weight:700;color:var(--ac);margin-bottom:12px">📧 전체 회원 단체 메일 발송</div>'+
+    '<div style="background:var(--c2);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:14px">'+
+      '<div style="font-size:11px;color:var(--m2);margin-bottom:6px">Resend API 키 &nbsp;·&nbsp; <a href="https://resend.com/api-keys" target="_blank" style="color:var(--ac)">resend.com/api-keys</a></div>'+
+      '<div style="display:flex;gap:6px">'+
+        '<input id="resend-key-inp" type="password" placeholder="re_xxxxxxxxxxxx" style="flex:1;background:var(--bg);border:1px solid var(--bd2);color:var(--t);padding:7px 10px;font-size:11px;font-family:monospace;border-radius:6px;outline:none">'+
+        '<button id="resend-key-save" style="padding:7px 14px;background:var(--ac);color:#000;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">저장</button>'+
+      '</div>'+
+      '<div id="resend-key-status" style="font-size:10px;color:var(--m2);margin-top:5px"></div>'+
+    '</div>'+
+    '<div style="margin-bottom:10px">'+
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:6px;font-weight:600">수신 대상</div>'+
+      '<div style="display:flex;gap:12px;flex-wrap:wrap">'+
+        '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t);cursor:pointer"><input type="radio" name="mail-target" value="all" checked style="accent-color:var(--ac)"> 전체 회원</label>'+
+        '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t);cursor:pointer"><input type="radio" name="mail-target" value="plan" style="accent-color:var(--ac)"> 특정 플랜</label>'+
+        '<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t);cursor:pointer"><input type="radio" name="mail-target" value="manual" style="accent-color:var(--ac)"> 직접 입력</label>'+
+      '</div>'+
+      '<div id="mail-target-extra" style="margin-top:8px;display:none"></div>'+
+    '</div>'+
+    '<div style="margin-bottom:10px">'+
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:4px;font-weight:600">발신자 이메일 <span style="color:var(--m2);font-weight:400">(Resend 인증 도메인)</span></div>'+
+      '<input id="mail-from" type="text" placeholder="no-reply@cloverai.kr" value="no-reply@cloverai.kr" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box">'+
+    '</div>'+
+    '<div style="margin-bottom:10px">'+
+      '<div style="font-size:11px;color:var(--t2);margin-bottom:4px;font-weight:600">메일 제목</div>'+
+      '<input id="mail-subject" type="text" placeholder="[Clover AI] 공지사항" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box">'+
+    '</div>'+
+    '<div style="margin-bottom:14px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+        '<div style="font-size:11px;color:var(--t2);font-weight:600">메일 내용</div>'+
+        '<div style="display:flex;gap:5px">'+
+          '<button onclick="admMailPreview()" style="padding:4px 10px;background:var(--acg);border:1px solid var(--acb);color:var(--ac);border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit">미리보기</button>'+
+          '<button onclick="admMailInsertVar(\'{{이름}}\')" style="padding:4px 8px;background:var(--c2);border:1px solid var(--bd2);color:var(--t2);border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit">+이름</button>'+
+          '<button onclick="admMailInsertVar(\'{{이메일}}\')" style="padding:4px 8px;background:var(--c2);border:1px solid var(--bd2);color:var(--t2);border-radius:5px;font-size:10px;cursor:pointer;font-family:inherit">+이메일</button>'+
+        '</div>'+
+      '</div>'+
+      '<textarea id="mail-body" rows="8" placeholder="안녕하세요, Clover AI입니다.\n\n{{이름}}님께 알려드립니다..." style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:10px;font-size:12px;border-radius:6px;outline:none;resize:vertical;box-sizing:border-box;font-family:inherit;line-height:1.7"></textarea>'+
+      '<div style="font-size:10px;color:var(--m2);margin-top:3px">{{이름}}, {{이메일}} 은 각 회원 정보로 자동 치환됩니다</div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:10px">'+
+      '<button id="mail-test-btn" style="flex:1;padding:10px;background:var(--c2);border:1px solid var(--bd2);color:var(--t);border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🧪 테스트 (내 계정만)</button>'+
+      '<button id="mail-send-btn" style="flex:2;padding:10px;background:linear-gradient(135deg,var(--ac),#00b894);border:none;color:#000;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📧 전체 발송</button>'+
+    '</div>'+
+    '<div id="mail-result" style="font-size:11px;color:var(--m2);text-align:center;min-height:16px;padding:4px"></div>'+
+    '<div style="border-top:1px solid var(--bd);margin-top:14px;padding-top:12px">'+
+      '<div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">📋 최근 발송 이력</div>'+
+      '<div id="mail-history"></div>'+
+    '</div>';
+
+  setTimeout(function(){
+    // API 키 초기값 세팅
+    var ki=gE('resend-key-inp');
+    if(ki)ki.value=RESEND_KEY;
+    var ks=gE('resend-key-status');
+    if(ks)ks.textContent=RESEND_KEY?'✓ API 키 저장됨':'API 키를 입력하면 실제 메일이 발송됩니다';
+
+    var kSave=gE('resend-key-save');
+    if(kSave)kSave.onclick=function(){
+      var v=(gE('resend-key-inp')?gE('resend-key-inp').value:'').trim();
+      localStorage.setItem('clover_resend_key',v);
+      var st=gE('resend-key-status');
+      if(st){st.style.color='var(--ac)';st.textContent='✓ 저장됨';}
+      kSave.textContent='✓';kSave.style.background='#10b981';
+      setTimeout(function(){kSave.textContent='저장';kSave.style.background='var(--ac)';},2000);
+    };
+
+    document.querySelectorAll('input[name="mail-target"]').forEach(function(r){
+      r.onchange=function(){
+        var extra=gE('mail-target-extra');if(!extra)return;
+        if(r.value==='plan'){
+          extra.style.display='block';
+          extra.innerHTML='<select id="mail-plan-sel" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px;border-radius:6px;font-size:12px;outline:none"><option value="free">Free</option><option value="basic">Basic</option><option value="pro">Pro</option><option value="studio">Studio</option><option value="agency">Agency</option></select>';
+        } else if(r.value==='manual'){
+          extra.style.display='block';
+          extra.innerHTML='<textarea id="mail-manual-emails" rows="3" placeholder="이메일을 줄바꿈으로 구분\nuser1@email.com\nuser2@email.com" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px;font-size:11px;border-radius:6px;outline:none;resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>';
+        } else {
+          extra.style.display='none';extra.innerHTML='';
+        }
+      };
+    });
+
+    var tBtn=gE('mail-test-btn');
+    if(tBtn)tBtn.onclick=function(){admMailSend(true);};
+    var sBtn=gE('mail-send-btn');
+    if(sBtn)sBtn.onclick=function(){
+      if(!confirm('정말 전체 발송하시겠습니까?\n대상 회원 전원에게 메일이 발송됩니다.'))return;
+      admMailSend(false);
+    };
+    admMailLoadHistory();
+  },100);
+}
+
+function admMailInsertVar(v){
+  var ta=gE('mail-body');if(!ta)return;
+  var s=ta.selectionStart,e=ta.selectionEnd;
+  ta.value=ta.value.slice(0,s)+v+ta.value.slice(e);
+  ta.selectionStart=ta.selectionEnd=s+v.length;
+  ta.focus();
+}
+
+function admMailPreview(){
+  var subj=(gE('mail-subject')?gE('mail-subject').value:'(제목 없음)');
+  var body=(gE('mail-body')?gE('mail-body').value:'(내용 없음)');
+  var html=body
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\n/g,'<br>')
+    .replace(/\{\{이름\}\}/g,'<span style="background:#e8fdf8;color:#00a87a;padding:1px 5px;border-radius:3px">홍길동</span>')
+    .replace(/\{\{이메일\}\}/g,'<span style="background:#e8fdf8;color:#00a87a;padding:1px 5px;border-radius:3px">user@email.com</span>');
+  var win=window.open('','_blank','width=620,height:520');
+  if(!win){alert('팝업이 차단됐습니다. 허용 후 다시 시도해주세요.');return;}
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>미리보기</title><style>body{font-family:Apple SD Gothic Neo,sans-serif;padding:30px;max-width:600px;margin:0 auto;color:#222;line-height:1.8}h2{border-bottom:2px solid #eee;padding-bottom:10px;color:#111}.tag{display:inline-block;background:#e8fdf8;color:#00a87a;padding:2px 8px;border-radius:4px;font-size:11px;margin-bottom:14px}hr{border:none;border-top:1px solid #eee;margin:20px 0}footer{font-size:11px;color:#999}</style></head><body>');
+  win.document.write('<div class="tag">미리보기</div><h2>'+subj+'</h2><div>'+html+'</div><hr><footer>본 메일은 Clover AI에서 발송된 공지 메일입니다. · cloverai.design@gmail.com</footer></body></html>');
+  win.document.close();
+}
+
+function admMailSend(testOnly){
+  var apiKey=localStorage.getItem('clover_resend_key')||'';
+  var from=(gE('mail-from')?gE('mail-from').value.trim():'');
+  var subject=(gE('mail-subject')?gE('mail-subject').value.trim():'');
+  var body=(gE('mail-body')?gE('mail-body').value.trim():'');
+  var result=gE('mail-result');
+
+  if(!subject){if(result){result.style.color='#fca5a5';result.textContent='메일 제목을 입력하세요.';}return;}
+  if(!body){if(result){result.style.color='#fca5a5';result.textContent='메일 내용을 입력하세요.';}return;}
+  if(!apiKey){if(result){result.style.color='#fca5a5';result.textContent='Resend API 키가 없습니다. 상단에서 입력 후 저장하세요.';}return;}
+  if(!from){if(result){result.style.color='#fca5a5';result.textContent='발신자 이메일을 입력하세요.';}return;}
+
+  if(testOnly){
+    _admMailDoSend(apiKey,from,subject,body,[_supaUser.email],true);
+    return;
+  }
+
+  var target=document.querySelector('input[name="mail-target"]:checked');
+  var targetVal=target?target.value:'all';
+
+  if(targetVal==='manual'){
+    var raw=(gE('mail-manual-emails')?gE('mail-manual-emails').value:'');
+    var emails=raw.split('\n').map(function(e){return e.trim();}).filter(function(e){return e&&e.indexOf('@')>-1;});
+    if(!emails.length){if(result){result.style.color='#fca5a5';result.textContent='이메일 주소를 입력하세요.';}return;}
+    _admMailDoSend(apiKey,from,subject,body,emails,false);
+    return;
+  }
+
+  if(result){result.style.color='var(--m2)';result.textContent='회원 목록 조회 중...';}
+  var req=_supa.from('profiles').select('email,plan').neq('role','admin');
+  if(targetVal==='plan'){
+    var planSel=gE('mail-plan-sel');
+    if(planSel)req=req.eq('plan',planSel.value);
+  }
+  req.then(function(res){
+    var emails=(res.data||[]).map(function(u){return u.email;}).filter(function(e){return e&&e.indexOf('@')>-1;});
+    if(!emails.length){if(result){result.style.color='#fca5a5';result.textContent='대상 회원이 없습니다.';}return;}
+    _admMailDoSend(apiKey,from,subject,body,emails,false);
+  }).catch(function(e){if(result){result.style.color='#fca5a5';result.textContent='회원 조회 실패: '+e.message;}});
+}
+
+function _admMailDoSend(apiKey,from,subject,body,emails,isTest){
+  var result=gE('mail-result');
+  var total=emails.length;
+  var sent=0,failed=0;
+  if(result){result.style.color='var(--m2)';result.textContent=(isTest?'테스트 ':'')+'발송 시작... (총 '+total+'명)';}
+
+  var batches=[];
+  for(var i=0;i<emails.length;i+=50)batches.push(emails.slice(i,i+50));
+  var bIdx=0;
+
+  function sendBatch(){
+    if(bIdx>=batches.length){
+      var msg=(isTest?'🧪 테스트 발송 완료!':'📧 전체 발송 완료!')+' 성공: '+sent+'명'+(failed>0?' / 실패: '+failed+'명':'');
+      if(result){result.style.color='var(--ac)';result.textContent=msg;}
+      var hist=[];try{hist=JSON.parse(localStorage.getItem('clover_mail_history')||'[]');}catch(e){}
+      hist.unshift({date:new Date().toISOString().slice(0,16).replace('T',' '),subject:subject,count:sent,test:isTest});
+      if(hist.length>20)hist=hist.slice(0,20);
+      localStorage.setItem('clover_mail_history',JSON.stringify(hist));
+      admMailLoadHistory();
+      return;
+    }
+    var batch=batches[bIdx++];
+    var promises=batch.map(function(email){
+      var name=email.split('@')[0];
+      var pb=body.replace(/\{\{이름\}\}/g,name).replace(/\{\{이메일\}\}/g,email);
+      var htmlBody='<div style="font-family:Apple SD Gothic Neo,sans-serif;max-width:600px;margin:0 auto;padding:30px;color:#222;line-height:1.8">'+
+        pb.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+
+        '<br><br><hr style="border:none;border-top:1px solid #eee;margin:20px 0">'+
+        '<p style="font-size:11px;color:#999">본 메일은 Clover AI에서 발송된 공지 메일입니다.<br>문의: cloverai.design@gmail.com</p></div>';
+      return fetch('https://api.resend.com/emails',{
+        method:'POST',
+        headers:{'Authorization':'Bearer '+apiKey,'Content-Type':'application/json'},
+        body:JSON.stringify({from:from,to:[email],subject:subject,html:htmlBody})
+      }).then(function(r){r.ok?sent++:failed++;}).catch(function(){failed++;});
+    });
+    Promise.all(promises).then(function(){
+      if(result)result.textContent=(isTest?'테스트 ':'')+'발송 중... ('+sent+'/'+total+')';
+      sendBatch();
+    });
+  }
+  sendBatch();
+}
+
+function admMailLoadHistory(){
+  var h=gE('mail-history');if(!h)return;
+  var hist=[];try{hist=JSON.parse(localStorage.getItem('clover_mail_history')||'[]');}catch(e){}
+  if(!hist.length){h.innerHTML='<div style="color:var(--m2);font-size:11px;text-align:center;padding:8px">발송 이력 없음</div>';return;}
+  h.innerHTML=hist.map(function(item){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:6px;background:var(--c2);margin-bottom:5px">'+
+      '<div>'+
+        '<span style="font-size:10px;color:var(--m2)">'+item.date+'</span>'+
+        (item.test?'<span style="margin-left:6px;font-size:9px;background:rgba(0,229,204,.1);color:var(--ac);padding:1px 5px;border-radius:3px">테스트</span>':'')+
+        '<div style="font-size:12px;color:var(--t);margin-top:2px">'+item.subject+'</div>'+
+      '</div>'+
+      '<div style="font-size:13px;font-weight:700;color:var(--ac);white-space:nowrap;margin-left:10px">'+item.count+'명</div>'+
+    '</div>';
+  }).join('');
+}
+
 
 function useCoupon(code){
   if(!_supa||!_supaUser){alert('로그인이 필요합니다.');return;}
@@ -4076,6 +4298,21 @@ function buildAccount(){
 
   // ── 로그인 상태 ───────────────────────────────────────────────
   if(_supaUser){
+    // role이 아직 세팅 안 됐으면 DB 재확인 후 다시 렌더
+    if(!G.supaRole && _supa){
+      b.innerHTML='<div style="text-align:center;padding:20px;color:var(--m2);font-size:12px">로딩 중...</div>';
+      _supa.from('profiles').select('role,plan,credits,fal_key').eq('id',_supaUser.id).single()
+      .then(function(res){
+        if(res&&res.data){
+          G.supaRole=res.data.role||'user';
+          G.plan=G.supaRole==='admin'?'admin':(res.data.plan||'free');
+          G.cr=G.supaRole==='admin'?999999:(res.data.credits||G.cr);
+          if(res.data.fal_key)FAL_KEY=res.data.fal_key;
+        }
+        buildAccount();
+      }).catch(function(){buildAccount();});
+      return;
+    }
     var isAdmin=(G.supaRole==='admin');
     if(title)title.textContent=isAdmin?'계정 / 관리자':'내 계정';
 
@@ -4089,7 +4326,7 @@ function buildAccount(){
           '<div style="font-size:11px;color:var(--m2)">'+((G.supaRole||'user').toUpperCase())+' 플랜</div>'+
         '</div>'+
         '<div style="text-align:right">'+
-          '<div style="font-size:20px;font-weight:800;color:var(--ac)">'+G.cr.toLocaleString()+'</div>'+
+          '<div style="font-size:20px;font-weight:800;color:var(--ac)">'+(G.supaRole==='admin'?'999,999':G.cr.toLocaleString())+'</div>'+
           '<div style="font-size:10px;color:var(--m2)">크레딧</div>'+
         '</div>'+
       '</div>'+
@@ -4535,6 +4772,10 @@ function onSupaLogin(user){
       var dbPlan = res.data.plan||'free';
       G.supaRole = dbRole;
       G.plan = dbRole==='admin' ? 'admin' : dbPlan;
+      // 관리자는 크레딧 999999 고정
+      if(dbRole==='admin') G.cr = 999999;
+      // fal_key도 여기서 로드
+      if(res.data.fal_key && !FAL_KEY) FAL_KEY = res.data.fal_key;
       // plan이 없는 기존 사용자는 credits 기준으로 플랜 추정
       if(G.plan==='free' && G.cr>50){
         // 크레딧이 있으면 최소 basic
@@ -4543,7 +4784,7 @@ function onSupaLogin(user){
       localStorage.setItem('clover_cr', G.cr);
       localStorage.setItem('clover_plan', G.plan);
       var crn=gE('cr-n');
-      if(crn)crn.textContent=G.cr.toLocaleString();
+      if(crn)crn.textContent=(G.supaRole==='admin'?'999,999':G.cr.toLocaleString());
       // 사이드바 재렌더링 (레퍼런스 슬롯 반영)
       if(G.wf) renderSB();
     }
@@ -4605,7 +4846,7 @@ function deductCredits(amount){
   G.cr=Math.max(0,G.cr-amount);
   localStorage.setItem('clover_cr',G.cr);
   var crn=gE('cr-n');if(crn)crn.textContent=G.cr.toLocaleString();
-  if(_supa&&_supaUser){
+  if(_supa&&_supaUser&&G.supaRole!=='admin'){
     _supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id);
     _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-amount,reason:'서비스 사용'});
   }
@@ -4616,6 +4857,7 @@ function deductCredits(amount){
   <div style="max-width:800px;margin:0 auto">
     <div style="margin-bottom:6px;color:#444;font-size:12px;font-weight:600">CLOVER AI</div>
     <div>상호명: 스냅 &nbsp;|&nbsp; 대표자: 김충민 &nbsp;|&nbsp; 사업자등록번호: 119-20-32968</div>
+    <div>사업장 주소: 경기도 파주시 동패동 1781 운정신도시아이파크 108동 2801호</div>
     <div>대표전화: 02-545-4820 &nbsp;|&nbsp; 이메일: cloverai.design@gmail.com</div>
     <div style="margin-top:4px;color:#3a3a4a">통신판매업 신고 진행 중 &nbsp;|&nbsp; 이용약관 &nbsp;|&nbsp; 개인정보처리방침</div>
     <div style="margin-top:4px;color:#2a2a3a">© 2026 Clover AI. All rights reserved.</div>
