@@ -2984,33 +2984,37 @@ function executeSingleRender(task){
       var item={id:Date.now(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null};
 
       function _finishItem(){
-        // ── 크레딧 차감 ──────────────────────────────────────────
-        var finalCost = cost;
-        if(finalCost>0 && G.supaRole!=='admin' && G.plan!=='admin'){
-          G.cr=Math.max(0, G.cr-finalCost);
-          localStorage.setItem('clover_cr', G.cr);
-          var _mKey='clover_cr_used_'+new Date().toISOString().slice(0,7);
-  var used=parseInt(localStorage.getItem(_mKey)||'0',10);
-          localStorage.setItem(_mKey, used+finalCost);
-          var crn=gE('cr-n');
-          if(crn){
-            crn.style.color='#fca5a5';
-            crn.textContent=G.cr.toLocaleString();
-            setTimeout(function(){crn.style.color='';crn.textContent=G.cr.toLocaleString();},1200);
-          }
-          if(G.cr<50){gE('stl').textContent='크레딧이 부족합니다 ('+G.cr+'cr) — 충전이 필요합니다';}
-          // ★ Supabase DB 업데이트 (재로그인 시 복원용)
-          if(_supa&&_supaUser&&G.supaRole!=='admin'){
-            _supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id);
-            _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-finalCost,reason:'서비스 사용: '+task.wf}).catch(function(){});
-          }
-        }
+        // ── 1. 결과 저장 (DB 오류와 무관하게 무조건 실행) ──────────
         if(!G.HIST[task.wf])G.HIST[task.wf]=[];
         G.HIST[task.wf].unshift(item);
         getTab(task.wf).resultImg=ri;
         if(G.wf===task.wf) renderMain(task.wf);
         saveHistToStorage();
         console.log('[Queue] 완료:',task.wf,tags.join(' '));
+
+        // ── 2. 크레딧 차감 (결과 저장 후 별도 실행) ────────────────
+        try{
+          var finalCost = cost;
+          if(finalCost>0 && G.supaRole!=='admin' && G.plan!=='admin'){
+            G.cr=Math.max(0, G.cr-finalCost);
+            localStorage.setItem('clover_cr', G.cr);
+            var _mKey='clover_cr_used_'+new Date().toISOString().slice(0,7);
+            var used=parseInt(localStorage.getItem(_mKey)||'0',10);
+            localStorage.setItem(_mKey, used+finalCost);
+            var crn=gE('cr-n');
+            if(crn){
+              crn.style.color='#fca5a5';
+              crn.textContent=G.cr.toLocaleString();
+              setTimeout(function(){crn.style.color='';crn.textContent=G.cr.toLocaleString();},1200);
+            }
+            if(G.cr<50){gE('stl').textContent='크레딧이 부족합니다 ('+G.cr+'cr) — 충전이 필요합니다';}
+            // ★ Supabase DB 업데이트
+            if(_supa&&_supaUser){
+              try{_supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id).then(function(){}).catch(function(){});}catch(e){}
+              try{_supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-finalCost,reason:'서비스 사용: '+task.wf}).then(function(){}).catch(function(){});}catch(e){}
+            }
+          }
+        }catch(e){console.warn('[크레딧 차감 오류]',e);}
       }
 
       // 영상은 origThumb 불필요 — 바로 표시
@@ -4874,8 +4878,8 @@ function deductCredits(amount){
   localStorage.setItem('clover_cr',G.cr);
   var crn=gE('cr-n');if(crn)crn.textContent=G.cr.toLocaleString();
   if(_supa&&_supaUser&&G.supaRole!=='admin'){
-    _supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id);
-    _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-amount,reason:'서비스 사용'});
+    _supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id).then(function(){}).catch(function(){});
+    _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-amount,reason:'서비스 사용'}).then(function(){}).catch(function(){});
   }
 }
 </script>
