@@ -1830,6 +1830,8 @@ function loadHistFromStorage(){
 }
 function addHistEl(item, scroll){
   var hs=gE('hist-s');if(!hs)return;
+  // ── 중복 방지: 이미 같은 id의 카드가 DOM에 있으면 스킵 ──
+  if(gE('hi-'+item.id))return;
 
   // 로딩 중 아이템 — 로딩 카드로 표시
   if(item.loading){
@@ -2170,7 +2172,6 @@ function togFav(id){
   item.fav=!item.fav;
   var b=gE('fv-'+id);if(b)b.innerHTML=item.fav?'&#9733;':'&#9825;';
   saveHistToStorage();
-  if(G_PANEL) renderPanel(G_PANEL);
   // Supabase gallery 즐겨찾기 동기화
   if(_supa&&_supaUser&&item.gallery_id){
     _supa.from('gallery').update({fav:item.fav}).eq('id',item.gallery_id).eq('user_id',_supaUser.id)
@@ -4296,23 +4297,89 @@ function openPanel(id){
     // 태그
     if(item.tags&&item.tags.length){
       var tag=document.createElement('div');
-      tag.style.cssText='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));padding:4px 6px;font-size:9px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      tag.style.cssText='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));padding:20px 6px 5px;font-size:9px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       tag.textContent=item.tags.join(' · ');
       card.appendChild(tag);
     }
-    // 즐겨찾기
+    // 즐겨찾기 표시
     if(item.fav){
       var fv=document.createElement('div');
       fv.style.cssText='position:absolute;top:4px;right:4px;color:gold;font-size:12px';
       fv.textContent='★';card.appendChild(fv);
     }
-    // 클릭 → 이미지 크게 보기
+    // 하단 액션 버튼 (즐겨찾기 + 다운로드)
+    var actBar=document.createElement('div');
+    actBar.style.cssText='position:absolute;top:4px;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:0 4px;z-index:5';
+    // 즐겨찾기 버튼
+    var favBtn=document.createElement('button');
+    favBtn.style.cssText='background:rgba(0,0,0,.55);border:none;border-radius:50%;width:26px;height:26px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:'+(item.fav?'gold':'rgba(255,255,255,.7)')+';flex-shrink:0';
+    favBtn.textContent=item.fav?'★':'☆';
+    favBtn.title=item.fav?'즐겨찾기 해제':'즐겨찾기';
+    (function(it,btn){
+      btn.onclick=function(e){
+        e.stopPropagation();
+        togFav(it.id);
+        // 패널 재렌더링으로 버튼 갱신
+        openPanel(id);
+      };
+    })(item, favBtn);
+    actBar.appendChild(favBtn);
+    // 다운로드 버튼
+    var dlBtn2=document.createElement('button');
+    dlBtn2.style.cssText='background:rgba(0,0,0,.55);border:none;border-radius:50%;width:26px;height:26px;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.9);flex-shrink:0';
+    dlBtn2.textContent='↓';dlBtn2.title='다운로드';
+    (function(it){
+      dlBtn2.onclick=function(e){
+        e.stopPropagation();
+        var dlSrc=it.result||it.cloud_url||it.orig||'';
+        if(!dlSrc)return;
+        var isVid=dlSrc.includes('.mp4')||dlSrc.includes('.webm')||it.wf==='video';
+        var fname='clover-ai-'+Date.now()+(isVid?'.mp4':'.jpg');
+        cloverDownload(dlSrc, fname);
+      };
+    })(item);
+    actBar.appendChild(dlBtn2);
+    card.appendChild(actBar);
+    // 클릭 → 이미지 크게 보기 (다운로드/즐겨찾기 포함)
     (function(it){
       card.onclick=function(){
         var src=it.result||it.cloud_url||it.orig||'';
         if(!src) return;
-        var zbg=gE('zbg'),zimg=gE('zimg');
-        if(zbg&&zimg){zimg.src=src;zbg.style.display='flex';}
+        // 팝업 오버레이 생성
+        var ov=document.createElement('div');
+        ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
+        var isVidItem=src.includes('.mp4')||src.includes('.webm')||it.wf==='video';
+        var mediaEl;
+        if(isVidItem){
+          mediaEl=document.createElement('video');
+          mediaEl.src=src;mediaEl.controls=true;mediaEl.autoplay=true;mediaEl.loop=true;
+          mediaEl.style.cssText='max-width:96%;max-height:75vh;border-radius:8px;background:#000';
+        } else {
+          mediaEl=document.createElement('img');
+          mediaEl.src=src;
+          mediaEl.style.cssText='max-width:96%;max-height:75vh;object-fit:contain;border-radius:8px;cursor:zoom-out';
+        }
+        var btns=document.createElement('div');
+        btns.style.cssText='display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center';
+        // 다운로드 버튼
+        var dlB=document.createElement('button');
+        dlB.textContent='↓ 다운로드';
+        dlB.style.cssText='padding:10px 20px;background:var(--ac);border:none;color:#000;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+        dlB.onclick=function(e){e.stopPropagation();var fname='clover-ai-'+Date.now()+(isVidItem?'.mp4':'.jpg');cloverDownload(src,fname);};
+        // 즐겨찾기 버튼
+        var favB=document.createElement('button');
+        favB.textContent=(it.fav?'★ 즐겨찾기됨':'☆ 즐겨찾기');
+        favB.style.cssText='padding:10px 20px;background:'+(it.fav?'rgba(255,215,0,.15)':'var(--c2)')+';border:1px solid '+(it.fav?'gold':'var(--bd2)')+';color:'+(it.fav?'gold':'var(--t)')+';border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+        favB.onclick=function(e){e.stopPropagation();togFav(it.id);it.fav=!it.fav;favB.textContent=(it.fav?'★ 즐겨찾기됨':'☆ 즐겨찾기');favB.style.color=it.fav?'gold':'var(--t)';favB.style.borderColor=it.fav?'gold':'var(--bd2)';};
+        // 닫기 버튼
+        var closeB=document.createElement('button');
+        closeB.textContent='✕ 닫기';
+        closeB.style.cssText='padding:10px 20px;background:var(--c2);border:1px solid var(--bd2);color:var(--t2);border-radius:20px;font-size:13px;cursor:pointer;font-family:inherit';
+        closeB.onclick=function(e){e.stopPropagation();ov.remove();};
+        btns.appendChild(dlB);btns.appendChild(favB);btns.appendChild(closeB);
+        ov.appendChild(mediaEl);ov.appendChild(btns);
+        ov.onclick=function(e){if(e.target===ov)ov.remove();};
+        document.body.appendChild(ov);
       };
     })(item);
     grid.appendChild(card);
