@@ -5167,12 +5167,13 @@ function onSupaLogin(user){
         return _supa.from('profiles').insert({
           id:user.id, email:user.email, credits:100, role:'user', plan:'free'
         }).select().single().then(function(r){
-          if(r&&r.data) return r;
-          // insert 성공했지만 select 실패 → 직접 50cr 세팅
+          if(r&&r.data){
+            _sendAdminNewUserAlert(user.email);
+            return r;
+          }
           return {data:{credits:100, role:'user', plan:'free'}};
         }).catch(function(){
-          // insert 자체 실패 (RLS) → 50cr 직접 세팅
-          console.warn('[Supabase] insert 실패 → 50cr 로컬 적용');
+          console.warn('[Supabase] insert 실패 → 100cr 로컬 적용');
           return {data:{credits:100, role:'user', plan:'free'}};
         });
       }
@@ -5358,6 +5359,39 @@ function supaResetPw(){
 }
 
 // ── 클라우드 갤러리 로드 ──────────────────────────────────────────
+// 신규 가입 관리자 알림
+function _sendAdminNewUserAlert(email){
+  var resendKey = localStorage.getItem('clover_resend_key')||'';
+  if(!resendKey) return; // API 키 없으면 스킵
+  var now = new Date().toLocaleString('ko-KR', {timeZone:'Asia/Seoul'});
+  fetch('https://api.resend.com/emails', {
+    method:'POST',
+    headers:{'Authorization':'Bearer '+resendKey,'Content-Type':'application/json'},
+    body:JSON.stringify({
+      from:'no-reply@cloverai.kr',
+      to:['cloverai.design@gmail.com'],
+      subject:'[Clover AI] 🎉 신규 회원 가입!',
+      html:'<div style="font-family:sans-serif;padding:20px;color:#222">'+
+        '<h2 style="color:#00e5cc">🍀 Clover AI 신규 회원 가입</h2>'+
+        '<p>새로운 회원이 가입했습니다!</p>'+
+        '<table style="border-collapse:collapse;width:100%;max-width:400px">'+
+          '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">이메일</td>'+
+          '<td style="padding:8px">'+email+'</td></tr>'+
+          '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">가입일시</td>'+
+          '<td style="padding:8px">'+now+'</td></tr>'+
+          '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">지급 크레딧</td>'+
+          '<td style="padding:8px;color:#00e5cc;font-weight:bold">100cr</td></tr>'+
+        '</table>'+
+        '<p style="margin-top:16px"><a href="https://cloverai.kr" style="color:#00e5cc">관리자 대시보드 바로가기</a></p>'+
+      '</div>'
+    })
+  }).then(function(){
+    console.log('[Admin] 신규 가입 알림 발송:', email);
+  }).catch(function(e){
+    console.warn('[Admin] 알림 발송 실패:', e);
+  });
+}
+
 function loadCloudGallery(){
   if(!_supa||!_supaUser) return;
   _supa.from('gallery')
@@ -5375,7 +5409,7 @@ function loadCloudGallery(){
         var exists=G.HIST[wf].find(function(h){return h.gallery_id===row.id;});
         if(exists) return;
         G.HIST[wf].unshift({
-          id: Date.now()+Math.random(),
+          id: new Date(row.created_at).getTime() || Date.now()+Math.random(),
           gallery_id: row.id,
           result: row.public_url,
           cloud_url: row.public_url,
@@ -5390,6 +5424,10 @@ function loadCloudGallery(){
         loaded++;
       });
       if(loaded>0){
+        // 최신순 정렬 (id는 Date.now() 기반이라 클수록 최신)
+        Object.keys(G.HIST).forEach(function(wf){
+          G.HIST[wf].sort(function(a,b){return b.id - a.id;});
+        });
         saveHistToStorage();
         if(G.wf) renderMain(G.wf);
         console.log('[Gallery] 클라우드에서 '+loaded+'개 로드');
