@@ -2169,6 +2169,11 @@ function togFav(id){
   var b=gE('fv-'+id);if(b)b.innerHTML=item.fav?'&#9733;':'&#9825;';
   saveHistToStorage();
   if(G_PANEL) renderPanel(G_PANEL);
+  // Supabase gallery 즐겨찾기 동기화
+  if(_supa&&_supaUser&&item.gallery_id){
+    _supa.from('gallery').update({fav:item.fav}).eq('id',item.gallery_id).eq('user_id',_supaUser.id)
+    .then(function(){}).catch(function(){});
+  }
 }
 function sendEdit(item){
   if(!item)return;
@@ -3135,6 +3140,38 @@ function executeSingleRender(task){
         if(G.wf===task.wf) renderMain(task.wf);
         saveHistToStorage();
         console.log('[Queue] 완료:',task.wf,tags.join(' '));
+
+        // ── Supabase Storage + gallery 테이블 저장 (클라우드 갤러리) ──
+        if(_supa&&_supaUser&&ri){
+          try{
+            var galleryId=item.id+'';
+            var filePath=_supaUser.id+'/'+task.wf+'/'+galleryId+'.jpg';
+            // 이미지 URL → Blob 변환 후 Storage 업로드
+            fetch(ri).then(function(r){return r.blob();}).then(function(blob){
+              _supa.storage.from('gallery').upload(filePath, blob, {
+                contentType:'image/jpeg', upsert:true
+              }).then(function(uploadRes){
+                if(uploadRes.error){console.warn('[Gallery] 업로드 실패:',uploadRes.error.message);return;}
+                var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
+                // gallery 테이블에 메타데이터 저장
+                _supa.from('gallery').insert({
+                  user_id:_supaUser.id,
+                  wf:task.wf,
+                  storage_path:filePath,
+                  public_url:publicUrl,
+                  engine:tags[0]||'',
+                  resolution:task.resolution||'',
+                  style_key:task.selK||''
+                }).then(function(){
+                  console.log('[Gallery] 클라우드 저장 완료');
+                  item.cloud_url=publicUrl;
+                  item.gallery_id=galleryId;
+                  saveHistToStorage();
+                }).catch(function(e){console.warn('[Gallery] DB 저장 실패:',e);});
+              }).catch(function(e){console.warn('[Gallery] 업로드 오류:',e);});
+            }).catch(function(e){console.warn('[Gallery] fetch 오류:',e);});
+          }catch(e){console.warn('[Gallery] 오류:',e);}
+        }
 
         // ── 2. 크레딧 차감 (결과 저장 후 별도 실행) ────────────────
         try{
@@ -5186,6 +5223,8 @@ function onSupaLogin(user){
       _loginInProgress = false;
       var crn=gE('cr-n');
       if(crn)crn.textContent=(G.supaRole==='admin'?'999,999':G.cr.toLocaleString());
+      // 클라우드 갤러리 로드
+      loadCloudGallery();
       // 사이드바 재렌더링 (레퍼런스 슬롯 반영)
       if(G.wf) renderSB();
     }
@@ -5315,6 +5354,46 @@ function supaResetPw(){
     if(res.error){alert('오류: '+res.error.message);}
     else{alert('비밀번호 재설정 메일을 발송했습니다. 이메일을 확인해주세요.');}
   });
+}
+
+// ── 클라우드 갤러리 로드 ──────────────────────────────────────────
+function loadCloudGallery(){
+  if(!_supa||!_supaUser) return;
+  _supa.from('gallery')
+    .select('*')
+    .eq('user_id', _supaUser.id)
+    .order('created_at', {ascending:false})
+    .limit(200)
+    .then(function(res){
+      if(res.error||!res.data||!res.data.length) return;
+      var loaded=0;
+      res.data.forEach(function(row){
+        var wf=row.wf||'space';
+        if(!G.HIST[wf]) G.HIST[wf]=[];
+        // 이미 로컬에 같은 id 있으면 스킵
+        var exists=G.HIST[wf].find(function(h){return h.gallery_id===row.id;});
+        if(exists) return;
+        G.HIST[wf].unshift({
+          id: Date.now()+Math.random(),
+          gallery_id: row.id,
+          result: row.public_url,
+          cloud_url: row.public_url,
+          orig: null,
+          origThumb: null,
+          tags: [row.engine||'AI', row.resolution||'1K'],
+          wf: wf,
+          fav: false,
+          cx: 50,
+          preview: false
+        });
+        loaded++;
+      });
+      if(loaded>0){
+        saveHistToStorage();
+        if(G.wf) renderMain(G.wf);
+        console.log('[Gallery] 클라우드에서 '+loaded+'개 로드');
+      }
+    }).catch(function(e){console.warn('[Gallery] 로드 실패:',e);});
 }
 
 function supaSignOut(){
