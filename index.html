@@ -3164,10 +3164,10 @@ function executeSingleRender(task){
                   engine:tags[0]||'',
                   resolution:task.resolution||'',
                   style_key:task.selK||''
-                }).then(function(){
+                }).select().single().then(function(ins){
                   console.log('[Gallery] 클라우드 저장 완료');
                   item.cloud_url=publicUrl;
-                  item.gallery_id=galleryId;
+                  item.gallery_id=ins&&ins.data?ins.data.id:galleryId;
                   saveHistToStorage();
                 }).catch(function(e){console.warn('[Gallery] DB 저장 실패:',e);});
               }).catch(function(e){console.warn('[Gallery] 업로드 오류:',e);});
@@ -4306,10 +4306,15 @@ function openPanel(id){
       fv.style.cssText='position:absolute;top:4px;right:4px;color:gold;font-size:12px';
       fv.textContent='★';card.appendChild(fv);
     }
-    // 클릭 → 해당 탭으로 이동
-    card.onclick=function(){
-      if(item.wf)selectWF(item.wf);
-    };
+    // 클릭 → 이미지 크게 보기
+    (function(it){
+      card.onclick=function(){
+        var src=it.result||it.cloud_url||it.orig||'';
+        if(!src) return;
+        var zbg=gE('zbg'),zimg=gE('zimg');
+        if(zbg&&zimg){zimg.src=src;zbg.style.display='flex';}
+      };
+    })(item);
     grid.appendChild(card);
   });
   hs.appendChild(grid);
@@ -5074,8 +5079,17 @@ function mobGalleryFav(id){
 }
 
 function mobGalleryDl(url){
-  var a=document.createElement('a');
-  a.href=url;a.download='clover-ai.jpg';a.click();
+  // 외부 URL(supabase storage)은 fetch로 blob 변환 후 다운로드
+  fetch(url).then(function(r){return r.blob();}).then(function(blob){
+    var blobUrl=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=blobUrl;a.download='clover-ai-'+Date.now()+'.jpg';
+    document.body.appendChild(a);a.click();
+    setTimeout(function(){URL.revokeObjectURL(blobUrl);a.remove();},1000);
+  }).catch(function(){
+    // fetch 실패 시 새 탭으로 열기
+    window.open(url,'_blank');
+  });
 }
 
 function mobTab(wf){
@@ -5411,9 +5425,15 @@ function loadCloudGallery(){
       res.data.forEach(function(row){
         var wf=row.wf||'space';
         if(!G.HIST[wf]) G.HIST[wf]=[];
-        // 이미 로컬에 같은 id 있으면 스킵
-        var exists=G.HIST[wf].find(function(h){return h.gallery_id===row.id;});
-        if(exists) return;
+        // 이미 로컬에 같은 항목 있으면 스킵 (gallery_id 또는 cloud_url 기준)
+        var exists=G.HIST[wf].find(function(h){
+          return h.gallery_id===row.id || h.cloud_url===row.public_url || h.result===row.public_url;
+        });
+        if(exists){
+          // 기존 로컬 아이템에 gallery_id 연결
+          if(exists&&!exists.gallery_id) exists.gallery_id=row.id;
+          return;
+        }
         G.HIST[wf].unshift({
           id: new Date(row.created_at).getTime() || Date.now()+Math.random(),
           gallery_id: row.id,
