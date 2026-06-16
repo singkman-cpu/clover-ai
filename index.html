@@ -1313,7 +1313,7 @@ function makeOrigThumb(dataUrl, cb){
   if(!dataUrl||!dataUrl.startsWith('data:')){cb(null);return;}
   var img=new Image();
   img.onload=function(){
-    var MAX=300;
+    var MAX=800;
     var r=Math.min(MAX/img.width, MAX/img.height, 1);
     var cv=document.createElement('canvas');
     cv.width=Math.round(img.width*r);
@@ -2296,8 +2296,8 @@ function saveHistToStorage(){try{
         save[wf]=items.map(function(x){
           // origThumb이 data URL이면 축소해서 저장 (썸네일만)
           var thumb=x.origThumb||null;
-          if(thumb && thumb.startsWith('data:') && thumb.length>50000){
-            thumb=null; // 너무 크면 저장 안 함
+          if(thumb && thumb.startsWith('data:') && thumb.length>200000){
+            thumb=null; // 200KB 이상이면 저장 안 함 (800px JPEG는 보통 50~150KB)
           }
           // orig: cloud URL 우선, 없으면 data URL (단 1MB 이하만)
           var origToSave = x.orig_cloud_url || null;
@@ -2435,11 +2435,11 @@ function addHistEl(item, scroll){
   // 태그는 하단 ptags에만 표시 (우상단 중복 제거)
 
   // BEFORE 이미지 소스 결정: orig 우선, 없으면 origThumb (썸네일), 없으면 null
-  var beforeSrc=item.orig||item.origThumb||null;
+  var beforeSrc=item.orig||item.origThumb||null;  // orig 없으면 thumb, 없으면 null (재방문 시 thumb=800px)
 
   if(item.result && (beforeSrc || item.wf==='video')){
     var isVideo = item.wf==='video' || item.result.includes('.mp4') || item.result.includes('.webm');
-    var IMG_STYLE='display:block;width:100%;min-height:280px;max-height:calc(100vh - 200px);object-fit:contain;background:#1a1a22';
+    var IMG_STYLE='display:block;width:100%;height:auto;min-height:300px;max-height:calc(100vh - 180px);object-fit:contain;background:#1a1a22';
     var VID_STYLE='display:block;width:100%;max-height:calc(100vh - 200px);background:#1a1a22';
     var cw=dv('cmpw');cw.id='cw-'+item.id;
     if(isVideo){
@@ -2501,6 +2501,11 @@ function addHistEl(item, scroll){
     imgB.setAttribute('style',IMG_STYLE);
     imgB.onload=function(){
       this.style.background='';
+      // 원본이 작은 썸네일이면 크기 강제로 늘림 (object-fit:contain이라 비율 유지)
+      if(this.naturalWidth>0 && this.naturalWidth<400){
+        this.style.width='100%';
+        this.style.minHeight='300px';
+      }
       // BEFORE 픽셀 정보 업데이트
       var pxb=gE('pxb-'+item.id);
       if(pxb)pxb.textContent=this.naturalWidth+'×'+this.naturalHeight+'px';
@@ -3708,7 +3713,7 @@ function executeSingleRender(task){
         if(!G.HIST[task.wf])G.HIST[task.wf]=[];
         G.HIST[task.wf].unshift(item);
         getTab(task.wf).resultImg=ri;
-        if(G.wf===task.wf) renderMain(task.wf);
+        renderMain(task.wf); // 항상 렌더 (탭 전환해도 히스토리 유지)
         saveHistToStorage();
         console.log('[Queue] 완료:',task.wf,tags.join(' '));
 
@@ -4927,13 +4932,18 @@ function openPanel(id){
     })(item);
     actBar.appendChild(dlBtn2);
     card.appendChild(actBar);
-    // 클릭 → 이미지 크게 보기 (다운로드/즐겨찾기 포함)
+    // 클릭 → 확대팝업 (다운로드/즐겨찾기 포함, 다시 클릭하면 닫힘)
     (function(it){
-      card.onclick=function(){
+      card.onclick=function(e){
+        if(e.target===favBtn||e.target===dlBtn2) return;
         var src=it.result||it.cloud_url||it.orig||'';
         if(!src) return;
+        // 기존 팝업 있으면 닫기 (토글)
+        var existOv=document.getElementById('gallery-popup-ov');
+        if(existOv){existOv.remove();return;}
         // 팝업 오버레이 생성
         var ov=document.createElement('div');
+        ov.id='gallery-popup-ov';
         ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
         var isVidItem=src.includes('.mp4')||src.includes('.webm')||it.wf==='video';
         var mediaEl;
@@ -4954,10 +4964,19 @@ function openPanel(id){
         dlB.style.cssText='padding:10px 20px;background:var(--ac);border:none;color:#000;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
         dlB.onclick=function(e){e.stopPropagation();var fname='clover-ai-'+Date.now()+(isVidItem?'.mp4':'.jpg');cloverDownload(src,fname);};
         // 즐겨찾기 버튼
+        var curFav=!!(G.HIST[it.wf]||[]).find(function(x){return x.id===it.id&&x.fav;});
         var favB=document.createElement('button');
-        favB.textContent=(it.fav?'★ 즐겨찾기됨':'☆ 즐겨찾기');
-        favB.style.cssText='padding:10px 20px;background:'+(it.fav?'rgba(255,215,0,.15)':'var(--c2)')+';border:1px solid '+(it.fav?'gold':'var(--bd2)')+';color:'+(it.fav?'gold':'var(--t)')+';border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-        favB.onclick=function(e){e.stopPropagation();togFav(it.id);it.fav=!it.fav;favB.textContent=(it.fav?'★ 즐겨찾기됨':'☆ 즐겨찾기');favB.style.color=it.fav?'gold':'var(--t)';favB.style.borderColor=it.fav?'gold':'var(--bd2)';};
+        favB.textContent=(curFav?'★ 즐겨찾기됨':'☆ 즐겨찾기');
+        favB.style.cssText='padding:10px 20px;background:'+(curFav?'rgba(255,215,0,.15)':'var(--c2)')+';border:1px solid '+(curFav?'gold':'var(--bd2)')+';color:'+(curFav?'gold':'var(--t)')+';border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+        favB.onclick=function(e){
+          e.stopPropagation();
+          togFav(it.id);
+          var nowFav=!!(G.HIST[it.wf]||[]).find(function(x){return x.id===it.id&&x.fav;});
+          favB.textContent=(nowFav?'★ 즐겨찾기됨':'☆ 즐겨찾기');
+          favB.style.color=nowFav?'gold':'var(--t)';
+          favB.style.borderColor=nowFav?'gold':'var(--bd2)';
+          favB.style.background=nowFav?'rgba(255,215,0,.15)':'var(--c2)';
+        };
         // 닫기 버튼
         var closeB=document.createElement('button');
         closeB.textContent='✕ 닫기';
@@ -4965,7 +4984,11 @@ function openPanel(id){
         closeB.onclick=function(e){e.stopPropagation();ov.remove();};
         btns.appendChild(dlB);btns.appendChild(favB);btns.appendChild(closeB);
         ov.appendChild(mediaEl);ov.appendChild(btns);
-        ov.onclick=function(e){if(e.target===ov)ov.remove();};
+        // 배경 클릭 or ESC로 닫기
+        ov.onclick=function(e){if(e.target===ov||e.target===mediaEl)ov.remove();};
+        document.addEventListener('keydown',function escClose(ev){
+          if(ev.key==='Escape'){ov.remove();document.removeEventListener('keydown',escClose);}
+        });
         document.body.appendChild(ov);
       };
     })(item);
