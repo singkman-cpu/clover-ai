@@ -365,7 +365,7 @@ select option{background:var(--c2)}
     <div class="sb-btm">
       <button class="actbtn dis" id="actbtn">
         <span id="aclbl" class="aclbl">AI 공간 변환</span>
-        <span class="actcr" id="accr" class="accr">-- cr</span>
+        <span class="actcr accr" id="accr">-- cr</span>
       </button>
     </div>
   </div>
@@ -920,7 +920,7 @@ select option{background:var(--c2)}
     <div class="sb-btm">
       <button class="actbtn dis" id="actbtn">
         <span id="aclbl" class="aclbl">AI 공간 변환</span>
-        <span class="actcr" id="accr" class="accr">-- cr</span>
+        <span class="actcr accr" id="accr">-- cr</span>
       </button>
     </div>
   </div>
@@ -3243,18 +3243,19 @@ function urlToDataUrl(url, cb) {
 }
 
 // ── Nano Banana 2 / Pro (image edit) ─────────────────────────────
-function runNanoBanana(prompt, imgDataUrl, modelSlug, onDone, onErr) {
+function runNanoBanana(prompt, imgDataUrl, modelSlug, onDone, onErr, resKey) {
   var slug = modelSlug || 'fal-ai/nano-banana-2/edit';
   gE('ldst').textContent = '이미지 업로드 중 (' + slug.split('/').pop() + ')...';
   uploadImgToFal(imgDataUrl, function(imgUrl){
     gE('ldst').textContent = slug.split('/')[1] + ' 생성 중 (10~40초)...';
-    var resObj = getResObj();
-    console.log('[NB2] using resolution:', resObj.apiRes, 'for', resObj.k);
+    // resKey 직접 전달 우선, 없으면 현재 탭에서 읽기
+    var apiRes = resKey || (getResObj() ? getResObj().apiRes : '1K');
+    console.log('[NB2] using resolution:', apiRes);
     falRun(slug, {
       prompt: prompt,
       image_urls: [imgUrl],
       num_images: 1,
-      resolution: resObj.apiRes,
+      resolution: apiRes,
       aspect_ratio: 'auto',
       output_format: 'jpeg'
     }, function(d){
@@ -3604,16 +3605,16 @@ function runKling(imgDataUrl, prompt, duration, onDone, onErr) {
 }
 
 // ── Engine key → runner function ──────────────────────────────────
-function runByEngine(engKey, prompt, imgDataUrl, onDone, onErr) {
+function runByEngine(engKey, prompt, imgDataUrl, onDone, onErr, resKey) {
   var p = prompt || 'photorealistic interior architecture, high quality lighting, professional photography';
   switch(engKey) {
-    case 'nano2':     runNanoBanana(p, imgDataUrl, 'fal-ai/nano-banana-2/edit',   onDone, onErr); break;
-    case 'nano_pro':  runNanoBanana(p, imgDataUrl, 'fal-ai/nano-banana-pro/edit', onDone, onErr); break;
+    case 'nano2':     runNanoBanana(p, imgDataUrl, 'fal-ai/nano-banana-2/edit',   onDone, onErr, resKey); break;
+    case 'nano_pro':  runNanoBanana(p, imgDataUrl, 'fal-ai/nano-banana-pro/edit', onDone, onErr, resKey); break;
     case 'flux2':     runFluxKontext(p, imgDataUrl, onDone, onErr);  break;
     case 'recraft':   runRecraft(p, onDone, onErr);                   break;
     case 'gpt2':      runGptImage(p, imgDataUrl, onDone, onErr);      break;
     case 'seedream':  runSeedream(p, imgDataUrl, onDone, onErr);      break;
-    default:          runNanoBanana(p, imgDataUrl, 'fal-ai/nano-banana-2/edit', onDone, onErr);
+    default:          runNanoBanana(p, imgDataUrl, 'fal-ai/nano-banana-2/edit', onDone, onErr, resKey);
   }
 }
 
@@ -4478,12 +4479,13 @@ function procImg(onDone, onErr) {
          '. Sharp details, realistic materials, high resolution.';
   }
 
+  var _taskRes = (typeof task !== 'undefined' && task.resolution) ? task.resolution : (getTab(G.wf).resolution||'1K');
   runByEngine(eng.k, ap, getTab(G.wf).inputImg, onDone, function(err){
     console.error('[procImg engine error]', err);
     gE('ldov').style.display = 'none';
     gE('stl').textContent = '오류: ' + err.slice(0, 60);
     onErr(err);
-  });
+  }, _taskRes);
 }
 function procImgCanvas(cb){
   if(!getTab(G.wf).inputImg){cb(null);return;}
