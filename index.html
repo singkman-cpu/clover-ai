@@ -1447,7 +1447,10 @@ function selectWF(wf){// 1. home-s 숨김
     G.tabs.edit.inputImg=q.img||null;
     G.tabs.edit.status='idle';
   }
-  // 6. 중앙 화면 결정
+  // 6. 탭 전환 시 done-badge 제거
+  var prevBadge=document.querySelector('.wft[data-w="'+wf+'"] .done-badge');
+  if(prevBadge)prevBadge.remove();
+  // 7. 중앙 화면 결정
   renderMain(wf);
   // 7. 사이드바 + 버튼
   var sbtm2=document.querySelector('.sb-btm');
@@ -1509,6 +1512,7 @@ function loadImgSafe(src, onload, onerror){
 function renderMain(wf){var ub=document.getElementById('canvas-upload-box');
   var hs=gE('hist-s');
   if(!ub||!hs){console.error('[renderMain] 요소 없음');return;}
+  // G.HIST 필터링 (항상 수행)
   if(G.HIST[wf]){
     G.HIST[wf]=G.HIST[wf].filter(function(x){
       if(x.loading)return true;
@@ -1516,6 +1520,8 @@ function renderMain(wf){var ub=document.getElementById('canvas-upload-box');
       return !!(x.result||x.origThumb);
     });
   }
+  // 화면 렌더는 현재 보이는 탭일 때만 (다른 탭 결과가 화면 덮어쓰기 방지)
+  if(wf !== G.wf) return;
   var items=G.HIST[wf]||[];
   if(items.length>0){
     ub.classList.remove('active');
@@ -3731,9 +3737,21 @@ function executeSingleRender(task){
         if(!G.HIST[task.wf])G.HIST[task.wf]=[];
         G.HIST[task.wf].unshift(item);
         getTab(task.wf).resultImg=ri;
-        renderMain(task.wf); // 항상 렌더 (탭 전환해도 히스토리 유지)
+        renderMain(task.wf); // 현재 탭이면 화면 갱신, 아니면 G.HIST만 업데이트
         saveHistToStorage();
         console.log('[Queue] 완료:',task.wf,tags.join(' '));
+        // 현재 탭이 다른 탭이면 완료 탭 아이콘에 뱃지 표시
+        if(G.wf !== task.wf){
+          var doneTab=document.querySelector('.wft[data-w="'+task.wf+'"]');
+          if(doneTab && !doneTab.querySelector('.done-badge')){
+            var badge=document.createElement('div');
+            badge.className='done-badge';
+            badge.style.cssText='position:absolute;top:2px;right:2px;width:8px;height:8px;background:var(--ac);border-radius:50%;pointer-events:none';
+            doneTab.style.position='relative';
+            doneTab.appendChild(badge);
+          }
+          setTabStatus(task.wf,'done');
+        }
 
         // ── Supabase Storage + gallery 테이블 저장 (클라우드 갤러리) ──
         if(_supa&&_supaUser&&ri){
