@@ -1367,26 +1367,23 @@ function canRun(){
   return true;
 }
 function updBtn(){
-  var ok=canRun(),b=gE('actbtn');
-  if(b)b.className='actbtn '+(ok?'ok':'dis');
-  var al=gE('aclbl');
-  var ac=gE('accr');
-  // 탭 미선택 상태
-  if(!G.wf){
-    if(al)al.textContent='작업을 선택하세요';
-    if(ac)ac.textContent='-- cr';
-    return;
-  }
-  var cost=getCost();
-  var tab=getTab(G.wf);
-  if(!tab||!tab.inputImg){
-    if(al)al.textContent=WFL[G.wf]||'실행';
-  } else if(G.cr<cost){
-    if(al)al.textContent='크레딧 부족 ('+G.cr+'cr)';
-  } else {
-    if(al)al.textContent=WFL[G.wf]||'실행';
-  }
-  if(ac)ac.textContent=cost+' cr';
+  var ok=canRun();
+  // actbtn이 데스크탑/모바일 두 곳 → 전부 업데이트
+  document.querySelectorAll('.actbtn').forEach(function(b){
+    b.className='actbtn '+(ok?'ok':'dis');
+  });
+  // aclbl, accr도 두 곳 모두
+  var cost=(!G.wf)?null:getCost();
+  document.querySelectorAll('#aclbl').forEach(function(al){
+    if(!G.wf){ al.textContent='작업을 선택하세요'; return; }
+    var tab=getTab(G.wf);
+    if(!tab||!tab.inputImg){ al.textContent=WFL[G.wf]||'실행'; }
+    else if(G.cr<cost){ al.textContent='크레딧 부족 ('+G.cr+'cr)'; }
+    else { al.textContent=WFL[G.wf]||'실행'; }
+  });
+  document.querySelectorAll('#accr').forEach(function(ac){
+    ac.textContent=G.wf?(cost+' cr'):'-- cr';
+  });
 }
 
 function eLogo(lg,sm){
@@ -5842,6 +5839,7 @@ function renderMobGallery(type){
     '<div style="display:flex;gap:6px">'+
       '<button onclick="renderMobGallery(&quot;gallery&quot;)" style="padding:6px 16px;border-radius:20px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;background:'+(_mobGalleryTab==='gallery'?'var(--ac)':'var(--c2)')+';color:'+(_mobGalleryTab==='gallery'?'#000':'var(--t2)')+'">📷 갤러리</button>'+
       '<button onclick="renderMobGallery(&quot;favs&quot;)" style="padding:6px 16px;border-radius:20px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;background:'+(_mobGalleryTab==='favs'?'var(--ac)':'var(--c2)')+';color:'+(_mobGalleryTab==='favs'?'#000':'var(--t2)')+'">⭐ 즐겨찾기</button>'+
+      '<button onclick="mobGalleryDelAll()" style="margin-left:auto;padding:5px 10px;border-radius:8px;border:1px solid rgba(255,80,80,.4);background:rgba(255,80,80,.12);color:#ff6b6b;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑 전체삭제</button>'+
     '</div>'+
     '<button onclick="closeMobGallery()" style="padding:6px 12px;border-radius:20px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit">✕ 닫기</button>'+
   '</div>';
@@ -5876,6 +5874,7 @@ function renderMobGallery(type){
           '<div style="display:flex;gap:4px">'+
             '<button onclick="event.stopPropagation();mobGalleryFav(this.dataset.id)" data-id="'+item.id+'" style="background:none;border:none;font-size:16px;cursor:pointer;padding:2px">'+(isFav?'♥':'♡')+'</button>'+
             '<button onclick="event.stopPropagation();mobGalleryDl(this.dataset.url)" data-url="'+url+'" style="background:none;border:none;font-size:14px;cursor:pointer;padding:2px;color:white">↓</button>'+
+            '<button onclick="event.stopPropagation();mobGalleryDel(this.dataset.id)" data-id="'+item.id+'" style="background:rgba(200,40,40,.8);border:none;border-radius:50%;width:22px;height:22px;font-size:11px;cursor:pointer;padding:0;color:white;display:flex;align-items:center;justify-content:center">✕</button>'+
           '</div>'+
         '</div>'+
       '</div>';
@@ -5886,6 +5885,25 @@ function renderMobGallery(type){
   panel.innerHTML=html;
 }
 
+function mobGalleryDel(id){
+  id=parseInt(id);
+  if(!confirm('이 항목을 삭제할까요?')) return;
+  deleteHistItem(id);
+  renderMobGallery(_mobGalleryTab);
+}
+function mobGalleryDelAll(){
+  var msg=_mobGalleryTab==='favs'?'즐겨찾기 항목을 모두 삭제할까요?':'갤러리의 모든 항목을 삭제할까요?';
+  if(!confirm(msg)) return;
+  if(_mobGalleryTab==='favs'){
+    Object.keys(G.HIST).forEach(function(wf){
+      (G.HIST[wf]||[]).forEach(function(x){if(x.fav)x.fav=false;});
+    });
+  } else {
+    Object.keys(G.HIST).forEach(function(wf){G.HIST[wf]=[];});
+  }
+  saveHistToStorage();
+  renderMobGallery(_mobGalleryTab);
+}
 function closeMobGallery(){
   var panel=gE('mob-gallery-panel');
   if(panel) panel.style.display='none';
