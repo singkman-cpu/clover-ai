@@ -1310,19 +1310,9 @@ function getTab(wf){ return G.tabs[wf||G.wf] || G.tabs.space; }
 function setTabStatus(wf, status){ if(G.tabs[wf]) G.tabs[wf].status=status; }
 // origThumb: BEFORE 슬라이더 복원용 축소 썸네일 생성 (최대 300px, JPEG 0.65)
 function makeOrigThumb(dataUrl, cb){
+  // 원본 그대로 전달 (축소하지 않음)
   if(!dataUrl||!dataUrl.startsWith('data:')){cb(null);return;}
-  var img=new Image();
-  img.onload=function(){
-    var MAX=800;
-    var r=Math.min(MAX/img.width, MAX/img.height, 1);
-    var cv=document.createElement('canvas');
-    cv.width=Math.round(img.width*r);
-    cv.height=Math.round(img.height*r);
-    cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
-    cb(cv.toDataURL('image/jpeg',0.65));
-  };
-  img.onerror=function(){cb(null);};
-  img.src=dataUrl;
+  cb(dataUrl);
 }
 function getCE(){var l=G.wf==='video'?EV:EL;for(var i=0;i<l.length;i++){if(l[i].k===(G.wf==='video'?G.vidEng:G.eng))return l[i];}return l[0];}
 function getBaseCost(wf,scale,resolution){
@@ -1594,7 +1584,15 @@ function rUB(b,key){
   if(v){
     var th=dv('uthumb');var im=mk('img','');im.src=v;var db=mk('button','uth-del');db.textContent='\u2715';
     db.onclick=function(){if(key==='main'){getTab(G.wf).inputImg=null;getTab(G.wf).status='idle';}else{G.tabs.video.endImg=null;}rUB(b,key);updBtn();};
-    th.appendChild(im);th.appendChild(db);b.innerHTML='';b.appendChild(th);
+    // 픽셀 정보 배지 (uthumb 우하단)
+    var pxBadge=document.createElement('div');
+    pxBadge.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#ccc;font-size:9px;text-align:center;padding:2px 0;letter-spacing:.3px;pointer-events:none';
+    pxBadge.textContent='로딩 중...';
+    im.onload=function(){
+      var w=this.naturalWidth,h=this.naturalHeight;
+      pxBadge.textContent=w+'×'+h+' px';
+    };
+    th.appendChild(im);th.appendChild(db);th.appendChild(pxBadge);b.innerHTML='';b.appendChild(th);
   } else {
     var lbl2=key==='end'?'End Frame':'이미지 업로드';
     var ub=dv('ubox');ub.id='ubox-'+key;
@@ -2240,8 +2238,27 @@ function loadF(f,key){
       if(!G.HIST[G.wf])G.HIST[G.wf]=[];
       G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
       G.HIST[G.wf].unshift({id:Date.now(),orig:v,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
-      var msgMap={edit:'AI 편집 이미지 로드됨',upscale:'업스케일 이미지 로드됨'};
-      gE('stl').textContent=(msgMap[G.wf]||'이미지 로드됨')+' - 실행하세요';
+      // 이미지 픽셀 정보 표시
+      var _infoImg=new Image();
+      _infoImg.onload=function(){
+        var w=this.naturalWidth, h=this.naturalHeight;
+        var sz=Math.round(v.length*0.75/1024); // base64 → KB 근사
+        var msgMap={edit:'AI 편집 이미지',upscale:'업스케일 이미지'};
+        var label=(msgMap[G.wf]||'이미지');
+        gE('stl').textContent=label+' '+w+'×'+h+'px ('+sz+'KB) · 실행하세요';
+        // uthumb 아래 픽셀 배지 갱신
+        var ub=gE('ub-main');
+        if(ub){
+          var old=ub.querySelector('.img-px-badge');
+          if(old)old.remove();
+          var badge=document.createElement('div');
+          badge.className='img-px-badge';
+          badge.style.cssText='margin-top:4px;font-size:10px;color:var(--t2);text-align:center;letter-spacing:.3px;padding:2px 0';
+          badge.textContent=w+'×'+h+' px  ·  '+sz+' KB  ·  '+(w>=2000?'2K이상':w>=1000?'1K이상':'1K미만');
+          ub.appendChild(badge);
+        }
+      };
+      _infoImg.src=v;
       var crl=gE('cr-l');if(crl&&FAL_KEY)crl.textContent='fal.ai &#10003;';
       renderMain(G.wf);
     } else if(key==='end'){
@@ -2295,9 +2312,10 @@ function saveHistToStorage(){try{
       if(items.length>0){
         save[wf]=items.map(function(x){
           // origThumb이 data URL이면 축소해서 저장 (썸네일만)
+          // origThumb: cloud URL이 있으면 불필요. 없으면 원본(최대 500KB)
           var thumb=x.origThumb||null;
-          if(thumb && thumb.startsWith('data:') && thumb.length>200000){
-            thumb=null; // 200KB 이상이면 저장 안 함 (800px JPEG는 보통 50~150KB)
+          if(thumb && thumb.startsWith('data:') && thumb.length>500000){
+            thumb=null; // 500KB 초과 시 저장 생략 (총 용량 보호)
           }
           // orig: cloud URL 우선, 없으면 data URL (단 1MB 이하만)
           var origToSave = x.orig_cloud_url || null;
