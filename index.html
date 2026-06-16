@@ -1735,7 +1735,7 @@ function saveHistToStorage(){try{
     var save={};
     Object.keys(G.HIST).forEach(function(wf){
       var items=(G.HIST[wf]||[]).filter(function(x){
-        return !x.preview && !x.loading && x.result && x.result.startsWith('http');
+        return !x.preview && !x.loading && x.result && (x.result.startsWith('http')||x.result.startsWith('data:'));
       }).slice(0,20); // 최대 20개
       if(items.length>0){
         save[wf]=items.map(function(x){
@@ -1744,9 +1744,13 @@ function saveHistToStorage(){try{
           if(thumb && thumb.startsWith('data:') && thumb.length>50000){
             thumb=null; // 너무 크면 저장 안 함
           }
+          // orig: cloud URL 우선, 없으면 data URL (단 1MB 이하만)
+          var origToSave = x.orig_cloud_url || null;
+          if(!origToSave && x.orig && x.orig.startsWith('http')) origToSave = x.orig;
+          if(!origToSave && x.orig && x.orig.startsWith('data:') && x.orig.length < 1000000) origToSave = x.orig;
           return {
             id:x.id,
-            orig:x.orig_cloud_url||x.orig||null,
+            orig:origToSave,
             orig_cloud_url:x.orig_cloud_url||null,
             result:x.result,
             origThumb:thumb,
@@ -1785,9 +1789,11 @@ function saveHistToStorage(){try{
         }).slice(0,10);
         if(items.length>0){
           save2[wf]=items.map(function(x){
-            return {id:x.id,orig:null,origThumb:null,result:x.result,
+            var o2=x.orig_cloud_url||(x.orig&&x.orig.startsWith('http')?x.orig:null);
+            return {id:x.id,orig:o2,origThumb:null,result:x.result,
               tags:x.tags,ai:x.ai,cx:x.cx||50,fav:x.fav,wf:x.wf,preview:false,
-              vidEng:x.vidEng||null,upscaleEng:x.upscaleEng||null};
+              vidEng:x.vidEng||null,upscaleEng:x.upscaleEng||null,
+              gallery_id:x.gallery_id||null,cloud_url:x.cloud_url||null};
           });
         }
       });
@@ -4303,12 +4309,12 @@ function openPanel(id){
   }
   // 그리드 뷰 (사진첩 스타일)
   var grid=document.createElement('div');
-  grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;width:100%;padding:4px';
+  grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;width:100%;padding:8px';
   all.forEach(function(item){
     var src=item.result||item.orig||item.origThumb;
     if(!src)return;
     var card=document.createElement('div');
-    card.style.cssText='position:relative;border-radius:8px;overflow:hidden;background:var(--card);cursor:pointer;aspect-ratio:1;border:1px solid var(--bd)';
+    card.style.cssText='position:relative;border-radius:10px;overflow:hidden;background:var(--card);cursor:pointer;aspect-ratio:4/3;border:1px solid var(--bd);box-shadow:0 2px 8px rgba(0,0,0,.3)';
     var isVid=item.wf==='video'||String(src).includes('.mp4')||String(src).includes('.webm');
     if(isVid){
       var v=document.createElement('video');
