@@ -1621,8 +1621,17 @@ function rUB(b,key){
     db.onclick=function(){if(key==='main'){getTab(G.wf).inputImg=null;getTab(G.wf).status='idle';}else{G.tabs.video.endImg=null;}rUB(b,key);updBtn();};
     // 픽셀 정보 배지 (uthumb 우하단)
     var pxBadge=document.createElement('div');
-    pxBadge.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#ccc;font-size:9px;text-align:center;padding:2px 0;letter-spacing:.3px;pointer-events:none';
+    pxBadge.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#ccc;font-size:9px;text-align:center;padding:2px 0;letter-spacing:.3px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     pxBadge.textContent='로딩 중...';
+    // 파일명 표시 (저장된 이름 있으면 우상단에)
+    var fname=(key==='main'?(getTab(G.wf).inputImgName):'')||'';
+    if(fname){
+      var fnBadge=document.createElement('div');
+      fnBadge.style.cssText='position:absolute;top:0;left:0;right:0;background:rgba(0,0,0,.6);color:#eee;font-size:9px;text-align:center;padding:2px 4px;letter-spacing:.2px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      fnBadge.textContent=fname;
+      fnBadge.title=fname;
+      th.appendChild(fnBadge);
+    }
     im.onload=function(){
       var w=this.naturalWidth,h=this.naturalHeight;
       pxBadge.textContent=w+'×'+h+' px';
@@ -2289,10 +2298,11 @@ function loadF(f,key){
     if(key==='main'){
       var tab=getTab(G.wf);
       tab.inputImg=v;
+      tab.inputImgName=f.name||''; // 원본 파일명 저장
       tab.status='idle';
       if(!G.HIST[G.wf])G.HIST[G.wf]=[];
       G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
-      G.HIST[G.wf].unshift({id:Date.now(),orig:v,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
+      G.HIST[G.wf].unshift({id:Date.now(),orig:v,origName:f.name||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
       // 이미지 픽셀 정보 표시
       var _infoImg=new Image();
       _infoImg.onload=function(){
@@ -2783,6 +2793,18 @@ function addHistEl(item, scroll){
     w.appendChild(pw);w.appendChild(hint);
   }
 
+  // 카드 클릭 시 좌측 업로드박스를 이 카드의 원본 이미지로 전환 (버튼/슬라이더 클릭은 제외)
+  w.style.cursor='pointer';
+  w.addEventListener('click', function(e){
+    if(e.target.closest('button')||e.target.closest('.cmp-hnd')||e.target.closest('.ib')) return;
+    if(!item.orig) return;
+    var tab=getTab(item.wf);
+    tab.inputImg=item.orig;
+    tab.inputImgName=item.origName||'';
+    var ub=gE('ub-main');
+    if(ub) rUB(ub,'main');
+    updBtn();
+  });
   hs.insertBefore(w, hs.firstChild); // 최신을 맨 위에
   if(scroll) hs.scrollTop=0;
 }
@@ -5180,6 +5202,26 @@ function openPanel(id){
           favB.style.borderColor=nowFav?'gold':'var(--bd2)';
           favB.style.background=nowFav?'rgba(255,215,0,.15)':'var(--c2)';
         };
+        // 이미지일 때만: 영상/AI편집/업스케일로 전달
+        if(!isVidItem){
+          var vidB=document.createElement('button');
+          vidB.textContent='▶ 영상';
+          vidB.style.cssText='padding:10px 20px;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.4);color:#c4b5fd;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+          vidB.onclick=function(e){e.stopPropagation();ov.remove();sendToWf('video',it);};
+          btns.appendChild(vidB);
+
+          var editB=document.createElement('button');
+          editB.textContent='✎ AI편집';
+          editB.style.cssText='padding:10px 20px;background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.4);color:var(--ac);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+          editB.onclick=function(e){e.stopPropagation();ov.remove();sendToWf('edit',it);};
+          btns.appendChild(editB);
+
+          var upB=document.createElement('button');
+          upB.textContent='⬆ 업스케일';
+          upB.style.cssText='padding:10px 20px;background:rgba(255,255,255,.08);border:1px solid var(--bd2);color:var(--t);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+          upB.onclick=function(e){e.stopPropagation();ov.remove();sendToWf('upscale',it);};
+          btns.appendChild(upB);
+        }
         // 닫기 버튼
         var closeB=document.createElement('button');
         closeB.textContent='✕ 닫기';
@@ -6323,6 +6365,7 @@ function loadCloudGallery(){
     .then(function(res){
       if(res.error||!res.data||!res.data.length) return;
       var loaded=0;
+      var origRestored=false;
       res.data.forEach(function(row){
         var wf=row.wf||'space';
         if(!G.HIST[wf]) G.HIST[wf]=[];
@@ -6333,6 +6376,12 @@ function loadCloudGallery(){
         if(exists){
           // 기존 로컬 아이템에 gallery_id 연결
           if(exists&&!exists.gallery_id) exists.gallery_id=row.id;
+          // orig가 없으면 클라우드 orig_url로 복원 (localStorage 복원 시 orig=null 처리됨)
+          if(exists&&!exists.orig&&row.orig_url){
+            exists.orig=row.orig_url;
+            exists.orig_cloud_url=row.orig_url;
+            origRestored=true;
+          }
           return;
         }
         G.HIST[wf].unshift({
@@ -6351,14 +6400,26 @@ function loadCloudGallery(){
         });
         loaded++;
       });
-      if(loaded>0){
+      if(loaded>0||origRestored){
         // 최신순 정렬 (id는 Date.now() 기반이라 클수록 최신)
         Object.keys(G.HIST).forEach(function(wf){
           G.HIST[wf].sort(function(a,b){return b.id - a.id;});
         });
+        // 각 탭의 inputImg가 비어있으면 가장 최근 작업 원본으로 채움 (재접속 시 업로드박스 유지)
+        Object.keys(G.HIST).forEach(function(wf){
+          var t=G.tabs[wf];
+          if(t && !t.inputImg){
+            var latest=(G.HIST[wf]||[]).find(function(x){return !!x.orig;});
+            if(latest) t.inputImg=latest.orig;
+          }
+        });
         saveHistToStorage();
-        if(G.wf) renderMain(G.wf);
-        console.log('[Gallery] 클라우드에서 '+loaded+'개 로드');
+        if(G.wf){
+          var ub2=gE('ub-main');
+          if(ub2) rUB(ub2,'main');
+          renderMain(G.wf);
+        }
+        console.log('[Gallery] 클라우드에서 '+loaded+'개 로드'+(origRestored?' (원본이미지 복원됨)':''));
       }
     }).catch(function(e){console.warn('[Gallery] 로드 실패:',e);});
 }
