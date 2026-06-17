@@ -1571,9 +1571,11 @@ function loadImgSafe(src, onload, onerror){
   });
 }
 
-function renderMain(wf){var ub=document.getElementById('canvas-upload-box');
-  var hs=gE('hist-s');
-  if(!ub||!hs){console.error('[renderMain] 요소 없음');return;}
+function renderMain(wf){
+  // canvas-upload-box / hist-s 가 데스크탑·모바일 레이아웃에 각각 존재(중복 id) → 전부 갱신
+  var ubAll=document.querySelectorAll('#canvas-upload-box');
+  var hsAll=document.querySelectorAll('.hist-s');
+  if(!ubAll.length||!hsAll.length){console.error('[renderMain] 요소 없음');return;}
   // G.HIST 필터링 (항상 수행)
   if(G.HIST[wf]){
     G.HIST[wf]=G.HIST[wf].filter(function(x){
@@ -1585,24 +1587,29 @@ function renderMain(wf){var ub=document.getElementById('canvas-upload-box');
   // 화면 렌더는 현재 보이는 탭일 때만 (다른 탭 결과가 화면 덮어쓰기 방지)
   if(wf !== G.wf) return;
   var items=G.HIST[wf]||[];
-  if(items.length>0){
-    ub.classList.remove('active');
-    hs.style.display='flex';
-    hs.innerHTML='';
-    items.slice().sort(function(a,b){return a.id-b.id;}).forEach(function(item){addHistEl(item,false);});
-    hs.scrollTop=0;
-  } else {
-    hs.style.display='none';
-    hs.innerHTML='';
-    var info=WF_INFO[wf]||WF_INFO.space;
-    var icon=document.getElementById('cub-icon');
-    var title=document.getElementById('cub-title');
-    var sub=document.getElementById('cub-sub');
-    if(icon)icon.innerHTML=info.icon;
-    if(title)title.innerHTML=info.title;
-    if(sub)sub.textContent=info.sub;
-    ub.classList.add('active');
-  }
+  // addHistEl이 내부적으로 gE('hist-s')(=첫번째 hist-s)에 append하므로,
+  // 각 hist-s마다 순서대로 동일하게 채워준다.
+  hsAll.forEach(function(hs, hsIdx){
+    var ub=ubAll[hsIdx]||ubAll[0];
+    if(items.length>0){
+      ub.classList.remove('active');
+      hs.style.display='flex';
+      hs.innerHTML='';
+      items.slice().sort(function(a,b){return a.id-b.id;}).forEach(function(item){addHistEl(item,false,hs);});
+      hs.scrollTop=0;
+    } else {
+      hs.style.display='none';
+      hs.innerHTML='';
+      var info=WF_INFO[wf]||WF_INFO.space;
+      var icon=document.querySelectorAll('#cub-icon')[hsIdx]||document.getElementById('cub-icon');
+      var title=document.querySelectorAll('#cub-title')[hsIdx]||document.getElementById('cub-title');
+      var sub=document.querySelectorAll('#cub-sub')[hsIdx]||document.getElementById('cub-sub');
+      if(icon)icon.innerHTML=info.icon;
+      if(title)title.innerHTML=info.title;
+      if(sub)sub.textContent=info.sub;
+      ub.classList.add('active');
+    }
+  });
 }
 
 function renderSB(){
@@ -2407,7 +2414,8 @@ function addHist(orig,result,tags,ai,preview){
   var item={id:Date.now(),orig:orig,result:hasResult?result:null,tags:tags,ai:ai,preview:preview,cx:50,fav:false,wf:G.wf};
   if(!G.HIST[G.wf])G.HIST[G.wf]=[];
   G.HIST[G.wf].unshift(item); // 최신이 배열 앞
-  addHistEl(item,true);
+  // hist-s가 데스크탑/모바일 두 곳에 존재 → 둘 다에 추가
+  document.querySelectorAll('.hist-s').forEach(function(hs){ addHistEl(item,true,hs); });
   if(!preview)saveHistToStorage();
 }
 function saveHistToStorage(){try{
@@ -2521,10 +2529,10 @@ function loadHistFromStorage(){
     localStorage.removeItem('clover_hist');
   }
 }
-function addHistEl(item, scroll){
-  var hs=gE('hist-s');if(!hs)return;
-  // ── 중복 방지: 이미 같은 id의 카드가 DOM에 있으면 스킵 ──
-  if(gE('hi-'+item.id))return;
+function addHistEl(item, scroll, targetHs){
+  var hs=targetHs||gE('hist-s');if(!hs)return;
+  // ── 중복 방지: 이미 같은 id의 카드가 이 컨테이너 안에 있으면 스킵 ──
+  if(hs.querySelector('#hi-'+item.id))return;
 
   // 로딩 중 아이템 — 로딩 카드로 표시
   if(item.loading){
@@ -5718,7 +5726,11 @@ document.addEventListener('DOMContentLoaded',function(){try{
   gE('credits-close').onclick=function(){closeMd('credits');};
   gE('zbg').onclick=function(){this.style.display='none';};
   gE('nav-logo').onclick=function(e){e.preventDefault();goHome();};
+  var _actbtnBusy=false;
   function _doActbtn(){
+    if(_actbtnBusy)return; // 중복 클릭(터치+클릭 동시 발생) 방지
+    _actbtnBusy=true;
+    setTimeout(function(){_actbtnBusy=false;},800);
     try{
       if(!G.wf){ alert('상단 탭을 먼저 선택하세요.'); return; }
       var tab=getTab(G.wf);
