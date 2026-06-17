@@ -1325,7 +1325,40 @@ var G={
   activeRenders:0,
   maxConcurrent:3
 };
-function gE(id){return document.getElementById(id);}
+var _SYNC_IDS=['ldov','ldst','ld-timer','ld-timer-hint','ldbar','ldsteps','stl','accr','aclbl','actbtn'];
+function gE(id){
+  if(_SYNC_IDS.indexOf(id)===-1) return document.getElementById(id);
+  var first=document.getElementById(id);
+  if(!first) return null;
+  var all=document.querySelectorAll('#'+CSS.escape(id)+',.'+CSS.escape(id));
+  if(all.length<=1) return first;
+  // 여러 동일 id 요소가 있으면, 대표 프로퍼티(textContent/style/className 등) 변경 시 전부 동기화되는 프록시 반환
+  var handler={
+    set:function(target,prop,value){
+      all.forEach(function(el){
+        if(prop==='style'){ return; } // style 객체 자체 교체는 비정상 케이스, 무시
+        try{ el[prop]=value; }catch(e){}
+      });
+      target[prop]=value;
+      return true;
+    },
+    get:function(target,prop){
+      if(prop==='style'){
+        return new Proxy(target.style,{
+          set:function(st,p,v){
+            all.forEach(function(el){ try{ el.style[p]=v; }catch(e){} });
+            st[p]=v;
+            return true;
+          },
+          get:function(st,p){ return st[p]; }
+        });
+      }
+      if(typeof target[prop]==='function') return target[prop].bind(target);
+      return target[prop];
+    }
+  };
+  return new Proxy(first, handler);
+}
 function mk(t,cl){var e=document.createElement(t);if(cl)e.className=cl;return e;}
 function dv(cl){return mk('div',cl);}
 function slBg(r,v,mn,mx){r.style.background='linear-gradient(to right,var(--ac) '+Math.round((v-mn)/(mx-mn)*100)+'%,var(--bd2) '+Math.round((v-mn)/(mx-mn)*100)+'%)';r.value=v;}
@@ -1623,7 +1656,6 @@ function rUB(b,key){
     var pxBadge=document.createElement('div');
     pxBadge.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#ccc;font-size:9px;text-align:center;padding:2px 0;letter-spacing:.3px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     pxBadge.textContent='로딩 중...';
-    // 파일명 표시 (저장된 이름 있으면 우상단에)
     var fname=(key==='main'?(getTab(G.wf).inputImgName):'')||'';
     if(fname){
       var fnBadge=document.createElement('div');
@@ -1795,7 +1827,6 @@ function mkPre(p,list){
       var textHeavyPresets=['restaurant_korean','restaurant_western','restaurant_japanese','restaurant_chinese','restaurant_asian','restaurant_buffet','restaurant_fastfood','convenience','pharmacy'];
       var hint=gE('eng-hint');
       if(hint)hint.remove();
-      // 카메라 앵글 변환 프리셋이면 Nano Banana 2 권장 안내 (앵글 변경에 가장 강함)
       var anglePresets=['isometric','cad_isometric','axonometry','topview','aerial_to_eye','eye_to_aerial','eye_to_wide_aerial','view_left','view_right'];
       if(_t3.selK && textHeavyPresets.indexOf(_t3.selK)!==-1 && G.eng!=='gpt2'){
         var engBox=document.querySelector('.eng-box');
@@ -2309,7 +2340,7 @@ function loadF(f,key){
     if(key==='main'){
       var tab=getTab(G.wf);
       tab.inputImg=v;
-      tab.inputImgName=f.name||''; // 원본 파일명 저장
+      tab.inputImgName=f.name||'';
       tab.status='idle';
       if(!G.HIST[G.wf])G.HIST[G.wf]=[];
       G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
@@ -2804,7 +2835,6 @@ function addHistEl(item, scroll){
     w.appendChild(pw);w.appendChild(hint);
   }
 
-  // 카드 클릭 시 좌측 업로드박스를 이 카드의 원본 이미지로 전환 (버튼/슬라이더 클릭은 제외)
   w.style.cursor='pointer';
   w.addEventListener('click', function(e){
     if(e.target.closest('button')||e.target.closest('.cmp-hnd')||e.target.closest('.ib')) return;
@@ -3357,7 +3387,7 @@ function runRecraft(prompt, onDone, onErr) {
   }, onErr);
 }
 
-// ── GPT Image 2 ───────────────────────────────────────────────────
+// ── GPT Image 1 ───────────────────────────────────────────────────
 function runGptImage(prompt, imgDataUrl, onDone, onErr) {
   gE('ldst').textContent = imgDataUrl ? '이미지 업로드 중 (GPT Image 2)...' : 'GPT Image 2 생성 중...';
   var doRun = function(extraInput) {
@@ -5216,7 +5246,6 @@ function openPanel(id){
           favB.style.borderColor=nowFav?'gold':'var(--bd2)';
           favB.style.background=nowFav?'rgba(255,215,0,.15)':'var(--c2)';
         };
-        // 이미지일 때만: 영상/AI편집/업스케일로 전달
         if(!isVidItem){
           var vidB=document.createElement('button');
           vidB.textContent='▶ 영상';
@@ -5710,7 +5739,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       _runToolWithPrompt(tab.prompt||'');
     }catch(e){ console.error('[actbtn]',e); alert('오류: '+e.message); }
   }
-  // actbtn이 데스크탑/모바일 두 곳에 중복 id로 존재 → class로 전부 바인딩
+  // actbtn이 데스크탑/모바일 두 곳에 중복 id로 존재 → 모든 버튼에 바인딩
   document.querySelectorAll('.actbtn').forEach(function(_actbtnEl){
     _actbtnEl.onclick=_doActbtn;
     _actbtnEl.addEventListener('touchend',function(e){
@@ -6004,7 +6033,6 @@ function closeMobGallery(){
 function mobGalleryItem(id){
   var allItems=[];
   Object.keys(G.HIST||{}).forEach(function(wf){allItems=allItems.concat(G.HIST[wf]||[]);});
-  // id가 문자열로 전달되므로 타입 무관하게 비교
   var item=allItems.find(function(x){return String(x.id)===String(id);});
   if(!item) return;
   var url=item.result||item.img||'';
@@ -6031,7 +6059,6 @@ function mobGalleryItem(id){
   }
   var btns=document.createElement('div');
   btns.style.cssText='display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center';
-  // 이미지일 때만: 영상/AI편집/업스케일로 전달
   if(!isVidItem){
     var vidB=document.createElement('button');
     vidB.textContent='▶ 영상';
@@ -6413,14 +6440,11 @@ function loadCloudGallery(){
       res.data.forEach(function(row){
         var wf=row.wf||'space';
         if(!G.HIST[wf]) G.HIST[wf]=[];
-        // 이미 로컬에 같은 항목 있으면 스킵 (gallery_id 또는 cloud_url 기준)
         var exists=G.HIST[wf].find(function(h){
           return h.gallery_id===row.id || h.cloud_url===row.public_url || h.result===row.public_url;
         });
         if(exists){
-          // 기존 로컬 아이템에 gallery_id 연결
           if(exists&&!exists.gallery_id) exists.gallery_id=row.id;
-          // orig가 없으면 클라우드 orig_url로 복원 (localStorage 복원 시 orig=null 처리됨)
           if(exists&&!exists.orig&&row.orig_url){
             exists.orig=row.orig_url;
             exists.orig_cloud_url=row.orig_url;
@@ -6445,11 +6469,9 @@ function loadCloudGallery(){
         loaded++;
       });
       if(loaded>0||origRestored){
-        // 최신순 정렬 (id는 Date.now() 기반이라 클수록 최신)
         Object.keys(G.HIST).forEach(function(wf){
           G.HIST[wf].sort(function(a,b){return b.id - a.id;});
         });
-        // 각 탭의 inputImg가 비어있으면 가장 최근 작업 원본으로 채움 (재접속 시 업로드박스 유지)
         Object.keys(G.HIST).forEach(function(wf){
           var t=G.tabs[wf];
           if(t && !t.inputImg){
