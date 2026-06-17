@@ -1230,7 +1230,7 @@ var EL=[
   {k:'nano_pro',n:'Nano Banana Pro',t:'Quality',d:'Pro 고품질 모델',lg:'g'},
   
   {k:'recraft',n:'Recraft v3',t:'Style',d:'디자인 특화',lg:'r'},
-  {k:'gpt2',n:'GPT Image 2',t:'Style',d:'OpenAI',lg:'o'},
+  {k:'gpt2',n:'GPT Image 2',t:'Text',d:'텍스트·한글 정확도 최고',lg:'o'},
   {k:'seedream',n:'Seedream v4.5',t:'Cheap',d:'경제적',lg:'s'}
 ];
 var EV=[
@@ -1621,17 +1621,8 @@ function rUB(b,key){
     db.onclick=function(){if(key==='main'){getTab(G.wf).inputImg=null;getTab(G.wf).status='idle';}else{G.tabs.video.endImg=null;}rUB(b,key);updBtn();};
     // 픽셀 정보 배지 (uthumb 우하단)
     var pxBadge=document.createElement('div');
-    pxBadge.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#ccc;font-size:9px;text-align:center;padding:2px 0;letter-spacing:.3px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    pxBadge.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#ccc;font-size:9px;text-align:center;padding:2px 0;letter-spacing:.3px;pointer-events:none';
     pxBadge.textContent='로딩 중...';
-    // 파일명 표시 (저장된 이름 있으면 우상단에)
-    var fname=(key==='main'?(getTab(G.wf).inputImgName):'')||'';
-    if(fname){
-      var fnBadge=document.createElement('div');
-      fnBadge.style.cssText='position:absolute;top:0;left:0;right:0;background:rgba(0,0,0,.6);color:#eee;font-size:9px;text-align:center;padding:2px 4px;letter-spacing:.2px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-      fnBadge.textContent=fname;
-      fnBadge.title=fname;
-      th.appendChild(fnBadge);
-    }
     im.onload=function(){
       var w=this.naturalWidth,h=this.naturalHeight;
       pxBadge.textContent=w+'×'+h+' px';
@@ -1791,6 +1782,20 @@ function mkPre(p,list){
           ta.style.color=_t3.selK?'var(--ac)':'var(--t)';
         }
       }
+      // 텍스트/간판이 들어가는 프리셋이면 GPT Image 2 권장 안내
+      var textHeavyPresets=['restaurant_korean','restaurant_western','restaurant_japanese','restaurant_chinese','restaurant_asian','restaurant_buffet','restaurant_fastfood','convenience','pharmacy'];
+      var hint=gE('eng-hint');
+      if(hint)hint.remove();
+      if(_t3.selK && textHeavyPresets.indexOf(_t3.selK)!==-1 && G.eng!=='gpt2'){
+        var engBox=document.querySelector('.eng-box');
+        if(engBox){
+          var hintEl=document.createElement('div');
+          hintEl.id='eng-hint';
+          hintEl.style.cssText='margin-top:6px;font-size:11px;color:#fbbf24;padding:6px 10px;background:rgba(251,191,36,.1);border-radius:6px;line-height:1.4';
+          hintEl.textContent='💡 간판·메뉴판 텍스트가 들어가는 공간입니다. 정확한 텍스트가 필요하면 AI 엔진을 GPT Image 2로 변경해보세요.';
+          engBox.parentElement.appendChild(hintEl);
+        }
+      }
       updBtn();
     };
     g.appendChild(pi);
@@ -1854,6 +1859,12 @@ function getCost(){
     base=WFC[G.wf]||50;
   }
   if(G.wf!=='video'&&G.wf!=='upscale') base=Math.round(base*getResObj().mult);
+  // GPT Image 2: 토큰 기반 가변 과금 → medium 품질 기준 별도 단가 적용 (1cr=₩10 기준)
+  // fal.ai 가격: 1K medium ≈ $0.053(₩77) → 8cr, 2K medium ≈ $0.08(₩116) → 12cr (마진 포함 35cr/45cr)
+  if((G.wf==='space'||G.wf==='render'||G.wf==='edit') && G.eng==='gpt2'){
+    var gptRes=getResObj().k;
+    base = gptRes==='2K' ? 45 : 35;
+  }
   return base;
 }
 
@@ -2278,11 +2289,10 @@ function loadF(f,key){
     if(key==='main'){
       var tab=getTab(G.wf);
       tab.inputImg=v;
-      tab.inputImgName=f.name||''; // 원본 파일명 저장
       tab.status='idle';
       if(!G.HIST[G.wf])G.HIST[G.wf]=[];
       G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
-      G.HIST[G.wf].unshift({id:Date.now(),orig:v,origName:f.name||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
+      G.HIST[G.wf].unshift({id:Date.now(),orig:v,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
       // 이미지 픽셀 정보 표시
       var _infoImg=new Image();
       _infoImg.onload=function(){
@@ -2773,18 +2783,6 @@ function addHistEl(item, scroll){
     w.appendChild(pw);w.appendChild(hint);
   }
 
-  // 카드 클릭 시 좌측 업로드박스를 이 카드의 원본 이미지로 전환 (버튼/슬라이더 클릭은 제외)
-  w.style.cursor='pointer';
-  w.addEventListener('click', function(e){
-    if(e.target.closest('button')||e.target.closest('.cmp-hnd')||e.target.closest('.ib')) return;
-    if(!item.orig) return;
-    var tab=getTab(item.wf);
-    tab.inputImg=item.orig;
-    tab.inputImgName=item.origName||'';
-    var ub=gE('ub-main');
-    if(ub) rUB(ub,'main');
-    updBtn();
-  });
   hs.insertBefore(w, hs.firstChild); // 최신을 맨 위에
   if(scroll) hs.scrollTop=0;
 }
@@ -3328,18 +3326,19 @@ function runRecraft(prompt, onDone, onErr) {
 
 // ── GPT Image 1 ───────────────────────────────────────────────────
 function runGptImage(prompt, imgDataUrl, onDone, onErr) {
-  gE('ldst').textContent = imgDataUrl ? '이미지 업로드 중 (GPT Image)...' : 'GPT Image 생성 중...';
+  gE('ldst').textContent = imgDataUrl ? '이미지 업로드 중 (GPT Image 2)...' : 'GPT Image 2 생성 중...';
   var doRun = function(extraInput) {
-    gE('ldst').textContent = 'GPT Image 1 생성 중...';
-    falRun('fal-ai/gpt-image-1', Object.assign({
+    gE('ldst').textContent = 'GPT Image 2 생성 중 (텍스트 정밀 렌더링)...';
+    var slug = extraInput.image_url ? 'openai/gpt-image-2/edit' : 'openai/gpt-image-2';
+    falRun(slug, Object.assign({
       prompt: prompt,
       image_size: 'landscape_4_3',
-      quality: 'standard',
+      quality: 'medium',
       num_images: 1
     }, extraInput), function(d){
       var url = falExtractImageUrl(d);
       if(url) onDone(url);
-      else onErr('GPT Image URL 없음.');
+      else onErr('GPT Image 2 URL 없음.');
     }, onErr);
   };
   if(imgDataUrl) {
@@ -4254,12 +4253,12 @@ function procImgWithTask(task, onDone, onErr){
   // NB2 / NB Pro (edit 이외 탭)
   if(eng==='gpt2'){
     uploadImgToFal(img, function(imgUrl){
-      // GPT Image 1: image URL을 messages 형식으로 전달
-      falRun('fal-ai/gpt-image-1',{
+      // GPT Image 2: 텍스트/한글 렌더링 정밀도 최우선 엔진
+      falRun('openai/gpt-image-2/edit',{
         prompt:ap,
         image_url:imgUrl,
         image_size:'landscape_4_3',
-        quality:'standard',
+        quality:'medium',
         num_images:1,
         background:'opaque'
       },function(d){
@@ -4267,7 +4266,7 @@ function procImgWithTask(task, onDone, onErr){
         if(url)onDone(url);
         else{
           console.warn('[GPT2] 응답:', JSON.stringify(d).slice(0,100));
-          onErr('GPT Image URL 없음');
+          onErr('GPT Image 2 URL 없음');
         }
       },onErr);
     },onErr);
@@ -5181,26 +5180,6 @@ function openPanel(id){
           favB.style.borderColor=nowFav?'gold':'var(--bd2)';
           favB.style.background=nowFav?'rgba(255,215,0,.15)':'var(--c2)';
         };
-        // 이미지일 때만: 영상/AI편집/업스케일로 전달
-        if(!isVidItem){
-          var vidB=document.createElement('button');
-          vidB.textContent='▶ 영상';
-          vidB.style.cssText='padding:10px 20px;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.4);color:#c4b5fd;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-          vidB.onclick=function(e){e.stopPropagation();ov.remove();sendToWf('video',it);};
-          btns.appendChild(vidB);
-
-          var editB=document.createElement('button');
-          editB.textContent='✎ AI편집';
-          editB.style.cssText='padding:10px 20px;background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.4);color:var(--ac);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-          editB.onclick=function(e){e.stopPropagation();ov.remove();sendToWf('edit',it);};
-          btns.appendChild(editB);
-
-          var upB=document.createElement('button');
-          upB.textContent='⬆ 업스케일';
-          upB.style.cssText='padding:10px 20px;background:rgba(255,255,255,.08);border:1px solid var(--bd2);color:var(--t);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-          upB.onclick=function(e){e.stopPropagation();ov.remove();sendToWf('upscale',it);};
-          btns.appendChild(upB);
-        }
         // 닫기 버튼
         var closeB=document.createElement('button');
         closeB.textContent='✕ 닫기';
@@ -5972,7 +5951,6 @@ function mobGalleryItem(id){
   if(!item) return;
   var url=item.result||item.img||'';
   if(!url) return;
-  var isVidItem=url.includes('.mp4')||url.includes('.webm')||item.wf==='video';
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
   var dlBtn=document.createElement('button');
@@ -5983,39 +5961,12 @@ function mobGalleryItem(id){
   closeBtn.textContent='닫기';
   closeBtn.style.cssText='padding:10px 24px;background:var(--c2);border:1px solid var(--bd2);color:var(--t);border-radius:20px;font-size:13px;cursor:pointer;font-family:inherit';
   closeBtn.onclick=function(){ov.remove();};
-  var mediaEl;
-  if(isVidItem){
-    mediaEl=document.createElement('video');
-    mediaEl.src=url;mediaEl.controls=true;mediaEl.autoplay=true;mediaEl.loop=true;
-    mediaEl.style.cssText='max-width:100%;max-height:80vh;border-radius:8px;background:#000';
-  } else {
-    mediaEl=document.createElement('img');
-    mediaEl.src=url;mediaEl.style.cssText='max-width:100%;max-height:80vh;object-fit:contain;border-radius:8px';
-  }
+  var img=document.createElement('img');
+  img.src=url;img.style.cssText='max-width:100%;max-height:80vh;object-fit:contain;border-radius:8px';
   var btns=document.createElement('div');
-  btns.style.cssText='display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center';
-  // 이미지일 때만: 영상/AI편집/업스케일로 전달
-  if(!isVidItem){
-    var vidB=document.createElement('button');
-    vidB.textContent='▶ 영상';
-    vidB.style.cssText='padding:10px 20px;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.4);color:#c4b5fd;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-    vidB.onclick=function(){ov.remove();closeMobGallery();sendToWf('video',item);};
-    btns.appendChild(vidB);
-
-    var editB=document.createElement('button');
-    editB.textContent='✎ AI편집';
-    editB.style.cssText='padding:10px 20px;background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.4);color:var(--ac);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-    editB.onclick=function(){ov.remove();closeMobGallery();sendToWf('edit',item);};
-    btns.appendChild(editB);
-
-    var upB=document.createElement('button');
-    upB.textContent='⬆ 업스케일';
-    upB.style.cssText='padding:10px 20px;background:rgba(255,255,255,.08);border:1px solid var(--bd2);color:var(--t);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-    upB.onclick=function(){ov.remove();closeMobGallery();sendToWf('upscale',item);};
-    btns.appendChild(upB);
-  }
+  btns.style.cssText='display:flex;gap:10px;margin-top:14px';
   btns.appendChild(dlBtn);btns.appendChild(closeBtn);
-  ov.appendChild(mediaEl);ov.appendChild(btns);
+  ov.appendChild(img);ov.appendChild(btns);
   document.body.appendChild(ov);
 }
 
@@ -6372,7 +6323,6 @@ function loadCloudGallery(){
     .then(function(res){
       if(res.error||!res.data||!res.data.length) return;
       var loaded=0;
-      var origRestored=false;
       res.data.forEach(function(row){
         var wf=row.wf||'space';
         if(!G.HIST[wf]) G.HIST[wf]=[];
@@ -6383,12 +6333,6 @@ function loadCloudGallery(){
         if(exists){
           // 기존 로컬 아이템에 gallery_id 연결
           if(exists&&!exists.gallery_id) exists.gallery_id=row.id;
-          // orig가 없으면 클라우드 orig_url로 복원 (localStorage 복원 시 orig=null 처리됨)
-          if(exists&&!exists.orig&&row.orig_url){
-            exists.orig=row.orig_url;
-            exists.orig_cloud_url=row.orig_url;
-            origRestored=true;
-          }
           return;
         }
         G.HIST[wf].unshift({
@@ -6407,27 +6351,14 @@ function loadCloudGallery(){
         });
         loaded++;
       });
-      if(loaded>0||origRestored){
+      if(loaded>0){
         // 최신순 정렬 (id는 Date.now() 기반이라 클수록 최신)
         Object.keys(G.HIST).forEach(function(wf){
           G.HIST[wf].sort(function(a,b){return b.id - a.id;});
         });
-        // 각 탭의 inputImg가 비어있으면 가장 최근 작업 원본으로 채움 (재접속 시 업로드박스 유지)
-        Object.keys(G.HIST).forEach(function(wf){
-          var t=G.tabs[wf];
-          if(t && !t.inputImg){
-            var latest=(G.HIST[wf]||[]).find(function(x){return !!x.orig;});
-            if(latest) t.inputImg=latest.orig;
-          }
-        });
         saveHistToStorage();
-        if(G.wf){
-          var curTab=getTab(G.wf);
-          var curUb=gE('ub-main');
-          if(curUb) rUB(curUb,'main');
-          renderMain(G.wf);
-        }
-        console.log('[Gallery] 클라우드에서 '+loaded+'개 로드'+(origRestored?' (원본이미지 복원됨)':''));
+        if(G.wf) renderMain(G.wf);
+        console.log('[Gallery] 클라우드에서 '+loaded+'개 로드');
       }
     }).catch(function(e){console.warn('[Gallery] 로드 실패:',e);});
 }
