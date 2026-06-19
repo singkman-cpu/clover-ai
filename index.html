@@ -2916,8 +2916,19 @@ function deleteHistItem(id){
 }
 function deleteAllHist(){
   if(!confirm('갤러리의 모든 항목을 삭제할까요?\n즐겨찾기 포함 전체 삭제됩니다.')) return;
+  // 클라우드(Supabase)에 저장된 항목들의 gallery_id 수집
+  var galleryIds=[];
+  Object.keys(G.HIST).forEach(function(wf){
+    (G.HIST[wf]||[]).forEach(function(x){ if(x.gallery_id) galleryIds.push(x.gallery_id); });
+  });
   Object.keys(G.HIST).forEach(function(wf){ G.HIST[wf]=[]; });
   saveHistToStorage();
+  // Supabase gallery에서도 일괄 삭제 (안 하면 새로고침 시 클라우드에서 다시 로드되어 복구됨)
+  if(_supa&&_supaUser&&galleryIds.length>0){
+    _supa.from('gallery').delete().in('id',galleryIds).eq('user_id',_supaUser.id)
+      .then(function(){console.log('[Gallery] 클라우드 전체삭제 완료:',galleryIds.length+'개');})
+      .catch(function(e){console.warn('[Gallery] 클라우드 삭제 실패:',e);});
+  }
   openPanel('gallery');
 }
 function deleteAllFavs(){
@@ -6023,10 +6034,22 @@ function mobGalleryDelAll(){
     Object.keys(G.HIST).forEach(function(wf){
       (G.HIST[wf]||[]).forEach(function(x){if(x.fav)x.fav=false;});
     });
+    saveHistToStorage();
   } else {
+    // 클라우드(Supabase)에 저장된 항목들의 gallery_id 수집
+    var galleryIds=[];
+    Object.keys(G.HIST).forEach(function(wf){
+      (G.HIST[wf]||[]).forEach(function(x){ if(x.gallery_id) galleryIds.push(x.gallery_id); });
+    });
     Object.keys(G.HIST).forEach(function(wf){G.HIST[wf]=[];});
+    saveHistToStorage();
+    // Supabase gallery에서도 일괄 삭제 (안 하면 새로고침 시 클라우드에서 다시 로드되어 복구됨)
+    if(_supa&&_supaUser&&galleryIds.length>0){
+      _supa.from('gallery').delete().in('id',galleryIds).eq('user_id',_supaUser.id)
+        .then(function(){console.log('[Gallery] 클라우드 전체삭제 완료:',galleryIds.length+'개');})
+        .catch(function(e){console.warn('[Gallery] 클라우드 삭제 실패:',e);});
+    }
   }
-  saveHistToStorage();
   renderMobGallery(_mobGalleryTab);
 }
 function closeMobGallery(){
