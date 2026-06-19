@@ -6469,10 +6469,30 @@ function loadCloudGallery(){
     .order('created_at', {ascending:false})
     .limit(200)
     .then(function(res){
-      if(res.error||!res.data||!res.data.length) return;
+      if(res.error) return;
+      var cloudData = res.data || [];
+      // ── 클라우드에서 이미 삭제된 항목을 로컬에서도 정리 (다른 기기에서 전체삭제했을 때 동기화) ──
+      var cloudIds = {};
+      cloudData.forEach(function(row){ cloudIds[row.id] = true; });
+      var pruned = false;
+      Object.keys(G.HIST).forEach(function(wf){
+        var before = G.HIST[wf].length;
+        G.HIST[wf] = G.HIST[wf].filter(function(x){
+          // gallery_id가 있는데(클라우드에 한 번이라도 올라갔던 항목) 지금 클라우드 목록에 없으면 = 다른 기기에서 삭제됨
+          if(x.gallery_id && !cloudIds[x.gallery_id]) return false;
+          return true;
+        });
+        if(G.HIST[wf].length !== before) pruned = true;
+      });
+      if(pruned){
+        saveHistToStorage();
+        if(G.wf) renderMain(G.wf);
+        console.log('[Gallery] 다른 기기에서 삭제된 항목 동기화 정리됨');
+      }
+      if(!cloudData.length) return;
       var loaded=0;
       var origRestored=false;
-      res.data.forEach(function(row){
+      cloudData.forEach(function(row){
         var wf=row.wf||'space';
         if(!G.HIST[wf]) G.HIST[wf]=[];
         var exists=G.HIST[wf].find(function(h){
