@@ -3412,7 +3412,8 @@ function executeSingleRender(task){
                     console.log('[Gallery] 클라우드 저장 완료');
                     item.cloud_url=publicUrl;
                     item.orig_cloud_url=origUrl||null;
-                    item.gallery_id=ins&&ins.data?ins.data.id:galleryId;
+                    // insert 응답에 실제 DB row id가 없으면 gallery_id는 비워둠 (가짜 id로 인한 동기화 오류 방지)
+                    if(ins&&ins.data&&ins.data.id) item.gallery_id=ins.data.id;
                     saveHistToStorage();
                   }).catch(function(e){console.warn('[Gallery] DB 저장 실패:',e);});
                 }
@@ -5918,24 +5919,6 @@ function loadCloudGallery(){
     .then(function(res){
       if(res.error) return;
       var cloudData = res.data || [];
-      // ── 클라우드에서 이미 삭제된 항목을 로컬에서도 정리 (다른 기기에서 전체삭제했을 때 동기화) ──
-      var cloudIds = {};
-      cloudData.forEach(function(row){ cloudIds[row.id] = true; });
-      var pruned = false;
-      Object.keys(G.HIST).forEach(function(wf){
-        var before = G.HIST[wf].length;
-        G.HIST[wf] = G.HIST[wf].filter(function(x){
-          // gallery_id가 있는데(클라우드에 한 번이라도 올라갔던 항목) 지금 클라우드 목록에 없으면 = 다른 기기에서 삭제됨
-          if(x.gallery_id && !cloudIds[x.gallery_id]) return false;
-          return true;
-        });
-        if(G.HIST[wf].length !== before) pruned = true;
-      });
-      if(pruned){
-        saveHistToStorage();
-        if(G.wf) renderMain(G.wf);
-        console.log('[Gallery] 다른 기기에서 삭제된 항목 동기화 정리됨');
-      }
       if(!cloudData.length) return;
       var loaded=0;
       var origRestored=false;
