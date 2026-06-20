@@ -2592,9 +2592,15 @@ function falPoll(baseUrl, reqId, onDone, onErr, attempt) {
       })
       .catch(function(e){ onErr('result fetch 실패: ' + e.message); });
     } else if(st === 'FAILED') {
-      var errMsg = d.error || d.detail || d.message || JSON.stringify(d);
+      var errMsg = d.error || d.detail || d.message || d.msg || JSON.stringify(d);
+      // fal.ai 422 에러는 detail이 배열 형태({loc, msg, type})로 오는 경우가 있음
+      if(Array.isArray(errMsg)) {
+        errMsg = errMsg.map(function(x){ return x.msg || JSON.stringify(x); }).join('; ');
+      } else if(typeof errMsg === 'object' && errMsg !== null) {
+        errMsg = errMsg.msg || JSON.stringify(errMsg);
+      }
       console.error('[FAL FAILED]', JSON.stringify(d));
-      onErr('FAL 생성 실패: ' + errMsg.slice(0,120));
+      onErr('생성 실패: ' + String(errMsg).slice(0,150) + ' — 레퍼런스 이미지 개수를 줄이거나 프롬프트를 단순하게 바꿔 다시 시도해보세요.');
     } else {
       var wait = attempt < 15 ? 300 : attempt < 30 ? 500 : 800;
       setTimeout(function(){ falPoll(baseUrl, reqId, onDone, onErr, attempt + 1); }, wait);
@@ -3743,41 +3749,43 @@ function procImgWithTask(task, onDone, onErr){
 
     console.log('[edit] 레퍼런스:',editRefs2.length,'개 | 엔진:',nb2Slug,'| 프롬프트:',editPrompt.slice(0,80));
 
-    _doUpload(img, function(imgUrl){
-      getEditRes(img, function(editRes, origW, origH){
-        // URL 그대로 onDone — urlToDataUrl 변환 제거 (속도 개선)
-        function finishWithResize(u, done){
-          done(u); // URL 직접 전달, 리사이즈 생략
-        }
-        if(editRefs2.length>0){
-          var refUrls=new Array(editRefs2.length); var rDone=0;
-          editRefs2.forEach(function(rd,ri){
-            _doUpload(rd,function(rUrl){
-              refUrls[ri]=rUrl; rDone++;
-              if(rDone===editRefs2.length){
-                var allUrls=[imgUrl].concat(refUrls.filter(Boolean));
-                var refCount=refUrls.filter(Boolean).length;
-                // 사용자가 직접 프롬프트 작성 시 그대로 사용 (1번이미지, 2번이미지 지칭 포함)
-                // 프롬프트 없을 때만 자동 생성
-                var rp = userPrompt
-                  ? userPrompt + ' Photorealistic architectural photography.'
-                  : 'Apply the style, material, color and texture from the reference image'+(refCount>1?' images':'')+' to the main image. Photorealistic result. Keep all other areas exactly unchanged.';
-                console.log('[API]',nb2Slug,'|',allUrls.length,'imgs | res:',editRes,'| orig:',origW+'x'+origH);
-                falRun(nb2Slug,{prompt:rp,image_urls:allUrls,num_images:1,resolution:editRes,aspect_ratio:'auto',output_format:'jpeg'},
-                  function(d){var u=falExtractImageUrl(d);if(u)finishWithResize(u,onDone);else onErr('NB2 URL 없음');},onErr);
-              }
-            },function(){rDone++;if(rDone===editRefs2.length){
-              falRun(nb2Slug,{prompt:editPrompt,image_urls:[imgUrl],num_images:1,resolution:editRes,aspect_ratio:'auto',output_format:'jpeg'},
-                function(d){var u=falExtractImageUrl(d);if(u)finishWithResize(u,onDone);else onErr('NB2 URL 없음');},onErr);
-            }});
-          });
-        } else {
-          console.log('[API]',nb2Slug,'| res:',editRes,'| orig:',origW+'x'+origH,'| 프롬프트:',editPrompt.slice(0,80));
-          falRun(nb2Slug,{prompt:editPrompt,image_urls:[imgUrl],num_images:1,resolution:editRes,aspect_ratio:'auto',output_format:'jpeg'},
-            function(d){var u=falExtractImageUrl(d);if(u)finishWithResize(u,onDone);else onErr('NB2 편집 URL 없음');},onErr);
-        }
+    getEditRes(img, function(editRes, origW, origH){
+      // URL 그대로 onDone — urlToDataUrl 변환 제거 (속도 개선)
+      function finishWithResize(u, done){
+        done(u); // URL 직접 전달, 리사이즈 생략
+      }
+      // 메인 이미지 + 모든 레퍼런스 이미지를 동시에 병렬 업로드 (직렬 업로드 대비 속도 대폭 개선)
+      var totalUploads = 1 + editRefs2.length;
+      var uploadedMain = null;
+      var refUrls = new Array(editRefs2.length);
+      var doneCount = 0;
+      var hadError = false;
+
+      function checkAllDone(){
+        if(hadError) return;
+        doneCount++;
+        if(doneCount !== totalUploads) return;
+        var allUrls = [uploadedMain].concat(refUrls.filter(Boolean));
+        var refCount = refUrls.filter(Boolean).length;
+        var rp = editRefs2.length>0
+          ? (userPrompt ? userPrompt + ' Photorealistic architectural photography.'
+                        : 'Apply the style, material, color and texture from the reference image'+(refCount>1?' images':'')+' to the main image. Photorealistic result. Keep all other areas exactly unchanged.')
+          : editPrompt;
+        console.log('[API]',nb2Slug,'|',allUrls.length,'imgs | res:',editRes,'| orig:',origW+'x'+origH);
+        falRun(nb2Slug,{prompt:rp,image_urls:allUrls,num_images:1,resolution:editRes,aspect_ratio:'auto',output_format:'jpeg'},
+          function(d){var u=falExtractImageUrl(d);if(u)finishWithResize(u,onDone);else onErr('NB2 URL 없음');},onErr);
+      }
+      function handleError(e){
+        if(hadError) return;
+        hadError = true;
+        onErr(e||'이미지 업로드 실패');
+      }
+
+      _doUpload(img, function(imgUrl){ uploadedMain = imgUrl; checkAllDone(); }, handleError);
+      editRefs2.forEach(function(rd, ri){
+        _doUpload(rd, function(rUrl){ refUrls[ri] = rUrl; checkAllDone(); }, function(){ checkAllDone(); }); // 레퍼런스 업로드 실패는 그 1장만 제외하고 진행
       });
-    },onErr);
+    });
     return;
   }
 
