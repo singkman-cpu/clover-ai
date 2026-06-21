@@ -553,6 +553,86 @@ function cloverDownload(src, fname){
       .catch(function(){ window.open(src,'_blank','noopener'); });
   }
 }
+
+// 결과 이미지를 카카오톡/문자/메일 등으로 바로 공유 (모바일 네이티브 공유 시트)
+// 지원 안 하는 환경(대부분 PC)에서는 다운로드로 폴백
+function cloverShare(src, fname){
+  fname = fname || ('clover-ai-'+Date.now()+'.jpg');
+  function doFallback(){ cloverDownload(src, fname); }
+  if(!navigator.share){ doFallback(); return; }
+  function shareBlob(blob){
+    var file = new File([blob], fname, {type: blob.type||'image/jpeg'});
+    if(navigator.canShare && !navigator.canShare({files:[file]})){
+      doFallback(); return;
+    }
+    navigator.share({
+      files: [file],
+      title: 'Clover AI 렌더링 결과',
+      text: 'Clover AI로 만든 인테리어 렌더링입니다.'
+    }).catch(function(e){
+      // 사용자가 공유를 취소한 경우는 폴백하지 않음
+      if(e && e.name === 'AbortError') return;
+      doFallback();
+    });
+  }
+  if(src.startsWith('data:')){
+    var arr=src.split(','), mime=(arr[0].match(/:(.*?);/)||[,'image/jpeg'])[1];
+    var bstr=atob(arr[1]||''), u8=new Uint8Array(bstr.length);
+    for(var i=0;i<bstr.length;i++) u8[i]=bstr.charCodeAt(i);
+    shareBlob(new Blob([u8],{type:mime}));
+  } else if(src.startsWith('http')){
+    fetch(src).then(function(r){return r.blob();}).then(shareBlob).catch(doFallback);
+  } else {
+    doFallback();
+  }
+}
+
+// 여러 이미지를 ZIP으로 한 번에 다운로드 (분양/영업용 결과물 일괄 전달)
+function downloadAllAsZip(items, zipName){
+  if(!window.JSZip){ alert('ZIP 기능을 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.'); return; }
+  if(!items || !items.length){ alert('다운로드할 항목이 없습니다.'); return; }
+  var zip = new JSZip();
+  var done = 0, total = items.length, failed = 0;
+  var btn = gE('zipdl-btn') || gE('mob-zipdl-btn');
+  function updProgress(){
+    if(btn) btn.textContent = '⏳ 압축 중 ('+done+'/'+total+')';
+  }
+  function finishIfDone(){
+    if(done+failed !== total) return;
+    if(btn) btn.textContent = '📦 ZIP 다운로드';
+    zip.generateAsync({type:'blob'}).then(function(blob){
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (zipName||'clover-ai-'+Date.now())+'.zip';
+      a.style.cssText='position:fixed;top:-9999px;left:-9999px';
+      document.body.appendChild(a);
+      a.click();
+      requestAnimationFrame(function(){ document.body.removeChild(a); URL.revokeObjectURL(a.href); });
+    });
+  }
+  updProgress();
+  items.forEach(function(item, idx){
+    var src = item.result || item.orig || '';
+    if(!src){ failed++; finishIfDone(); return; }
+    var ext = (src.includes('.mp4')||src.includes('.webm')) ? 'mp4' : 'jpg';
+    var fname = (idx+1)+'_'+(item.id||idx)+'.'+ext;
+    function addBlob(blob){
+      zip.file(fname, blob);
+      done++; updProgress(); finishIfDone();
+    }
+    if(src.startsWith('data:')){
+      var arr=src.split(','), mime=(arr[0].match(/:(.*?);/)||[,'image/jpeg'])[1];
+      var bstr=atob(arr[1]||''), u8=new Uint8Array(bstr.length);
+      for(var i=0;i<bstr.length;i++) u8[i]=bstr.charCodeAt(i);
+      addBlob(new Blob([u8],{type:mime}));
+    } else if(src.startsWith('http')){
+      fetch(src).then(function(r){return r.blob();}).then(addBlob).catch(function(){ failed++; finishIfDone(); });
+    } else {
+      failed++; finishIfDone();
+    }
+  });
+}
+
 var PS_SPACE=[
   {k:'site_based',l:'현장사진 기반',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. First, automatically detect the space type (living room, bedroom, kitchen, bathroom, office, etc.) and whether it is a construction site or unfinished space. If it is a construction site or unfinished space, complete and finish it into a fully furnished and decorated interior. Use all reference images as design references for MATERIALS, FURNITURE, COLORS and LIGHTING STYLE ONLY. Do NOT copy the window layout, wall layout, room shape or camera angle from the reference images — those structural elements must come only from the original photo, never from the reference images. Analyze the uploaded reference images and redesign the space using those references. Apply the materials, colors, furniture, lighting and design language from the reference images, while keeping the original photo\'s exact windows, doors and wall structure unchanged. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>'},
   {k:'modern_minimal',l:'모던 미니멀',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Analyze this scene — if it is an interior space, redesign the interior in a modern minimalist style with clean lines, premium materials, neutral colors, architectural lighting and elegant furniture. If it is an exterior or architectural scene, redesign the exterior facade in a modern minimalist architectural style with clean geometric forms, premium cladding materials and refined detailing. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="21"/></svg>'},
@@ -622,6 +702,12 @@ var PS_SPACE=[
   {k:'nail_salon',l:'네일샵',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean nail salon interior. Clean bright atmosphere with soft pastel or neutral color palette, rows of manicure stations with comfortable chairs and small round tables equipped with built-in ventilation, a nail polish display wall organized by color gradient as a decorative feature, soft diffused lighting plus focused task lighting at each station, pedicure stations with massage chairs and footbaths along one wall if space allows, light wood or white flooring, minimal modern decor with plants and soft textiles. Clean, relaxing, premium Korean nail salon atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M12 2a4 4 0 00-4 4v6a4 4 0 008 0V6a4 4 0 00-4-4z"/><path d="M8 12v2a4 4 0 008 0v-2"/><path d="M12 18v4"/></svg>'},
   {k:'yoga_studio',l:'요가스튜디오',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean yoga studio interior. Warm minimal atmosphere with natural light flooding in through the existing windows, light oak or bamboo flooring, neatly rolled yoga mats and props (blocks, straps) stored on a simple wooden shelf along one wall, a large wall mirror on one side for form-checking, soft neutral color palette (cream, sage, warm beige) on walls, indoor plants for a calming natural touch, minimal sound system speakers mounted discreetly, soft diffused ceiling lighting with the option of dimming, a small reception/check-in counter near the entrance. Calm, clean, premium Korean yoga studio atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><path d="M12 7v6M12 13l-5 7M12 13l5 7M7 11l5 2 5-2"/></svg>'},
   {k:'academy',l:'학원',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean private education academy (학원) classroom/interior. Clean modern classroom with rows of individual desks and ergonomic chairs facing a large whiteboard or interactive smart screen (no readable text), bright even ceiling lighting designed to reduce eye strain, a small bookshelf or cubby storage unit along one wall, a teacher\'s desk at the front, motivational and clean wall decor in soft neutral tones, durable easy-clean flooring (vinyl or laminate), large windows with simple blinds for light control, a welcoming reception/waiting area visible near the entrance if space allows. Bright, organized, premium Korean academy/hagwon atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 2 9 2 12 0v-5"/></svg>'},
+  {k:'cafe_detail',l:'카페',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean cafe interior. Warm inviting atmosphere with a mix of natural wood tables and comfortable upholstered seating, a stylish barista counter in light wood or marble-look surface with visible espresso machine and clean shelving of cups and syrups, large windows with sheer curtains or simple blinds allowing soft natural light, pendant lighting in warm tones mixed with track spotlights, a feature wall with exposed brick, warm plaster texture or wood slat paneling, indoor plants and dried flower arrangements as accents, polished concrete or light wood flooring, a mix of seating types — booth seating, communal table, and window bar seating. Cozy, photogenic, premium Korean cafe atmosphere popular for cafe-hopping. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M4 11h16v2a8 8 0 01-8 8 8 8 0 01-8-8z"/><path d="M18 11c2 0 3 1 3 3s-1 3-3 3"/><path d="M8 3c0 1-1 1-1 2s1 1 1 2M12 3c0 1-1 1-1 2s1 1 1 2"/></svg>'},
+  {k:'oriental_clinic',l:'한의원',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean traditional medicine clinic (한의원) interior. Calm and trustworthy atmosphere with warm wood tones (walnut or oak) combined with clean white walls, a welcoming reception desk in natural wood with soft indirect lighting, a waiting area with comfortable upholstered chairs and a small tea/water station, traditional Korean herbal medicine cabinets with small labeled wooden drawers (한약장) displayed as a tasteful design feature in the waiting area, treatment rooms with adjustable beds and soft privacy curtains visible through open doors, calming nature-inspired wall art or a small indoor garden feature, soft warm lighting throughout, light wood or stone-look flooring. Calm, trustworthy, premium Korean traditional medicine clinic atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M12 2v6M8 4l4 4 4-4"/><rect x="4" y="10" width="16" height="11" rx="1"/><path d="M9 14h6M9 17h6"/></svg>'},
+  {k:'dental_clinic',l:'치과',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean dental clinic interior. Bright, clean, modern atmosphere with white and soft pastel blue or mint accent colors, a sleek reception desk in white lacquer or light wood with a calming waiting area featuring comfortable chairs and a small reading corner, dental treatment bays visible through glass partitions with modern dental chairs in white and chrome, large windows or skylights bringing in natural light, soft indirect ceiling lighting designed to feel non-clinical and calming, light wood or white tile flooring, subtle nature-themed wall art or a small living wall feature to ease patient anxiety. Bright, modern, premium Korean dental clinic atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M12 4c-2 0-3 1.5-3 3.5 0 2 1 3 1 5s-1 3-1 5c0 1.5 1 2.5 2 2.5s1.5-1.5 2-4c.5 2.5 1 4 2 4s2-1 2-2.5c0-2-1-3-1-5s1-3 1-5C17 5.5 16 4 14 4c-1 0-1.5.5-2 .5s-1-.5-2-.5z"/></svg>'},
+  {k:'coworking_office',l:'공유오피스',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean co-working / shared office space interior. Open-plan layout with a mix of individual hot-desk stations and small private phone booths with glass walls, comfortable lounge seating areas with low tables for casual meetings, a glass-walled conference room with a modern table and ergonomic chairs visible, exposed ceiling or clean modern ceiling with track lighting and pendant fixtures, a small kitchen/coffee bar area with high stools, biophilic design touches (indoor plants, living walls), a neutral palette of white, light wood and black accents, polished concrete or carpet tile flooring, motivational or minimal branding graphics on an accent wall (no readable text). Modern, energetic, premium Korean co-working space atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/></svg>'},
+  {k:'pension',l:'펜션',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean pension/guesthouse interior. Warm, homey atmosphere with a mix of cozy living area (low sofa or floor seating with cushions on a heated ondol-style floor) and an open kitchenette with light wood cabinetry, large windows showcasing a scenic mountain, sea, or countryside view using the existing window openings, warm wood ceiling beams or a simple clean white ceiling, soft warm lighting with a mix of pendant and ambient fixtures, a cozy bedroom area with a low platform bed if visible, natural materials throughout (wood, stone, linen textiles), a small terrace or deck area glimpse if space allows. Warm, relaxing, premium Korean pension/guesthouse atmosphere popular for staycations. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M3 12L12 4l9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>'},
+  {k:'pet_shop',l:'펫샵/애견카페',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean pet shop / dog cafe interior. Bright, clean, playful atmosphere with durable easy-clean flooring (vinyl or sealed concrete), a designated play area with soft turf or cushioned flooring and pet-friendly furniture, retail shelving displaying pet food, toys and accessories in organized clean fixtures, a small grooming station with a stainless steel tub visible if space allows, a cafe seating area with comfortable chairs and low tables for owners, pet water stations and cozy pet beds as accent decor, warm ambient lighting mixed with bright task lighting, paw-print or playful nature-themed accent wall art, large windows for natural light and visibility. Cheerful, clean, premium Korean pet shop/cafe atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><circle cx="7" cy="8" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="17" cy="8" r="2"/><path d="M7 14a5 5 0 0110 0c0 2.5-2 4-5 4s-5-1.5-5-4z"/></svg>'},
   {k:'rooftop_garden',l:'옥상정원',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this rooftop or outdoor terrace space into a premium Korean rooftop garden. Composite wood deck flooring in warm teak tone laid in linear pattern, modular outdoor sofa set in weather-resistant dark grey textilene fabric with white scatter cushions, tall privacy planter boxes in cor-ten steel filled with ornamental grasses and shrubs creating green perimeter screen, string Edison bulb lights suspended between matte black steel poles, built-in outdoor kitchen counter in concrete finish with black grill station, city skyline or mountain view beyond railing, large sculptural planters with olive trees and seasonal flowers, outdoor floor lanterns and step lighting. Stylish, lush and relaxing Korean urban rooftop garden atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M12 7V3M8 3h8"/><path d="M7 13h10"/></svg>'},
   {k:'terrace_balcony',l:'테라스/발코니',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this balcony or terrace into a premium Korean apartment outdoor space. Slim-profile composite decking in warm oak tone over existing floor, space-saving folding bistro table and two rattan chairs with cushions in sage green, built-in planter box along railing with trailing herbs and seasonal flowers, waterproof outdoor wall lamp in matte black with warm bulb, frosted glass or tempered glass balustrade for unobstructed view, outdoor curtain panel in natural linen providing shade and privacy, compact vertical plant wall with succulents and air plants, city view or garden view beyond. Charming, intimate and well-designed Korean balcony atmosphere. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/><line x1="3" y1="9" x2="21" y2="9"/></svg>'},
   {k:'parking',l:'주차장',pt:'Preserve the original camera angle, perspective, composition, framing, object placement, and geometry. Do not change the viewpoint or camera position. MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Transform this space into a premium Korean underground or multi-level parking facility interior. High-gloss white epoxy flooring with crisp yellow and white lane markings and numbered bay markings, bright uniform LED panel lighting ceiling with no dark zones, white painted concrete columns with yellow impact protection guard at base, EV charging station bay with blue indicator LED strip and branded charging unit, clear wayfinding signage system on walls and ceiling in modern Korean typography, security camera visible at column, fire sprinkler system integrated into white ceiling, speed bump with reflective yellow markings, clean ventilation grille in wall. Clean, bright and efficiently organized premium Korean parking facility. Photorealistic architectural photography.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7h4a3 3 0 010 6H9"/><line x1="9" y1="13" x2="13" y2="13"/></svg>'},  {k:'drawing_based',l:'도면기반 디자인',pt:'MOST IMPORTANT: The existing wall structure, ceiling, floor boundaries and room dimensions are ABSOLUTE — do NOT move, break, expand or alter any walls under any circumstances. Do NOT create new openings, do NOT widen the room, do NOT change the room shape or size in any way. WINDOWS AND DOORS ARE ALSO ABSOLUTE — preserve the exact same number, position, size and shape of all windows and doors visible in the original photo, panel for panel and frame for frame. Count the window panels/sections in the original photo and reproduce that exact same count in the result — do not merge panels, do not reduce the window width, do not narrow the glass area. Do NOT add new windows or doors, do NOT remove existing windows or doors, do NOT block, cover, wall-over or relocate any window or door opening, do NOT shrink or narrow the window or balcony door opening even slightly. Do NOT mirror, flip, or swap left and right — if a window or door is on the left side of the frame in the original photo, it must remain on the left side in the result; if on the right, it must remain on the right. The left-right orientation of every wall, window, door and fixed structural element must exactly match the original photo. The proportion of glass area to wall area in the result must match the original photo as closely as possible. All interior design must fit strictly within the exact original architectural shell as photographed, keeping every wall, window and door exactly where it is in the original. Use the reference drawing images to guide the interior design: reference image 1 is the floor plan — use it to determine furniture layout, zone placement and spatial arrangement. Reference image 2 is the elevation drawing — apply the wall finishes, window positions, door locations and vertical proportions shown. Reference image 3 if provided is the ceiling plan — reflect the lighting layout and ceiling design shown. Preserve the exact camera angle, perspective and framing of the original photo. Apply the design language from the drawings: materials, finishes, fixture types and spatial relationships shown in the drawings must be reflected in the result. Photorealistic architectural photography quality. Do not generate any text or labels in the image.',s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>'},
@@ -729,7 +815,7 @@ var FAQS=[
   ['각 기능별 크레딧 소모량은?','• 현장사진 디자인: 20cr (1K) / 30cr (2K)\\n• 렌더 실사화: 20cr (1K) / 30cr (2K)\\n• AI 편집: 20cr(1K) / 30cr(2K)\\n• 사람 추가: 50cr(1K) / 75cr(2K)\\n• 업스케일: 20cr (2x) / 60cr (4x)\\n• 영상 Kling 5초: 200cr · 10초: 400cr · 15초: 600cr\\n• 영상 Veo 6초: 222cr · 10초: 370cr · 15초: 555cr\\n• 영상 Seedance 5초: 360cr · 10초: 720cr · 15초: 1080cr'],
   ['크레딧 충전 방법과 유효기간은?','CLOVER AI는 구독제 없이 크레딧 충전제로 운영됩니다.\\n\\n충전 패키지:\\n• Basic 900cr — ₩9,900\\n• Pro 2,000cr — ₩19,900 ★ 인기\\n• Studio 5,500cr — ₩49,900\\n• Agency 11,000cr — ₩99,000\\n\\n• 구매한 크레딧은 12개월 동안 유효합니다.\\n• 자동결제는 없습니다. 원할 때만 충전하세요.\\n• 회원가입 시 100cr 무료 제공.'],
   // ── 결과물 ──
-  ['생성한 이미지를 상업적으로 사용할 수 있나요?','유료 플랜(Basic 이상)에서 생성한 이미지는 상업적 사용이 가능합니다.\n클라이언트 제안서, 포트폴리오, 마케팅 자료, 출판물 등에 자유롭게 활용하실 수 있습니다.\nFree 플랜은 워터마크 포함, 비상업적 목적으로만 사용 가능합니다.'],
+  ['생성한 이미지를 상업적으로 사용할 수 있나요?','유료 플랜(Basic 이상)에서 생성한 이미지는 상업적 사용이 가능합니다.\n클라이언트 제안서, 포트폴리오, 마케팅 자료, 출판물 등에 자유롭게 활용하실 수 있습니다.\nFree 플랜은 비상업적 목적으로만 사용 가능합니다.'],
   ['결과 이미지는 어디에 저장되나요?','상단 갤러리 버튼에서 모든 생성 이력을 확인할 수 있습니다.\n다운로드(↓) 버튼으로 JPG 저장, 즐겨찾기(♡)로 중요 결과물을 별도 관리할 수 있습니다.\n\n※ 결과물은 브라우저 로컬에 저장되므로, 중요한 이미지는 즉시 다운로드해 두는 것을 권장합니다. 시크릿 모드에서는 세션 종료 시 삭제됩니다.'],
   // ── 문제 해결 ──
   ['생성이 안 되거나 오류가 발생해요.','1. 계정 탭에서 fal.ai API 키가 올바르게 입력되어 있는지 확인하세요.\n2. fal.ai 테스트 버튼으로 연결 상태를 확인하세요.\n3. fal.ai 대시보드(fal.ai/dashboard)에서 잔액을 확인하세요.\n4. 이미지 파일 형식(JPG·PNG·WEBP)과 크기(20MB 이하)를 확인하세요.\n5. Chrome 또는 Edge 최신 버전 사용을 권장합니다.\n6. 위 방법으로도 해결되지 않으면 페이지를 새로고침 후 다시 시도하세요.'],
@@ -4586,6 +4672,7 @@ function bypassLogin(){
   if(crn)crn.textContent=G.cr.toLocaleString();
 }
 function openPanel(id){
+  G._curGalleryId = id; // renderGalleryGrid에서 즐겨찾기/삭제 후 재오픈 시 사용
   var hs=gE('hist-s');
   var home=gE('home-s');
   var cub=document.getElementById('canvas-upload-box');
@@ -4607,6 +4694,35 @@ function openPanel(id){
     hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2)">'+(id==='favs'?'즐겨찾기한 항목이 없습니다':'작업 내역이 없습니다')+'</div>';
     return;
   }
+  // 검색 + 작업유형 필터 바
+  var searchBar=document.createElement('div');
+  searchBar.style.cssText='width:100%;display:flex;gap:8px;padding:8px 10px 0;flex-shrink:0;flex-wrap:wrap;align-items:center';
+  var searchInp=document.createElement('input');
+  searchInp.id='gallery-search-inp';
+  searchInp.placeholder='🔍 태그·메모로 검색...';
+  searchInp.style.cssText='flex:1;min-width:160px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
+  searchBar.appendChild(searchInp);
+  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['upscale','업스케일']];
+  var wfSel=document.createElement('select');
+  wfSel.id='gallery-wf-filter';
+  wfSel.style.cssText='padding:7px 10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
+  wfTypes.forEach(function(w){ var o=document.createElement('option'); o.value=w[0]; o.textContent=w[1]; wfSel.appendChild(o); });
+  searchBar.appendChild(wfSel);
+  hs.appendChild(searchBar);
+  function applyFilter(){
+    var q = (searchInp.value||'').trim().toLowerCase();
+    var wfFilter = wfSel.value;
+    var filtered = all.filter(function(item){
+      if(wfFilter && item.wf!==wfFilter) return false;
+      if(!q) return true;
+      var hay = ((item.tags||[]).join(' ')+' '+(item.memo||'')+' '+(item.ai||'')).toLowerCase();
+      return hay.indexOf(q) !== -1;
+    });
+    G._curFilteredItems = filtered; // ZIP 다운로드가 현재 필터 결과를 쓸 수 있도록
+    renderGalleryGrid(filtered);
+  }
+  searchInp.oninput = applyFilter;
+  wfSel.onchange = applyFilter;
   // 전체삭제 버튼 헤더
   var delBar=document.createElement('div');
   delBar.style.cssText='width:100%;display:flex;justify-content:flex-end;align-items:center;padding:4px 10px 0;gap:8px;flex-shrink:0';
@@ -4614,6 +4730,12 @@ function openPanel(id){
   totalLabel.style.cssText='font-size:11px;color:var(--t2);margin-right:auto';
   totalLabel.textContent='총 '+all.length+'개';
   delBar.appendChild(totalLabel);
+  var zipBtn=document.createElement('button');
+  zipBtn.id='zipdl-btn';
+  zipBtn.textContent='📦 ZIP 다운로드';
+  zipBtn.style.cssText='background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.4);color:var(--ac);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+  zipBtn.onclick=function(){ downloadAllAsZip(G._curFilteredItems||all, (id==='favs'?'clover-ai-favorites':'clover-ai-gallery')+'-'+Date.now()); };
+  delBar.appendChild(zipBtn);
   var delAllBtn=document.createElement('button');
   delAllBtn.textContent='🗑 전체 삭제';
   delAllBtn.style.cssText='background:rgba(255,80,80,.15);border:1px solid rgba(255,80,80,.4);color:#ff6b6b;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
@@ -4624,10 +4746,18 @@ function openPanel(id){
   delBar.appendChild(delAllBtn);
   hs.appendChild(delBar);
 
+  applyFilter();
+}
+
+function renderGalleryGrid(items){
+  var hs=gE('hist-s');
+  var oldGrid=document.getElementById('gallery-grid-wrap');
+  if(oldGrid) oldGrid.remove();
   // 그리드 뷰 (사진첩 스타일)
   var grid=document.createElement('div');
+  grid.id='gallery-grid-wrap';
   grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;width:100%;padding:8px';
-  all.forEach(function(item){
+  items.forEach(function(item){
     var src=item.result||item.orig||item.origThumb;
     if(!src)return;
     var card=document.createElement('div');
@@ -4669,7 +4799,7 @@ function openPanel(id){
         e.stopPropagation();
         togFav(it.id);
         // 패널 재렌더링으로 버튼 갱신
-        openPanel(id);
+        openPanel(G._curGalleryId);
       };
     })(item, favBtn);
     actBar.appendChild(favBtn);
@@ -4684,7 +4814,7 @@ function openPanel(id){
         deleteHistItem(it.id);
         // 현재 탭 renderMain도 갱신
         if(G.wf===it.wf) renderMain(it.wf);
-        openPanel(id);
+        openPanel(G._curGalleryId);
       };
     })(item);
     actBar.appendChild(delBtn);
@@ -4735,6 +4865,24 @@ function openPanel(id){
         dlB.textContent='↓ 다운로드';
         dlB.style.cssText='padding:10px 20px;background:var(--ac);border:none;color:#000;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
         dlB.onclick=function(e){e.stopPropagation();var fname='clover-ai-'+Date.now()+(isVidItem?'.mp4':'.jpg');cloverDownload(src,fname);};
+        // 공유 버튼 (카카오톡/문자/메일 등 — 모바일은 네이티브 공유시트, PC는 자동 다운로드 폴백)
+        var shB=document.createElement('button');
+        shB.textContent='↗ 공유';
+        shB.style.cssText='padding:10px 20px;background:rgba(255,224,102,.12);border:1px solid rgba(255,224,102,.4);color:#ffe066;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+        shB.onclick=function(e){e.stopPropagation();var fname='clover-ai-'+Date.now()+(isVidItem?'.mp4':'.jpg');cloverShare(src,fname);};
+        // 태그 편집 버튼 (분류·검색용 라벨)
+        var tagB=document.createElement('button');
+        tagB.textContent='🏷 태그';
+        tagB.style.cssText='padding:10px 20px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.4);color:#a78bfa;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+        tagB.onclick=function(e){
+          e.stopPropagation();
+          var cur=(it.tags||[]).join(', ');
+          var input=prompt('태그를 쉼표(,)로 구분해서 입력하세요.\n예: A아파트, 거실, 1차안', cur);
+          if(input===null) return; // 취소
+          it.tags = input.split(',').map(function(s){return s.trim();}).filter(Boolean);
+          saveHistToStorage();
+          openPanel(G._curGalleryId||'gallery');
+        };
         // 즐겨찾기 버튼
         var curFav=!!(G.HIST[it.wf]||[]).find(function(x){return x.id===it.id&&x.fav;});
         var favB=document.createElement('button');
@@ -4773,7 +4921,7 @@ function openPanel(id){
         closeB.textContent='✕ 닫기';
         closeB.style.cssText='padding:10px 20px;background:var(--c2);border:1px solid var(--bd2);color:var(--t2);border-radius:20px;font-size:13px;cursor:pointer;font-family:inherit';
         closeB.onclick=function(e){e.stopPropagation();ov.remove();};
-        btns.appendChild(dlB);btns.appendChild(favB);btns.appendChild(closeB);
+        btns.appendChild(dlB);btns.appendChild(shB);btns.appendChild(tagB);btns.appendChild(favB);btns.appendChild(closeB);
         ov.appendChild(mediaEl);ov.appendChild(btns);
         // 배경 클릭 or ESC로 닫기
         ov.onclick=function(e){if(e.target===ov||e.target===mediaEl)ov.remove();};
@@ -5459,10 +5607,12 @@ function renderMobGallery(type){
     '<div style="display:flex;gap:6px">'+
       '<button onclick="renderMobGallery(&quot;gallery&quot;)" style="padding:6px 16px;border-radius:20px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;background:'+(_mobGalleryTab==='gallery'?'var(--ac)':'var(--c2)')+';color:'+(_mobGalleryTab==='gallery'?'#000':'var(--t2)')+'">📷 갤러리</button>'+
       '<button onclick="renderMobGallery(&quot;favs&quot;)" style="padding:6px 16px;border-radius:20px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;background:'+(_mobGalleryTab==='favs'?'var(--ac)':'var(--c2)')+';color:'+(_mobGalleryTab==='favs'?'#000':'var(--t2)')+'">⭐ 즐겨찾기</button>'+
-      '<button onclick="mobGalleryDelAll()" style="margin-left:auto;padding:5px 10px;border-radius:8px;border:1px solid rgba(255,80,80,.4);background:rgba(255,80,80,.12);color:#ff6b6b;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑 전체삭제</button>'+
+      '<button id="mob-zipdl-btn" onclick="mobZipDownload()" style="margin-left:auto;padding:5px 10px;border-radius:8px;border:1px solid rgba(0,229,204,.4);background:rgba(0,229,204,.12);color:var(--ac);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">📦 ZIP</button>'+
+      '<button onclick="mobGalleryDelAll()" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(255,80,80,.4);background:rgba(255,80,80,.12);color:#ff6b6b;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🗑 전체삭제</button>'+
     '</div>'+
     '<button onclick="closeMobGallery()" style="padding:6px 12px;border-radius:20px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit">✕ 닫기</button>'+
-  '</div>';
+  '</div>'+
+  '<input id="mob-gallery-search" value="'+(_mobGallerySearchQ||'').replace(/"/g,'&quot;')+'" oninput="mobGallerySearch(this.value)" placeholder="🔍 태그로 검색..." style="width:100%;box-sizing:border-box;padding:8px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit;margin-bottom:10px">';
 
   _mobGalleryTab=type;
 
@@ -5474,8 +5624,17 @@ function renderMobGallery(type){
       items.push(item);
     });
   });
+  // 검색어 필터 (태그·메모 기준)
+  var q=(_mobGallerySearchQ||'').trim().toLowerCase();
+  if(q){
+    items = items.filter(function(item){
+      var hay=((item.tags||[]).join(' ')+' '+(item.memo||'')+' '+(item.ai||'')).toLowerCase();
+      return hay.indexOf(q)!==-1;
+    });
+  }
   // 최신순 정렬 (id = Date.now() 기반)
   items.sort(function(a,b){return (b.id||0)-(a.id||0);});
+  _mobGalleryItems = items; // ZIP 다운로드에서 사용
 
   if(!items.length){
     html+='<div style="text-align:center;padding:60px 20px;color:var(--m2);font-size:13px">'+
@@ -5503,6 +5662,18 @@ function renderMobGallery(type){
   }
 
   panel.innerHTML=html;
+}
+var _mobGalleryItems = [];
+var _mobGallerySearchQ = '';
+function mobGallerySearch(q){
+  _mobGallerySearchQ = q;
+  renderMobGallery(_mobGalleryTab);
+  // 검색 입력 후 포커스/커서 위치 유지
+  var inp = gE('mob-gallery-search');
+  if(inp){ inp.focus(); var v=inp.value; inp.value=''; inp.value=v; }
+}
+function mobZipDownload(){
+  downloadAllAsZip(_mobGalleryItems, (_mobGalleryTab==='favs'?'clover-ai-favorites':'clover-ai-gallery')+'-'+Date.now());
 }
 
 function mobGalleryDel(id){
@@ -5563,6 +5734,22 @@ function mobGalleryItem(id){
   dlBtn.textContent='↓ 다운로드';
   dlBtn.style.cssText='padding:10px 24px;background:var(--ac);border:none;color:#000;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
   dlBtn.onclick=function(){mobGalleryDl(url);};
+  var shBtn=document.createElement('button');
+  shBtn.textContent='↗ 공유';
+  shBtn.style.cssText='padding:10px 24px;background:rgba(255,224,102,.12);border:1px solid rgba(255,224,102,.4);color:#ffe066;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+  shBtn.onclick=function(){cloverShare(url,'clover-ai-'+Date.now()+(isVidItem?'.mp4':'.jpg'));};
+  var tagBtn=document.createElement('button');
+  tagBtn.textContent='🏷 태그';
+  tagBtn.style.cssText='padding:10px 24px;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.4);color:#a78bfa;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+  tagBtn.onclick=function(){
+    var cur=(item.tags||[]).join(', ');
+    var input=prompt('태그를 쉼표(,)로 구분해서 입력하세요.\n예: A아파트, 거실, 1차안', cur);
+    if(input===null) return;
+    item.tags = input.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    saveHistToStorage();
+    ov.remove();
+    renderMobGallery(_mobGalleryTab);
+  };
   var closeBtn=document.createElement('button');
   closeBtn.textContent='닫기';
   closeBtn.style.cssText='padding:10px 24px;background:var(--c2);border:1px solid var(--bd2);color:var(--t);border-radius:20px;font-size:13px;cursor:pointer;font-family:inherit';
@@ -5597,7 +5784,7 @@ function mobGalleryItem(id){
     upB.onclick=function(){ov.remove();closeMobGallery();sendToWf('upscale',item);};
     btns.appendChild(upB);
   }
-  btns.appendChild(dlBtn);btns.appendChild(closeBtn);
+  btns.appendChild(dlBtn);btns.appendChild(shBtn);btns.appendChild(tagBtn);btns.appendChild(closeBtn);
   ov.appendChild(mediaEl);ov.appendChild(btns);
   document.body.appendChild(ov);
 }
@@ -5670,6 +5857,7 @@ document.addEventListener('click',function(e){
   }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 // ── Supabase 설정 ─────────────────────────────────────────────────
 // 아래 두 줄에 직접 입력하거나, 계정 관리자 설정에서 입력하세요
