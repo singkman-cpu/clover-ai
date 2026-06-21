@@ -932,6 +932,7 @@ var G={
   QUEUE:[],
   renderQueue:[],
   activeRenders:0,
+  activeBatchRenders:0,
   maxConcurrent:3
 };
 var _SYNC_IDS=['ldov','ldst','ld-timer','ld-timer-hint','ldbar','ldsteps','stl','accr','aclbl','actbtn'];
@@ -1204,7 +1205,7 @@ function renderMain(wf){
       ub.classList.remove('active');
       hs.style.display='flex';
       hs.innerHTML='';
-      var sorted=items.slice().sort(function(a,b){return a.id-b.id;});
+      var sorted=items.slice().sort(function(a,b){return b.id-a.id;});
       // batchId가 있고 batchTotal>1인 항목들을 그룹으로 묶어서 그리드 카드로 렌더링
       var seenBatch={};
       sorted.forEach(function(item){
@@ -3600,14 +3601,24 @@ function getMaxConcurrent(){
 function processRenderQueue(){
   // 플랜별 동시 렌더 슬롯 실시간 반영
   G.maxConcurrent = getMaxConcurrent();
+  // 일반 작업(단일 생성)은 플랜별 동시 슬롯 제한을 따름
   while(G.activeRenders < G.maxConcurrent){
-    var next = G.renderQueue.find(function(t){return t.status==='queued';});
+    var next = G.renderQueue.find(function(t){return t.status==='queued' && (!t.batchTotal || t.batchTotal<=1);});
     if(!next)break;
     next.status='running';
     G.activeRenders++;
     updateQueueUI();
     executeSingleRender(next);
   }
+  // 배치 생성(한 번에 N장 선택)은 동시 슬롯과 별개로 즉시 전부 실행
+  // — 사용자가 명시적으로 N장을 요청한 것이므로 다른 작업을 막지 않도록 분리
+  G.renderQueue.filter(function(t){return t.status==='queued' && t.batchTotal>1;})
+    .forEach(function(t){
+      t.status='running';
+      G.activeBatchRenders=(G.activeBatchRenders||0)+1;
+      updateQueueUI();
+      executeSingleRender(t);
+    });
 }
 
 function updateQueueUI(){
@@ -3682,7 +3693,7 @@ function executeSingleRender(task){
 
   // loading 아이템을 G.HIST에 추가 — 탭 전환해도 renderMain이 표시
   if(!G.HIST[task.wf])G.HIST[task.wf]=[];
-  var loadingId = task.id + 0.5;
+  var loadingId = Date.now() + Math.random(); // 항상 현재 시점 기준 최댓값 → 정렬 시 맨 위 보장
   var loadingItem={
     id: loadingId,
     taskId: task.id,
@@ -3697,7 +3708,7 @@ function executeSingleRender(task){
 
   procImgWithTask(task, function(ri){
     _stopTimer();
-    G.activeRenders=Math.max(0,G.activeRenders-1);
+    if(task.batchTotal>1){G.activeBatchRenders=Math.max(0,(G.activeBatchRenders||0)-1);}else{G.activeRenders=Math.max(0,G.activeRenders-1);}
     task.status='done';
     setTabStatus(task.wf,'done');
     var ldov=gE('ldov');if(ldov)ldov.style.display='none';
@@ -3868,7 +3879,7 @@ function executeSingleRender(task){
     processRenderQueue();
   }, function(err){
     _stopTimer();
-    G.activeRenders=Math.max(0,G.activeRenders-1);
+    if(task.batchTotal>1){G.activeBatchRenders=Math.max(0,(G.activeBatchRenders||0)-1);}else{G.activeRenders=Math.max(0,G.activeRenders-1);}
     task.status='error';
     setTabStatus(task.wf,'error');
     if(loadingCard&&loadingCard.parentNode){
@@ -3941,7 +3952,7 @@ function addLoadingCard(task){
     task.status='cancelled';
     if(card.parentNode)card.parentNode.removeChild(card);
     G.renderQueue=G.renderQueue.filter(function(t){return t.id!==task.id;});
-    G.activeRenders=Math.max(0,G.activeRenders-1);
+    if(task.batchTotal>1){G.activeBatchRenders=Math.max(0,(G.activeBatchRenders||0)-1);}else{G.activeRenders=Math.max(0,G.activeRenders-1);}
     updateQueueUI();processRenderQueue();
   };
   card.appendChild(ring);card.appendChild(txt);card.appendChild(cancBtn);
