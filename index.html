@@ -1539,11 +1539,35 @@ function updParamTags(){
     }
   });
 }
+var PS_SPACE_CATS=[
+  {name:'스타일/기반',keys:['site_based','modern_minimal','scandi','luxury','cafe','office','midcentury','muji','naturalwood','showroom','exhibition','hanok','japanese_trad','industrial']},
+  {name:'주거공간',keys:['apartment_living','kitchen_dining','bedroom','bathroom','entryway','kids_room','home_office']},
+  {name:'외식/F&B',keys:['restaurant_korean','restaurant_western','restaurant_japanese','restaurant_chinese','restaurant_asian','restaurant_buffet','restaurant_fastfood','cafe_detail','roastery_cafe','dessert_cafe','bakery','food_court','wine_bar','cocktail_bar','pub','izakaya','lounge_bar','pocha']},
+  {name:'백화점/쇼핑몰',keys:['shopping_mall','department_store','dept_b1_food','dept_1f_cosmetics','dept_womens','dept_mens','dept_sports','dept_kids','dept_living','dept_restaurant']},
+  {name:'리테일',keys:['clothing_store','cosmetics_store','lifestyle_shop','flagship_store','sports_store','shoe_store','phone_store','appliance_store','car_showroom','convenience','pharmacy']},
+  {name:'숙박/리조트',keys:['hotel_lobby','hotel_room','pool_villa','pension','resort']},
+  {name:'의료/뷰티',keys:['clinic_medical','oriental_clinic','dental_clinic','plastic_surgery','beauty_salon','spa_wellness','nail_salon','aesthetic_clinic','barber_shop']},
+  {name:'교육/종교/문화',keys:['daycare','study_cafe','library','church','academy','temple','lecture_room','auditorium','small_auditorium','cultural_complex']},
+  {name:'웨딩',keys:['wedding_hall','banquet_hall','bride_room']},
+  {name:'스포츠/레저',keys:['fitness','yoga_studio','golf_practice','outdoor_golf','swimming_pool','tennis_court','climbing_gym','baseball_stadium','soccer_field','basketball_court','volleyball_court','camping_site','jjimjilbang']},
+  {name:'기타공간',keys:['bank','coworking_office','model_house','theme_park','kids_cafe','pet_shop','general_lobby','lounge','rest_area','bar_lounge','cinema','concert_hall','pilates_studio','flower_shop','rooftop_garden','terrace_balcony','parking','drawing_based','photo_studio']}
+];
+var PS_EDIT_CATS=[
+  {name:'마감재 변경',keys:['wall','floor','furniture','lighting','lights_on','lights_off']},
+  {name:'사람·자연 추가',keys:['person_remove','person_add','korean_person','person_blur','plant_add','tree_add','flower_add','grass_add','dog_add','car_add','car_blur']},
+  {name:'시간/날씨/분위기',keys:['autumn','winter','rain','day_to_night','night_to_day','golden_hour']},
+  {name:'뷰·구도 변환',keys:['view_left','view_right','aerial_to_eye','eye_to_aerial','eye_to_wide_aerial','axonometry','topview','isometric','cad_isometric']},
+  {name:'기타',keys:['design_board','moodboard','unfinished','sketch','material_focus','cushion_props','window_seoul']}
+];
 function mkPre(p,list){
   if(!list||!list.length)return;
   var w=dv('ss');w.innerHTML='<div class="lbl">스타일 프리셋 <span class="lbl-en">단일 선택</span></div>';
-  var g=dv('pre-grid');
-  list.forEach(function(q){
+
+  // 현재 list가 PS_SPACE인지 PS_EDIT인지 구분해서 맞는 카테고리 메타를 사용 (없으면 카테고리 없이 통째로 렌더링)
+  var cats = (list===PS_SPACE) ? PS_SPACE_CATS : (list===PS_EDIT) ? PS_EDIT_CATS : null;
+  var byKey = {}; list.forEach(function(q){ byKey[q.k]=q; });
+
+  function makePi(q, g){
     var pi=dv('pi'+(getTab(G.wf).selK===q.k?' on':''));
     var ck=dv('pi-ck');ck.textContent='\u2713';
     var ic=dv('pi-ic');ic.innerHTML=q.s||'<svg class="pi-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>';
@@ -1551,7 +1575,7 @@ function mkPre(p,list){
     pi.appendChild(ck);pi.appendChild(ic);pi.appendChild(lb);
     pi.onclick=function(){
       var _tab=getTab(G.wf);_tab.selK=_tab.selK===q.k?null:q.k;
-      g.querySelectorAll('.pi').forEach(function(x){
+      w.querySelectorAll('.pi').forEach(function(x){
         var on=false;
         list.forEach(function(qq){if(qq.k===getTab(G.wf).selK&&qq.l===x.querySelector('.pi-l').textContent)on=true;});
         x.classList.toggle('on',on);
@@ -1614,8 +1638,42 @@ function mkPre(p,list){
       updBtn();
     };
     g.appendChild(pi);
+  }
+
+  if(!cats){
+    // 카테고리 메타 없는 리스트(PS_RENDER, PS_VIDEO 등)는 기존처럼 단일 그리드로
+    var g=dv('pre-grid');
+    list.forEach(function(q){ makePi(q,g); });
+    w.appendChild(g);p.appendChild(w);
+    return;
+  }
+
+  // 카테고리별 아코디언 렌더링 — 현재 선택된 프리셋이 속한 카테고리는 기본으로 펼쳐둠
+  var curSelK = getTab(G.wf).selK;
+  cats.forEach(function(cat){
+    var items = cat.keys.map(function(k){return byKey[k];}).filter(Boolean);
+    if(!items.length) return;
+    var isOpenDefault = curSelK && cat.keys.indexOf(curSelK)!==-1;
+    var catWrap=dv('');catWrap.style.cssText='margin-bottom:6px;border:1px solid var(--bd2);border-radius:8px;overflow:hidden';
+    var hdr=dv('');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--c2);cursor:pointer;font-size:12px;font-weight:700;color:var(--t)';
+    var hdrLeft=dv('');hdrLeft.style.cssText='display:flex;align-items:center;gap:6px';
+    hdrLeft.innerHTML='<span>'+cat.name+'</span><span style="font-size:10px;color:var(--m2);font-weight:400">('+items.length+')</span>';
+    var arrow=dv('');arrow.style.cssText='font-size:10px;color:var(--m2);transition:transform .15s';
+    arrow.textContent='\u25BC';
+    hdr.appendChild(hdrLeft);hdr.appendChild(arrow);
+    var body=dv('pre-grid');body.style.cssText='margin:0;max-height:none;padding:8px;background:var(--card)';
+    body.style.display = isOpenDefault ? 'grid' : 'none';
+    arrow.style.transform = isOpenDefault ? 'rotate(0deg)' : 'rotate(-90deg)';
+    items.forEach(function(q){ makePi(q, body); });
+    hdr.onclick=function(){
+      var open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'grid';
+      arrow.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
+    };
+    catWrap.appendChild(hdr);catWrap.appendChild(body);
+    w.appendChild(catWrap);
   });
-  w.appendChild(g);p.appendChild(w);
+  p.appendChild(w);
 }
 function mkChips(p,lbl,opts,key){
   var w=dv('ss');w.innerHTML='<div class="lbl">'+lbl+'</div>';
