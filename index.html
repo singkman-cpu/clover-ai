@@ -980,7 +980,7 @@ function makeOrigThumb(dataUrl, cb){
   cb(dataUrl);
 }
 function getCE(){var l=G.wf==='video'?EV:EL;for(var i=0;i<l.length;i++){if(l[i].k===(G.wf==='video'?G.vidEng:G.eng))return l[i];}return l[0];}
-function getBaseCost(wf,scale,resolution){
+function getBaseCost(wf,scale,resolution,isDemolition){
   var tab=getTab(wf);
   var sc=scale||tab.scale||'2x';
   var res=resolution||tab.resolution||'1K';
@@ -993,7 +993,10 @@ function getBaseCost(wf,scale,resolution){
   }
   var base=wf==='video'?60:wf==='upscale'?((SCR[scale||'2x']&&SCR[scale||'2x'][G_UPSCALE_ENG])||(scale==='4x'?30:20)):(({'space':20,'render':20})[wf]||20);
   var mult=({'1K':1.0,'2K':1.5})[res]||1.0;
-  return Math.round(base*mult);
+  base = Math.round(base*mult);
+  // 완전 철거 단계 2단계 처리 → 크레딧 2배 (task 객체의 플래그를 직접 사용 — 현재 탭 상태와 무관하게 정확한 과금 보장)
+  if(wf==='space' && isDemolition) base = base*2;
+  return base;
 }
 function canRun(){
   var tab=getTab(G.wf);
@@ -1265,6 +1268,20 @@ function togEngDrop(l,box,par,vid){
 function mkUB(p,lbl,key){
   var w=dv('ss');w.innerHTML='<div class="lbl">'+lbl+'</div>';
   var b=dv('');b.id='ub-'+key;rUB(b,key);w.appendChild(b);p.appendChild(w);
+}
+// 완전 철거(콘크리트 골조 노출) 단계 체크 — 켜면 2단계 처리(구조 정리 → 디자인 적용)로 골조 정확도를 크게 높임. 크레딧 2배.
+function mkDemolitionCheck(p){
+  var tab=getTab(G.wf);
+  var w=dv('ss');w.style.cssText='background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:10px 12px';
+  var row=dv('');row.style.cssText='display:flex;align-items:flex-start;gap:8px;cursor:pointer';
+  var cb=mk('input','');cb.type='checkbox';cb.id='demolition-check';cb.style.cssText='margin-top:2px;cursor:pointer;flex-shrink:0';
+  cb.checked=!!tab.isDemolition;
+  var lbl=dv('');lbl.style.cssText='font-size:12px;line-height:1.4;color:var(--t)';
+  lbl.innerHTML='🏗 <strong>완전 철거 단계</strong> (콘크리트 골조만 노출된 사진)<br><span style="font-size:10.5px;color:var(--m2)">체크하면 구조(벽·기둥·창문·문)를 먼저 정확히 파악한 뒤 디자인을 입혀, 골조 정확도를 크게 높입니다. 처리 단계가 2배라 크레딧도 2배 소요됩니다.</span>';
+  cb.onchange=function(){ tab.isDemolition=cb.checked; updBtn(); };
+  row.onclick=function(e){ if(e.target!==cb){ cb.checked=!cb.checked; cb.onchange(); } };
+  row.appendChild(cb);row.appendChild(lbl);
+  w.appendChild(row);p.appendChild(w);
 }
 function rUB(b,key){
   var v=key==='main'?getTab(G.wf).inputImg:G.tabs.video.endImg;
@@ -1672,6 +1689,10 @@ function getCost(){
     var proRes=getResObj().k;
     base = proRes==='2K' ? 45 : 30;
   }
+  // 완전 철거 단계 체크 시 2단계 처리(구조 정리 → 디자인 적용) → 크레딧 2배
+  if(G.wf==='space' && getTab('space').isDemolition){
+    base = base * 2;
+  }
   return base;
 }
 
@@ -1765,7 +1786,7 @@ function mkResolution(p){
 
 function sbSpace(p){
   mkNote(p,'<strong style="color:var(--ac)">실제 현장사진 &#8594; 새로운 디자인</strong><br>현장 사진을 레퍼런스와 함께 AI로 변환합니다.');
-  mkEng(p,false);mkUB(p,'현장사진 업로드','main');mkRef(p,6,'디자인 레퍼런스');
+  mkEng(p,false);mkUB(p,'현장사진 업로드','main');mkDemolitionCheck(p);mkRef(p,6,'디자인 레퍼런스');
   mkResolution(p);
   mkTA(p,'예: 모던 미니멀, 북유럽 스타일, 조명 따뜻하게...');
   mkPre(p,PS_SPACE);
@@ -3544,6 +3565,7 @@ function _runToolWithPrompt(translatedPrompt){
     optimFor:  G.optimFor,
     vidMode:   tab.vidMode||G.tabs.video.vidMode||'image',
     vdur:      tab.vdur||G.tabs.video.vdur||5,
+    isDemolition: G.wf==='space' && !!tab.isDemolition, // 완전 철거 단계 → 2단계 처리
     maskData:  null,
     status:    'queued'
   };
@@ -3701,7 +3723,7 @@ function executeSingleRender(task){
         var cps=crPerSec[task.vidEng]||25;
         cost=Math.round(cps*vidDur);
       } else {
-        cost=Math.round(getBaseCost(task.wf,task.scale,task.resolution));
+        cost=Math.round(getBaseCost(task.wf,task.scale,task.resolution,task.isDemolition));
       }
       tags.push(cost+'cr');
       if(!G.HIST[task.wf])G.HIST[task.wf]=[];
@@ -3925,6 +3947,19 @@ function procImgWithTask(task, onDone, onErr){
 
   if(!FAL_KEY){ onErr('fal.ai 키가 없습니다.'); return; }
   if(!img){ onErr('이미지가 없습니다.'); return; }
+
+  // ── 완전 철거 단계 2단계 처리: 1단계(구조 정리) → 그 결과로 2단계(디자인 적용) 실행 ──
+  if(wf==='space' && task.isDemolition){
+    var stl1=gE('ldst'); if(stl1) stl1.textContent='1/2단계: 구조 정리 중...';
+    var stage1Prompt = 'Clean up this bare concrete construction site photo into a finished, neutral, empty interior shell. CRITICAL: Preserve the EXACT same number, position and size of every wall, column, window and door visible in this photo — do not add, remove, enlarge, shrink or move any structural element. Simply apply plain white painted walls, plain white ceiling, and plain grey concrete or neutral flooring to make it look like a clean, finished, empty shell — completely empty room, no furniture, no decoration. Do not change the camera angle, perspective or composition. Photorealistic architectural photography.';
+    var task1 = Object.assign({}, task, {prompt: stage1Prompt, isDemolition:false, selK:null});
+    procImgWithTask(task1, function(stage1Url){
+      var stl2=gE('ldst'); if(stl2) stl2.textContent='2/2단계: 디자인 적용 중...';
+      var task2 = Object.assign({}, task, {img: stage1Url, isDemolition:false});
+      procImgWithTask(task2, onDone, onErr);
+    }, onErr);
+    return;
+  }
 
   // ── VIDEO ────────────────────────────────────────────────────
   if(wf==='video'){
