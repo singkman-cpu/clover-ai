@@ -6241,6 +6241,18 @@ function onSupaLogin(user){
   if(_loginInProgress){ console.log('[Supabase] 로그인 중복 호출 무시'); return; }
   _loginInProgress = true;
   console.log('[Supabase] 로그인:', user.email);
+  // 보안: 같은 브라우저에서 이전에 로그인했던 계정과 다른 계정이면, 로컬에 남은 갤러리 데이터를 즉시 삭제
+  // (localStorage는 계정과 무관하게 브라우저 단위로 공유되므로, 계정이 바뀌면 이전 사용자의 작업물이 그대로 노출될 위험)
+  var _lastUid = localStorage.getItem('clover_last_uid');
+  if(_lastUid && _lastUid !== user.id){
+    console.log('[Storage] 다른 계정으로 전환 감지 → 로컬 갤러리 데이터 초기화');
+    localStorage.removeItem('clover_hist');
+    localStorage.removeItem('clover_cr');
+    localStorage.removeItem('clover_plan');
+    G.HIST = {space:[], render:[], edit:[], video:[], upscale:[]};
+    if(typeof renderMain==='function' && G.wf) renderMain(G.wf);
+  }
+  localStorage.setItem('clover_last_uid', user.id);
   // 로딩 중 표시
   var crn=gE('cr-n');if(crn)crn.textContent='...';
   // profiles 테이블 조회/생성
@@ -6328,6 +6340,11 @@ function onSupaLogout(){
   var crn=gE('cr-n');
   if(crn)crn.textContent='로그인 필요';
   updateAccountBtn();
+  // 보안: 로그아웃 시 로컬에 남은 갤러리 데이터 즉시 삭제 (다음 사용자에게 노출 방지)
+  localStorage.removeItem('clover_hist');
+  localStorage.removeItem('clover_last_uid');
+  G.HIST = {space:[], render:[], edit:[], video:[], upscale:[]};
+  if(typeof renderMain==='function' && G.wf) renderMain(G.wf);
 }
 
 function updateAccountBtn(){
