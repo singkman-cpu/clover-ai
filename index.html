@@ -5010,6 +5010,16 @@ function admMailSend(testOnly){
   }).catch(function(e){if(result){result.style.color='#fca5a5';result.textContent='회원 조회 실패: '+e.message;}});
 }
 
+function _resendProxy(apiKey,from,to,subject,html){
+  // 브라우저에서 api.resend.com 직접 호출은 CORS로 막혀있어 항상 실패함 →
+  // Supabase Edge Function(send-mail)을 거쳐서 보낸다.
+  return fetch(SUPA_URL+'/functions/v1/send-mail',{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({apiKey:apiKey,from:from,to:to,subject:subject,html:html})
+  });
+}
+
 function _admMailDoSend(apiKey,from,subject,body,emails,isTest){
   var result=gE('mail-result');
   var total=emails.length;
@@ -5039,11 +5049,7 @@ function _admMailDoSend(apiKey,from,subject,body,emails,isTest){
         pb.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+
         '<br><br><hr style="border:none;border-top:1px solid #eee;margin:20px 0">'+
         '<p style="font-size:11px;color:#999">본 메일은 Clover AI에서 발송된 공지 메일입니다.<br>문의: cloverai.design@gmail.com</p></div>';
-      return fetch('https://api.resend.com/emails',{
-        method:'POST',
-        headers:{'Authorization':'Bearer '+apiKey,'Content-Type':'application/json'},
-        body:JSON.stringify({from:from,to:[email],subject:subject,html:htmlBody})
-      }).then(function(r){r.ok?sent++:failed++;}).catch(function(){failed++;});
+      return _resendProxy(apiKey,from,[email],subject,htmlBody).then(function(r){r.ok?sent++:failed++;}).catch(function(){failed++;});
     });
     Promise.all(promises).then(function(){
       if(result)result.textContent=(isTest?'테스트 ':'')+'발송 중... ('+sent+'/'+total+')';
@@ -6582,28 +6588,21 @@ function _sendAdminNewUserAlert(email){
   var resendKey = localStorage.getItem('clover_resend_key')||'';
   if(!resendKey) return; // API 키 없으면 스킵
   var now = new Date().toLocaleString('ko-KR', {timeZone:'Asia/Seoul'});
-  fetch('https://api.resend.com/emails', {
-    method:'POST',
-    headers:{'Authorization':'Bearer '+resendKey,'Content-Type':'application/json'},
-    body:JSON.stringify({
-      from:'no-reply@cloverai.kr',
-      to:['cloverai.design@gmail.com'],
-      subject:'[Clover AI] 🎉 신규 회원 가입!',
-      html:'<div style="font-family:sans-serif;padding:20px;color:#222">'+
-        '<h2 style="color:#00e5cc">🍀 Clover AI 신규 회원 가입</h2>'+
-        '<p>새로운 회원이 가입했습니다!</p>'+
-        '<table style="border-collapse:collapse;width:100%;max-width:400px">'+
-          '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">이메일</td>'+
-          '<td style="padding:8px">'+email+'</td></tr>'+
-          '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">가입일시</td>'+
-          '<td style="padding:8px">'+now+'</td></tr>'+
-          '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">지급 크레딧</td>'+
-          '<td style="padding:8px;color:#00e5cc;font-weight:bold">100cr</td></tr>'+
-        '</table>'+
-        '<p style="margin-top:16px"><a href="https://cloverai.kr" style="color:#00e5cc">관리자 대시보드 바로가기</a></p>'+
-      '</div>'
-    })
-  }).then(function(){
+  _resendProxy(resendKey,'no-reply@cloverai.kr',['cloverai.design@gmail.com'],'[Clover AI] 🎉 신규 회원 가입!',
+    '<div style="font-family:sans-serif;padding:20px;color:#222">'+
+      '<h2 style="color:#00e5cc">🍀 Clover AI 신규 회원 가입</h2>'+
+      '<p>새로운 회원이 가입했습니다!</p>'+
+      '<table style="border-collapse:collapse;width:100%;max-width:400px">'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">이메일</td>'+
+        '<td style="padding:8px">'+email+'</td></tr>'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">가입일시</td>'+
+        '<td style="padding:8px">'+now+'</td></tr>'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">지급 크레딧</td>'+
+        '<td style="padding:8px;color:#00e5cc;font-weight:bold">100cr</td></tr>'+
+      '</table>'+
+      '<p style="margin-top:16px"><a href="https://cloverai.kr" style="color:#00e5cc">관리자 대시보드 바로가기</a></p>'+
+    '</div>'
+  ).then(function(){
     console.log('[Admin] 신규 가입 알림 발송:', email);
   }).catch(function(e){
     console.warn('[Admin] 알림 발송 실패:', e);
