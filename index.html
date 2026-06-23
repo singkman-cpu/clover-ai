@@ -876,6 +876,7 @@ var PS_VIDEO=[
 
 var EU=[
   {k:'clarity',n:'Clarity Upscaler',t:'AI,Detail',d:'디테일 강화 · 범용 고품질',lg:'f'},
+  {k:'creative',n:'Creative Upscaler',t:'New,Vivid',d:'Magnific 방식 · 디테일을 적극적으로 보강 (살짝 변형 가능)',lg:'f'},
   {k:'topaz',n:'Topaz Upscaler',t:'Best,Pro',d:'전문가용 · 최고 정밀도',lg:'f'},
   {k:'magnific_creative',n:'Magnific Creative',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'},
   {k:'magnific_precision',n:'Magnific Precision v2',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'}
@@ -897,7 +898,7 @@ var EV=[
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
 var WFC={space:20,render:20,edit:20,video:60,upscale:20};
 var WFL={space:'AI 공간 변환',render:'렌더 실사화',edit:'AI 편집',video:'영상 생성',upscale:'업스케일'};
-var SCR={'2x':{'clarity':20,'topaz':15},'4x':{'clarity':40,'topaz':30}};
+var SCR={'2x':{'clarity':20,'creative':35,'topaz':15},'4x':{'clarity':40,'creative':60,'topaz':30}};
 var OPTIMIZED=['Standard','Portraits (Soft)','Portraits (Hard)','Art & Illustrations','Nature & Landscapes','Films & Photography','3d Renders','Science Fiction'];
 var FAQS=[
   // ── 서비스 소개 ──
@@ -1562,7 +1563,9 @@ function mkTA(p,ph){
     var exW=dv('ss');exW.style.cssText='margin-top:8px';
     exW.innerHTML='<div class="lbl" style="font-size:11px;color:var(--t2)">추가 요청사항 <span class="lbl-en">(선택)</span></div>';
     var exTa=mk('textarea','ta');exTa.id='sb-ta-extra';exTa.rows=2;exTa.style.minHeight='52px';
-    exTa.placeholder='프리셋에 추가로 반영하고 싶은 내용을 적어주세요 (예: 소파는 초록색으로, 조명은 따뜻하게)';
+    exTa.placeholder = (getTab(G.wf).selK==='custom_direction')
+      ? '원하시는 방향을 적어주세요 (예: 소파에서 주방쪽을 봐줘 / 주방에서 소파쪽을 봐줘 / 소파에서 창가를 봐줘)'
+      : '프리셋에 추가로 반영하고 싶은 내용을 적어주세요 (예: 소파는 초록색으로, 조명은 따뜻하게)';
     exTa.value=getTab(G.wf).extraPrompt||'';
     exTa.oninput=function(){
       getTab(G.wf).extraPrompt=exTa.value;
@@ -3524,6 +3527,24 @@ function runClarityUpscale(imgDataUrl, scaleFactor, onDone, onErr) {
         runClarity(imgUrl, scaleFactor, onDone, onErr);
       }, function(err){
         console.warn('[VizMaker Pro 실패]', err, '→ Clarity 폴백');
+        runClarity(imgUrl, scaleFactor, onDone, onErr);
+      });
+    } else if(eng==='creative'){
+      // ── Creative Upscaler (Magnific 방식 — CCSR 1차 + 디테일 창작 보강) ──
+      if(ldst)ldst.textContent='Creative Upscaler 처리 중 (30~60초)...';
+      falRun('fal-ai/creative-upscaler',{
+        image_url: imgUrl,
+        scale: Math.min(4, scaleFactor||2),
+        creativity: 0.35,
+        detail: 1,
+        shape_preservation: 0.6
+      }, function(d){
+        var url=falExtractImageUrl(d);
+        if(url){urlToDataUrl(url,function(r){onDone(r||url);});return;}
+        console.warn('[Creative Upscaler] URL 없음 → Clarity 폴백');
+        runClarity(imgUrl, scaleFactor, onDone, onErr);
+      }, function(err){
+        console.warn('[Creative Upscaler 실패]', err, '→ Clarity 폴백');
         runClarity(imgUrl, scaleFactor, onDone, onErr);
       });
     } else {
