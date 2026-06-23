@@ -3109,6 +3109,59 @@ function cancelRun(){
   gE('stl').textContent = '취소됨';
   setTimeout(function(){ G_CANCEL = false; }, 1000);
 }
+// ── 진행 중인 작업 추적 (새로고침해도 추적 가능) ───────────────────
+function _saveActiveJob(reqId, baseUrl, label){
+  try{
+    var jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');
+    jobs=jobs.filter(function(j){return Date.now()-j.ts<20*60*1000;}); // 20분 넘은 건 자동 정리
+    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',ts:Date.now()});
+    localStorage.setItem('clover_active_jobs',JSON.stringify(jobs));
+  }catch(e){}
+}
+function _clearActiveJob(reqId){
+  try{
+    var jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');
+    jobs=jobs.filter(function(j){return j.reqId!==reqId;});
+    localStorage.setItem('clover_active_jobs',JSON.stringify(jobs));
+  }catch(e){}
+}
+function _showJobRecoveryBanner(text,isError){
+  var old=gE('job-recovery-banner');if(old)old.remove();
+  var b=document.createElement('div');
+  b.id='job-recovery-banner';
+  b.style.cssText='position:fixed;top:14px;right:14px;z-index:99999;max-width:340px;padding:12px 14px;'+
+    'border-radius:10px;font-size:12px;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,.3);'+
+    'background:'+(isError?'#3a1212':'#0c2a26')+';color:'+(isError?'#fca5a5':'#5eead4')+';'+
+    'border:1px solid '+(isError?'#7f1d1d':'#0d9488');
+  b.innerHTML=text+'<div style="text-align:right;margin-top:6px"><button onclick="this.closest(\'#job-recovery-banner\').remove()" '+
+    'style="background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;font-size:11px;font-family:inherit">닫기</button></div>';
+  document.body.appendChild(b);
+  return b;
+}
+function _resumeActiveJobs(){
+  var jobs=[];
+  try{jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');}catch(e){}
+  jobs=jobs.filter(function(j){return Date.now()-j.ts<20*60*1000;});
+  if(!jobs.length)return;
+  localStorage.setItem('clover_active_jobs',JSON.stringify(jobs)); // 만료된 것 정리해서 다시 저장
+  jobs.forEach(function(j){
+    _showJobRecoveryBanner('🔄 새로고침 전에 진행 중이던 '+j.label+' 작업을 다시 확인하고 있어요...', false);
+    falPoll(j.baseUrl, j.reqId, function(d){
+      _clearActiveJob(j.reqId);
+      var url=falExtractImageUrl(d);
+      if(url){
+        var b=_showJobRecoveryBanner('✅ '+j.label+' 완료! 아래 이미지를 확인하세요.<br><img src="'+url+'" style="width:100%;border-radius:6px;margin-top:6px">'+
+          '<a href="'+url+'" target="_blank" rel="noopener" style="display:block;margin-top:6px;color:#5eead4;text-decoration:underline">새 탭에서 열기 / 저장하기</a>', false);
+      } else {
+        _showJobRecoveryBanner('⚠️ '+j.label+' 결과를 가져오지 못했어요. fal.ai Dashboard에서 직접 확인해보세요.', true);
+      }
+    }, function(err){
+      _clearActiveJob(j.reqId);
+      _showJobRecoveryBanner('⚠️ '+j.label+' 작업이 실패했거나 만료됐어요: '+String(err).slice(0,80), true);
+    }, 0);
+  });
+}
+
 function falRun(modelId, input, onDone, onErr) {
   falSubmit(modelId, input, function(reqId, responseUrl){
     // Build base URL for status/result polling (strip subpath like /edit, /image-to-video)
@@ -3130,7 +3183,9 @@ function falRun(modelId, input, onDone, onErr) {
       baseUrl = FAL_QUEUE + '/' + base;
     }
     console.log('[FAL] baseUrl for polling:', baseUrl);
-    falPoll(baseUrl, reqId, onDone, onErr, 0);
+    var _modelLabel=(modelId.split('/')[1]||modelId);
+    _saveActiveJob(reqId, baseUrl, _modelLabel);
+    falPoll(baseUrl, reqId, function(d){ _clearActiveJob(reqId); onDone(d); }, function(e){ _clearActiveJob(reqId); onErr(e); }, 0);
   }, onErr);
 }
 
@@ -6033,6 +6088,9 @@ document.addEventListener('DOMContentLoaded',function(){try{
       localStorage.setItem('clover_zoom_hint','1');
     },2000);
   }
+
+  // 새로고침 전에 진행 중이던 fal.ai 작업이 있으면 다시 추적
+  setTimeout(function(){ try{_resumeActiveJobs();}catch(e){console.warn('[Job recovery]',e);} },1500);
 
 }catch(e){console.error('DOMContentLoaded error:',e);try{renderSB();updBtn();}catch(e2){}}});
   // ── 모바일 탭바 ───────────────────────────────────────────────
