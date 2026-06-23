@@ -3769,9 +3769,11 @@ function executeSingleRender(task){
   // 예상 소요시간 맵 (초)
   var _etaMap = {space:20, render:15, edit:15, video:90, upscale:20};
   var _eta = _etaMap[task.wf] || 15;
-  // 아이소매트릭/탑뷰는 조금 더 걸림
-  if(task.wf==='edit' && (task.selK==='isometric'||task.selK==='cad_isometric')){
-    _eta = 30;
+  // 아이소매트릭/탑뷰는 조금 더 걸림 — 2K + Pro 엔진 조합이면 훨씬 더 오래 걸릴 수 있음
+  var _slowComposition = task.wf==='edit' && ['isometric','cad_isometric','axonometry','topview'].indexOf(task.selK)!==-1;
+  var _slowCombo = _slowComposition && task.resolution==='2K';
+  if(_slowComposition){
+    _eta = _slowCombo ? 150 : 30;
   }
   if(task.wf==='video'){
     var _vidEtaMap={kling3:120,veo31:150,seedance2:180};
@@ -3788,9 +3790,14 @@ function executeSingleRender(task){
       // 예상 남은 시간
       var remain=Math.max(0,_eta-elapsed);
       if(hintEl){
-        hintEl.textContent=elapsed<_eta
-          ? '예상 남은 시간: 약 '+remain+'초'
-          : '거의 완료됩니다...';
+        if(elapsed<_eta){
+          hintEl.textContent='예상 남은 시간: 약 '+remain+'초'
+            +(_slowCombo?' (구도 변환 + 2K는 시간이 더 걸려요)':'');
+        } else {
+          hintEl.textContent=_slowCombo
+            ? '복잡한 구도 변환 처리 중입니다. 조금만 더 기다려주세요 (최대 8~10분 소요될 수 있어요)'
+            : '거의 완료됩니다...';
+        }
       }
       // 프로그레스 바
       if(barEl){
