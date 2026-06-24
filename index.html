@@ -3126,7 +3126,7 @@ function _saveActiveJob(reqId, baseUrl, label){
   try{
     var jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');
     jobs=jobs.filter(function(j){return Date.now()-j.ts<20*60*1000;}); // 20분 넘은 건 자동 정리
-    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',ts:Date.now()});
+    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',wf:G.wf||'edit',ts:Date.now()});
     localStorage.setItem('clover_active_jobs',JSON.stringify(jobs));
   }catch(e){}
 }
@@ -3162,7 +3162,35 @@ function _resumeActiveJobs(){
       _clearActiveJob(j.reqId);
       var url=falExtractImageUrl(d);
       if(url){
-        var b=_showJobRecoveryBanner('✅ '+j.label+' 완료! 아래 이미지를 확인하세요.<br><img src="'+url+'" style="width:100%;border-radius:6px;margin-top:6px">'+
+        var jobWf=j.wf||G.wf||'edit';
+        // ── 정상 완료 흐름과 동일하게 히스토리 + 클라우드 갤러리에 저장 ──
+        if(!G.HIST[jobWf])G.HIST[jobWf]=[];
+        var recoveredItem={id:Date.now()+Math.random(),orig:null,result:url,origThumb:null,tags:[j.label,'새로고침 복구'],ai:'',preview:false,cx:50,fav:false,wf:jobWf};
+        G.HIST[jobWf].unshift(recoveredItem);
+        saveHistToStorage();
+        if(G.wf===jobWf) renderMain(jobWf);
+        if(_supa&&_supaUser){
+          try{
+            var galleryId=recoveredItem.id+'';
+            var filePath=_supaUser.id+'/'+jobWf+'/'+galleryId+'.jpg';
+            fetch(url).then(function(r){return r.blob();}).then(function(blob){
+              _supa.storage.from('gallery').upload(filePath, blob, {contentType:'image/jpeg', upsert:true}).then(function(uploadRes){
+                if(uploadRes.error){console.warn('[Gallery 복구] 업로드 실패:',uploadRes.error.message);return;}
+                var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
+                _supa.from('gallery').insert({
+                  user_id:_supaUser.id, wf:jobWf, storage_path:filePath, public_url:publicUrl,
+                  orig_url:null, engine:j.label||'', resolution:'', style_key:''
+                }).select().single().then(function(ins){
+                  recoveredItem.cloud_url=publicUrl;
+                  if(ins&&ins.data&&ins.data.id) recoveredItem.gallery_id=ins.data.id;
+                  saveHistToStorage();
+                  console.log('[Gallery 복구] 클라우드 저장 완료');
+                }).catch(function(e){console.warn('[Gallery 복구] DB 저장 실패:',e);});
+              }).catch(function(e){console.warn('[Gallery 복구] 업로드 오류:',e);});
+            }).catch(function(e){console.warn('[Gallery 복구] fetch 오류:',e);});
+          }catch(e){console.warn('[Gallery 복구] 예외:',e);}
+        }
+        var b=_showJobRecoveryBanner('✅ '+j.label+' 완료! 갤러리에 저장됐어요.<br><img src="'+url+'" style="width:100%;border-radius:6px;margin-top:6px">'+
           '<a href="'+url+'" target="_blank" rel="noopener" style="display:block;margin-top:6px;color:#5eead4;text-decoration:underline">새 탭에서 열기 / 저장하기</a>', false);
       } else {
         _showJobRecoveryBanner('⚠️ '+j.label+' 결과를 가져오지 못했어요. fal.ai Dashboard에서 직접 확인해보세요.', true);
