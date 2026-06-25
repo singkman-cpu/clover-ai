@@ -383,6 +383,7 @@ select option{background:var(--c2)}
       <div><div class="cr-n" id="cr-n">로그인</div><div class="cr-l" id="cr-l">Credits</div></div>
     </div>
     <button class="nbtn" id="btn-faq" onclick="openMd('faq')">FAQ</button>
+    <button class="nbtn" id="btn-world3d" onclick="openMd('world3d')" style="color:var(--ac);border-color:var(--acb)">🌐 3D투어<span style="font-size:9px;background:var(--ac);color:#000;border-radius:4px;padding:1px 4px;margin-left:4px;font-weight:800">NEW</span></button>
     <button class="nbtn" id="btn-bizinfo" onclick="openMd('bizinfo')">사업자정보</button>
     <button class="nbtn" id="btn-account" onclick="openMd('account')">계정</button>
     <button class="nbtn up" id="btn-pricing" onclick="openMd('pricing')">크레딧 충전</button>
@@ -525,6 +526,29 @@ select option{background:var(--c2)}
   <div style="margin-top:12px;font-size:11px;color:var(--m2);text-align:center;line-height:1.7">
     본 서비스는 전자상거래법 및 관련 법령을 준수합니다.<br>
     문의사항은 이메일로 연락 주시기 바랍니다.
+  </div>
+</div></div></div>
+
+<div id="mworld3d" class="mbg"><div class="md" style="width:520px"><div class="mdh"><h2>🌐 3D 투어 생성 (베타)</h2><button class="mdc" onclick="closeMd('world3d')">&#10005;</button></div><div class="mdb" id="world3d-b">
+  <div style="background:rgba(0,229,204,.08);border:1px solid var(--acb);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--ac);line-height:1.6;margin-bottom:14px">
+    렌더링된 이미지를 실제로 걸어다닐 수 있는 3D 공간으로 변환합니다. (World Labs Marble 기반 · 베타)
+  </div>
+  <div style="font-size:12px;color:var(--t2);margin-bottom:6px">변환할 이미지</div>
+  <div id="w3d-upload" style="border:2px dashed var(--bd2);border-radius:10px;height:140px;display:flex;align-items:center;justify-content:center;cursor:pointer;margin-bottom:14px;overflow:hidden;position:relative;background:var(--c2)">
+    <span id="w3d-upload-hint" style="font-size:12px;color:var(--m2)">클릭해서 이미지 선택 (또는 최근 렌더링 결과 사용)</span>
+    <img id="w3d-preview" style="display:none;max-width:100%;max-height:100%;object-fit:contain">
+  </div>
+  <input type="file" id="w3d-file" accept="image/*" style="display:none">
+  <div style="font-size:12px;color:var(--t2);margin-bottom:6px">품질</div>
+  <div style="display:flex;gap:8px;margin-bottom:16px">
+    <button class="w3d-q on" data-q="mini" style="flex:1;padding:10px;border-radius:8px;border:1.5px solid var(--acb);background:var(--acg);color:var(--ac);font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">⚡ 빠른 미리보기<br><span style="font-size:10px;color:var(--m2);font-weight:400">30~45초 · 약 250원</span></button>
+    <button class="w3d-q" data-q="plus" style="flex:1;padding:10px;border-radius:8px;border:1.5px solid var(--bd2);background:var(--c2);color:var(--t2);font-weight:700;cursor:pointer;font-family:inherit;font-size:12px">✨ 고품질<br><span style="font-size:10px;color:var(--m2);font-weight:400">~5분 · 약 1,750원</span></button>
+  </div>
+  <button id="w3d-go" style="width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">🌐 3D 투어 생성하기</button>
+  <div id="w3d-status" style="margin-top:14px;font-size:12px;color:var(--t2);text-align:center;display:none"></div>
+  <div id="w3d-result" style="margin-top:14px;display:none">
+    <div style="font-size:12px;color:var(--ac);font-weight:700;margin-bottom:8px">✅ 3D 투어가 완성됐어요!</div>
+    <a id="w3d-link" href="#" target="_blank" rel="noopener" style="display:block;text-align:center;padding:12px;border-radius:10px;background:var(--ac);color:#000;font-weight:800;text-decoration:none;font-size:13px">↗ 3D 투어 새 탭에서 열기</a>
   </div>
 </div></div></div>
 <div id="mlogin" class="mbg"><div class="md" style="width:400px"><div class="mdh"><h2>🍀 로그인 / 회원가입</h2><button class="mdc" onclick="closeMd('login')">&#10005;</button></div><div class="mdb" style="padding:8px 16px 20px">
@@ -3283,6 +3307,125 @@ function _showJobRecoveryBanner(text,isError){
   document.body.appendChild(b);
   return b;
 }
+// ── 3D 투어 (World Labs Marble) ─────────────────────────────────
+var _w3dImageDataUrl = null;
+var _w3dQuality = 'mini';
+var _w3dPollTimer = null;
+
+function _initWorld3dModal(){
+  var box=gE('w3d-upload'), fileInp=gE('w3d-file'), preview=gE('w3d-preview'), hint=gE('w3d-upload-hint');
+  if(box && !box._wired){
+    box._wired=true;
+    box.onclick=function(){ fileInp.click(); };
+    fileInp.onchange=function(e){
+      var f=e.target.files[0]; if(!f) return;
+      var reader=new FileReader();
+      reader.onload=function(ev){
+        _w3dImageDataUrl=ev.target.result;
+        preview.src=_w3dImageDataUrl;
+        preview.style.display='block';
+        hint.style.display='none';
+      };
+      reader.readAsDataURL(f);
+    };
+    document.querySelectorAll('.w3d-q').forEach(function(btn){
+      btn.onclick=function(){
+        document.querySelectorAll('.w3d-q').forEach(function(b){
+          b.classList.remove('on');
+          b.style.border='1.5px solid var(--bd2)';b.style.background='var(--c2)';b.style.color='var(--t2)';
+        });
+        btn.classList.add('on');
+        btn.style.border='1.5px solid var(--acb)';btn.style.background='var(--acg)';btn.style.color='var(--ac)';
+        _w3dQuality=btn.dataset.q;
+      };
+    });
+    gE('w3d-go').onclick=_w3dStart;
+  }
+  // 최근 렌더링 결과가 있으면 기본으로 채워줌(편집 탭 기준)
+  if(!_w3dImageDataUrl){
+    var editTab=getTab('edit');
+    var latestResult = (editTab&&editTab.resultImg) || (editTab&&editTab.inputImg) || null;
+    if(latestResult){
+      _w3dImageDataUrl=latestResult;
+      preview.src=latestResult; preview.style.display='block'; hint.style.display='none';
+    }
+  }
+}
+
+function _w3dStart(){
+  if(!_w3dImageDataUrl){ alert('먼저 이미지를 선택해주세요.'); return; }
+  var goBtn=gE('w3d-go'), statusEl=gE('w3d-status'), resultEl=gE('w3d-result');
+  goBtn.disabled=true; goBtn.textContent='업로드 중...';
+  resultEl.style.display='none';
+  statusEl.style.display='block';
+  statusEl.textContent='이미지 업로드 중...';
+
+  // World Labs는 공개 URL이 필요하므로, dataURL이면 먼저 우리 클라우드(gallery)에 업로드해서 URL을 확보
+  _w3dEnsurePublicUrl(_w3dImageDataUrl).then(function(publicUrl){
+    statusEl.textContent='3D 월드 생성 요청 중...';
+    return fetch(SUPA_URL+'/functions/v1/world-generate',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        action:'submit',
+        imageUrl:publicUrl,
+        model: _w3dQuality==='plus' ? 'Marble 0.1-plus' : 'Marble 0.1-mini',
+        displayName:'CloverAI 3D Tour'
+      })
+    });
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ throw new Error(d.error); }
+    goBtn.textContent='생성 중...';
+    statusEl.textContent=(_w3dQuality==='plus' ? '고품질 생성 중 (최대 5분 정도 걸려요)...' : '빠른 생성 중 (30~45초)...');
+    _w3dPoll(d.operation_id);
+  }).catch(function(e){
+    console.warn('[3D투어] 실패:', e);
+    statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);
+    goBtn.disabled=false; goBtn.textContent='🌐 3D 투어 생성하기';
+  });
+}
+
+// dataURL을 World Labs가 접근 가능한 공개 URL로 만들기 위해 Supabase storage(gallery 버킷)에 업로드
+function _w3dEnsurePublicUrl(dataUrlOrHttp){
+  if(/^https?:\/\//.test(dataUrlOrHttp)) return Promise.resolve(dataUrlOrHttp);
+  return fetch(dataUrlOrHttp).then(function(r){return r.blob();}).then(function(blob){
+    var path=(_supaUser?_supaUser.id:'anon')+'/world3d/'+Date.now()+'.jpg';
+    return _supa.storage.from('gallery').upload(path, blob, {contentType:'image/jpeg', upsert:true}).then(function(res){
+      if(res.error) throw new Error('업로드 실패: '+res.error.message);
+      return _supa.storage.from('gallery').getPublicUrl(path).data.publicUrl;
+    });
+  });
+}
+
+function _w3dPoll(operationId){
+  if(_w3dPollTimer) clearTimeout(_w3dPollTimer);
+  var statusEl=gE('w3d-status'), resultEl=gE('w3d-result'), goBtn=gE('w3d-go');
+  fetch(SUPA_URL+'/functions/v1/world-generate',{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({action:'status', operationId:operationId})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ throw new Error(d.error); }
+    if(d.done){
+      if(d.error){ throw new Error(d.error.message||'생성 실패'); }
+      var world=d.response;
+      var url=world&&(world.world_marble_url||(world.world_id?('https://marble.worldlabs.ai/world/'+world.world_id):null));
+      if(!url){ throw new Error('결과 URL을 찾지 못했습니다.'); }
+      statusEl.style.display='none';
+      resultEl.style.display='block';
+      gE('w3d-link').href=url;
+      goBtn.disabled=false; goBtn.textContent='🌐 3D 투어 생성하기';
+    } else {
+      statusEl.textContent='생성 중... (조금만 기다려주세요)';
+      _w3dPollTimer=setTimeout(function(){ _w3dPoll(operationId); }, 5000);
+    }
+  }).catch(function(e){
+    console.warn('[3D투어] 상태확인 실패:', e);
+    statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);
+    goBtn.disabled=false; goBtn.textContent='🌐 3D 투어 생성하기';
+  });
+}
+
 function _resumeActiveJobs(){
   var jobs=[];
   try{jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');}catch(e){}
@@ -4911,6 +5054,7 @@ function openMd(id){
   if(id==='pricing')buildPricing();
   if(id==='account')buildAccount();
   if(id==='credits')buildCredits();
+  if(id==='world3d')_initWorld3dModal();
   if(id==='login'){/* static */}
   if(id==='bizinfo'){/* static */}
   if(id==='admin'){
