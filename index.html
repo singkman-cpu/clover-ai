@@ -1713,17 +1713,12 @@ function _showPresetHints(_t3){
     insertAfter.parentElement.insertBefore(hintEl3, insertAfter.nextSibling);
   }
 }
-var HOT_PRESETS=['apartment_living','kitchen_dining','site_based','person_add','modern_minimal','isometric','restaurant_korean','cafe_detail'];
 function makePi(q, g){
     var pi=dv('pi'+(getTab(G.wf).selK===q.k?' on':''));
     var ck=dv('pi-ck');ck.textContent='\u2713';
     var ic=dv('pi-ic');ic.innerHTML=q.s||'<svg class="pi-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>';
     var lb=mk('span','pi-l');lb.textContent=q.l;
     pi.appendChild(ck);pi.appendChild(ic);pi.appendChild(lb);
-    if(HOT_PRESETS.indexOf(q.k)!==-1){
-      var hot=dv('pi-hot');hot.textContent='🔥';hot.title='인기 프리셋';
-      pi.appendChild(hot);
-    }
     pi.onclick=function(){
       var _tab=getTab(G.wf);_tab.selK=_tab.selK===q.k?null:q.k;
       w.querySelectorAll('.pi').forEach(function(x){
@@ -1788,19 +1783,58 @@ function makePi(q, g){
 
   // 카테고리별 아코디언 렌더링 — 현재 선택된 프리셋이 속한 카테고리는 기본으로 펼쳐둠
   var curSelK = getTab(G.wf).selK;
-  cats.forEach(function(cat){
+  // 비슷한 카테고리들을 상위 그룹으로 묶어서 한눈에 훑어보기 쉽게 함
+  var CAT_GROUPS=[
+    {g:'🎨 스타일',cats:['스타일/기반']},
+    {g:'🏠 주거공간',cats:['주거공간']},
+    {g:'🍽 외식·쇼핑',cats:['외식/F&B','백화점/쇼핑몰','리테일']},
+    {g:'🏨 숙박·헬스케어',cats:['숙박/리조트','의료/뷰티']},
+    {g:'🎓 교육·웨딩',cats:['교육/종교/문화','웨딩']},
+    {g:'⚡ 스포츠·오락',cats:['스포츠/레저','오락/놀거리','스포츠/도장']},
+    {g:'🏪 생활·기타',cats:['생활서비스','기타공간']}
+  ];
+  var CAT_ICON={'스타일/기반':'🎨','주거공간':'🏠','외식/F&B':'🍽','백화점/쇼핑몰':'🛍','리테일':'🏬',
+    '숙박/리조트':'🏨','의료/뷰티':'💆','교육/종교/문화':'🎓','웨딩':'💐','스포츠/레저':'⚽',
+    '오락/놀거리':'🎮','스포츠/도장':'🥋','생활서비스':'🧺','기타공간':'✨'};
+  var catByName={}; cats.forEach(function(c){catByName[c.name]=c;});
+  var renderedNames={};
+
+  CAT_GROUPS.forEach(function(grp){
+    var grpCatsToRender = grp.cats.map(function(n){return catByName[n];}).filter(function(c){
+      return c && c.keys.map(function(k){return byKey[k];}).filter(Boolean).length>0;
+    });
+    if(!grpCatsToRender.length) return;
+    var grpHead=dv('');grpHead.style.cssText='font-size:11px;font-weight:700;color:var(--m2);letter-spacing:.3px;margin:14px 2px 6px;text-transform:uppercase';
+    grpHead.textContent=grp.g;
+    w.appendChild(grpHead);
+    var grid2=dv('');grid2.style.cssText='display:flex;flex-direction:column;gap:5px';
+    grpCatsToRender.forEach(function(cat){
+      renderedNames[cat.name]=true;
+      grid2.appendChild(buildCatAccordion(cat));
+    });
+    w.appendChild(grid2);
+  });
+  // 그룹 매핑에서 빠진 카테고리가 있으면(향후 추가 대비) 맨 아래 "기타" 영역에 빠짐없이 표시
+  var leftoverCats = cats.filter(function(c){return !renderedNames[c.name];});
+  if(leftoverCats.length){
+    var lh=dv('');lh.style.cssText='font-size:11px;font-weight:700;color:var(--m2);letter-spacing:.3px;margin:14px 2px 6px;text-transform:uppercase';
+    lh.textContent='더보기';
+    w.appendChild(lh);
+    leftoverCats.forEach(function(cat){ w.appendChild(buildCatAccordion(cat)); });
+  }
+
+  function buildCatAccordion(cat){
     var items = cat.keys.map(function(k){return byKey[k];}).filter(Boolean);
-    if(!items.length) return;
     var isOpenDefault = curSelK && cat.keys.indexOf(curSelK)!==-1;
-    var catWrap=dv('');catWrap.style.cssText='margin-bottom:6px;border:1px solid var(--bd2);border-radius:8px;overflow:hidden';
+    var catWrap=dv('');catWrap.style.cssText='border:1px solid var(--bd2);border-radius:10px;overflow:hidden;background:var(--card)';
     catWrap.dataset.catkeys=cat.keys.join(',');
-    var hdr=dv('');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--c2);cursor:pointer;font-size:12px;font-weight:700;color:var(--t)';
-    var hdrLeft=dv('');hdrLeft.style.cssText='display:flex;align-items:center;gap:6px';
-    hdrLeft.innerHTML='<span>'+cat.name+'</span><span style="font-size:10px;color:var(--m2);font-weight:400">('+items.length+')</span>';
+    var hdr=dv('');hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--c2);cursor:pointer;font-size:12.5px;font-weight:700;color:var(--t);transition:background .15s';
+    var hdrLeft=dv('');hdrLeft.style.cssText='display:flex;align-items:center;gap:8px';
+    hdrLeft.innerHTML='<span style="font-size:15px">'+(CAT_ICON[cat.name]||'📁')+'</span><span>'+cat.name+'</span><span style="font-size:10px;color:var(--m2);font-weight:400">('+items.length+')</span>';
     var arrow=dv('');arrow.style.cssText='font-size:10px;color:var(--m2);transition:transform .15s';
     arrow.textContent='\u25BC';
     hdr.appendChild(hdrLeft);hdr.appendChild(arrow);
-    var body=dv('pre-grid pre-grid-cat');body.style.cssText='margin:0;max-height:none;padding:8px;background:var(--card)';
+    var body=dv('pre-grid pre-grid-cat');body.style.cssText='margin:0;max-height:none;padding:9px;background:var(--bg2,var(--card))';
     body.style.display = isOpenDefault ? 'grid' : 'none';
     arrow.style.transform = isOpenDefault ? 'rotate(0deg)' : 'rotate(-90deg)';
     items.forEach(function(q){ makePi(q, body); });
@@ -1810,8 +1844,8 @@ function makePi(q, g){
       arrow.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
     };
     catWrap.appendChild(hdr);catWrap.appendChild(body);
-    w.appendChild(catWrap);
-  });
+    return catWrap;
+  }
   p.appendChild(w);
 }
 function mkChips(p,lbl,opts,key){
