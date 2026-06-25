@@ -383,7 +383,6 @@ select option{background:var(--c2)}
       <div><div class="cr-n" id="cr-n">로그인</div><div class="cr-l" id="cr-l">Credits</div></div>
     </div>
     <button class="nbtn" id="btn-faq" onclick="openMd('faq')">FAQ</button>
-    <button class="nbtn" id="btn-world3d" onclick="openMd('world3d')" style="color:var(--ac);border-color:var(--acb)">🌐 3D투어<span style="font-size:9px;background:var(--ac);color:#000;border-radius:4px;padding:1px 4px;margin-left:4px;font-weight:800">NEW</span></button>
     <button class="nbtn" id="btn-bizinfo" onclick="openMd('bizinfo')">사업자정보</button>
     <button class="nbtn" id="btn-account" onclick="openMd('account')">계정</button>
     <button class="nbtn up" id="btn-pricing" onclick="openMd('pricing')">크레딧 충전</button>
@@ -402,6 +401,7 @@ select option{background:var(--c2)}
       <div class="wft" data-w="edit" onclick="selectWF('edit')"><div class="wft-ic">&#9998;</div><div><div class="wft-ko">AI 편집</div><div class="wft-en">AI Edit</div></div></div>
       <div class="wft" data-w="video" onclick="selectWF('video')"><div class="wft-ic">&#9654;</div><div><div class="wft-ko">영상 제작</div><div class="wft-en">Video</div></div></div>
       <div class="wft" data-w="upscale" onclick="selectWF('upscale')"><div class="wft-ic">&#11014;</div><div><div class="wft-ko">업스케일</div><div class="wft-en">Upscale</div></div></div>
+      <div class="wft" data-w="world3d" onclick="selectWF('world3d')"><div class="wft-ic">&#127760;</div><div><div class="wft-ko">3D 월드 <span style="font-size:8px;background:var(--ac);color:#000;border-radius:3px;padding:0 3px;font-weight:800">NEW</span></div><div class="wft-en">3D World</div></div></div>
     </div>
     <div class="sdiv"></div>
     <div class="sb-scroll"><div id="ssets"></div></div>
@@ -1049,10 +1049,17 @@ var G={
       prompt:'', selK:null,
       scale:'2x', engine:'clarity',
       status:'idle'
+    },
+    world3d:{
+      inputImg:null, resultImg:null,
+      refs:[],
+      prompt:'', selK:null,
+      quality:'mini', // mini(빠름) | plus(고품질)
+      status:'idle'
     }
   },
   // ── 히스토리 (Single Source Of Truth) ────────────────────────────
-  HIST:{space:[],render:[],edit:[],video:[],upscale:[]},
+  HIST:{space:[],render:[],edit:[],video:[],upscale:[],world3d:[]},
   QUEUE:[],
   renderQueue:[],
   activeRenders:0,
@@ -1250,12 +1257,13 @@ function selectWF(wf){// 1. home-s 숨김
   renderMain(wf);
   // 7. 사이드바 + 버튼
   var sbtm2=document.querySelector('.sb-btm');
-  if(sbtm2)sbtm2.style.display='';
+  if(sbtm2)sbtm2.style.display=(wf==='world3d')?'none':'';
   renderSB();updBtn();
   // 8. 상태 표시
   var tab=getTab(wf);
   var msgs={space:'현장 사진을 업로드하세요',render:'렌더·스케치를 업로드하세요',
-    edit:'수정할 이미지를 업로드하세요',video:'이미지를 업로드하세요',upscale:'업스케일할 이미지를 업로드하세요'};
+    edit:'수정할 이미지를 업로드하세요',video:'이미지를 업로드하세요',upscale:'업스케일할 이미지를 업로드하세요',
+    world3d:'3D로 변환할 이미지를 업로드하세요'};
   gE('stl').textContent=tab.inputImg?'이미지 로드됨 - 실행하세요':(msgs[wf]||'이미지를 업로드하세요');
 }
 // ══════════════════════════════════════════════════════════════
@@ -1289,6 +1297,11 @@ var WF_INFO={
     icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"/><line x1="12" y1="6" x2="12" y2="18"/></svg>',
     title:'업스케일할 이미지를 <span>클릭해서 업로드</span>',
     sub:'이미지를 4K · 8K 고해상도로 향상합니다'
+  },
+  world3d:{
+    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20 15 15 0 010-20z"/></svg>',
+    title:'3D로 변환할 이미지를 <span>클릭해서 업로드</span>',
+    sub:'렌더링된 이미지를 걸어다닐 수 있는 3D 공간으로 변환합니다 (베타)'
   }
 };
 
@@ -1351,7 +1364,7 @@ function renderSB(){
   var allS=document.querySelectorAll('#ssets');
   if(!allS.length)return;
   if(!G.wf)return;
-  var map={space:sbSpace,render:sbRender,edit:sbEdit,video:sbVideo,upscale:sbUpscale};
+  var map={space:sbSpace,render:sbRender,edit:sbEdit,video:sbVideo,upscale:sbUpscale,world3d:sbWorld3d};
   allS.forEach(function(s){
     s.innerHTML='';
     if(map[G.wf])map[G.wf](s);
@@ -2201,6 +2214,34 @@ function sbUpscale(p){
   notew.innerHTML='실제 출력은 입력 해상도 기준 선택 배율로 업스케일됩니다.';
   p.appendChild(notew);
 }
+function sbWorld3d(p){
+  mkNote(p,'<strong style="color:#6ee7b7">&#127760; 3D 투어 생성 (베타)</strong><br>렌더링된 이미지를 실제로 걸어다닐 수 있는 3D 공간으로 변환합니다. <span style="color:var(--m2)">(World Labs Marble 기반)</span>');
+  mkUB(p,'3D로 변환할 이미지','main');
+
+  var qw=dv('ss');qw.innerHTML='<div class="lbl">품질 Quality</div>';
+  var qr=dv('');qr.style.cssText='display:flex;gap:8px';
+  [['mini','⚡ 빠른 미리보기','30~45초 · 약 250원'],['plus','✨ 고품질','~5분 · 약 1,750원']].forEach(function(pair){
+    var key=pair[0];
+    var on=(G.tabs.world3d.quality||'mini')===key;
+    var btn=mk('button','');
+    btn.style.cssText='flex:1;padding:10px;border-radius:8px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;'+
+      'border:1.5px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c2)')+';color:'+(on?'var(--ac)':'var(--t2)');
+    btn.innerHTML=pair[1]+'<br><span style="font-size:10px;color:var(--m2);font-weight:400">'+pair[2]+'</span>';
+    btn.onclick=function(){ G.tabs.world3d.quality=key; renderSB(); };
+    qr.appendChild(btn);
+  });
+  qw.appendChild(qr);p.appendChild(qw);
+
+  var goWrap=dv('ss');
+  var goBtn=mk('button','');goBtn.id='w3d-go-tab';
+  goBtn.style.cssText='width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit';
+  goBtn.textContent='🌐 3D 투어 생성하기';
+  goBtn.onclick=_w3dTabStart;
+  goWrap.appendChild(goBtn);
+  var statusEl=dv('');statusEl.id='w3d-tab-status';statusEl.style.cssText='margin-top:10px;font-size:12px;color:var(--t2);text-align:center;display:none';
+  goWrap.appendChild(statusEl);
+  p.appendChild(goWrap);
+}
 function buildUpscaleSliders(eng,container){
   if(!container)return;
   if(eng==='topaz'){
@@ -2614,6 +2655,32 @@ function addHistEl(item, scroll, targetHs){
   var beforeSrc=item.orig||item.origThumb||null;  // orig 없으면 thumb, 없으면 null (재방문 시 thumb=800px)
 
   if(item.result){  // beforeSrc 없어도 result 있으면 표시 (AFTER만)
+    // 3D 월드 결과는 이미지/영상이 아니라 외부 링크이므로 전용 카드로 단순하게 표시
+    if(item.wf==='world3d'){
+      var w3card=dv('cmpw');w3card.id='cw-'+item.id;
+      w3card.style.cssText='padding:18px;text-align:center';
+      if(beforeSrc){
+        var w3thumb=mk('img','');
+        w3thumb.setAttribute('style','width:100%;max-height:280px;object-fit:contain;border-radius:8px;margin-bottom:14px;background:#1a1a22');
+        w3thumb.src=beforeSrc;
+        w3card.appendChild(w3thumb);
+      }
+      var w3title=dv('');w3title.style.cssText='font-size:13px;font-weight:700;color:var(--ac);margin-bottom:10px';
+      w3title.textContent='🌐 3D 투어가 완성됐어요!';
+      w3card.appendChild(w3title);
+      var w3link=document.createElement('a');
+      w3link.href=item.result;w3link.target='_blank';w3link.rel='noopener';
+      w3link.style.cssText='display:inline-block;padding:12px 28px;border-radius:10px;background:var(--ac);color:#000;font-weight:800;font-size:13px;text-decoration:none';
+      w3link.textContent='↗ 3D 투어 새 탭에서 열기';
+      w3card.appendChild(w3link);
+      var bfWrap0=dv('');bfWrap0.style.cssText='position:relative;display:flex;align-items:stretch;border-radius:7px;overflow:hidden';
+      var cwWrap0=dv('');cwWrap0.style.cssText='flex:1;position:relative;overflow:hidden;min-width:0';
+      cwWrap0.appendChild(w3card);bfWrap0.appendChild(cwWrap0);
+      w.appendChild(bfWrap0);
+      hs.insertBefore(w, hs.firstChild);
+      if(scroll)hs.scrollTop=0;
+      return;
+    }
     var isVideo = item.wf==='video' || item.result.includes('.mp4') || item.result.includes('.webm');
     var IMG_STYLE='display:block;width:100%;height:auto;min-height:300px;max-height:calc(100vh - 180px);object-fit:contain;background:#1a1a22';
     var VID_STYLE='display:block;width:100%;max-height:calc(100vh - 200px);background:#1a1a22';
@@ -2805,6 +2872,15 @@ function addHistEl(item, scroll, targetHs){
     se.addEventListener('click',function(e){e.stopPropagation();sendEdit(item);},false);
     se.addEventListener('mousedown',function(e){e.stopPropagation();},false);
     sebar.appendChild(se);
+
+    // 3D 월드 (이미지 결과에만 표시 — 영상/3D월드 자체 결과는 제외)
+    if(item.wf!=='video' && item.wf!=='world3d'){
+      var s3d=mk('button','se-btn');s3d.type='button';s3d.innerHTML='&#127760; 3D월드';s3d.title='3D 월드 탭으로';
+      s3d.style.cssText='background:rgba(59,130,246,.12);border-color:rgba(59,130,246,.4);color:#93c5fd;padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
+      s3d.addEventListener('click',function(e){e.stopPropagation();sendToWf('world3d',item);},false);
+      s3d.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      sebar.appendChild(s3d);
+    }
 
     // 현장사진 디자인 (렌더 실사화 탭 결과에만 표시 — 실사화된 이미지를 현장사진 디자인으로 다시 디자인할 때)
     if(item.wf==='render'){
@@ -3426,6 +3502,86 @@ function _w3dPoll(operationId){
   });
 }
 
+// ── 3D 월드 탭(정식 탭 버전) — 모달 대신 G.HIST 기반으로 카드에 표시 ──────
+function _w3dTabStart(){
+  var tab=getTab('world3d');
+  if(!tab.inputImg){ alert('먼저 이미지를 업로드해주세요.'); return; }
+  var goBtn=gE('w3d-go-tab'), statusEl=gE('w3d-tab-status');
+  if(goBtn){goBtn.disabled=true;goBtn.textContent='업로드 중...';}
+  if(statusEl){statusEl.style.display='block';statusEl.textContent='이미지 업로드 중...';}
+
+  var loadingId='w3d-loading-'+Date.now();
+  G.HIST.world3d.unshift({id:loadingId, loading:true, wf:'world3d'});
+  renderMain('world3d');
+
+  var quality=tab.quality||'mini';
+  var srcImg=tab.inputImg;
+
+  _w3dEnsurePublicUrl(srcImg).then(function(publicUrl){
+    if(statusEl) statusEl.textContent='3D 월드 생성 요청 중...';
+    return fetch(SUPA_URL+'/functions/v1/world-generate',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        action:'submit', imageUrl:publicUrl,
+        model: quality==='plus' ? 'Marble 0.1-plus' : 'Marble 0.1-mini',
+        displayName:'CloverAI 3D Tour'
+      })
+    });
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ throw new Error(d.error); }
+    if(statusEl) statusEl.textContent=(quality==='plus' ? '고품질 생성 중 (최대 5분 정도)...' : '빠른 생성 중 (30~45초)...');
+    _w3dTabPoll(d.operation_id, loadingId, srcImg);
+  }).catch(function(e){
+    console.warn('[3D월드] 실패:', e);
+    G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
+    renderMain('world3d');
+    if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);}
+    if(goBtn){goBtn.disabled=false;goBtn.textContent='🌐 3D 투어 생성하기';}
+  });
+}
+
+function _w3dTabPoll(operationId, loadingId, srcImg){
+  var statusEl=gE('w3d-tab-status'), goBtn=gE('w3d-go-tab');
+  fetch(SUPA_URL+'/functions/v1/world-generate',{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({action:'status', operationId:operationId})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ throw new Error(d.error); }
+    if(d.done){
+      if(d.error){ throw new Error((d.error&&d.error.message)||'생성 실패'); }
+      var world=d.response;
+      var url=world&&(world.world_marble_url||(world.world_id?('https://marble.worldlabs.ai/world/'+world.world_id):null));
+      if(!url){ throw new Error('결과 URL을 찾지 못했습니다.'); }
+      G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
+      var newItem={id:Date.now(),orig:srcImg,result:url,origThumb:null,tags:['3D월드'],ai:'',cx:50,fav:false,wf:'world3d'};
+      G.HIST.world3d.unshift(newItem);
+      saveHistToStorage();
+      renderMain('world3d');
+      if(statusEl){statusEl.style.display='none';}
+      if(goBtn){goBtn.disabled=false;goBtn.textContent='🌐 3D 투어 생성하기';}
+      // 클라우드 갤러리에도 비동기로 저장 (실패해도 무시)
+      if(_supa&&_supaUser){
+        try{
+          _supa.from('gallery').insert({
+            user_id:_supaUser.id, wf:'world3d', orig_url:null, public_url:url,
+            engine:'world3d', resolution:'', style_key:'world3d'
+          }).then(function(){}).catch(function(){});
+        }catch(e){}
+      }
+    } else {
+      if(statusEl) statusEl.textContent='생성 중... (조금만 기다려주세요)';
+      setTimeout(function(){ _w3dTabPoll(operationId, loadingId, srcImg); }, 5000);
+    }
+  }).catch(function(e){
+    console.warn('[3D월드] 상태확인 실패:', e);
+    G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
+    renderMain('world3d');
+    if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);}
+    if(goBtn){goBtn.disabled=false;goBtn.textContent='🌐 3D 투어 생성하기';}
+  });
+}
 function _resumeActiveJobs(){
   var jobs=[];
   try{jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');}catch(e){}
