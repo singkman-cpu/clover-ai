@@ -1010,7 +1010,7 @@ var EU=[
   {k:'magnific_precision',n:'Magnific Precision v2',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'}
 ];
 var G_UPSCALE_ENG='topaz';
-var W3D_COST=200; // 3D 투어 1회 생성 비용 (World Labs 실제 원가 약 1,650원 + 마진 반영)
+var W3D_COST=250; // 3D 투어 1회 생성 비용 (World Labs 실제 원가 약 1,560cr=약 1,900~2,000원 — 대용량 충전팩 구매자도 적자 안 나도록 250cr로 조정)
 var EL=[
   {k:'nano2',n:'Nano Banana 2',t:'Precise,Quality,Fast',d:'최고 성능',lg:'g'},
   {k:'nano_pro',n:'Nano Banana Pro',t:'Quality',d:'구조·디테일 최고 정밀도 (1K 30cr/2K 45cr)',lg:'g'},
@@ -2732,14 +2732,20 @@ function addHistEl(item, scroll, targetHs){
       w3frameWrap.id='w3d-canvas-'+item.id;
       w3frameWrap.style.cssText='position:relative;width:100%;padding-top:62%;border-radius:10px;overflow:hidden;background:#0a0a0a';
       w3card.appendChild(w3frameWrap);
-      // 실제 캔버스는 컨테이너에 높이가 잡힌 후 한 프레임 뒤에 초기화 (clientWidth/Height가 0이면 렌더러 크기가 깨짐)
+      // 실제 캔버스는 컨테이너에 높이가 잡힌 후 초기화 (clientWidth/Height가 0이면 렌더러 크기가 깨짐)
+      // 주의: 이전에는 JS로 높이를 고정 px로 박아넣었는데, 모바일에서 레이아웃이 아직
+      // 자리잡기 전(offsetWidth=0)에 실행되면 0px로 영구히 고정돼서 VR이 안 보이는 버그가 있었음.
+      // → padding-top 비율(CSS)은 그대로 유지하고, 폭이 0이면 재시도하도록 변경.
       if(item.spzUrl){
-        setTimeout(function(){
+        var _w3dTryInit=function(retries){
+          retries = retries==null ? 10 : retries;
+          var iw=w3frameWrap.offsetWidth;
+          if(iw<=0 && retries>0){ setTimeout(function(){ _w3dTryInit(retries-1); }, 80); return; }
           var inner=dv('');inner.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%';
           w3frameWrap.appendChild(inner);
-          w3frameWrap.style.paddingTop='0';w3frameWrap.style.height=(w3frameWrap.offsetWidth*0.62)+'px';
           if(window._w3dInitViewer) window._w3dInitViewer(inner, item.spzUrl, item.metricScale);
-        },50);
+        };
+        setTimeout(function(){ _w3dTryInit(10); },50);
       } else {
         w3frameWrap.innerHTML='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;text-align:center;padding:20px">미리보기를 지원하지 않는 이전 결과입니다.<br>아래 링크로 확인해주세요.</div>';
       }
@@ -3623,6 +3629,13 @@ function _w3dTabStart(){
     // 요청이 정상적으로 World Labs에 접수된 시점에 크레딧 차감 (실패 시 차감 안 됨)
     deductCredits(W3D_COST);
     _chargedAlready=true;
+    // 크레딧이 차감된 뒤이므로, 페이지를 새로고침/이탈해도 결과를 잃어버리지 않도록
+    // operation_id를 localStorage에 남겨둔다 (완료되면 _w3dTabPoll이 정상 처리 후 자동 제거).
+    try{
+      localStorage.setItem('clover_w3d_pending', JSON.stringify({
+        operationId: d.operation_id, loadingId: loadingId, srcImg: srcImg, startTime: Date.now()
+      }));
+    }catch(e){}
     if(statusEl) statusEl.textContent='생성 중입니다 (보통 1~3분, 서버 상황에 따라 더 걸릴 수 있어요)...';
     _w3dTabPoll(d.operation_id, loadingId, srcImg, 0, Date.now());
   }).catch(function(e){
@@ -3680,6 +3693,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       var newItem={id:Date.now(),orig:thumbUrl||srcImg,result:url,spzUrl:spzUrl,metricScale:metricScale,origThumb:null,tags:['VR 투어'],ai:'',cx:50,fav:false,wf:'world3d'};
       G.HIST.world3d.unshift(newItem);
       saveHistToStorage();
+      try{ localStorage.removeItem('clover_w3d_pending'); }catch(e){}
       renderMain('world3d');
       if(statusEl){statusEl.style.display='none';}
       if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
@@ -3694,6 +3708,21 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       }
     } else {
       var elapsedMin = Math.floor((Date.now()-startTime)/60000);
+      if(elapsedMin >= 15){
+        // 15분 넘으면 더 이상 자동으로 계속 묻지 않고, 사용자가 직접 선택하게 한다.
+        // (크레딧은 이미 차감됐고 World Labs 쪽에서는 계속 처리 중일 수 있으므로,
+        //  완전히 포기시키지 말고 "계속 기다리기" 옵션을 남겨둔다.)
+        if(statusEl){
+          statusEl.innerHTML = '⏳ '+elapsedMin+'분째 생성 중입니다. World Labs 서버가 많이 혼잡한 것 같아요.'+
+            '<br>크레딧은 이미 차감되었고 결과가 나오면 자동으로 저장되니, 계속 기다리시거나 나중에 다시 확인하셔도 됩니다.'+
+            '<br><button id="w3d-keep-waiting" style="margin-top:6px;padding:6px 14px;background:var(--ac);color:#000;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">5분 더 기다리기</button>';
+          var kw=gE('w3d-keep-waiting');
+          if(kw) kw.onclick=function(){
+            setTimeout(function(){ _w3dTabPoll(operationId, loadingId, srcImg, 0, Date.now()); }, 5000);
+          };
+        }
+        return; // 자동 재시도 중단 — 사용자가 버튼을 눌러야 다시 확인
+      }
       if(statusEl){
         if(elapsedMin < 2){
           statusEl.textContent='생성 중... ('+(elapsedMin)+'분 경과)';
@@ -3713,6 +3742,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       return;
     }
     G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
+    try{ localStorage.removeItem('clover_w3d_pending'); }catch(e2){}
     renderMain('world3d');
     if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);}
     if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
@@ -5912,7 +5942,7 @@ function openPanel(id){
   searchInp.placeholder='🔍 태그·메모로 검색...';
   searchInp.style.cssText='flex:1;min-width:160px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
   searchBar.appendChild(searchInp);
-  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['upscale','업스케일']];
+  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['upscale','업스케일'],['world3d','VR 투어']];
   var wfSel=document.createElement('select');
   wfSel.id='gallery-wf-filter';
   wfSel.style.cssText='padding:7px 10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
@@ -6543,6 +6573,23 @@ document.addEventListener('DOMContentLoaded',function(){try{
   renderSB();
   updBtn();
   loadHistFromStorage();
+
+  // 새로고침/재방문 전에 진행 중이던 VR 투어 작업이 있으면 복구 (크레딧은 이미 차감된 상태이므로 잃어버리지 않도록)
+  try{
+    var _pendingW3D = JSON.parse(localStorage.getItem('clover_w3d_pending')||'null');
+    if(_pendingW3D && _pendingW3D.operationId){
+      var _pendingAgeMs = Date.now() - (_pendingW3D.startTime||0);
+      if(_pendingAgeMs < 2*60*60*1000){ // 2시간 이내 작업만 복구 시도
+        var _resumeId = Date.now();
+        G.HIST.world3d.unshift({id:_resumeId, loading:true, wf:'world3d'});
+        setTimeout(function(){
+          _w3dTabPoll(_pendingW3D.operationId, _resumeId, _pendingW3D.srcImg, 0, _pendingW3D.startTime);
+        }, 1000);
+      } else {
+        localStorage.removeItem('clover_w3d_pending'); // 너무 오래된 작업은 정리
+      }
+    }
+  }catch(e){}
 
   // ── Supabase 초기화 ───────────────────────────────────────────
   initSupabase();
@@ -7626,7 +7673,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
     var w = containerEl.clientWidth || 480, h = containerEl.clientHeight || 300;
     var renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(w, h);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
     containerEl.innerHTML = '';
     containerEl.style.position = containerEl.style.position || 'relative';
     containerEl.appendChild(renderer.domElement);
@@ -7688,19 +7735,56 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
         pitch = clampPitch(pitch - dy*lookSpeed*2.2);
         applyRotation();
       });
-      window.addEventListener('keydown', function(e){ keys[e.key.toLowerCase()]=true; });
+      window.addEventListener('keydown', function(e){
+        keys[e.key.toLowerCase()]=true;
+        var tag=(document.activeElement&&document.activeElement.tagName)||'';
+        if(tag==='INPUT'||tag==='TEXTAREA') return;
+        // 스페이스바/방향키로 VR을 조작하는 동안 배경 페이지가 스크롤되는 것 방지
+        if([' ','arrowup','arrowdown','arrowleft','arrowright'].indexOf(e.key.toLowerCase())>=0) e.preventDefault();
+      });
       window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()]=false; });
+
+      // PC용 조작법 안내 (처음 몇 초만 보여줌)
+      var pcHint=document.createElement('div');
+      pcHint.style.cssText='position:absolute;top:12px;left:12px;color:#fff;font-size:11px;line-height:1.6;background:rgba(0,0,0,.6);padding:10px 14px;border-radius:10px;pointer-events:none;z-index:3;opacity:1;transition:opacity .5s;white-space:nowrap';
+      pcHint.innerHTML='🖱 드래그: 시점 회전 · ⌨ W/A/S/D 또는 방향키: 이동<br>⌨ Space: 위로 · C: 아래로 · Shift: 빠르게';
+      containerEl.appendChild(pcHint);
+      setTimeout(function(){ if(pcHint) pcHint.style.opacity='0'; }, 5000);
     }
 
     // ── 모바일: 화면 드래그로 시점, 좌하단 가상 조이스틱으로 이동 ──
     var joyVec={x:0,y:0};
+    var _w3dUpDown=0;
     var hintEl, joyBase, joyStick;
     if(isTouch){
       hintEl=document.createElement('div');
-      hintEl.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:11px;background:rgba(0,0,0,.55);padding:8px 14px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:3;opacity:1;transition:opacity .4s';
-      hintEl.textContent='왼쪽 조이스틱: 이동 · 화면 드래그: 시점';
+      hintEl.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:11px;background:rgba(0,0,0,.55);padding:8px 14px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:3;opacity:1;transition:opacity .4s;text-align:center';
+      hintEl.innerHTML='왼쪽 조이스틱: 이동 · 화면 드래그: 시점<br>오른쪽 ▲▼ 버튼: 위/아래로 이동';
       containerEl.appendChild(hintEl);
-      setTimeout(function(){ if(hintEl) hintEl.style.opacity='0'; }, 3200);
+      setTimeout(function(){ if(hintEl) hintEl.style.opacity='0'; }, 4200);
+
+      // 우측 하단 위/아래 이동 버튼 (모바일은 키보드가 없어 수직 이동 수단이 따로 필요)
+      var vBase=document.createElement('div');
+      vBase.style.cssText='position:absolute;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:3';
+      var upBtn=document.createElement('button');
+      upBtn.textContent='▲';
+      upBtn.style.cssText='width:44px;height:44px;border-radius:50%;border:1.5px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:16px;touch-action:none';
+      var downBtn=document.createElement('button');
+      downBtn.textContent='▼';
+      downBtn.style.cssText=upBtn.style.cssText;
+      vBase.appendChild(upBtn); vBase.appendChild(downBtn);
+      containerEl.appendChild(vBase);
+      function bindHold(btn,val){
+        var on=function(e){ e.preventDefault(); e.stopPropagation(); _w3dUpDown=val; };
+        var off=function(e){ if(e)e.stopPropagation(); _w3dUpDown=0; };
+        btn.addEventListener('touchstart',on,{passive:false});
+        btn.addEventListener('touchend',off,{passive:true});
+        btn.addEventListener('touchcancel',off,{passive:true});
+        btn.addEventListener('mousedown',on);
+        btn.addEventListener('mouseup',off);
+        btn.addEventListener('mouseleave',off);
+      }
+      bindHold(upBtn,1); bindHold(downBtn,-1);
 
       joyBase=document.createElement('div');
       joyBase.style.cssText='position:absolute;left:18px;bottom:18px;width:84px;height:84px;border-radius:50%;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.35);z-index:3;touch-action:none';
@@ -7788,17 +7872,22 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
       // 카메라가 보는 수평 방향(앞/옆)만 추출해서 걷는 느낌 유지 (위아래로 안 기울어짐)
       camera.getWorldDirection(forward);
       forward.y = 0; forward.normalize();
-      right.set(forward.z, 0, -forward.x);
+      // 카메라가 보는 방향(forward) 기준 진짜 '오른쪽' 벡터 = cross(forward, up).
+      // 기존 코드는 이 값의 반대(왼쪽 벡터)를 구하고 있어서 A/D, 좌우 조이스틱이 뒤바뀌어 있었음.
+      right.set(-forward.z, 0, forward.x);
 
       moveDir.set(0,0,0);
       if(isTouch){
         moveDir.addScaledVector(forward, -joyVec.y);
         moveDir.addScaledVector(right, joyVec.x);
+        if(_w3dUpDown) moveDir.y += _w3dUpDown;
       } else {
         if(keys['w']||keys['arrowup'])    moveDir.addScaledVector(forward, 1);
         if(keys['s']||keys['arrowdown'])  moveDir.addScaledVector(forward, -1);
         if(keys['a']||keys['arrowleft'])  moveDir.addScaledVector(right, -1);
         if(keys['d']||keys['arrowright']) moveDir.addScaledVector(right, 1);
+        if(keys[' ']) moveDir.y += 1;       // Space: 위로
+        if(keys['c']||keys['control']) moveDir.y -= 1; // C: 아래로
       }
       if(moveDir.lengthSq()>0){
         moveDir.normalize();
