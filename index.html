@@ -2730,7 +2730,7 @@ function addHistEl(item, scroll, targetHs){
           var inner=dv('');inner.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%';
           w3frameWrap.appendChild(inner);
           w3frameWrap.style.paddingTop='0';w3frameWrap.style.height=(w3frameWrap.offsetWidth*0.62)+'px';
-          if(window._w3dInitViewer) window._w3dInitViewer(inner, item.spzUrl);
+          if(window._w3dInitViewer) window._w3dInitViewer(inner, item.spzUrl, item.metricScale);
         },50);
       } else {
         w3frameWrap.innerHTML='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;text-align:center;padding:20px">미리보기를 지원하지 않는 이전 결과입니다.<br>아래 링크로 확인해주세요.</div>';
@@ -3605,7 +3605,7 @@ function _w3dTabStart(){
       headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
       body:JSON.stringify({
         action:'submit', imageUrl:publicUrl,
-        model:'marble-1.0-draft', // marble-1.1보다 훨씬 빠른 드래프트 모델 (속도 우선)
+        model:'marble-1.1', // 화질 최우선 요청 — draft보다 느리지만 훨씬 고품질
         isPano: !!tab.isPano,
         displayName:'CloverAI 3D Tour'
       })
@@ -3657,20 +3657,29 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
         }
         if(!spzUrl && splatAsset && splatAsset.spz_url) spzUrl=splatAsset.spz_url;
       }catch(e){}
-      console.log('[VR 투어] 완료! world 객체:', world, '| url:', url, '| spzUrl:', spzUrl);
+      // 실제 월드 크기 스케일 보정용 메타데이터 (없으면 1로 기본값)
+      var metricScale=1;
+      try{
+        var sm=world&&world.semantics_metadata;
+        if(sm&&sm.metric_scale_factor) metricScale=sm.metric_scale_factor;
+      }catch(e){}
+      // 갤러리/이력 카드에 보일 진짜 미리보기 이미지 (marble 페이지 링크는 이미지가 아니라서 그대로 쓰면 검게 나옴)
+      var thumbUrl=null;
+      try{ thumbUrl=world&&world.thumbnail_url||null; }catch(e){}
+      console.log('[VR 투어] 완료! world 객체:', world, '| url:', url, '| spzUrl:', spzUrl, '| metricScale:', metricScale);
       if(!url && !spzUrl){ throw new Error('결과 데이터를 찾지 못했습니다. (콘솔의 world 객체를 확인해주세요)'); }
       G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
-      var newItem={id:Date.now(),orig:srcImg,result:url,spzUrl:spzUrl,origThumb:null,tags:['VR 투어'],ai:'',cx:50,fav:false,wf:'world3d'};
+      var newItem={id:Date.now(),orig:thumbUrl||srcImg,result:url,spzUrl:spzUrl,metricScale:metricScale,origThumb:null,tags:['VR 투어'],ai:'',cx:50,fav:false,wf:'world3d'};
       G.HIST.world3d.unshift(newItem);
       saveHistToStorage();
       renderMain('world3d');
       if(statusEl){statusEl.style.display='none';}
       if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
-      // 클라우드 갤러리에도 비동기로 저장 (실패해도 무시)
+      // 클라우드 갤러리에도 비동기로 저장 (실패해도 무시) — 썸네일은 실제 미리보기 이미지로
       if(_supa&&_supaUser){
         try{
           _supa.from('gallery').insert({
-            user_id:_supaUser.id, wf:'world3d', orig_url:null, public_url:url,
+            user_id:_supaUser.id, wf:'world3d', orig_url:null, public_url:thumbUrl||url,
             engine:'world3d', resolution:'', style_key:'world3d'
           }).then(function(){}).catch(function(){});
         }catch(e){}
@@ -7562,8 +7571,9 @@ import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 
 window._w3dViewers = window._w3dViewers || {};
 
-window._w3dInitViewer = function(containerEl, spzUrl){
+window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
   if(!containerEl || !spzUrl) return;
+  metricScale = metricScale && metricScale > 0 ? metricScale : 1;
   try{
     var w = containerEl.clientWidth || 480, h = containerEl.clientHeight || 300;
     var renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -7577,7 +7587,9 @@ window._w3dInitViewer = function(containerEl, spzUrl){
 
     var scene = new THREE.Scene();
     var camera = new THREE.PerspectiveCamera(70, w / h, 0.01, 1000);
-    camera.position.set(0, 0, 3);
+    // 카메라 시작 위치는 스플랫의 원점(촬영 시점)에 그대로 둔다 — 멀리 떨어뜨려두면
+    // 실제 콘텐츠가 없는 빈 공간을 보게 되어 화면이 어둡게/까맣게 나오는 원인이 된다
+    camera.position.set(0, 0, 0);
 
     var spark = new SparkRenderer({ renderer });
     scene.add(spark);
@@ -7592,7 +7604,7 @@ window._w3dInitViewer = function(containerEl, spzUrl){
     var isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
     var yaw = 0, pitch = 0;
     var keys = {};
-    var moveSpeed = 1.6; // 초당 이동 속도(월드 단위)
+    var moveSpeed = 1.6 * metricScale; // 초당 이동 속도(월드 실제 크기에 비례해서 보정)
     var lookSpeed = 0.0028;
 
     function clampPitch(p){ return Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, p)); }
