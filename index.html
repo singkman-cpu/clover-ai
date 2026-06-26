@@ -2587,6 +2587,15 @@ function addHist(orig,result,tags,ai,preview){
   if(!preview)saveHistToStorage();
 }
 function saveHistToStorage(){try{
+    localStorage.setItem('clover_eng',    G.eng||'nano2');
+    localStorage.setItem('clover_vidEng', G.vidEng||'kling3');
+    // 로그인 사용자는 새로고침/재방문 시 loadCloudGallery()가 클라우드에서 다시 채워주므로
+    // localStorage에 똑같은 데이터(특히 data: URL 큰 이미지들)를 무겁게 또 저장할 필요가 없다.
+    // → 이게 누적되면서 "Setting the value of 'clover_hist' exceeded the quota" 에러의 주범이었음.
+    if(_supa && _supaUser){
+      try{ localStorage.removeItem('clover_hist'); }catch(e0){}
+      return;
+    }
     var save={};
     Object.keys(G.HIST).forEach(function(wf){
       var items=(G.HIST[wf]||[]).filter(function(x){
@@ -2633,12 +2642,10 @@ function saveHistToStorage(){try{
       json=JSON.stringify(save);
     }
     localStorage.setItem('clover_hist', json);
-    localStorage.setItem('clover_eng',    G.eng||'nano2');
-    localStorage.setItem('clover_vidEng', G.vidEng||'kling3');
     console.log('[Storage] 저장 완료 ('+Math.round(json.length/1024)+'KB)');
   }catch(e){
     console.warn('[Storage] 저장 실패:', e.message);
-    // 썸네일 제거 후 재시도
+    // 1차 폴백: 썸네일/data URL 다 빼고 http 링크만, 최대 10개
     try{
       var save2={};
       Object.keys(G.HIST).forEach(function(wf){
@@ -2659,8 +2666,30 @@ function saveHistToStorage(){try{
       localStorage.setItem('clover_hist', JSON.stringify(save2));
       console.log('[Storage] 썸네일 제거 후 재저장 완료');
     }catch(e2){
-      console.warn('[Storage] 재저장도 실패, 히스토리 초기화:', e2.message);
-      try{localStorage.removeItem('clover_hist');}catch(e3){}
+      console.warn('[Storage] 1차 폴백도 실패, 2차(워크플로별 최대 3개)로 재시도:', e2.message);
+      // 2차 폴백: 그래도 안 되면 워크플로별로 최대 3개까지만, 그래도 안 되면 완전히 비움
+      // (로그인 안 한 사용자만 이 경로를 타며, 이전엔 여기서 바로 전체 삭제했는데
+      //  그러면 새로고침할 때마다 작업 내역이 통째로 사라지는 문제가 있었음)
+      try{
+        var save3={};
+        Object.keys(G.HIST).forEach(function(wf){
+          var items=(G.HIST[wf]||[]).filter(function(x){
+            return !x.preview && !x.loading && x.result && x.result.startsWith('http');
+          }).slice(0,3);
+          if(items.length>0){
+            save3[wf]=items.map(function(x){
+              return {id:x.id,orig:null,origThumb:null,result:x.result,
+                tags:x.tags,wf:x.wf,preview:false,fav:x.fav,
+                spzUrl:x.spzUrl||null,metricScale:x.metricScale||null};
+            });
+          }
+        });
+        localStorage.setItem('clover_hist', JSON.stringify(save3));
+        console.log('[Storage] 2차 폴백(최대 3개)으로 재저장 완료');
+      }catch(e3){
+        console.warn('[Storage] 모든 저장 시도 실패, 로컬 히스토리 캐시만 비움(클라우드 로그인 시 영향 없음):', e3.message);
+        try{localStorage.removeItem('clover_hist');}catch(e4){}
+      }
     }
   }
 }
