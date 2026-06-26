@@ -1074,19 +1074,19 @@ var G={
     space:{
       inputImg:null, resultImg:null,
       refs:Array(6).fill(null),
-      prompt:'', selK:null, resolution:'1K',
+      prompt:'', selK:null, resolution:'2K',
       status:'idle'
     },
     render:{
       inputImg:null, resultImg:null,
       refs:Array(6).fill(null),
-      prompt:'', selK:null, resolution:'1K',
+      prompt:'', selK:null, resolution:'2K',
       status:'idle'
     },
     edit:{
       inputImg:null, resultImg:null,
       refs:[],
-      prompt:'', selK:null, resolution:'1K',
+      prompt:'', selK:null, resolution:'2K',
       maskData:null,
       status:'idle'
     },
@@ -1395,12 +1395,14 @@ function renderMain(wf){
     if(items.length>0){
       ub.classList.remove('active');
       hs.style.display='flex';
+      window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
       hs.innerHTML='';
       var sorted=items.slice().sort(function(a,b){return a.id-b.id;}); // addHistEl이 항상 맨 위에 꽂으므로, 오래된 것부터 순서대로 넣어야 최신이 맨 위에 위치
       sorted.forEach(function(item){ addHistEl(item,false,hs); });
       hs.scrollTop=0;
     } else {
       hs.style.display='none';
+      window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
       hs.innerHTML='';
       var info=WF_INFO[wf]||WF_INFO.space;
       var icon=document.querySelectorAll('#cub-icon')[hsIdx]||document.getElementById('cub-icon');
@@ -2589,7 +2591,9 @@ function saveHistToStorage(){try{
             vidEng:x.vidEng||null,
             upscaleEng:x.upscaleEng||null,
             gallery_id:x.gallery_id||null,
-            cloud_url:x.cloud_url||null
+            cloud_url:x.cloud_url||null,
+            spzUrl:x.spzUrl||null,
+            metricScale:x.metricScale||null
           };
         });
       }
@@ -2623,7 +2627,8 @@ function saveHistToStorage(){try{
             return {id:x.id,orig:o2,origThumb:null,result:x.result,
               tags:x.tags,ai:x.ai,cx:x.cx||50,fav:x.fav,wf:x.wf,preview:false,
               vidEng:x.vidEng||null,upscaleEng:x.upscaleEng||null,
-              gallery_id:x.gallery_id||null,cloud_url:x.cloud_url||null};
+              gallery_id:x.gallery_id||null,cloud_url:x.cloud_url||null,
+              spzUrl:x.spzUrl||null,metricScale:x.metricScale||null};
           });
         }
       });
@@ -2650,7 +2655,7 @@ function loadHistFromStorage(){
         var resOk = !x.result || x.result.startsWith('http');
         // orig는 저장 안 함 (data URL 크기 문제) → null 처리
         if(resOk){
-          x.orig=null;
+          if(!(x.orig && x.orig.startsWith('http'))) x.orig=null;
           // vidEng 복원: 저장 당시 없었으면 tags에서 역매칭
           if(x.wf==='video' && !x.vidEng){
             var engNames={
@@ -2705,7 +2710,10 @@ function addHistEl(item, scroll, targetHs){
     if(!resOk){console.warn('[addHistEl] 유효하지 않은 result URL, 생략:',item.id);return;}
   }
 
-  var w=dv('h-item');w.id='hi-'+item.id;
+  var w=dv('h-item');
+  var prevEl=document.getElementById('hi-'+item.id);
+  if(prevEl){ window._disposeW3DViewersIn&&window._disposeW3DViewersIn(prevEl); prevEl.remove(); }
+  w.id='hi-'+item.id;
 
   // 태그는 하단 ptags에만 표시 (우상단 중복 제거)
 
@@ -3876,7 +3884,7 @@ function resizeForUpload(dataUrl, cb, resolution){
     cv.width=Math.round(w*ratio);
     cv.height=Math.round(h*ratio);
     cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
-    cb(cv.toDataURL('image/jpeg',0.90));
+    cb(cv.toDataURL('image/jpeg',0.96));
   };
   img.onerror=function(){cb(dataUrl);};
   img.src=dataUrl;
@@ -4827,7 +4835,7 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
         var ctx=canvas.getContext('2d');
         ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
         ctx.drawImage(img2, 0, 0, targetW, targetH);
-        var dataUrl=canvas.toDataURL('image/jpeg', 0.92);
+        var dataUrl=canvas.toDataURL('image/jpeg', 0.97);
         console.log('[원본 크기 맞춤]', img2.naturalWidth+'x'+img2.naturalHeight, '→', targetW+'x'+targetH);
         cb(dataUrl);
       }catch(e){
@@ -5881,6 +5889,7 @@ function openPanel(id){
   if(cub)cub.classList.remove('active');
   if(!hs)return;
   hs.style.display='flex';
+  window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
   hs.innerHTML='';
   var all=[];
   Object.keys(G.HIST).forEach(function(wf){
@@ -5959,7 +5968,10 @@ function renderGalleryGrid(items){
   grid.id='gallery-grid-wrap';
   grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;width:100%;padding:8px';
   items.forEach(function(item){
-    var src=item.result||item.orig||item.origThumb;
+    var isW3D = item.wf==='world3d';
+    // VR 투어 결과(item.result)는 이미지가 아니라 marble.worldlabs.ai 링크라서
+    // 그대로 <img>에 넣으면 깨진 이미지로 보인다 → 항상 썸네일(item.orig)을 우선 사용
+    var src=isW3D ? (item.orig||item.origThumb) : (item.result||item.orig||item.origThumb);
     if(!src)return;
     var card=document.createElement('div');
     card.style.cssText='position:relative;border-radius:10px;overflow:hidden;background:var(--card);cursor:pointer;aspect-ratio:4/3;border:1px solid var(--bd);box-shadow:0 2px 8px rgba(0,0,0,.3)';
@@ -5980,6 +5992,13 @@ function renderGalleryGrid(items){
       tag.style.cssText='position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.7));padding:20px 6px 5px;font-size:9px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       tag.textContent=item.tags.join(' · ');
       card.appendChild(tag);
+    }
+    // VR 투어 배지
+    if(isW3D){
+      var vrBadge=document.createElement('div');
+      vrBadge.style.cssText='position:absolute;top:4px;left:4px;background:var(--ac);color:#000;font-size:9px;font-weight:800;border-radius:5px;padding:2px 6px;z-index:6';
+      vrBadge.textContent='🌐 VR';
+      card.appendChild(vrBadge);
     }
     // 즐겨찾기 표시
     if(item.fav){
@@ -6026,7 +6045,7 @@ function renderGalleryGrid(items){
     (function(it){
       dlBtn2.onclick=function(e){
         e.stopPropagation();
-        var dlSrc=it.result||it.cloud_url||it.orig||'';
+        var dlSrc=it.wf==='world3d' ? (it.orig||'') : (it.result||it.cloud_url||it.orig||'');
         if(!dlSrc)return;
         var isVid=dlSrc.includes('.mp4')||dlSrc.includes('.webm')||it.wf==='video';
         var fname='clover-ai-'+Date.now()+(isVid?'.mp4':'.jpg');
@@ -6039,6 +6058,13 @@ function renderGalleryGrid(items){
     (function(it){
       card.onclick=function(e){
         if(e.target===favBtn||e.target===dlBtn2) return;
+        // VR 투어 항목은 이미지 팝업이 아니라 VR 투어 탭으로 이동해서 실제 3D 뷰어로 보여준다
+        if(it.wf==='world3d'){
+          var ovx=document.getElementById('gallery-popup-ov'); if(ovx) ovx.remove();
+          if(typeof sendToWf==='function'){ sendToWf('world3d', it); }
+          else { selectWF('world3d'); }
+          return;
+        }
         var src=it.result||it.cloud_url||it.orig||'';
         if(!src) return;
         // 기존 팝업 있으면 닫기 (토글)
@@ -7571,6 +7597,28 @@ import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 
 window._w3dViewers = window._w3dViewers || {};
 
+// 컨테이너(또는 그 하위) 안에 살아있는 VR 뷰어가 있으면 전부 정리(dispose)한다.
+// 탭 이동/히스토리 재렌더링 시 이걸 안 해주면 WebGL 컨텍스트가 계속 쌓여서
+// 브라우저의 컨텍스트 개수 제한(보통 16개)을 넘기는 순간부터 화면이 까맣게 나온다.
+window._disposeW3DViewersIn = function(root){
+  if(!root) return;
+  var nodes = root.querySelectorAll ? root.querySelectorAll('[data-viewer-key]') : [];
+  for(var i=0;i<nodes.length;i++){
+    var key = nodes[i].dataset.viewerKey;
+    if(key && window._w3dViewers[key]){
+      try{ window._w3dViewers[key](); }catch(e){}
+      delete window._w3dViewers[key];
+    }
+  }
+  if(root.dataset && root.dataset.viewerKey){
+    var k2 = root.dataset.viewerKey;
+    if(window._w3dViewers[k2]){
+      try{ window._w3dViewers[k2](); }catch(e){}
+      delete window._w3dViewers[k2];
+    }
+  }
+};
+
 window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
   if(!containerEl || !spzUrl) return;
   metricScale = metricScale && metricScale > 0 ? metricScale : 1;
@@ -7584,6 +7632,18 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
     containerEl.appendChild(renderer.domElement);
     renderer.domElement.style.cursor = 'grab';
     renderer.domElement.style.touchAction = 'none';
+
+    // 브라우저가 메모리 압박 등으로 WebGL 컨텍스트를 강제로 회수하면(특히 모바일/탭 백그라운드)
+    // 그대로 두면 화면이 영구히 까맣게 남는다 → 컨텍스트가 복구되면 같은 자리에 뷰어를 다시 만든다.
+    renderer.domElement.addEventListener('webglcontextlost', function(e){
+      e.preventDefault();
+      console.warn('[VR 투어 뷰어] WebGL 컨텍스트 손실됨');
+    }, false);
+    renderer.domElement.addEventListener('webglcontextrestored', function(){
+      console.warn('[VR 투어 뷰어] WebGL 컨텍스트 복구됨 → 뷰어 재초기화');
+      try{ stopped = true; ro.disconnect(); }catch(e){}
+      window._w3dInitViewer(containerEl, spzUrl, metricScale);
+    }, false);
 
     var scene = new THREE.Scene();
     var camera = new THREE.PerspectiveCamera(70, w / h, 0.01, 1000);
