@@ -3626,13 +3626,15 @@ function _w3dTabStart(){
   });
 }
 
-function _w3dTabPoll(operationId, loadingId, srcImg){
+function _w3dTabPoll(operationId, loadingId, srcImg, retryCount){
+  retryCount = retryCount || 0;
   var statusEl=gE('w3d-tab-status'), goBtn=gE('w3d-go-tab');
   fetch(SUPA_URL+'/functions/v1/world-generate',{
     method:'POST',
     headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
     body:JSON.stringify({action:'status', operationId:operationId})
   }).then(function(r){return r.json();}).then(function(d){
+    console.log('[VR투어] 상태확인 응답 원본:', JSON.stringify(d)); // 디버깅용 - 정상이면 나중에 빼도 됨
     if(d.error){ throw new Error((d.error&&d.error.message)?d.error.message:String(d.error)); }
     if(d.done){
       if(d.error){ throw new Error((d.error&&d.error.message)||'생성 실패'); }
@@ -3647,7 +3649,8 @@ function _w3dTabPoll(operationId, loadingId, srcImg){
           else if(splatAsset.spz_url) spzUrl=splatAsset.spz_url;
         }
       }catch(e){}
-      if(!url && !spzUrl){ throw new Error('결과 데이터를 찾지 못했습니다.'); }
+      console.log('[VR투어] 완료! world 객체:', world, '| url:', url, '| spzUrl:', spzUrl);
+      if(!url && !spzUrl){ throw new Error('결과 데이터를 찾지 못했습니다. (콘솔의 world 객체를 확인해주세요)'); }
       G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
       var newItem={id:Date.now(),orig:srcImg,result:url,spzUrl:spzUrl,origThumb:null,tags:['VR투어'],ai:'',cx:50,fav:false,wf:'world3d'};
       G.HIST.world3d.unshift(newItem);
@@ -3666,10 +3669,17 @@ function _w3dTabPoll(operationId, loadingId, srcImg){
       }
     } else {
       if(statusEl) statusEl.textContent='생성 중... (조금만 기다려주세요)';
-      setTimeout(function(){ _w3dTabPoll(operationId, loadingId, srcImg); }, 5000);
+      setTimeout(function(){ _w3dTabPoll(operationId, loadingId, srcImg, 0); }, 5000);
     }
   }).catch(function(e){
-    console.warn('[VR투어] 상태확인 실패:', e);
+    console.warn('[VR투어] 상태확인 실패 (시도 '+retryCount+'):', e);
+    // 일시적인 네트워크/게이트웨이 오류일 수 있으니, 몇 번은 그냥 다시 시도해보고
+    // 계속 실패하면 그때 진짜 실패로 처리한다 (생성 자체는 World Labs에서 계속 진행 중일 수 있음)
+    if(retryCount < 5){
+      if(statusEl) statusEl.textContent='생성 중... (네트워크 확인, 잠시만요)';
+      setTimeout(function(){ _w3dTabPoll(operationId, loadingId, srcImg, retryCount+1); }, 6000);
+      return;
+    }
     G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
     renderMain('world3d');
     if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);}
