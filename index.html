@@ -499,6 +499,7 @@ select option{background:var(--c2)}
   <button class="mob-tab" id="mobt-edit"    onclick="mobTab('edit')">   <span>✏️</span>편집</button>
   <button class="mob-tab" id="mobt-video"   onclick="mobTab('video')">  <span>▶</span>영상</button>
   <button class="mob-tab" id="mobt-upscale" onclick="mobTab('upscale')"><span>⬆</span>업스케일</button>
+  <button class="mob-tab" id="mobt-world3d" onclick="mobTab('world3d')"><span>🌐</span>VR투어</button>
   <button class="mob-tab" id="mobt-gallery" onclick="mobOpenPanel('gallery')"><span>📷</span>갤러리</button>
   <button class="mob-tab" id="mobt-favs"    onclick="mobOpenPanel('favs')">   <span>⭐</span>즐겨찾기</button>
 </div>
@@ -2281,6 +2282,8 @@ function sbUpscale(p){
 function sbWorld3d(p){
   mkNote(p,'<strong style="color:#6ee7b7">&#127760; 3D 투어 생성 (베타)</strong><br>렌더링된 이미지를 실제로 걸어다닐 수 있는 VR 공간으로 변환합니다. <span style="color:var(--m2)">(World Labs Marble 기반)</span>');
   mkUB(p,'VR로 변환할 이미지','main');
+  var upscaleNote=dv('');upscaleNote.id='w3d-upscale-note';upscaleNote.style.cssText='font-size:11px;color:var(--ac);margin:-4px 0 8px 2px';
+  p.appendChild(upscaleNote);
 
   var panoWrap=dv('ss');
   var panoLabel=document.createElement('label');
@@ -2301,7 +2304,7 @@ function sbWorld3d(p){
   p.appendChild(panoWrap);
 
   var timeHint=dv('');timeHint.style.cssText='font-size:11px;color:var(--ac);margin-bottom:8px;padding:8px 10px;background:var(--acg);border-radius:8px;line-height:1.5';
-  timeHint.innerHTML='⏱ 생성에 보통 <strong>7~10분</strong> 정도 걸려요 (서버가 혼잡하면 더 걸릴 수 있어요).<br>⚠️ 완료되기 전까지 <strong>새로고침하지 마세요</strong> — 크레딧이 차감된 작업을 잃어버릴 수 있어요.';
+  timeHint.innerHTML='⏱ 생성에 보통 <strong>7분</strong> 정도 걸려요 (서버가 혼잡하면 10분 이상 걸릴 수 있어요).<br>⚠️ 완료되기 전까지 <strong>새로고침하지 마세요</strong> — 크레딧이 차감된 작업을 잃어버릴 수 있어요.';
   p.appendChild(timeHint);
 
   var goWrap=dv('ss');
@@ -2716,7 +2719,7 @@ function addHistEl(item, scroll, targetHs){
     var lc=document.createElement('div');
     lc.className='h-item';lc.id='hi-'+item.id;
     var lSubText = (item.wf==='world3d')
-      ? '보통 7~10분 정도 걸려요 (혼잡하면 더 걸릴 수 있어요) — 끝날 때까지 새로고침하지 마세요!'
+      ? '보통 7분 정도 걸려요 (혼잡하면 10분 이상 걸릴 수 있어요) — 끝날 때까지 새로고침하지 마세요!'
       : '탭을 이동해도 렌더링은 계속됩니다';
     if(item.wf==='world3d') lLabel='🌐 VR 투어 생성 중...';
     lc.innerHTML='<div style="padding:32px 20px;text-align:center;color:var(--ac)">' +
@@ -2784,8 +2787,11 @@ function addHistEl(item, scroll, targetHs){
         if('IntersectionObserver' in window){
           var _w3dIO=new IntersectionObserver(function(entries){
             entries.forEach(function(en){ en.isIntersecting ? _w3dInitOnce() : _w3dDisposeOnce(); });
-          },{threshold:0.1});
+          },{threshold:0});
           _w3dIO.observe(w3frameWrap);
+          // 안전장치: 일부 모바일 브라우저에서 중첩 스크롤 컨테이너 안에서는 IntersectionObserver가
+          // 제대로 안 잡히는 경우가 있어서, 2초 뒤에도 아직 안 켜졌으면 그냥 강제로 켠다.
+          setTimeout(function(){ if(!_w3dActive) _w3dInitOnce(); }, 2000);
         } else {
           setTimeout(_w3dInitOnce, 50); // IntersectionObserver 미지원 브라우저는 그냥 항상 켜둠
         }
@@ -3262,6 +3268,40 @@ function sendToWf(wf, item){
   if(window.innerWidth<=768){
     setTimeout(function(){ mobTab(wf); }, 200);
   }
+  // VR 투어로 보낼 때: 원본 사진 해상도가 낮으면(짧은 쪽 1800px 미만) 자동으로 2배 업스케일.
+  // 화면(파노라마 확장 등)은 어차피 낮은 해상도에서 시작하면 더 뭉개지므로, 가능하면 큰 사이즈로
+  // 넘겨주는 게 결과 화질에 도움이 됨. 화면 전환은 기다리지 않고 바로 하고, 업스케일은 백그라운드로.
+  if(wf==='world3d'){
+    _w3dMaybeUpscaleSrc(src);
+  }
+}
+function _w3dMaybeUpscaleSrc(src){
+  var img=new Image();
+  img.onload=function(){
+    var minSide=Math.min(img.naturalWidth||0, img.naturalHeight||0);
+    if(!minSide || minSide>=1800) return; // 이미 충분히 큼
+    var tab=getTab('world3d');
+    if(tab.inputImg!==src) return; // 그 사이에 사용자가 다른 이미지를 새로 올렸으면 건너뜀
+    var noteEl=gE('w3d-upscale-note');
+    if(noteEl) noteEl.textContent='🔍 사진이 작아서 화질 보정 중...';
+    _w3dEnsurePublicUrl(src).then(function(publicUrl){
+      falRun('fal-ai/topaz/upscale/image', {image_url:publicUrl, upscale_factor:2, model:'CGI'},
+        function(d){
+          var url=falExtractImageUrl(d);
+          var tab2=getTab('world3d');
+          if(url && tab2.inputImg===src){
+            tab2.inputImg=url;
+            if(G.wf==='world3d') renderSB();
+          } else if(noteEl){ noteEl.textContent=''; }
+        },
+        function(err){
+          console.warn('[VR 투어] 자동 업스케일 실패, 원본 사진으로 계속 진행:', err);
+          if(noteEl) noteEl.textContent='';
+        });
+    }).catch(function(){ if(noteEl) noteEl.textContent=''; });
+  };
+  img.onerror=function(){};
+  img.src=src;
 }
 function sendTo(wf,id){
   var item=(G.HIST[G.wf]||[]).find(function(x){return x.id===id;});
@@ -7036,11 +7076,14 @@ function renderMobGallery(type){
   } else {
     html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
     items.forEach(function(item){
-      var url=item.result||item.img||'';
+      var isW3D=item.wf==='world3d';
+      // VR 투어 결과(item.result)는 이미지가 아니라 marble.worldlabs.ai 링크라서 그대로 쓰면 깨진다 → 썸네일 사용
+      var url=isW3D ? (item.orig||item.origThumb||'') : (item.result||item.img||'');
       if(!url) return;
       var isFav=item.fav?true:false;
       html+='<div style="position:relative;border-radius:8px;overflow:hidden;background:var(--c2)" onclick="mobGalleryItem(this.dataset.id)" data-id="'+item.id+'">' +
         '<img src="'+url+'" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">'+
+        (isW3D?'<div style="position:absolute;top:4px;left:4px;background:var(--ac);color:#000;font-size:9px;font-weight:800;border-radius:5px;padding:2px 6px;z-index:2">🌐 VR</div>':'')+
         '<div style="position:absolute;bottom:0;left:0;right:0;padding:4px 6px;background:linear-gradient(transparent,rgba(0,0,0,.7));display:flex;justify-content:space-between;align-items:center">'+
           '<span style="font-size:9px;color:rgba(255,255,255,.7)">'+(item.wf||'')+'</span>'+
           '<div style="display:flex;gap:4px">'+
@@ -7118,6 +7161,11 @@ function mobGalleryItem(id){
   Object.keys(G.HIST||{}).forEach(function(wf){allItems=allItems.concat(G.HIST[wf]||[]);});
   var item=allItems.find(function(x){return String(x.id)===String(id);});
   if(!item) return;
+  if(item.wf==='world3d'){
+    closeMobGallery();
+    sendToWf('world3d', item);
+    return;
+  }
   var url=item.result||item.img||'';
   if(!url) return;
   var isVidItem=url.includes('.mp4')||url.includes('.webm')||item.wf==='video';
@@ -7781,6 +7829,33 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
     containerEl.appendChild(renderer.domElement);
     renderer.domElement.style.cursor = 'grab';
     renderer.domElement.style.touchAction = 'none';
+
+    // 전체화면 버튼 (우상단, PC/모바일 공통) — containerEl을 그대로 전체화면으로 키우면
+    // 이미 있는 ResizeObserver가 크기 변화를 감지해서 렌더러 사이즈도 자동으로 맞춰준다.
+    var fsBtn=document.createElement('button');
+    fsBtn.type='button';
+    fsBtn.title='전체화면';
+    fsBtn.innerHTML='⛶';
+    fsBtn.style.cssText='position:absolute;top:10px;right:10px;width:34px;height:34px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.55);color:#fff;font-size:17px;cursor:pointer;z-index:4;display:flex;align-items:center;justify-content:center;line-height:1';
+    fsBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      var isFs = document.fullscreenElement===containerEl;
+      if(!isFs){
+        var req = containerEl.requestFullscreen||containerEl.webkitRequestFullscreen||containerEl.mozRequestFullScreen;
+        if(req) req.call(containerEl);
+      } else {
+        var exit = document.exitFullscreen||document.webkitExitFullscreen||document.mozCancelFullScreen;
+        if(exit) exit.call(document);
+      }
+    });
+    document.addEventListener('fullscreenchange', function(){
+      var isFs = document.fullscreenElement===containerEl;
+      fsBtn.innerHTML = isFs ? '⛶ 닫기' : '⛶';
+      fsBtn.style.fontSize = isFs ? '13px' : '17px';
+      fsBtn.style.width = isFs ? 'auto' : '34px';
+      fsBtn.style.padding = isFs ? '0 10px' : '0';
+    });
+    containerEl.appendChild(fsBtn);
 
     // 브라우저가 메모리 압박 등으로 WebGL 컨텍스트를 강제로 회수하면(특히 모바일/탭 백그라운드)
     // 그대로 두면 화면이 영구히 까맣게 남는다 → 컨텍스트가 복구되면 같은 자리에 뷰어를 다시 만든다.
