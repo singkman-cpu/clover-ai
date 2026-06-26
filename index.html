@@ -3819,11 +3819,13 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       if(statusEl){statusEl.style.display='none';}
       if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';}
       // 클라우드 갤러리에도 비동기로 저장 (실패해도 무시) — 썸네일은 실제 미리보기 이미지로
+      // spzUrl/metricScale은 'gallery' 테이블에 전용 컬럼이 없어서, 안 쓰이는 style_key 컬럼에
+      // JSON으로 안전하게 묶어서 저장 (스키마 변경 없이 다른 기기/모바일에서도 복원 가능하게)
       if(_supa&&_supaUser){
         try{
           _supa.from('gallery').insert({
-            user_id:_supaUser.id, wf:'world3d', orig_url:null, public_url:thumbUrl||url,
-            engine:'world3d', resolution:'', style_key:'world3d'
+            user_id:_supaUser.id, wf:'world3d', orig_url:thumbUrl||srcImg||null, public_url:thumbUrl||url,
+            engine:'world3d', resolution:'', style_key:JSON.stringify({spzUrl:spzUrl||null, metricScale:metricScale||1})
           }).then(function(){}).catch(function(){});
         }catch(e){}
       }
@@ -7614,12 +7616,24 @@ function loadCloudGallery(){
         var exists=G.HIST[wf].find(function(h){
           return h.gallery_id===row.id || h.cloud_url===row.public_url || h.result===row.public_url;
         });
+        // world3d(VR 투어) 항목은 style_key에 spzUrl/metricScale을 JSON으로 묻어서 저장해뒀음 — 복원
+        var spzUrl=null, metricScale=1;
+        if(wf==='world3d' && row.style_key){
+          try{
+            var meta=JSON.parse(row.style_key);
+            spzUrl=meta.spzUrl||null;
+            metricScale=meta.metricScale||1;
+          }catch(e){}
+        }
         if(exists){
           if(exists&&!exists.gallery_id) exists.gallery_id=row.id;
           if(exists&&!exists.orig&&row.orig_url){
             exists.orig=row.orig_url;
             exists.orig_cloud_url=row.orig_url;
             origRestored=true;
+          }
+          if(wf==='world3d' && spzUrl && !exists.spzUrl){
+            exists.spzUrl=spzUrl; exists.metricScale=metricScale; origRestored=true;
           }
           return;
         }
@@ -7631,6 +7645,8 @@ function loadCloudGallery(){
           orig: row.orig_url||null,
           orig_cloud_url: row.orig_url||null,
           origThumb: null,
+          spzUrl: spzUrl,
+          metricScale: metricScale,
           tags: [row.engine||'AI', row.resolution||'1K'],
           wf: wf,
           fav: false,
