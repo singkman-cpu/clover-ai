@@ -1010,7 +1010,7 @@ var EU=[
   {k:'magnific_precision',n:'Magnific Precision v2',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'}
 ];
 var G_UPSCALE_ENG='topaz';
-var W3D_COST=200; // 3D 투어 1회 생성 비용 (World Labs 실제 원가 약 1,650원 + 마진 반영)
+var W3D_COST=250; // 3D 투어 1회 생성 비용 (World Labs 실제 원가 약 1,560cr=약 1,900~2,000원 — 대용량 충전팩 구매자도 적자 안 나도록 250cr로 조정)
 var EL=[
   {k:'nano2',n:'Nano Banana 2',t:'Precise,Quality,Fast',d:'최고 성능',lg:'g'},
   {k:'nano_pro',n:'Nano Banana Pro',t:'Quality',d:'구조·디테일 최고 정밀도 (1K 30cr/2K 45cr)',lg:'g'},
@@ -3629,6 +3629,13 @@ function _w3dTabStart(){
     // 요청이 정상적으로 World Labs에 접수된 시점에 크레딧 차감 (실패 시 차감 안 됨)
     deductCredits(W3D_COST);
     _chargedAlready=true;
+    // 크레딧이 차감된 뒤이므로, 페이지를 새로고침/이탈해도 결과를 잃어버리지 않도록
+    // operation_id를 localStorage에 남겨둔다 (완료되면 _w3dTabPoll이 정상 처리 후 자동 제거).
+    try{
+      localStorage.setItem('clover_w3d_pending', JSON.stringify({
+        operationId: d.operation_id, loadingId: loadingId, srcImg: srcImg, startTime: Date.now()
+      }));
+    }catch(e){}
     if(statusEl) statusEl.textContent='생성 중입니다 (보통 1~3분, 서버 상황에 따라 더 걸릴 수 있어요)...';
     _w3dTabPoll(d.operation_id, loadingId, srcImg, 0, Date.now());
   }).catch(function(e){
@@ -3686,6 +3693,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       var newItem={id:Date.now(),orig:thumbUrl||srcImg,result:url,spzUrl:spzUrl,metricScale:metricScale,origThumb:null,tags:['VR 투어'],ai:'',cx:50,fav:false,wf:'world3d'};
       G.HIST.world3d.unshift(newItem);
       saveHistToStorage();
+      try{ localStorage.removeItem('clover_w3d_pending'); }catch(e){}
       renderMain('world3d');
       if(statusEl){statusEl.style.display='none';}
       if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
@@ -3700,6 +3708,21 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       }
     } else {
       var elapsedMin = Math.floor((Date.now()-startTime)/60000);
+      if(elapsedMin >= 15){
+        // 15분 넘으면 더 이상 자동으로 계속 묻지 않고, 사용자가 직접 선택하게 한다.
+        // (크레딧은 이미 차감됐고 World Labs 쪽에서는 계속 처리 중일 수 있으므로,
+        //  완전히 포기시키지 말고 "계속 기다리기" 옵션을 남겨둔다.)
+        if(statusEl){
+          statusEl.innerHTML = '⏳ '+elapsedMin+'분째 생성 중입니다. World Labs 서버가 많이 혼잡한 것 같아요.'+
+            '<br>크레딧은 이미 차감되었고 결과가 나오면 자동으로 저장되니, 계속 기다리시거나 나중에 다시 확인하셔도 됩니다.'+
+            '<br><button id="w3d-keep-waiting" style="margin-top:6px;padding:6px 14px;background:var(--ac);color:#000;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">5분 더 기다리기</button>';
+          var kw=gE('w3d-keep-waiting');
+          if(kw) kw.onclick=function(){
+            setTimeout(function(){ _w3dTabPoll(operationId, loadingId, srcImg, 0, Date.now()); }, 5000);
+          };
+        }
+        return; // 자동 재시도 중단 — 사용자가 버튼을 눌러야 다시 확인
+      }
       if(statusEl){
         if(elapsedMin < 2){
           statusEl.textContent='생성 중... ('+(elapsedMin)+'분 경과)';
@@ -3719,6 +3742,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       return;
     }
     G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
+    try{ localStorage.removeItem('clover_w3d_pending'); }catch(e2){}
     renderMain('world3d');
     if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);}
     if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
@@ -6549,6 +6573,23 @@ document.addEventListener('DOMContentLoaded',function(){try{
   renderSB();
   updBtn();
   loadHistFromStorage();
+
+  // 새로고침/재방문 전에 진행 중이던 VR 투어 작업이 있으면 복구 (크레딧은 이미 차감된 상태이므로 잃어버리지 않도록)
+  try{
+    var _pendingW3D = JSON.parse(localStorage.getItem('clover_w3d_pending')||'null');
+    if(_pendingW3D && _pendingW3D.operationId){
+      var _pendingAgeMs = Date.now() - (_pendingW3D.startTime||0);
+      if(_pendingAgeMs < 2*60*60*1000){ // 2시간 이내 작업만 복구 시도
+        var _resumeId = Date.now();
+        G.HIST.world3d.unshift({id:_resumeId, loading:true, wf:'world3d'});
+        setTimeout(function(){
+          _w3dTabPoll(_pendingW3D.operationId, _resumeId, _pendingW3D.srcImg, 0, _pendingW3D.startTime);
+        }, 1000);
+      } else {
+        localStorage.removeItem('clover_w3d_pending'); // 너무 오래된 작업은 정리
+      }
+    }
+  }catch(e){}
 
   // ── Supabase 초기화 ───────────────────────────────────────────
   initSupabase();
