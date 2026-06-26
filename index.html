@@ -1010,7 +1010,7 @@ var EU=[
   {k:'magnific_precision',n:'Magnific Precision v2',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'}
 ];
 var G_UPSCALE_ENG='topaz';
-var W3D_COST=280; // 3D 투어 1회 생성 비용 — World Labs 원가(약 1,560cr≈1,900~2,000원) + 일반 사진일 때 자동으로 돌리는 나노바나나 프로 360도 보정 비용(약 200~300원)까지 포함한 단일가
+var W3D_COST=290; // 3D 투어 1회 생성 비용 — World Labs 원가(약 1,560cr≈1,900~2,000원) + 일반 사진일 때 자동으로 돌리는 나노바나나 프로 360도 보정(4K) 비용까지 포함한 단일가
 var EL=[
   {k:'nano2',n:'Nano Banana 2',t:'Precise,Quality,Fast',d:'최고 성능',lg:'g'},
   {k:'nano_pro',n:'Nano Banana Pro',t:'Quality',d:'구조·디테일 최고 정밀도 (1K 30cr/2K 45cr)',lg:'g'},
@@ -3621,7 +3621,7 @@ function _w3dGeneratePanorama(imageUrl, onDone, onErr){
     prompt: panoPrompt,
     image_urls: [imageUrl],
     num_images: 1,
-    resolution: '2K',
+    resolution: '4K', // 화질 최우선 — 4K(짧은 쪽 4096px) × 21:9 ≈ 4096×9557px
     aspect_ratio: '21:9', // 가장 가까운 와이드 비율 — 정확한 2:1 equirectangular는 프롬프트로 유도
     output_format: 'jpeg'
   }, function(d){
@@ -7789,52 +7789,27 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
         keys[e.key.toLowerCase()]=true;
         var tag=(document.activeElement&&document.activeElement.tagName)||'';
         if(tag==='INPUT'||tag==='TEXTAREA') return;
-        // 스페이스바/방향키로 VR을 조작하는 동안 배경 페이지가 스크롤되는 것 방지
-        if([' ','arrowup','arrowdown','arrowleft','arrowright'].indexOf(e.key.toLowerCase())>=0) e.preventDefault();
+        // 방향키로 VR을 조작하는 동안 배경 페이지가 스크롤되는 것 방지
+        if(['arrowup','arrowdown','arrowleft','arrowright'].indexOf(e.key.toLowerCase())>=0) e.preventDefault();
       });
       window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()]=false; });
 
       // PC용 조작법 안내 (처음 몇 초만 보여줌)
       var pcHint=document.createElement('div');
-      pcHint.style.cssText='position:absolute;top:12px;left:12px;color:#fff;font-size:11px;line-height:1.6;background:rgba(0,0,0,.6);padding:10px 14px;border-radius:10px;pointer-events:none;z-index:3;opacity:1;transition:opacity .5s;white-space:nowrap';
-      pcHint.innerHTML='🖱 드래그: 시점 회전 · ⌨ W/A/S/D 또는 방향키: 이동<br>⌨ Space: 위로 · C: 아래로 · Shift: 빠르게';
+      pcHint.style.cssText='position:absolute;top:14px;left:14px;color:#fff;font-size:14px;font-weight:600;line-height:1.7;background:rgba(0,0,0,.65);padding:12px 18px;border-radius:12px;pointer-events:none;z-index:3;white-space:nowrap';
+      pcHint.innerHTML='🖱 드래그: 시점 회전 &nbsp;·&nbsp; ⌨ W/A/S/D 또는 방향키: 이동 &nbsp;·&nbsp; Shift: 빠르게 이동';
       containerEl.appendChild(pcHint);
-      setTimeout(function(){ if(pcHint) pcHint.style.opacity='0'; }, 5000);
     }
 
     // ── 모바일: 화면 드래그로 시점, 좌하단 가상 조이스틱으로 이동 ──
     var joyVec={x:0,y:0};
-    var _w3dUpDown=0;
     var hintEl, joyBase, joyStick;
     if(isTouch){
       hintEl=document.createElement('div');
       hintEl.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:11px;background:rgba(0,0,0,.55);padding:8px 14px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:3;opacity:1;transition:opacity .4s;text-align:center';
-      hintEl.innerHTML='왼쪽 조이스틱: 이동 · 화면 드래그: 시점<br>오른쪽 ▲▼ 버튼: 위/아래로 이동';
+      hintEl.innerHTML='왼쪽 조이스틱: 이동 · 화면 드래그: 시점';
       containerEl.appendChild(hintEl);
       setTimeout(function(){ if(hintEl) hintEl.style.opacity='0'; }, 4200);
-
-      // 우측 하단 위/아래 이동 버튼 (모바일은 키보드가 없어 수직 이동 수단이 따로 필요)
-      var vBase=document.createElement('div');
-      vBase.style.cssText='position:absolute;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:3';
-      var upBtn=document.createElement('button');
-      upBtn.textContent='▲';
-      upBtn.style.cssText='width:44px;height:44px;border-radius:50%;border:1.5px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:16px;touch-action:none';
-      var downBtn=document.createElement('button');
-      downBtn.textContent='▼';
-      downBtn.style.cssText=upBtn.style.cssText;
-      vBase.appendChild(upBtn); vBase.appendChild(downBtn);
-      containerEl.appendChild(vBase);
-      function bindHold(btn,val){
-        var on=function(e){ e.preventDefault(); e.stopPropagation(); _w3dUpDown=val; };
-        var off=function(e){ if(e)e.stopPropagation(); _w3dUpDown=0; };
-        btn.addEventListener('touchstart',on,{passive:false});
-        btn.addEventListener('touchend',off,{passive:true});
-        btn.addEventListener('touchcancel',off,{passive:true});
-        btn.addEventListener('mousedown',on);
-        btn.addEventListener('mouseup',off);
-        btn.addEventListener('mouseleave',off);
-      }
-      bindHold(upBtn,1); bindHold(downBtn,-1);
 
       joyBase=document.createElement('div');
       joyBase.style.cssText='position:absolute;left:18px;bottom:18px;width:84px;height:84px;border-radius:50%;background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.35);z-index:3;touch-action:none';
@@ -7930,19 +7905,17 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
       if(isTouch){
         moveDir.addScaledVector(forward, -joyVec.y);
         moveDir.addScaledVector(right, joyVec.x);
-        if(_w3dUpDown) moveDir.y += _w3dUpDown;
       } else {
         if(keys['w']||keys['arrowup'])    moveDir.addScaledVector(forward, 1);
         if(keys['s']||keys['arrowdown'])  moveDir.addScaledVector(forward, -1);
         if(keys['a']||keys['arrowleft'])  moveDir.addScaledVector(right, -1);
         if(keys['d']||keys['arrowright']) moveDir.addScaledVector(right, 1);
-        if(keys[' ']) moveDir.y += 1;       // Space: 위로
-        if(keys['c']||keys['control']) moveDir.y -= 1; // C: 아래로
       }
       if(moveDir.lengthSq()>0){
         moveDir.normalize();
         var speed = moveSpeed * ((!isTouch && keys['shift']) ? 2.2 : 1);
         camera.position.addScaledVector(moveDir, speed*dt);
+        camera.position.y = 0; // 사람 눈높이로 고정 — 위아래 이동 없음
       }
 
       renderer.render(scene, camera);
