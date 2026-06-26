@@ -1010,7 +1010,7 @@ var EU=[
   {k:'magnific_precision',n:'Magnific Precision v2',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'}
 ];
 var G_UPSCALE_ENG='topaz';
-var W3D_COST=250; // 3D 투어 1회 생성 비용 (World Labs 실제 원가 약 1,560cr=약 1,900~2,000원 — 대용량 충전팩 구매자도 적자 안 나도록 250cr로 조정)
+var W3D_COST=280; // 3D 투어 1회 생성 비용 — World Labs 원가(약 1,560cr≈1,900~2,000원) + 일반 사진일 때 자동으로 돌리는 나노바나나 프로 360도 보정 비용(약 200~300원)까지 포함한 단일가
 var EL=[
   {k:'nano2',n:'Nano Banana 2',t:'Precise,Quality,Fast',d:'최고 성능',lg:'g'},
   {k:'nano_pro',n:'Nano Banana Pro',t:'Quality',d:'구조·디테일 최고 정밀도 (1K 30cr/2K 45cr)',lg:'g'},
@@ -1108,7 +1108,7 @@ var G={
       inputImg:null, resultImg:null,
       refs:[],
       prompt:'', selK:null,
-      isPano:false, // 업로드한 이미지가 360도(파노라마) 사진인지 여부
+      isPano:false, // 업로드한 이미지가 360도(파노라마) 사진인지 여부 — false면 자동으로 AI 360도 보정을 거쳐 World Labs로 전송됨
       status:'idle'
     }
   },
@@ -2281,14 +2281,14 @@ function sbWorld3d(p){
   panoCk.type='checkbox';panoCk.id='w3d-pano-ck';
   panoCk.checked=!!G.tabs.world3d.isPano;
   panoCk.style.cssText='width:16px;height:16px;accent-color:var(--ac);cursor:pointer';
-  panoCk.onchange=function(){ G.tabs.world3d.isPano=panoCk.checked; };
+  panoCk.onchange=function(){ G.tabs.world3d.isPano=panoCk.checked; updW3DPriceLabel(); };
   panoLabel.appendChild(panoCk);
   var panoText=document.createElement('span');
   panoText.innerHTML='이 사진은 <strong style="color:var(--ac)">360도(파노라마) 사진</strong>이에요';
   panoLabel.appendChild(panoText);
   panoWrap.appendChild(panoLabel);
   var panoHint=dv('');panoHint.style.cssText='font-size:10.5px;color:var(--m2);margin-top:5px;line-height:1.5;padding:0 2px';
-  panoHint.textContent='360도 카메라나 파노라마 모드로 찍은 사진이면 켜주세요 — AI가 주변을 추측하지 않고 실제 촬영된 정보를 그대로 사용해서 훨씬 정확한 VR 공간이 만들어져요. ⚠️ 일반 사진(파노라마 아님)을 사용하면 원본 사진 밖의 영역은 AI가 추측해서 채우기 때문에 그 부분이 흐릿하거나 뭉개져 보일 수 있어요 — 화질이 가장 중요하면 360도 사진을 권장합니다.';
+  panoHint.textContent='360도 카메라나 파노라마 모드로 찍은 사진이면 켜주세요 — AI가 주변을 추측하지 않고 실제 촬영된 정보를 그대로 사용해서 훨씬 정확한 VR 공간이 만들어져요. 일반 사진을 올리시면 AI가 자동으로 360도로 보정해서 처리해드리지만, 그래도 진짜 360도 사진만큼 선명하진 않을 수 있어요.';
   panoWrap.appendChild(panoHint);
   p.appendChild(panoWrap);
 
@@ -2299,12 +2299,21 @@ function sbWorld3d(p){
   var goWrap=dv('ss');
   var goBtn=mk('button','');goBtn.id='w3d-go-tab';
   goBtn.style.cssText='width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit';
-  goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';
+  goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';
   goBtn.onclick=_w3dTabStart;
   goWrap.appendChild(goBtn);
   var statusEl=dv('');statusEl.id='w3d-tab-status';statusEl.style.cssText='margin-top:10px;font-size:12px;color:var(--t2);text-align:center;display:none';
   goWrap.appendChild(statusEl);
   p.appendChild(goWrap);
+}
+// 가격은 항상 고정(W3D_COST) — 일반 사진일 때의 자동 360도 보정 비용은 이미 기본가에 포함되어 있어 고객에게 따로 안 보임
+function _w3dTotalCost(){
+  return W3D_COST;
+}
+function updW3DPriceLabel(){
+  var goBtn=gE('w3d-go-tab');
+  if(!goBtn || goBtn.disabled) return;
+  goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';
 }
 function buildUpscaleSliders(eng,container){
   if(!container)return;
@@ -3603,6 +3612,24 @@ function _w3dPoll(operationId){
 }
 
 // ── 3D 월드 탭(정식 탭 버전) — 모달 대신 G.HIST 기반으로 카드에 표시 ──────
+function _w3dGeneratePanorama(imageUrl, onDone, onErr){
+  var panoPrompt = 'Convert this interior/architectural photo into a single seamless 360-degree equirectangular panorama image (2:1 aspect ratio). '+
+    'Extend the scene naturally and consistently in all directions to form a complete spherical environment, keeping the exact same materials, colors, lighting style and overall design as the original photo. '+
+    'Pay close attention to realistic global illumination, accurate light fixtures (chandeliers, downlights, etc.), natural shadow falloff, and material textures so the extended areas match the original photo\'s lighting and quality as closely as possible. '+
+    'The left and right edges of the panorama must connect seamlessly with no visible seam or discontinuity. Photorealistic architectural photography, no text, no watermark, no people, no logos.';
+  falRun('fal-ai/nano-banana-pro/edit', {
+    prompt: panoPrompt,
+    image_urls: [imageUrl],
+    num_images: 1,
+    resolution: '2K',
+    aspect_ratio: '21:9', // 가장 가까운 와이드 비율 — 정확한 2:1 equirectangular는 프롬프트로 유도
+    output_format: 'jpeg'
+  }, function(d){
+    var url = falExtractImageUrl(d);
+    if(!url){ onErr(new Error('파노라마 생성 결과를 찾지 못했습니다')); return; }
+    onDone(url);
+  }, function(e){ onErr(e); });
+}
 function _w3dTabStart(){
   var tab=getTab('world3d');
   if(!tab.inputImg){ alert('먼저 이미지를 업로드해주세요.'); return; }
@@ -3619,22 +3646,37 @@ function _w3dTabStart(){
 
   var srcImg=tab.inputImg;
   var _chargedAlready=false;
+  // 일반 사진(파노라마 체크 안 함)이면 항상 자동으로 360도 보정을 시도한다 — 고객에게는 따로 묻지 않음(내부 처리)
+  var _needsAutoPano = !tab.isPano;
 
   _w3dEnsurePublicUrl(srcImg).then(function(publicUrl){
+    if(!_needsAutoPano){
+      return {url: publicUrl, isPano: !!tab.isPano};
+    }
+    if(statusEl) statusEl.textContent='이미지 보정 중...';
+    return new Promise(function(resolve){
+      _w3dGeneratePanorama(publicUrl, function(panoUrl){
+        resolve({url: panoUrl, isPano: true});
+      }, function(err){
+        console.warn('[VR 투어] 파노라마 자동생성 실패, 원본 이미지로 계속 진행:', err);
+        resolve({url: publicUrl, isPano: !!tab.isPano});
+      });
+    });
+  }).then(function(imgResult){
     if(statusEl) statusEl.textContent='VR 투어 생성 요청 중...';
     return fetch(SUPA_URL+'/functions/v1/world-generate',{
       method:'POST',
       headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
       body:JSON.stringify({
-        action:'submit', imageUrl:publicUrl,
+        action:'submit', imageUrl:imgResult.url,
         model:'marble-1.1', // 화질 최우선 요청 — draft보다 느리지만 훨씬 고품질
-        isPano: !!tab.isPano,
+        isPano: imgResult.isPano,
         displayName:'CloverAI 3D Tour'
       })
     });
   }).then(function(r){return r.json();}).then(function(d){
     if(d.error){ throw new Error((d.error&&d.error.message)?d.error.message:String(d.error)); }
-    // 요청이 정상적으로 World Labs에 접수된 시점에 크레딧 차감 (실패 시 차감 안 됨)
+    // 요청이 정상적으로 World Labs에 접수된 시점에 크레딧 차감 (실패 시 차감 안 됨) — 가격은 항상 고정
     deductCredits(W3D_COST);
     _chargedAlready=true;
     // 크레딧이 차감된 뒤이므로, 페이지를 새로고침/이탈해도 결과를 잃어버리지 않도록
@@ -3651,7 +3693,7 @@ function _w3dTabStart(){
     G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
     renderMain('world3d');
     if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);}
-    if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
+    if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';}
   });
 }
 
@@ -3704,7 +3746,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       try{ localStorage.removeItem('clover_w3d_pending'); }catch(e){}
       renderMain('world3d');
       if(statusEl){statusEl.style.display='none';}
-      if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
+      if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';}
       // 클라우드 갤러리에도 비동기로 저장 (실패해도 무시) — 썸네일은 실제 미리보기 이미지로
       if(_supa&&_supaUser){
         try{
@@ -3753,7 +3795,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
     try{ localStorage.removeItem('clover_w3d_pending'); }catch(e2){}
     renderMain('world3d');
     if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,100);}
-    if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_COST+'cr</span>';}
+    if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';}
   });
 }
 function _resumeActiveJobs(){
