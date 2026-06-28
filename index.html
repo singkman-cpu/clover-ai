@@ -4047,6 +4047,25 @@ function falExtractVideoUrl(d) {
   return url;
 }
 
+// ── 캐드→아이소 전용: AI 변환 전에 텍스트(방 이름/치수)만 먼저 깨끗하게 지운다 ──────
+// "결과물에서 텍스트를 빼라"는 프롬프트 지시만으로는 AI가 원본에 보이는 글자를 그대로
+// 따라 그리는 경우가 많아서 잘 안 지켜짐 → 아예 AI가 텍스트를 보지 못하게, 변환 전에
+// 별도의 AI 호출로 텍스트만 지운 깨끗한 도면을 먼저 만들어서 그걸 isometric 변환에 사용한다.
+function _removeFloorPlanText(imageUrl, onDone, onErr){
+  var prompt = 'Remove all text from this floor plan image — room name labels, dimension numbers, area numbers, '+
+    'any Korean or English text, any annotations or numbers of any kind. Keep absolutely everything else exactly '+
+    'identical: all walls, lines, room shapes, colors, furniture icons, fixtures and the overall layout must remain '+
+    'pixel-for-pixel the same as the original — this is purely a text removal/cleanup pass, not a redesign. '+
+    'Fill the areas where text was removed with the same surrounding floor color/texture so it looks clean and '+
+    'untouched, like the text was never there.';
+  falRun('fal-ai/nano-banana-pro/edit', {
+    prompt: prompt, image_urls:[imageUrl], num_images:1, output_format:'jpeg'
+  }, function(d){
+    var url = falExtractImageUrl(d);
+    if(!url){ onErr(new Error('텍스트 제거 결과를 찾지 못했습니다')); return; }
+    onDone(url);
+  }, function(e){ onErr(e); });
+}
 // ── 캐드→아이소 전용: 도면 외곽 흰 여백을 잘라내고 내용에 꽉 맞게 크롭 ──────
 // AI가 도면 바깥 흰 여백을 "빈 캔버스"로 인식해서 거기에 없는 방을 만들어내는 문제(환각)가
 // 프롬프트만으로는 잘 안 잡혀서, 보내기 전에 이미지 자체를 도면 내용에 맞게 꽉 잘라서
@@ -4094,15 +4113,32 @@ function uploadImgToFal(dataUrl, onDone, onErr) {
   var key = FAL_KEY || '';
   if(!key){ onErr('fal.ai API 키가 없습니다. 계정 탭에서 입력하세요.'); return; }
   if(!dataUrl){ onErr('이미지가 없습니다.'); return; }
-  if(dataUrl.startsWith('http')){ onDone(dataUrl); return; }
   var res = getTab(G.wf).resolution || '1K';
   function proceed(srcUrl){
+    if(srcUrl.startsWith('http')){ onDone(srcUrl); return; }
     resizeForUpload(srcUrl, function(optimized){
       _doUpload(optimized, onDone, onErr);
     }, res);
   }
+  if(dataUrl.startsWith('http')){
+    if(getTab(G.wf).selK!=='cad_isometric'){ onDone(dataUrl); return; }
+    // http URL이라도 캐드→아이소면 텍스트 제거까지는 거쳐야 함 (아래 분기로 계속 진행)
+  }
   if(getTab(G.wf).selK==='cad_isometric'){
-    _autoCropFloorPlan(dataUrl, proceed);
+    _autoCropFloorPlan(dataUrl, function(croppedDataUrl){
+      // 텍스트 제거 AI 호출은 원격 URL이 필요하므로 먼저 업로드
+      var step1 = croppedDataUrl.startsWith('http') ? croppedDataUrl : null;
+      function afterUpload(uploadedUrl){
+        _removeFloorPlanText(uploadedUrl, function(cleanUrl){
+          onDone(cleanUrl);
+        }, function(err){
+          console.warn('[캐드→아이소] 텍스트 제거 실패, 원본(텍스트 포함) 그대로 진행:', err);
+          onDone(uploadedUrl);
+        });
+      }
+      if(step1){ afterUpload(step1); }
+      else { resizeForUpload(croppedDataUrl, function(optimized){ _doUpload(optimized, afterUpload, onErr); }, res); }
+    });
   } else {
     proceed(dataUrl);
   }
