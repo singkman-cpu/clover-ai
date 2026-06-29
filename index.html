@@ -606,7 +606,7 @@ select option{background:var(--c2)}
   <div style="font-size:11px;color:var(--m2);text-align:center;margin-top:12px">가입 시 <strong style="color:var(--ac)">100cr 무료</strong> 제공 · <span onclick="supaResetPw()" style="color:var(--ac);cursor:pointer">비밀번호 찾기</span></div>
 </div></div></div>
 <script>
-var FAL_KEY = localStorage.getItem('clover_fal_key') || "";
+var FAL_KEY = localStorage.getItem('clover_fal_key') || localStorage.getItem('clover_fal_key_platform') || "";
 
 
 // ── 다운로드 함수 (페이지 이동 없음) ──────────────────────────
@@ -4970,8 +4970,8 @@ function executeSingleRender(task){
             var crn=gE('cr-n');
             if(crn){
               crn.style.color='#fca5a5';
-              crn.textContent=G.cr.toLocaleString();
-              setTimeout(function(){crn.style.color='';crn.textContent=G.cr.toLocaleString();},1200);
+              crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
+              setTimeout(function(){crn.style.color='';crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());},1200);
             }
             if(G.cr<50){gE('stl').textContent='크레딧이 부족합니다 ('+G.cr+'cr) — 충전이 필요합니다';}
             // ★ Supabase DB 업데이트
@@ -6174,7 +6174,7 @@ function useCoupon(code){
         ]);
       }).then(function(){
         G.cr=newCr;localStorage.setItem('clover_cr',newCr);
-        var crn=gE('cr-n');if(crn)crn.textContent=newCr.toLocaleString();
+        var crn=gE('cr-n');if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':newCr.toLocaleString());
         alert('✓ +'+cp.credits+'cr 지급! 잔액: '+newCr.toLocaleString()+'cr');
         buildCredits();
       });
@@ -6188,7 +6188,7 @@ function bypassLogin(){
   updateAccountBtn();
   closeMd('login');
   var crn=gE('cr-n');
-  if(crn)crn.textContent=G.cr.toLocaleString();
+  if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
 }
 function openPanel(id){
   G._curGalleryId = id; // renderGalleryGrid에서 즐겨찾기/삭제 후 재오픈 시 사용
@@ -6721,7 +6721,7 @@ function buildAccount(){
           '<div style="font-size:11px;color:var(--m2)">'+((G.supaRole||'user').toUpperCase())+' 플랜</div>'+
         '</div>'+
         '<div style="text-align:right">'+
-          '<div style="font-size:20px;font-weight:800;color:var(--ac)">'+(G.supaRole==='admin'?'999,999':G.cr.toLocaleString())+'</div>'+
+          '<div style="font-size:20px;font-weight:800;color:var(--ac)">'+(G.supaRole==='admin'?'무제한':G.cr.toLocaleString())+'</div>'+
           '<div style="font-size:10px;color:var(--m2)">크레딧</div>'+
         '</div>'+
       '</div>'+
@@ -6911,7 +6911,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
   setInterval(function(){
     saveHistToStorage();
   }, 30000);
-  var crn=gE('cr-n');if(crn)crn.textContent=G.cr.toLocaleString();
+  var crn=gE('cr-n');if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
   G.wf='';
   document.querySelectorAll('.wft').forEach(function(t){t.classList.remove('on');});
   gE('hist-s').style.display='none';
@@ -7583,8 +7583,20 @@ function onSupaLogin(user){
       G.plan = dbRole==='admin' ? 'admin' : dbPlan;
       // 관리자는 크레딧 999999 고정
       if(dbRole==='admin') G.cr = 999999;
-      // fal_key도 여기서 로드
+      // fal_key도 여기서 로드 (자기 계정에 키가 있으면 우선 사용 — 보통 관리자만 해당)
       if(res.data.fal_key && !FAL_KEY) FAL_KEY = res.data.fal_key;
+      // 일반 회원은 자기 계정에 fal_key가 없는 게 정상 — 그럴 땐 관리자(플랫폼)가 등록해둔 공용 키를
+      // 가져와서 쓴다. 이게 없으면 신규 가입자는 렌더링 버튼을 눌러도 무조건 실패함.
+      // (RPC 함수를 통해 fal_key 값 하나만 안전하게 받아옴 — 관리자 row 전체를 노출하지 않음.
+      //  Supabase SQL Editor에서 아래 함수를 먼저 만들어둬야 함 — get_platform_fal_key())
+      if(!FAL_KEY && dbRole!=='admin'){
+        _supa.rpc('get_platform_fal_key').then(function(pr){
+          if(pr&&pr.data){
+            FAL_KEY = pr.data;
+            localStorage.setItem('clover_fal_key_platform', FAL_KEY); // 오프라인/지연 대비 캐시
+          }
+        }).catch(function(){});
+      }
       // 관리자가 개별 회원에게 따로 풀어준 레퍼런스 슬롯 개수 (없으면 null = 플랜 기준)
       G.refOverride = (res.data.ref_override!=null) ? res.data.ref_override : null;
       // 관리자가 개별 회원에게 따로 풀어준 동시 렌더링 개수 (없으면 null = 플랜 기준)
@@ -7594,7 +7606,7 @@ function onSupaLogin(user){
       localStorage.setItem('clover_plan', G.plan);
       _loginInProgress = false;
       var crn=gE('cr-n');
-      if(crn)crn.textContent=(G.supaRole==='admin'?'999,999':G.cr.toLocaleString());
+      if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
       // 클라우드 갤러리 로드
       loadCloudGallery();
       // 사이드바 재렌더링 (레퍼런스 슬롯 반영)
@@ -7860,7 +7872,7 @@ function deductCredits(amount){
   if(G.supaRole==='admin') return;
   G.cr=Math.max(0,G.cr-amount);
   localStorage.setItem('clover_cr',G.cr);
-  var crn=gE('cr-n');if(crn)crn.textContent=G.cr.toLocaleString();
+  var crn=gE('cr-n');if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
   if(_supa&&_supaUser&&G.supaRole!=='admin'){
     _supa.from('profiles').update({credits:G.cr}).eq('id',_supaUser.id).then(function(){}).catch(function(){});
     _supa.from('credit_logs').insert({user_id:_supaUser.id,amount:-amount,reason:'서비스 사용'}).then(function(){}).catch(function(){});
