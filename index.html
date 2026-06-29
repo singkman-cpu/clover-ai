@@ -2055,6 +2055,8 @@ function planGte(required){
 }
 function getMaxRefs(){
   if(G.plan==='admin') return 6;
+  // 관리자가 개별 회원에게 따로 풀어준 레퍼런스 슬롯이 있으면 플랜과 무관하게 그 값을 우선 사용
+  if(G.refOverride!=null) return Math.max(0, Math.min(6, G.refOverride));
   if(G.plan==='agency') return 6;
   if(G.plan==='studio') return 4;
   if(G.plan==='pro') return 3;
@@ -4707,6 +4709,8 @@ function _runToolWithPrompt(translatedPrompt){
 function getMaxConcurrent(){
   // 플랜별 동시 렌더링 수
   if(G.supaRole==='admin'||G.plan==='admin') return 6;
+  // 관리자가 개별 회원에게 따로 풀어준 동시 렌더링 개수가 있으면 플랜과 무관하게 그 값을 우선 사용
+  if(G.concurrentOverride!=null) return Math.max(1, Math.min(6, G.concurrentOverride));
   var m={free:1, basic:2, pro:3, studio:4, agency:6, admin:6};
   return m[G.plan||'free']||1;
 }
@@ -5741,6 +5745,34 @@ function admDashboard(c){
   }).catch(function(){c.innerHTML='<div style="color:#fca5a5">데이터 로드 실패</div>';});
 }
 
+function admSetRefOverride(uid, email, current){
+  var msg = '['+email+']에게 레퍼런스 슬롯을 몇 장까지 풀어줄까요? (0~6)\n'+
+    '플랜 기준 개수와 무관하게 이 회원에게만 적용됩니다.\n'+
+    '빈 값으로 두면 다시 플랜 기준으로 돌아갑니다.';
+  var v = prompt(msg, current!=null ? String(current) : '');
+  if(v===null) return; // 취소
+  v = v.trim();
+  var val = v==='' ? null : Math.max(0, Math.min(6, parseInt(v,10)||0));
+  _supa.from('profiles').update({ref_override: val}).eq('id', uid).then(function(res){
+    if(res.error){ alert('실패: '+res.error.message); return; }
+    alert(val===null ? (email+'님을 플랜 기준으로 되돌렸습니다.') : (email+'님에게 레퍼런스 '+val+'장을 풀어줬습니다.'));
+    admLoadMembers((gE('adm-search')?gE('adm-search').value:'').trim());
+  });
+}
+function admSetConcurrentOverride(uid, email, current){
+  var msg = '['+email+']에게 동시 렌더링을 몇 개까지 풀어줄까요? (1~6)\n'+
+    '플랜 기준 개수와 무관하게 이 회원에게만 적용됩니다.\n'+
+    '빈 값으로 두면 다시 플랜 기준으로 돌아갑니다.';
+  var v = prompt(msg, current!=null ? String(current) : '');
+  if(v===null) return; // 취소
+  v = v.trim();
+  var val = v==='' ? null : Math.max(1, Math.min(6, parseInt(v,10)||1));
+  _supa.from('profiles').update({concurrent_override: val}).eq('id', uid).then(function(res){
+    if(res.error){ alert('실패: '+res.error.message); return; }
+    alert(val===null ? (email+'님을 플랜 기준으로 되돌렸습니다.') : (email+'님에게 동시 렌더링 '+val+'개를 풀어줬습니다.'));
+    admLoadMembers((gE('adm-search')?gE('adm-search').value:'').trim());
+  });
+}
 function admMembers(c){
   if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
   c.innerHTML='<div style="display:flex;gap:8px;margin-bottom:12px"><input id="adm-search" type="text" placeholder="이메일 검색..." style="flex:1;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:7px;outline:none"><button onclick="admSearchMembers()" style="padding:8px 14px;background:var(--ac);color:#000;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">검색</button></div><div id="adm-members-list">불러오는 중...</div>';
@@ -5769,14 +5801,20 @@ function admLoadMembers(query){
       var tr=document.createElement('tr');
       tr.style.borderBottom='1px solid rgba(255,255,255,.04)';
       var tdEmail=document.createElement('td');tdEmail.style.cssText='padding:7px 8px;color:var(--t)';tdEmail.textContent=u.email;
-      var tdPlan=document.createElement('td');tdPlan.style.cssText='padding:7px 4px;text-align:center';tdPlan.innerHTML='<span style="color:'+pc+';font-weight:700;font-size:10px">'+(u.plan||'free').toUpperCase()+'</span>';
+      var tdPlan=document.createElement('td');tdPlan.style.cssText='padding:7px 4px;text-align:center';tdPlan.innerHTML='<span style="color:'+pc+';font-weight:700;font-size:10px">'+(u.plan||'free').toUpperCase()+'</span>'+(u.ref_override!=null?'<br><span style="font-size:8px;color:var(--ac)">레퍼런스 '+u.ref_override+'장</span>':'')+(u.concurrent_override!=null?'<br><span style="font-size:8px;color:#60a5fa">동시렌더 '+u.concurrent_override+'개</span>':'');
       var tdCr=document.createElement('td');tdCr.style.cssText='padding:7px 4px;text-align:center;color:var(--ac);font-weight:700';tdCr.textContent=(u.credits||0).toLocaleString();
       var tdDate=document.createElement('td');tdDate.style.cssText='padding:7px 4px;text-align:center;color:var(--m2)';tdDate.textContent=(u.created_at||'').slice(0,10);
-      var tdBtn=document.createElement('td');tdBtn.style.cssText='padding:7px 4px;text-align:center';
+      var tdBtn=document.createElement('td');tdBtn.style.cssText='padding:7px 4px;text-align:center;white-space:nowrap';
       var btn=document.createElement('button');
-      btn.textContent='크레딧';btn.style.cssText='padding:3px 8px;background:var(--acg);border:1px solid var(--acb);color:var(--ac);border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit';
+      btn.textContent='크레딧';btn.style.cssText='padding:3px 8px;background:var(--acg);border:1px solid var(--acb);color:var(--ac);border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit;margin-right:4px';
       (function(uid,email,cr){btn.onclick=function(){admQuickCredit(uid,email,cr);};})(u.id,u.email,u.credits||0);
-      tdBtn.appendChild(btn);
+      var refBtn=document.createElement('button');
+      refBtn.textContent='레퍼런스';refBtn.style.cssText='padding:3px 8px;background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.35);color:#60a5fa;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit;margin-right:4px';
+      (function(uid,email,cur){refBtn.onclick=function(){admSetRefOverride(uid,email,cur);};})(u.id,u.email,u.ref_override);
+      var concBtn=document.createElement('button');
+      concBtn.textContent='동시렌더';concBtn.style.cssText='padding:3px 8px;background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.35);color:#a78bfa;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit';
+      (function(uid,email,cur){concBtn.onclick=function(){admSetConcurrentOverride(uid,email,cur);};})(u.id,u.email,u.concurrent_override);
+      tdBtn.appendChild(btn);tdBtn.appendChild(refBtn);tdBtn.appendChild(concBtn);
       tr.appendChild(tdEmail);tr.appendChild(tdPlan);tr.appendChild(tdCr);tr.appendChild(tdDate);tr.appendChild(tdBtn);
       tbody.appendChild(tr);
     });
@@ -7545,6 +7583,10 @@ function onSupaLogin(user){
       if(dbRole==='admin') G.cr = 999999;
       // fal_key도 여기서 로드
       if(res.data.fal_key && !FAL_KEY) FAL_KEY = res.data.fal_key;
+      // 관리자가 개별 회원에게 따로 풀어준 레퍼런스 슬롯 개수 (없으면 null = 플랜 기준)
+      G.refOverride = (res.data.ref_override!=null) ? res.data.ref_override : null;
+      // 관리자가 개별 회원에게 따로 풀어준 동시 렌더링 개수 (없으면 null = 플랜 기준)
+      G.concurrentOverride = (res.data.concurrent_override!=null) ? res.data.concurrent_override : null;
       // plan은 DB 값 그대로 사용 (크레딧으로 플랜 추정 제거)
       localStorage.setItem('clover_cr', G.cr);
       localStorage.setItem('clover_plan', G.plan);
