@@ -5932,6 +5932,17 @@ function admLogs(c){
 function admMail(c){
   if(!_supa){c.innerHTML='<div style="color:#fca5a5;padding:20px">Supabase 미연결</div>';return;}
   var RESEND_KEY=localStorage.getItem('clover_resend_key')||'';
+  // localStorage가 비어있거나 다른 브라우저/PC에서 접속한 경우를 대비해 DB(내 계정)에서도 가져와 동기화
+  if(_supaUser){
+    _supa.from('profiles').select('resend_key').eq('id',_supaUser.id).single().then(function(r){
+      if(r&&r.data&&r.data.resend_key&&r.data.resend_key!==RESEND_KEY){
+        RESEND_KEY=r.data.resend_key;
+        localStorage.setItem('clover_resend_key',RESEND_KEY);
+        var ki2=gE('resend-key-inp');if(ki2)ki2.value=RESEND_KEY;
+        var ks2=gE('resend-key-status');if(ks2)ks2.textContent='✓ DB에서 키를 불러왔습니다';
+      }
+    }).catch(function(){});
+  }
   c.innerHTML=
     '<div style="font-size:12px;font-weight:700;color:var(--ac);margin-bottom:12px">📧 전체 회원 단체 메일 발송</div>'+
     '<div style="background:var(--c2);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:14px">'+
@@ -5992,8 +6003,9 @@ function admMail(c){
     if(kSave)kSave.onclick=function(){
       var v=(gE('resend-key-inp')?gE('resend-key-inp').value:'').trim();
       localStorage.setItem('clover_resend_key',v);
+      if(_supa&&_supaUser){_supa.from('profiles').update({resend_key:v}).eq('id',_supaUser.id).catch(function(){});}
       var st=gE('resend-key-status');
-      if(st){st.style.color='var(--ac)';st.textContent='✓ 저장됨';}
+      if(st){st.style.color='var(--ac)';st.textContent='✓ 저장됨 (DB에도 백업됨)';}
       kSave.textContent='✓';kSave.style.background='#10b981';
       setTimeout(function(){kSave.textContent='저장';kSave.style.background='var(--ac)';},2000);
     };
@@ -6032,34 +6044,48 @@ function admMailInsertVar(v){
   ta.focus();
 }
 
+// ── CLOVER AI 공지 메일 공통 템플릿 ───────────────────────────────────
+// 관리자는 제목(subject)과 본문(bodyHtml)만 넘기면 됨. 로고/태그라인/버튼/푸터는 고정.
+function _cloverMailHtml(title, bodyHtml){
+  var LOGO_URL = 'https://www.cloverai.kr/og-image.png';
+  var SUPPORT_EMAIL = 'cloverai.design@gmail.com';
+  var SITE_URL = 'https://cloverai.kr';
+  return ''+
+  '<div style="margin:0;padding:0;background-color:#151515;">'+
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#151515;"><tr><td align="center" style="padding:40px 16px;">'+
+      '<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:560px;">'+
+        '<tr><td style="background-color:#111111;border-radius:14px 14px 0 0;">'+
+          '<img src="'+LOGO_URL+'" alt="CLOVER AI" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:14px 14px 0 0;">'+
+        '</td></tr>'+
+        '<tr><td style="background-color:#111111;padding:0 36px 30px 36px;">'+
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="font-family:\'Apple SD Gothic Neo\',Malgun Gothic,Helvetica,Arial,sans-serif;font-size:14px;color:#cccccc;line-height:1.8;padding-top:8px">안녕하세요, CLOVER AI입니다.</td></tr></table>'+
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding-top:26px"><div style="border-top:1px solid #2c2c2c;line-height:1px;font-size:1px">&nbsp;</div></td></tr></table>'+
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding-top:30px;font-family:\'Apple SD Gothic Neo\',Malgun Gothic,Helvetica,Arial,sans-serif;font-size:24px;font-weight:800;color:#ffffff;line-height:1.4">'+title+'</td></tr></table>'+
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding-top:28px;font-family:\'Apple SD Gothic Neo\',Malgun Gothic,Helvetica,Arial,sans-serif;font-size:14.5px;color:#cccccc;line-height:1.9">'+bodyHtml+'</td></tr></table>'+
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding-top:32px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="border-radius:10px;background-color:#12E6E6"><a href="'+SITE_URL+'" target="_blank" style="display:inline-block;padding:14px 38px;font-family:Helvetica,Arial,sans-serif;font-size:14.5px;font-weight:700;color:#0b1a1a;text-decoration:none;border-radius:10px">CLOVER AI 바로가기</a></td></tr></table></td></tr></table>'+
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding-top:34px;font-family:\'Apple SD Gothic Neo\',Malgun Gothic,Helvetica,Arial,sans-serif;font-size:14px;color:#999999;line-height:1.8">감사합니다.<br><span style="color:#cccccc;font-weight:600">CLOVER AI Team</span></td></tr></table>'+
+        '</td></tr>'+
+        '<tr><td style="background-color:#111111;padding:0 36px 32px 36px;border-radius:0 0 14px 14px">'+
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding-top:22px;border-top:1px solid #2c2c2c"></td></tr>'+
+          '<tr><td align="center" style="padding-top:18px;font-family:Helvetica,Arial,sans-serif;font-size:11.5px;color:#777777;line-height:1.9">본 메일은 CLOVER AI에서 발송된 안내 메일입니다.<br>홈페이지: <a href="'+SITE_URL+'" target="_blank" style="color:#12E6E6;text-decoration:none">cloverai.kr</a> &nbsp;·&nbsp; 문의: <a href="mailto:'+SUPPORT_EMAIL+'" style="color:#12E6E6;text-decoration:none">'+SUPPORT_EMAIL+'</a></td></tr></table>'+
+        '</td></tr>'+
+      '</table>'+
+    '</td></tr></table>'+
+  '</div>';
+}
+
 function admMailPreview(){
   var subj=(gE('mail-subject')?gE('mail-subject').value:'(제목 없음)');
   var body=(gE('mail-body')?gE('mail-body').value:'(내용 없음)');
   var html=body
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/\n/g,'<br>')
-    .replace(/\{\{이름\}\}/g,'<span style="background:#e8fdf8;color:#00a87a;padding:1px 5px;border-radius:3px">홍길동</span>')
-    .replace(/\{\{이메일\}\}/g,'<span style="background:#e8fdf8;color:#00a87a;padding:1px 5px;border-radius:3px">user@email.com</span>');
-  var win=window.open('','_blank','width=620,height:520');
+    .replace(/\{\{이름\}\}/g,'<span style="background:#0e1f1f;color:#7df0e8;padding:1px 5px;border-radius:3px">홍길동</span>')
+    .replace(/\{\{이메일\}\}/g,'<span style="background:#0e1f1f;color:#7df0e8;padding:1px 5px;border-radius:3px">user@email.com</span>');
+  var win=window.open('','_blank','width=620,height=720');
   if(!win){alert('팝업이 차단됐습니다. 허용 후 다시 시도해주세요.');return;}
-  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>미리보기</title></head><body style="margin:0;background:#f4f5f7;font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif">');
-  win.document.write(
-    '<div style="padding:30px 0">'+
-      '<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #eee">'+
-        '<div style="background:#0a0a0c;padding:22px 30px;text-align:center">'+
-          '<img src="https://www.cloverai.kr/og-image.png" alt="CLOVER AI" style="height:32px;display:inline-block;vertical-align:middle;margin-right:8px;border-radius:6px">'+
-          '<span style="color:#00e5cc;font-size:18px;font-weight:800;letter-spacing:.5px;vertical-align:middle">CLOVER AI</span>'+
-        '</div>'+
-        '<div style="padding:32px 30px;color:#222;line-height:1.8;font-size:14px">'+
-          '<div style="display:inline-block;background:#e8fdf8;color:#00a87a;padding:2px 8px;border-radius:4px;font-size:11px;margin-bottom:14px">미리보기</div>'+
-          '<h2 style="margin:0 0 14px;color:#111;font-size:18px">'+subj+'</h2>'+
-          '<div>'+html+'</div>'+
-        '</div>'+
-        '<div style="padding:16px 30px;border-top:1px solid #eee;font-size:11px;color:#999;text-align:center">'+
-          '본 메일은 Clover AI에서 발송된 공지 메일입니다.<br>문의: cloverai.design@gmail.com'+
-        '</div>'+
-      '</div>'+
-    '</div>');
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>미리보기</title></head><body style="margin:0;background:#151515">');
+  win.document.write(_cloverMailHtml(subj, html));
   win.document.write('</body></html>');
   win.document.close();
 }
@@ -6130,7 +6156,7 @@ function _admMailDoSend(apiKey,from,subject,body,emails,isTest){
       var msg=(isTest?'🧪 테스트 발송 완료!':'📧 전체 발송 완료!')+' 성공: '+sent+'명'+(failed>0?' / 실패: '+failed+'명':'');
       if(result){result.style.color='var(--ac)';result.textContent=msg;}
       var hist=[];try{hist=JSON.parse(localStorage.getItem('clover_mail_history')||'[]');}catch(e){}
-      hist.unshift({date:new Date().toISOString().slice(0,16).replace('T',' '),subject:subject,count:sent,test:isTest});
+      hist.unshift({date:new Date().toISOString().slice(0,16).replace('T',' '),subject:subject,body:body,count:sent,total:total,test:isTest});
       if(hist.length>20)hist=hist.slice(0,20);
       localStorage.setItem('clover_mail_history',JSON.stringify(hist));
       admMailLoadHistory();
@@ -6140,27 +6166,29 @@ function _admMailDoSend(apiKey,from,subject,body,emails,isTest){
     var promises=batch.map(function(email){
       var name=email.split('@')[0];
       var pb=body.replace(/\{\{이름\}\}/g,name).replace(/\{\{이메일\}\}/g,email);
-      var htmlBody='<div style="background:#f4f5f7;padding:30px 0;font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif">'+
-        '<div style="max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #eee">'+
-          '<div style="background:#0a0a0c;padding:22px 30px;text-align:center">'+
-            '<img src="https://www.cloverai.kr/og-image.png" alt="CLOVER AI" style="height:32px;display:inline-block;vertical-align:middle;margin-right:8px;border-radius:6px">'+
-            '<span style="color:#00e5cc;font-size:18px;font-weight:800;letter-spacing:.5px;vertical-align:middle">CLOVER AI</span>'+
-          '</div>'+
-          '<div style="padding:32px 30px;color:#222;line-height:1.8;font-size:14px">'+
-            pb.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')+
-          '</div>'+
-          '<div style="padding:16px 30px;border-top:1px solid #eee;font-size:11px;color:#999;text-align:center">'+
-            '본 메일은 Clover AI에서 발송된 공지 메일입니다.<br>문의: cloverai.design@gmail.com'+
-          '</div>'+
-        '</div>'+
-      '</div>';
-      return _resendProxy(apiKey,from,[email],subject,htmlBody).then(function(r){r.ok?sent++:failed++;}).catch(function(){failed++;});
+      var bodyHtml=pb.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+      var htmlBody=_cloverMailHtml(subject, bodyHtml);
+      return _resendProxy(apiKey,from,[email],subject,htmlBody).then(function(r){
+        if(r.ok){ sent++; }
+        else{
+          failed++;
+          r.text().then(function(t){
+            console.warn('[단체메일] 발송 실패 — '+email+' / HTTP '+r.status+' / 응답: '+t);
+          }).catch(function(){
+            console.warn('[단체메일] 발송 실패 — '+email+' / HTTP '+r.status);
+          });
+        }
+      }).catch(function(e){
+        failed++;
+        console.warn('[단체메일] 네트워크/요청 실패 — '+email+' :', e);
+      });
     });
     Promise.all(promises).then(function(){
       if(result)result.textContent=(isTest?'테스트 ':'')+'발송 중... ('+sent+'/'+total+')';
       sendBatch();
     });
   }
+  console.log('[단체메일] 발송 시작 — 대상 '+total+'명:', emails);
   sendBatch();
 }
 
@@ -6168,16 +6196,39 @@ function admMailLoadHistory(){
   var h=gE('mail-history');if(!h)return;
   var hist=[];try{hist=JSON.parse(localStorage.getItem('clover_mail_history')||'[]');}catch(e){}
   if(!hist.length){h.innerHTML='<div style="color:var(--m2);font-size:11px;text-align:center;padding:8px">발송 이력 없음</div>';return;}
-  h.innerHTML=hist.map(function(item){
-    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:6px;background:var(--c2);margin-bottom:5px">'+
+  h.innerHTML=hist.map(function(item,i){
+    return '<div onclick="admMailViewHistory('+i+')" style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:6px;background:var(--c2);margin-bottom:5px;cursor:pointer" onmouseover="this.style.background=\'var(--bd)\'" onmouseout="this.style.background=\'var(--c2)\'">'+
       '<div>'+
         '<span style="font-size:10px;color:var(--m2)">'+item.date+'</span>'+
         (item.test?'<span style="margin-left:6px;font-size:9px;background:rgba(0,229,204,.1);color:var(--ac);padding:1px 5px;border-radius:3px">테스트</span>':'')+
         '<div style="font-size:12px;color:var(--t);margin-top:2px">'+item.subject+'</div>'+
       '</div>'+
-      '<div style="font-size:13px;font-weight:700;color:var(--ac);white-space:nowrap;margin-left:10px">'+item.count+'명</div>'+
+      '<div style="font-size:13px;font-weight:700;color:'+(item.total&&item.count<item.total?'#fca5a5':'var(--ac)')+';white-space:nowrap;margin-left:10px">'+item.count+(item.total!=null?'/'+item.total:'')+'명</div>'+
     '</div>';
   }).join('');
+}
+
+function admMailViewHistory(i){
+  var hist=[];try{hist=JSON.parse(localStorage.getItem('clover_mail_history')||'[]');}catch(e){}
+  var item=hist[i];if(!item)return;
+  var subj=item.subject||'(제목 없음)';
+  var bodyRaw=item.body!=null ? item.body : '(이 발송 건은 본문 내용이 저장되기 전에 보낸 거라 내용을 볼 수 없습니다)';
+  var html=bodyRaw
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\n/g,'<br>')
+    .replace(/\{\{이름\}\}/g,'<span style="background:#0e1f1f;color:#7df0e8;padding:1px 5px;border-radius:3px">홍길동</span>')
+    .replace(/\{\{이메일\}\}/g,'<span style="background:#0e1f1f;color:#7df0e8;padding:1px 5px;border-radius:3px">user@email.com</span>');
+  var win=window.open('','_blank','width=620,height=720');
+  if(!win){alert('팝업이 차단됐습니다. 허용 후 다시 시도해주세요.');return;}
+  win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>발송 내용 확인</title></head><body style="margin:0;background:#151515">');
+  win.document.write(
+    '<div style="text-align:center;padding-top:14px;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#777">'+
+      item.date+(item.test?' · 테스트':' · 실제 발송')+' · 성공 '+item.count+(item.total!=null?'/'+item.total:'')+'명'+
+    '</div>'
+  );
+  win.document.write(_cloverMailHtml(subj, html));
+  win.document.write('</body></html>');
+  win.document.close();
 }
 
 
