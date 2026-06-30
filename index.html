@@ -4171,7 +4171,12 @@ function resizeForUpload(dataUrl, cb, resolution){
     var cv=document.createElement('canvas');
     cv.width=Math.round(w*ratio);
     cv.height=Math.round(h*ratio);
-    cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+    // 모바일(특히 아이폰) 카메라 사진은 Display P3처럼 sRGB보다 넓은 색공간으로 저장되는 경우가 많음.
+    // 일부 모바일 브라우저는 캔버스에 그릴 때 이 색공간을 제대로 변환하지 않고 그냥 좁은 색역(sRGB)으로
+    // 잘못 해석해버려서, 결과물이 마치 필터를 씌운 것처럼 탁하고 채도 낮게 나오는 원인이 됨.
+    // → 브라우저가 지원하면 캔버스 자체를 원본과 같은 넓은 색공간(display-p3)으로 만들어서 이 손실을 방지.
+    var ctx = cv.getContext('2d', {colorSpace:'display-p3'}) || cv.getContext('2d');
+    ctx.drawImage(img,0,0,cv.width,cv.height);
     cb(cv.toDataURL('image/jpeg',0.96));
   };
   img.onerror=function(){cb(dataUrl);};
@@ -5122,7 +5127,9 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
         }
         var canvas=document.createElement('canvas');
         canvas.width=targetW; canvas.height=targetH;
-        var ctx=canvas.getContext('2d');
+        // 모바일 원본 사진이 Display P3 등 넓은 색공간인 경우, 결과 이미지를 여기서 다시 그릴 때
+        // 좁은 색역(sRGB)으로 잘못 변환되면서 탁하고 채도 낮게 보이는 문제를 방지
+        var ctx=canvas.getContext('2d', {colorSpace:'display-p3'}) || canvas.getContext('2d');
         ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
         ctx.drawImage(img2, 0, 0, targetW, targetH);
         var dataUrl=canvas.toDataURL('image/jpeg', 0.97);
