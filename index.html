@@ -3570,7 +3570,14 @@ function _saveActiveJob(reqId, baseUrl, label){
   try{
     var jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');
     jobs=jobs.filter(function(j){return Date.now()-j.ts<20*60*1000;}); // 20분 넘은 건 자동 정리
-    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',wf:G.wf||'edit',ts:Date.now()});
+    // 새로고침 후 복구할 때 Before/After 비교가 가능하도록, 작업 시작 시점의 원본 이미지도 같이 저장.
+    // 단, data: URL은 용량이 너무 커서 localStorage를 가득 채울 수 있으므로 http URL일 때만 저장한다.
+    var curOrig=null;
+    try{
+      var curTab=getTab(G.wf);
+      if(curTab && curTab.inputImg && curTab.inputImg.startsWith('http')) curOrig=curTab.inputImg;
+    }catch(e0){}
+    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',wf:G.wf||'edit',ts:Date.now(),origImg:curOrig});
     localStorage.setItem('clover_active_jobs',JSON.stringify(jobs));
   }catch(e){}
 }
@@ -3922,9 +3929,16 @@ function _resumeActiveJobs(){
         var jobWf=j.wf||G.wf||'edit';
         // ── 정상 완료 흐름과 동일하게 히스토리 + 클라우드 갤러리에 저장 ──
         if(!G.HIST[jobWf])G.HIST[jobWf]=[];
-        // orig를 null로 두면 비교(Before/After) 화면에서 Before 쪽이 빈 화면으로 보임 →
-        // 원본을 알 수 없으니 result를 orig 자리에도 넣어 최소한 정상적으로 표시되게 함
-        var recoveredItem={id:Date.now()+Math.random(),orig:url,result:url,origThumb:null,tags:[j.label,'새로고침 복구'],ai:'',preview:false,cx:50,fav:false,wf:jobWf,noCompare:true};
+        // 작업 시작 시점에 저장해둔 원본(http URL)이 있으면 그걸로 정상 Before/After 비교 표시.
+        // 원본을 알 수 없는 경우(예전 버전 호환 등)에만 result를 orig 자리에 넣어 빈 화면 방지.
+        var hasOrig = !!j.origImg;
+        var recoveredItem={
+          id:Date.now()+Math.random(),
+          orig: hasOrig ? j.origImg : url,
+          result:url, origThumb:null,
+          tags:[j.label,'새로고침 복구'], ai:'', preview:false, cx:50, fav:false,
+          wf:jobWf, noCompare: !hasOrig
+        };
         G.HIST[jobWf].unshift(recoveredItem);
         saveHistToStorage();
         if(G.wf===jobWf) renderMain(jobWf);
@@ -5211,7 +5225,7 @@ function procImgWithTask(task, onDone, onErr){
     }
   } else if(wf==='edit'){
     ap = prompt
-      ? prompt+' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions.'
+      ? prompt+' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions. CRITICAL — DO NOT ALTER ANYTHING NOT EXPLICITLY REQUESTED: do not turn any lights or lamps on or off unless explicitly asked, and do not change the overall brightness, exposure, contrast or color tone of the image — only the specific element(s) described should change; everything else must remain exactly as in the original.'
       : 'Improve materials, lighting and quality of this interior. Keep all other areas exactly unchanged. Photorealistic architectural photography.';
   } else {
     ap='Interior architecture photography. '+(prompt||'photorealistic high quality')+'. Sharp details.';
@@ -5246,7 +5260,7 @@ function procImgWithTask(task, onDone, onErr){
     if(userPrompt){
       // 사용자가 직접 입력한 프롬프트는 최우선으로 정확히 따르되,
       // 벽 구조(개수·위치·존재 여부)만은 별도 지시가 없는 한 절대 보존 — 가구 재배치는 허용
-      editPrompt = userPrompt + ' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions — only change what is explicitly described (furniture, materials, colors, placement of objects).';
+      editPrompt = userPrompt + ' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions — only change what is explicitly described (furniture, materials, colors, placement of objects). CRITICAL — DO NOT ALTER ANYTHING NOT EXPLICITLY REQUESTED: do not turn any lights, lamps, or fixtures on or off unless explicitly asked — if a lamp was off in the original photo, it must remain off; if on, it must remain on, exactly as in the original. Do NOT change the overall brightness, exposure, contrast, white balance, or color tone of the image — the window light, sunlight intensity, lamp brightness, highlights, shadows, and overall scene exposure must look exactly as bright and clear as the original photo. Do NOT add a hazy/dull/desaturated filter over the whole image, do NOT dim the room. Only the specific element(s) described in the instructions above should change; every other pixel, object, light source and lighting condition in the photo must remain exactly as it was in the original.';
     } else if(isTransformPreset){
       editPrompt = 'Improve materials, lighting and quality of this interior. Photorealistic architectural photography.';
     } else {
