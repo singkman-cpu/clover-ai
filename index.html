@@ -4168,15 +4168,37 @@ function resizeForUpload(dataUrl, cb, resolution){
     var w=img.width, h=img.height;
     if(w<=MAX && h<=MAX){ cb(dataUrl); return; }
     var ratio = Math.min(MAX/w, MAX/h);
-    var cv=document.createElement('canvas');
-    cv.width=Math.round(w*ratio);
-    cv.height=Math.round(h*ratio);
-    // 모바일(특히 아이폰) 카메라 사진은 Display P3처럼 sRGB보다 넓은 색공간으로 저장되는 경우가 많음.
-    // 일부 모바일 브라우저는 캔버스에 그릴 때 이 색공간을 제대로 변환하지 않고 그냥 좁은 색역(sRGB)으로
-    // 잘못 해석해버려서, 결과물이 마치 필터를 씌운 것처럼 탁하고 채도 낮게 나오는 원인이 됨.
-    // → 브라우저가 지원하면 캔버스 자체를 원본과 같은 넓은 색공간(display-p3)으로 만들어서 이 손실을 방지.
-    var ctx = cv.getContext('2d', {colorSpace:'display-p3'}) || cv.getContext('2d');
-    ctx.drawImage(img,0,0,cv.width,cv.height);
+    var targetW=Math.round(w*ratio), targetH=Math.round(h*ratio);
+    // ── 진짜 원인: 모바일 사진(예: 4949px)을 AI 입력 크기(1024px)로 줄일 때, 거의 5배에
+    // 가까운 비율을 한 번에 확 줄이게 됨. 이때 고품질 축소 옵션 없이 단순 축소하면 사진
+    // 자체가 흐릿해지고, AI는 그 흐릿한 사진을 보고 작업하므로 결과물도 따라서 흐려짐.
+    // PC는 원본이 작아서 이 정도로 크게 줄일 일이 없어 문제가 안 보였음.
+    // → 축소 비율이 클 때는 한 번에 줄이지 않고 단계적으로(최대 절반씩) 줄여서 품질 손실을 최소화.
+    var cv, ctx;
+    if(ratio < 0.5){
+      // 단계적 축소: 한 번에 50%씩만 줄여나가다가 마지막에 목표 크기로 정확히 맞춤
+      var curW=w, curH=h, srcCanvas=img;
+      while(curW*0.5 > targetW){
+        curW=Math.round(curW*0.5); curH=Math.round(curH*0.5);
+        var stepCv=document.createElement('canvas');
+        stepCv.width=curW; stepCv.height=curH;
+        var stepCtx=stepCv.getContext('2d');
+        stepCtx.imageSmoothingEnabled=true; stepCtx.imageSmoothingQuality='high';
+        stepCtx.drawImage(srcCanvas,0,0,curW,curH);
+        srcCanvas=stepCv;
+      }
+      cv=document.createElement('canvas');
+      cv.width=targetW; cv.height=targetH;
+      ctx=cv.getContext('2d');
+      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+      ctx.drawImage(srcCanvas,0,0,targetW,targetH);
+    } else {
+      cv=document.createElement('canvas');
+      cv.width=targetW; cv.height=targetH;
+      ctx=cv.getContext('2d');
+      ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+      ctx.drawImage(img,0,0,targetW,targetH);
+    }
     cb(cv.toDataURL('image/jpeg',0.96));
   };
   img.onerror=function(){cb(dataUrl);};
@@ -5250,7 +5272,7 @@ function procImgWithTask(task, onDone, onErr){
     }
   } else if(wf==='edit'){
     ap = prompt
-      ? prompt+' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions. CRITICAL — DO NOT ALTER ANYTHING NOT EXPLICITLY REQUESTED: do not turn any lights or lamps on or off unless explicitly asked, and do not change the overall brightness, exposure, contrast or color tone of the image — only the specific element(s) described should change; everything else must remain exactly as in the original. THIS RULE APPLIES EVEN WHEN THE EDITED OBJECT\'S OWN COLOR CHANGES SIGNIFICANTLY (e.g. a sofa changed from a light color to black, or any other large color swap): a large dark-colored or light-colored replacement object must NOT cause the renderer to auto-adjust overall scene exposure, white balance, or shadow density to compensate for it. Walls, floor, ceiling, plants, artwork, and every other untouched surface in the frame must keep their EXACT original brightness/luminance values, pixel-for-pixel — measure it like a fixed reference: if a wall looked light grey/white at a certain brightness in the original, it must be that identical brightness in the result, not darker just because a nearby object is now black. Only the replaced object itself should carry its new color/material — it must NOT cast extra ambient darkness onto the rest of the scene beyond its own normal, realistic, localized shadow.'
+      ? prompt+' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions.  CRITICAL — PRESERVE THE EXACT SHAPE/FORM OF EDITED FURNITURE: when changing a furniture piece\'s color/material, keep its exact silhouette, type, size, number of sections, and overall form unchanged — e.g. an L-shaped sectional sofa with a chaise must remain the same L-shaped sectional with the same chaise, never replaced by a single chair or a different sofa shape. CRITICAL — DO NOT ALTER ANYTHING NOT EXPLICITLY REQUESTED: do not turn any lights or lamps on or off unless explicitly asked, and do not change the overall brightness, exposure, contrast or color tone of the image — only the specific element(s) described should change; everything else must remain exactly as in the original. THIS RULE APPLIES EVEN WHEN THE EDITED OBJECT\'S OWN COLOR CHANGES SIGNIFICANTLY (e.g. a sofa changed from a light color to black, or any other large color swap): a large dark-colored or light-colored replacement object must NOT cause the renderer to auto-adjust overall scene exposure, white balance, or shadow density to compensate for it. Walls, floor, ceiling, plants, artwork, and every other untouched surface in the frame must keep their EXACT original brightness/luminance values, pixel-for-pixel — measure it like a fixed reference: if a wall looked light grey/white at a certain brightness in the original, it must be that identical brightness in the result, not darker just because a nearby object is now black. Only the replaced object itself should carry its new color/material — it must NOT cast extra ambient darkness onto the rest of the scene beyond its own normal, realistic, localized shadow.'
       : 'Improve materials, lighting and quality of this interior. Keep all other areas exactly unchanged. Photorealistic architectural photography.';
   } else {
     ap='Interior architecture photography. '+(prompt||'photorealistic high quality')+'. Sharp details.';
@@ -5285,7 +5307,7 @@ function procImgWithTask(task, onDone, onErr){
     if(userPrompt){
       // 사용자가 직접 입력한 프롬프트는 최우선으로 정확히 따르되,
       // 벽 구조(개수·위치·존재 여부)만은 별도 지시가 없는 한 절대 보존 — 가구 재배치는 허용
-      editPrompt = userPrompt + ' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions — only change what is explicitly described (furniture, materials, colors, placement of objects). CRITICAL — DO NOT ALTER ANYTHING NOT EXPLICITLY REQUESTED: do not turn any lights, lamps, or fixtures on or off unless explicitly asked — if a lamp was off in the original photo, it must remain off; if on, it must remain on, exactly as in the original. Do NOT change the overall brightness, exposure, contrast, white balance, or color tone of the image — the window light, sunlight intensity, lamp brightness, highlights, shadows, and overall scene exposure must look exactly as bright and clear as the original photo. Do NOT add a hazy/dull/desaturated filter over the whole image, do NOT dim the room. Only the specific element(s) described in the instructions above should change; every other pixel, object, light source and lighting condition in the photo must remain exactly as it was in the original. THIS RULE APPLIES EVEN WHEN THE EDITED OBJECT\'S OWN COLOR CHANGES SIGNIFICANTLY (e.g. a sofa changed from a light color to black, or any other large color swap): a large dark-colored or light-colored replacement object must NOT cause the renderer to auto-adjust overall scene exposure, white balance, or shadow density to compensate for it. Walls, floor, ceiling, plants, artwork, and every other untouched surface in the frame must keep their EXACT original brightness/luminance values, pixel-for-pixel — measure it like a fixed reference: if a wall looked light grey/white at a certain brightness in the original, it must be that identical brightness in the result, not darker just because a nearby object is now black. Only the replaced object itself should carry its new color/material — it must NOT cast extra ambient darkness onto the rest of the scene beyond its own normal, realistic, localized shadow.';
+      editPrompt = userPrompt + ' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions — only change what is explicitly described (furniture, materials, colors, placement of objects). CRITICAL — PRESERVE THE EXACT SHAPE/FORM OF EDITED FURNITURE: if the instruction asks to change the color or material of a specific furniture piece (e.g. \'change the sofa color\'), you must change ONLY its color/material and keep that exact same piece of furniture — same silhouette, same type, same size, same number of sections/segments, same arm/back/cushion shape, same overall form — completely unchanged. For example, if the original is an L-shaped sectional sofa with a chaise lounge, the result must still be the exact same L-shaped sectional with the same chaise — do NOT replace it with a single armchair, a different sofa shape, a smaller sofa, or any other different furniture model. Do NOT change the count of furniture pieces (e.g. do not turn one large sectional into a single chair, do not remove cushions or sections). Only the surface color/material changes; the object\'s physical form is a fixed constraint that must never change unless explicitly asked. CRITICAL — DO NOT ALTER ANYTHING NOT EXPLICITLY REQUESTED: do not turn any lights, lamps, or fixtures on or off unless explicitly asked — if a lamp was off in the original photo, it must remain off; if on, it must remain on, exactly as in the original. Do NOT change the overall brightness, exposure, contrast, white balance, or color tone of the image — the window light, sunlight intensity, lamp brightness, highlights, shadows, and overall scene exposure must look exactly as bright and clear as the original photo. Do NOT add a hazy/dull/desaturated filter over the whole image, do NOT dim the room. Only the specific element(s) described in the instructions above should change; every other pixel, object, light source and lighting condition in the photo must remain exactly as it was in the original. THIS RULE APPLIES EVEN WHEN THE EDITED OBJECT\'S OWN COLOR CHANGES SIGNIFICANTLY (e.g. a sofa changed from a light color to black, or any other large color swap): a large dark-colored or light-colored replacement object must NOT cause the renderer to auto-adjust overall scene exposure, white balance, or shadow density to compensate for it. Walls, floor, ceiling, plants, artwork, and every other untouched surface in the frame must keep their EXACT original brightness/luminance values, pixel-for-pixel — measure it like a fixed reference: if a wall looked light grey/white at a certain brightness in the original, it must be that identical brightness in the result, not darker just because a nearby object is now black. Only the replaced object itself should carry its new color/material — it must NOT cast extra ambient darkness onto the rest of the scene beyond its own normal, realistic, localized shadow.';
     } else if(isTransformPreset){
       editPrompt = 'Improve materials, lighting and quality of this interior. Photorealistic architectural photography.';
     } else {
