@@ -5139,25 +5139,11 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
   var mult = (resolution==='2K') ? 2 : 1;
   var probe=new Image();
   probe.onload=function(){
-    var wantW=Math.round(probe.naturalWidth*mult), wantH=Math.round(probe.naturalHeight*mult);
-    if(!wantW || !wantH){ cb(ri); return; }
+    var targetW=Math.round(probe.naturalWidth*mult), targetH=Math.round(probe.naturalHeight*mult);
+    if(!targetW || !targetH){ cb(ri); return; }
     // 결과 이미지를 블롭으로 불러와서(크로스오리진 캔버스 오염 방지) 정확한 픽셀 크기로 다시 그려준다
     loadImgSafe(ri, function(img2){
       try{
-        // ── 진짜 원인: 모바일 사진은 원본 해상도가 매우 큰 경우가 많음(예: 4949x3671) ──
-        // AI 결과물은 보통 ~2048px 정도로 생성되는데, 이걸 모바일 원본 크기(예: 4949px)에
-        // 맞추려고 강제로 2~3배씩 늘리면 디테일 자체가 사라져서 흐릿하고 탁하게 보임.
-        // 이전엔 대비/채도만 보정했는데, 이건 "흐려 보이는 느낌"만 가릴 뿐 실제 손실된
-        // 선명도는 복구하지 못함 → 근본적으로, AI 결과물 해상도 기준 최대 1.5배까지만 키우고
-        // 그 이상은 원본 크기에 안 맞더라도 화질을 우선해서 더 키우지 않는다.
-        var MAX_UPSCALE = 1.5;
-        var rawRatio = wantW / img2.naturalWidth;
-        var clampedRatio = Math.min(rawRatio, MAX_UPSCALE);
-        var targetW = Math.round(img2.naturalWidth * clampedRatio);
-        var targetH = Math.round(img2.naturalHeight * clampedRatio);
-        if(rawRatio > MAX_UPSCALE){
-          console.log('[원본 크기 맞춤] 모바일 원본('+wantW+'px)이 너무 커서 화질 보호를 위해 AI 결과물의 '+MAX_UPSCALE+'배('+targetW+'px)까지만 확대함');
-        }
         if(Math.abs(img2.naturalWidth-targetW)<=2 && Math.abs(img2.naturalHeight-targetH)<=2){
           cb(ri); return; // 이미 거의 같은 크기면 다시 그릴 필요 없음
         }
@@ -5165,15 +5151,9 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
         canvas.width=targetW; canvas.height=targetH;
         var ctx=canvas.getContext('2d');
         ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-        // 그래도 약간의 업스케일은 남아있을 수 있으므로, 보조적으로 대비/채도를 살짝 보정
-        if(clampedRatio > 1.15){
-          var boost = Math.min(1.1, 1 + (clampedRatio-1)*0.1);
-          ctx.filter = 'contrast('+boost.toFixed(3)+') saturate('+boost.toFixed(3)+')';
-        }
         ctx.drawImage(img2, 0, 0, targetW, targetH);
-        ctx.filter = 'none';
         var dataUrl=canvas.toDataURL('image/jpeg', 0.97);
-        console.log('[원본 크기 맞춤]', img2.naturalWidth+'x'+img2.naturalHeight, '→', targetW+'x'+targetH, '(요청된 원본 맞춤 크기:', wantW+'x'+wantH+')');
+        console.log('[원본 크기 맞춤]', img2.naturalWidth+'x'+img2.naturalHeight, '→', targetW+'x'+targetH);
         cb(dataUrl);
       }catch(e){
         console.warn('[원본 크기 맞춤 실패]', e);
