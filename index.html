@@ -5127,11 +5127,22 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
         }
         var canvas=document.createElement('canvas');
         canvas.width=targetW; canvas.height=targetH;
-        // 모바일 원본 사진이 Display P3 등 넓은 색공간인 경우, 결과 이미지를 여기서 다시 그릴 때
-        // 좁은 색역(sRGB)으로 잘못 변환되면서 탁하고 채도 낮게 보이는 문제를 방지
-        var ctx=canvas.getContext('2d', {colorSpace:'display-p3'}) || canvas.getContext('2d');
+        var ctx=canvas.getContext('2d');
         ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+        // ── 진짜 원인: 모바일 사진은 원본 해상도가 매우 큰 경우가 많음(예: 4949x3671) ──
+        // AI는 보통 ~2048px 정도로 결과물을 만드는데, 그걸 모바일 원본 크기에 맞추려면
+        // 2배 이상 크게 늘려야 하는 경우가 흔함. 이렇게 큰 비율로 업스케일하면 필연적으로
+        // 흐릿해지고 대비/채도가 낮아져서 "필름 씌운 듯 탁한" 느낌이 남 (PC는 보통 원본이
+        // 작아서 늘리는 비율이 작아 이 문제가 거의 안 보였음).
+        // → 업스케일 비율이 큰 경우, 흐려진 만큼 대비/채도를 살짝 보정해서 상쇄한다.
+        var upscaleRatio = targetW / img2.naturalWidth;
+        if(upscaleRatio > 1.25){
+          var boost = Math.min(1.18, 1 + (upscaleRatio-1)*0.12); // 비율이 클수록 보정폭도 커지되 과하지 않게 상한
+          ctx.filter = 'contrast('+boost.toFixed(3)+') saturate('+boost.toFixed(3)+')';
+          console.log('[원본 크기 맞춤] 업스케일 비율 '+upscaleRatio.toFixed(2)+'x → 대비/채도 보정 '+boost.toFixed(2)+'x 적용');
+        }
         ctx.drawImage(img2, 0, 0, targetW, targetH);
+        ctx.filter = 'none';
         var dataUrl=canvas.toDataURL('image/jpeg', 0.97);
         console.log('[원본 크기 맞춤]', img2.naturalWidth+'x'+img2.naturalHeight, '→', targetW+'x'+targetH);
         cb(dataUrl);
