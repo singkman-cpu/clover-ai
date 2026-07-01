@@ -1082,19 +1082,19 @@ var G={
     space:{
       inputImg:null, resultImg:null,
       refs:Array(6).fill(null),
-      prompt:'', selK:null, resolution:'2K',
+      prompt:'', selK:null, resolution:'1K',
       status:'idle'
     },
     render:{
       inputImg:null, resultImg:null,
       refs:Array(6).fill(null),
-      prompt:'', selK:null, resolution:'2K',
+      prompt:'', selK:null, resolution:'1K',
       status:'idle'
     },
     edit:{
       inputImg:null, resultImg:null,
       refs:[],
-      prompt:'', selK:null, resolution:'2K',
+      prompt:'', selK:null, resolution:'1K',
       maskData:null,
       status:'idle'
     },
@@ -3088,7 +3088,7 @@ function addHistEl(item, scroll, targetHs){
     // 타일 미리보기 (텍스처/맵소스 프리셋 결과물에만 표시 — 타일링 끊김 여부를 2x2로 바로 확인)
     if(item.savedSelK==='texture_from_photo' || item.savedSelK==='texture_seamless' || item.savedSelK==='texture_normal_map'){
       var stile=mk('button','se-btn');stile.type='button';stile.innerHTML='&#9638; 타일 미리보기';stile.title='2x2로 이어붙여서 타일링 확인';
-      stile.style.cssText='background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.35);color:#fcd34d;padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
+      stile.style.cssText='background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.35);color:#fcd34d;padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit;margin-right:4px';
       (function(srcUrl){
         stile.addEventListener('click',function(e){
           e.stopPropagation();
@@ -3097,6 +3097,20 @@ function addHistEl(item, scroll, targetHs){
       })(item.result||item.orig);
       stile.addEventListener('mousedown',function(e){e.stopPropagation();},false);
       sebar.appendChild(stile);
+
+      // PBR 맵 세트 버튼 (diffuse/normal/roughness/displacement 한번에 생성)
+      if(item.savedSelK==='texture_from_photo' || item.savedSelK==='texture_seamless'){
+        var spbr=mk('button','se-btn');spbr.type='button';spbr.innerHTML='🔷 PBR 세트';spbr.title='노멀·러프니스·디스플레이스맵 한번에 생성 + ZIP 다운로드';
+        spbr.style.cssText='background:rgba(99,102,241,.1);border-color:rgba(99,102,241,.35);color:#a5b4fc;padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
+        (function(srcUrl, diffuseUrl, lbl){
+          spbr.addEventListener('click',function(e){
+            e.stopPropagation();
+            _showPbrPanel(srcUrl, diffuseUrl, lbl);
+          },false);
+        })(item.result||item.orig, item.result, item.tags&&item.tags[0]||'texture');
+        spbr.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+        sebar.appendChild(spbr);
+      }
     }
 
     // 현장사진 디자인 (렌더 실사화 탭 결과에만 표시 — 실사화된 이미지를 현장사진 디자인으로 다시 디자인할 때)
@@ -5177,71 +5191,85 @@ function addLoadingCard(task){
 // 결과 이미지를 "원본 픽셀 크기" 기준으로 정확히 리사이즈한다 (AI 업스케일 아님 — 단순 크기 맞춤)
 // 1K 선택 = 원본과 동일한 픽셀 크기, 2K 선택 = 원본의 2배 픽셀 크기
 function _makeSeamlessTile(dataUrl, cb){
-  // 오프셋 기법 + 그라디언트 마스크 블렌딩:
-  // 1) 이미지를 절반 오프셋해서 가장자리를 가운데로 모음
-  // 2) 원본 이미지를 그라디언트 마스크로 가운데 십자 위에 부드럽게 덧그려서 이음새를 숨김
-  // → 이전 방식(전체 띠에 블러)은 + 형태의 흐린 줄이 선명하게 보이는 문제가 있었음
+  // 이중 오프셋 + 넓은 페이드 블렌딩:
+  // 나무결처럼 방향성이 강한 패턴은 단순 오프셋으로는 이음새가 보임.
+  // 원본을 4방향으로 타일처럼 깔고(2x2), 그 중앙 부분을 잘라내는 방식으로
+  // 자연스럽게 이어지는 1x1 타일을 만든다.
   try{
     loadImgSafe(dataUrl, function(img){
       try{
         var w=img.naturalWidth, h=img.naturalHeight;
         var hw=Math.round(w/2), hh=Math.round(h/2);
+
+        // STEP 1: 2x2 타일로 확장 (총 2w x 2h 캔버스에 원본을 4번 깔기)
+        var cv2=document.createElement('canvas');
+        cv2.width=w*2; cv2.height=h*2;
+        var c2=cv2.getContext('2d');
+        c2.drawImage(img, 0,   0  ); // 좌상
+        c2.drawImage(img, w,   0  ); // 우상
+        c2.drawImage(img, 0,   h  ); // 좌하
+        c2.drawImage(img, w,   h  ); // 우하
+
+        // STEP 2: 2x2 확장 이미지의 정중앙(hw, hh)을 기준으로
+        // 원래 크기(w x h)만큼 잘라내기 — 이 영역은 원본의 가운데에서 시작해서
+        // 가장자리가 자연스럽게 이어지는 부분임
         var cv=document.createElement('canvas');
         cv.width=w; cv.height=h;
         var ctx=cv.getContext('2d');
+        ctx.drawImage(cv2, hw, hh, w, h, 0, 0, w, h);
 
-        // STEP 1: 4분면 오프셋 배치 (가장자리를 가운데로)
-        ctx.drawImage(img, 0,0,   hw,hh,   w-hw,h-hh, hw,hh);   // 좌상 → 우하
-        ctx.drawImage(img, hw,0,  w-hw,hh, 0,h-hh,    w-hw,hh); // 우상 → 좌하
-        ctx.drawImage(img, 0,hh,  hw,h-hh, w-hw,0,    hw,h-hh); // 좌하 → 우상
-        ctx.drawImage(img, hw,hh, w-hw,h-hh, 0,0,     w-hw,h-hh);// 우하 → 좌상
+        // STEP 3: 원본과 오프셋 버전을 넓은 페이드로 블렌딩
+        // 가장자리 픽셀이 원본의 가장자리와 자연스럽게 이어지도록
+        var fade = Math.max(40, Math.round(Math.min(w,h)*0.15));
 
-        // STEP 2: 가운데 십자 이음새를 원본 이미지를 그라디언트 마스크로 덧그려서 숨김
-        // 페이드 폭 — 너무 넓으면 패턴이 눌려 보이고, 너무 좁으면 이음새가 보임
-        var fade = Math.max(20, Math.round(Math.min(w,h)*0.08));
+        function applyFade(canvas, origCanvas, horizontal){
+          var fw=canvas.width, fh=canvas.height;
+          var tmp=document.createElement('canvas');
+          tmp.width=fw; tmp.height=fh;
+          var tctx=tmp.getContext('2d');
+          tctx.drawImage(canvas, 0, 0);
 
-        // 세로 중앙선 블렌드 (가운데 수직 방향 이음새 숨기기)
-        var gv = ctx.createLinearGradient(hw-fade, 0, hw+fade, 0);
-        gv.addColorStop(0,   'rgba(0,0,0,0)');
-        gv.addColorStop(0.5, 'rgba(0,0,0,1)');
-        gv.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx.save();
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.fillStyle = gv;
-        ctx.fillRect(hw-fade, 0, fade*2, h);
-        ctx.restore();
-        // 원본 이미지를 오프셋(+hw) 위치로 덧그리기 — 이 자리가 원본의 이음새 없는 중간 부분
-        ctx.save();
-        ctx.globalCompositeOperation = 'destination-over';
-        ctx.drawImage(img, -hw, 0); // 왼쪽 절반 오프셋
-        ctx.drawImage(img, -hw+w, 0); // 오른쪽 절반 오프셋(wrap)
-        ctx.restore();
+          var fc=canvas.getContext('2d');
+          if(horizontal){
+            // 좌우 가장자리를 원본으로 페이드
+            var gl=fc.createLinearGradient(0,0,fade,0);
+            gl.addColorStop(0,'rgba(0,0,0,1)');
+            gl.addColorStop(1,'rgba(0,0,0,0)');
+            fc.save();fc.globalCompositeOperation='destination-out';fc.fillStyle=gl;fc.fillRect(0,0,fade,fh);fc.restore();
+            fc.save();fc.globalCompositeOperation='destination-over';fc.drawImage(origCanvas,0,0);fc.restore();
+            var gr=fc.createLinearGradient(fw-fade,0,fw,0);
+            gr.addColorStop(0,'rgba(0,0,0,0)');
+            gr.addColorStop(1,'rgba(0,0,0,1)');
+            fc.save();fc.globalCompositeOperation='destination-out';fc.fillStyle=gr;fc.fillRect(fw-fade,0,fade,fh);fc.restore();
+            fc.save();fc.globalCompositeOperation='destination-over';fc.drawImage(origCanvas,0,0);fc.restore();
+          } else {
+            // 상하 가장자리를 원본으로 페이드
+            var gt=fc.createLinearGradient(0,0,0,fade);
+            gt.addColorStop(0,'rgba(0,0,0,1)');
+            gt.addColorStop(1,'rgba(0,0,0,0)');
+            fc.save();fc.globalCompositeOperation='destination-out';fc.fillStyle=gt;fc.fillRect(0,0,fw,fade);fc.restore();
+            fc.save();fc.globalCompositeOperation='destination-over';fc.drawImage(origCanvas,0,0);fc.restore();
+            var gb=fc.createLinearGradient(0,fh-fade,0,fh);
+            gb.addColorStop(0,'rgba(0,0,0,0)');
+            gb.addColorStop(1,'rgba(0,0,0,1)');
+            fc.save();fc.globalCompositeOperation='destination-out';fc.fillStyle=gb;fc.fillRect(0,fh-fade,fw,fade);fc.restore();
+            fc.save();fc.globalCompositeOperation='destination-over';fc.drawImage(origCanvas,0,0);fc.restore();
+          }
+        }
 
-        // 가로 중앙선 블렌드 (가운데 수평 방향 이음새 숨기기)
-        var cv2=document.createElement('canvas');
-        cv2.width=w; cv2.height=h;
-        var ctx2=cv2.getContext('2d');
-        ctx2.drawImage(cv, 0,0);
-        var gh = ctx2.createLinearGradient(0, hh-fade, 0, hh+fade);
-        gh.addColorStop(0,   'rgba(0,0,0,0)');
-        gh.addColorStop(0.5, 'rgba(0,0,0,1)');
-        gh.addColorStop(1,   'rgba(0,0,0,0)');
-        ctx2.save();
-        ctx2.globalCompositeOperation = 'destination-out';
-        ctx2.fillStyle = gh;
-        ctx2.fillRect(0, hh-fade, w, fade*2);
-        ctx2.restore();
-        ctx2.save();
-        ctx2.globalCompositeOperation = 'destination-over';
-        ctx2.drawImage(img, 0, -hh);
-        ctx2.drawImage(img, 0, -hh+h);
-        ctx2.restore();
+        // 원본 캔버스(페이드 배경용)
+        var origCv=document.createElement('canvas');
+        origCv.width=w; origCv.height=h;
+        origCv.getContext('2d').drawImage(img, 0, 0);
 
-        var out=cv2.toDataURL('image/jpeg',0.95);
+        applyFade(cv, origCv, true);  // 좌우 페이드
+        applyFade(cv, origCv, false); // 상하 페이드
+
+        var out=cv.toDataURL('image/jpeg',0.96);
         cb(out);
       }catch(e){
         console.warn('[타일링 보정 실패]', e);
-        cb(dataUrl); // 실패하면 원본 그대로
+        cb(dataUrl);
       }
     }, function(){ cb(dataUrl); });
   }catch(e){ cb(dataUrl); }
@@ -6151,9 +6179,158 @@ function _showMaterialPickerPopup(selK){
     var exTa=document.getElementById('sb-ta-extra');
     if(exTa){ exTa.value=val; }
     updBtn();
+    // 팝업 확인 즉시 렌더링 시작
+    setTimeout(function(){
+      var actBtn=document.getElementById('actbtn');
+      if(actBtn && !actBtn.classList.contains('dis')) actBtn.click();
+    }, 150);
   };
   if(inp){ inp.onkeydown=function(e){ if(e.key==='Enter') document.getElementById('mat-confirm').click(); }; }
   ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+}
+// ── PBR 맵 세트 생성 + ZIP 다운로드 ────────────────────────────────────
+// 텍스처 결과물 1개로 Diffuse/Normal/Roughness/Displacement 4종 한번에 생성
+
+function _downloadZip(files, zipName){
+  // files: [{name:'diffuse.jpg', dataUrl:'data:...'}, ...]
+  // 브라우저 내에서 순수 JS로 ZIP 생성 (JSZip CDN 동적 로드)
+  function doZip(){
+    var zip=new JSZip();
+    files.forEach(function(f){
+      var b64=f.dataUrl.split(',')[1];
+      zip.file(f.name, b64, {base64:true});
+    });
+    zip.generateAsync({type:'blob'}).then(function(blob){
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download=zipName||'clover_pbr_maps.zip';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(a.href);},1000);
+    });
+  }
+  if(typeof JSZip==='undefined'){
+    var s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload=doZip;
+    s.onerror=function(){ alert('ZIP 라이브러리 로드 실패. 인터넷 연결을 확인해주세요.'); };
+    document.head.appendChild(s);
+  } else { doZip(); }
+}
+
+function _showPbrPanel(srcUrl, diffuseUrl, label){
+  // PBR 맵 생성 패널 팝업
+  if(gE('pbr-panel-ov')) gE('pbr-panel-ov').remove();
+  var ov=document.createElement('div');
+  ov.id='pbr-panel-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:99999;overflow-y:auto;padding:20px';
+  var box=document.createElement('div');
+  box.style.cssText='background:var(--card);border-radius:16px;padding:22px;max-width:560px;margin:0 auto;border:1px solid var(--bd2)';
+  box.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'+
+      '<div style="font-size:15px;font-weight:800;color:var(--t)">🔷 PBR 맵 세트 생성</div>'+
+      '<button id="pbr-close" style="background:none;border:none;color:var(--m2);font-size:20px;cursor:pointer">✕</button>'+
+    '</div>'+
+    '<div style="font-size:12px;color:var(--m2);margin-bottom:16px;line-height:1.6">'+
+      'Diffuse · Normal · Roughness · Displacement 4종을 자동으로 생성합니다.<br>'+
+      '<span style="color:var(--ac)">완료 후 ZIP으로 한번에 다운로드</span>할 수 있습니다.'+
+    '</div>'+
+    '<div id="pbr-maps" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px"></div>'+
+    '<div style="display:flex;gap:8px">'+
+      '<button id="pbr-run" style="flex:2;padding:11px;border-radius:9px;border:none;background:var(--ac);color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">▶ 맵 세트 생성 시작</button>'+
+      '<button id="pbr-zip" style="flex:1;padding:11px;border-radius:9px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;display:none">📦 ZIP 다운로드</button>'+
+    '</div>'+
+    '<div id="pbr-status" style="font-size:11px;color:var(--m2);text-align:center;margin-top:8px"></div>';
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  document.getElementById('pbr-close').onclick=function(){ ov.remove(); };
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+
+  var mapsDef=[
+    {key:'diffuse',  label:'Diffuse (컬러맵)',   emoji:'🟫', done:!!diffuseUrl, url:diffuseUrl||null,
+     pt:'This is the clean, flat, seamless diffuse/albedo color texture map. Keep it exactly as is — output it directly with no changes. This is the base color layer for PBR rendering.'},
+    {key:'normal',   label:'Normal Map',         emoji:'🟦', done:false, url:null,
+     pt:'Convert this seamless texture into a tangent-space normal map. Flat areas = uniform #8080FF. Bumps/ridges/grooves = directional color shifts (red/green). Keep EXACT SAME pattern position and layout as the input — do NOT rearrange the pattern. Output pure normal map colors only, no diffuse color.'},
+    {key:'roughness',label:'Roughness Map',      emoji:'⬜', done:false, url:null,
+     pt:'Convert this seamless texture into a roughness map (greyscale). Smooth/shiny surfaces = black (0). Rough/matte surfaces = white (1). Wood grain, stone, fabric = medium-high roughness. Output greyscale only, SAME pattern position as input.'},
+    {key:'displacement',label:'Displacement Map',emoji:'🔲', done:false, url:null,
+     pt:'Convert this seamless texture into a displacement/height map (greyscale). High points (ridges, bumps, grain peaks) = white. Low points (grooves, gaps, valleys) = black. Output greyscale only, SAME pattern layout as input.'},
+  ];
+
+  function renderMapsGrid(){
+    var mg=document.getElementById('pbr-maps');
+    if(!mg)return;
+    mg.innerHTML='';
+    mapsDef.forEach(function(m){
+      var card=document.createElement('div');
+      card.style.cssText='border:1px solid var(--bd2);border-radius:8px;overflow:hidden;background:var(--c2)';
+      var imgEl=document.createElement('div');
+      imgEl.style.cssText='width:100%;aspect-ratio:1;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--m2)';
+      if(m.url){ imgEl.innerHTML='<img src="'+m.url+'" style="width:100%;height:100%;object-fit:cover">'; }
+      else if(m.loading){ imgEl.innerHTML='<div style="text-align:center"><div style="font-size:18px;margin-bottom:4px">⏳</div>생성 중...</div>'; }
+      else { imgEl.innerHTML='<div style="text-align:center"><div style="font-size:18px;margin-bottom:4px">'+m.emoji+'</div>'+m.label+'</div>'; }
+      var lbl=document.createElement('div');
+      lbl.style.cssText='padding:5px 8px;font-size:10px;font-weight:600;color:'+(m.done?'var(--ac)':'var(--m2)');
+      lbl.textContent=(m.done?'✓ ':'○ ')+m.label;
+      card.appendChild(imgEl);card.appendChild(lbl);
+      mg.appendChild(card);
+    });
+  }
+  renderMapsGrid();
+
+  var generatedFiles=[];
+  document.getElementById('pbr-run').onclick=function(){
+    var runBtn=document.getElementById('pbr-run');
+    var status=document.getElementById('pbr-status');
+    runBtn.disabled=true;runBtn.style.opacity='0.5';
+    generatedFiles=[];
+    if(diffuseUrl){ generatedFiles.push({name:'diffuse.jpg',dataUrl:diffuseUrl}); mapsDef[0].done=true;mapsDef[0].url=diffuseUrl; }
+
+    var toGenerate=mapsDef.filter(function(m){return !m.done;});
+    var idx=0;
+    function runNext(){
+      if(idx>=toGenerate.length){
+        if(status)status.textContent='✅ 전체 완료! ZIP으로 다운로드하세요.';
+        var zipBtn=document.getElementById('pbr-zip');
+        if(zipBtn){zipBtn.style.display='';zipBtn.onclick=function(){
+          _downloadZip(generatedFiles,'clover_pbr_'+Date.now()+'.zip');
+        };}
+        if(runBtn){runBtn.textContent='✓ 완료';runBtn.style.background='#10b981';}
+        return;
+      }
+      var m=toGenerate[idx];
+      if(status)status.textContent=(idx+1)+'/'+toGenerate.length+' 생성 중: '+m.label+' ...';
+      m.loading=true;renderMapsGrid();
+
+      var imgSrc=srcUrl;
+      falRun('fal-ai/nano-banana-2/edit', {
+        prompt: m.pt, image_urls:[imgSrc], num_images:1, output_format:'jpeg'
+      }, function(d){
+        var url=falExtractImageUrl(d);
+        m.done=true;m.loading=false;m.url=url||null;
+        if(url) generatedFiles.push({name:m.key+'.jpg',dataUrl:null,httpUrl:url,_key:m.key});
+        // http URL은 fetch로 blob으로 변환해야 ZIP에 넣을 수 있음
+        if(url){
+          fetch(url).then(function(r){return r.blob();}).then(function(blob){
+            var reader=new FileReader();
+            reader.onload=function(e){
+              var f=generatedFiles.find(function(x){return x._key===m.key;});
+              if(f) f.dataUrl=e.target.result;
+            };
+            reader.readAsDataURL(blob);
+          }).catch(function(){});
+        }
+        renderMapsGrid();
+        idx++;runNext();
+      }, function(err){
+        console.warn('[PBR] '+m.label+' 생성 실패:', err);
+        m.loading=false;m.done=false;
+        renderMapsGrid();
+        idx++;runNext();
+      });
+    }
+    runNext();
+  };
 }
 function _showTilePreview(srcUrl){
   if(!srcUrl)return;
