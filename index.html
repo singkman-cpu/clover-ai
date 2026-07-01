@@ -5265,22 +5265,55 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
   var mult = (resolution==='2K') ? 2 : 1;
   var probe=new Image();
   probe.onload=function(){
-    var targetW=Math.round(probe.naturalWidth*mult), targetH=Math.round(probe.naturalHeight*mult);
-    if(!targetW || !targetH){ cb(ri); return; }
-    // 결과 이미지를 블롭으로 불러와서(크로스오리진 캔버스 오염 방지) 정확한 픽셀 크기로 다시 그려준다
+    var origW=Math.round(probe.naturalWidth*mult), origH=Math.round(probe.naturalHeight*mult);
+    if(!origW || !origH){ cb(ri); return; }
     loadImgSafe(ri, function(img2){
       try{
-        if(Math.abs(img2.naturalWidth-targetW)<=2 && Math.abs(img2.naturalHeight-targetH)<=2){
-          cb(ri); return; // 이미 거의 같은 크기면 다시 그릴 필요 없음
+        var aiW=img2.naturalWidth, aiH=img2.naturalHeight;
+        // AI 결과물과 원본의 비율(가로세로 비) 비교
+        var origRatio=origW/origH, aiRatio=aiW/aiH;
+        var ratioDiff=Math.abs(origRatio-aiRatio)/origRatio;
+        var targetW, targetH;
+        if(ratioDiff > 0.05){
+          // 비율 차이가 5% 이상이면 — AI가 비율을 바꿔서 생성한 것
+          // 원본 비율에 맞추되, AI 결과물이 원본 비율을 커버하도록 fit (letterbox 없이)
+          // → 원본 세로/가로 비율 기준으로 AI 결과물을 크롭해서 맞춤
+          if(aiRatio > origRatio){
+            // AI가 원본보다 더 넓음 → 세로 기준으로 맞추고 좌우 크롭
+            targetH=origH; targetW=origW;
+            var srcW=Math.round(aiH*origRatio), srcH=aiH;
+            var srcX=Math.round((aiW-srcW)/2), srcY=0;
+            var canvas=document.createElement('canvas');
+            canvas.width=targetW; canvas.height=targetH;
+            var ctx=canvas.getContext('2d');
+            ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+            ctx.drawImage(img2, srcX, srcY, srcW, srcH, 0, 0, targetW, targetH);
+            console.log('[원본 크기 맞춤] 비율 보정(가로 크롭)', aiW+'x'+aiH, '→', targetW+'x'+targetH);
+            cb(canvas.toDataURL('image/jpeg', 0.97)); return;
+          } else {
+            // AI가 원본보다 더 세로 → 가로 기준으로 맞추고 상하 크롭
+            targetW=origW; targetH=origH;
+            var srcW2=aiW, srcH2=Math.round(aiW/origRatio);
+            var srcX2=0, srcY2=Math.round((aiH-srcH2)/2);
+            var canvas2=document.createElement('canvas');
+            canvas2.width=targetW; canvas2.height=targetH;
+            var ctx2=canvas2.getContext('2d');
+            ctx2.imageSmoothingEnabled=true; ctx2.imageSmoothingQuality='high';
+            ctx2.drawImage(img2, srcX2, srcY2, srcW2, srcH2, 0, 0, targetW, targetH);
+            console.log('[원본 크기 맞춤] 비율 보정(세로 크롭)', aiW+'x'+aiH, '→', targetW+'x'+targetH);
+            cb(canvas2.toDataURL('image/jpeg', 0.97)); return;
+          }
         }
-        var canvas=document.createElement('canvas');
-        canvas.width=targetW; canvas.height=targetH;
-        var ctx=canvas.getContext('2d');
-        ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
-        ctx.drawImage(img2, 0, 0, targetW, targetH);
-        var dataUrl=canvas.toDataURL('image/jpeg', 0.97);
-        console.log('[원본 크기 맞춤]', img2.naturalWidth+'x'+img2.naturalHeight, '→', targetW+'x'+targetH);
-        cb(dataUrl);
+        // 비율이 거의 같으면 단순 리사이즈
+        targetW=origW; targetH=origH;
+        if(Math.abs(aiW-targetW)<=2 && Math.abs(aiH-targetH)<=2){ cb(ri); return; }
+        var canvas3=document.createElement('canvas');
+        canvas3.width=targetW; canvas3.height=targetH;
+        var ctx3=canvas3.getContext('2d');
+        ctx3.imageSmoothingEnabled=true; ctx3.imageSmoothingQuality='high';
+        ctx3.drawImage(img2, 0, 0, targetW, targetH);
+        console.log('[원본 크기 맞춤]', aiW+'x'+aiH, '→', targetW+'x'+targetH);
+        cb(canvas3.toDataURL('image/jpeg', 0.97));
       }catch(e){
         console.warn('[원본 크기 맞춤 실패]', e);
         cb(ri);
