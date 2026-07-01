@@ -1028,9 +1028,10 @@ var EL=[
   {k:'seedream',n:'Seedream v4.5',t:'Cheap',d:'경제적',lg:'s'}
 ];
 var EV=[
-  {k:'kling3',   n:'Kling 3.0 Pro', cost:70, t:'Cinematic',   d:'$0.84/5초 · 1080p · 시네마틱 · 오디오', lg:'k', res:['720p','1080p'], audio:true},
-  {k:'veo31',    n:'Veo 3.1 Fast',  cost:114, t:'Quality',     d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true},
-  {k:'seedance2',n:'Seedance 2.0',  cost:190, t:'Premium,Best',d:'$1.52/5초 · 480p/720p · 최고품질 · 오디오', lg:'s', res:['480p','720p'], audio:true}
+  {k:'kling3',       n:'Kling 3.0 Pro',     cost:70,  t:'Cinematic',    d:'$0.84/5초 · 1080p · 시네마틱 · 오디오', lg:'k', res:['720p','1080p'], audio:true},
+  {k:'veo31',        n:'Veo 3.1 Fast',       cost:114, t:'Quality',      d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true},
+  {k:'seedance2',    n:'Seedance 2.0',       cost:190, t:'Premium,Best', d:'$1.52/5초 · 480p/720p · 최고품질 · 오디오', lg:'s', res:['480p','720p'], audio:true},
+  {k:'seedance2mini',n:'Seedance 2.0 Mini',  cost:95,  t:'Fast,Cheap',   d:'$0.73/5초 · 480p/720p · 빠르고 저렴 · 오디오', lg:'m', res:['480p','720p'], audio:true}
 ];
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
 var WFC={space:20,render:20,edit:20,video:60,upscale:20};
@@ -2746,7 +2747,7 @@ function loadHistFromStorage(){
           if(x.wf==='video' && !x.vidEng){
             var engNames={
               'Wan 2.2':'wan22','Kling 3.0 Pro':'kling3',
-              'Veo 3.1 Fast':'veo31','Seedance 2.0':'seedance2'
+              'Veo 3.1 Fast':'veo31','Seedance 2.0':'seedance2','Seedance 2.0 Mini':'seedance2mini'
             };
             (x.tags||[]).forEach(function(t){
               if(engNames[t]) x.vidEng=engNames[t];
@@ -3131,7 +3132,7 @@ function addHistEl(item, scroll, targetHs){
       var fhdLabel=resLabel==='1080p'?'FHD':'HD';
       // 엔진 태그
       var vidEngTag=mk('span','ptag');
-      var vidColors={wan22:'#22d3ee',kling3:'#a78bfa',veo31:'#4ade80',seedance2:'#f59e0b'};
+      var vidColors={wan22:'#22d3ee',kling3:'#a78bfa',veo31:'#4ade80',seedance2:'#f59e0b',seedance2mini:'#fb923c'};
       var vc=vidColors[vidEngKey]||'#22d3ee';
       vidEngTag.style.cssText='background:'+vc+';color:#000;font-weight:800;border:none';
       vidEngTag.textContent='▶ '+evFound.n;
@@ -4716,6 +4717,28 @@ function runSeedance(imgDataUrl, prompt, duration, fast, onDone, onErr) {
   }, onErr);
 }
 
+// ── Seedance 2.0 Mini (image-to-video) ────────────────────────────
+function runSeedanceMini(imgDataUrl, prompt, duration, onDone, onErr) {
+  var finalPrompt = (prompt&&prompt.trim()) ? prompt : autoVideoPrompt();
+  var useAudio = (G.vidAudio===true);
+  uploadImgToFal(imgDataUrl, function(imgUrl){
+    var sRes = (G.vres==='480p') ? '480p' : '720p';
+    gE('ldst').textContent = 'Seedance 2.0 Mini 영상 생성 중 (30~90초)...';
+    falRun('bytedance/seedance-2.0/mini/image-to-video', {
+      image_url: imgUrl,
+      prompt: finalPrompt,
+      resolution: sRes,
+      duration: String(Math.max(3, Math.min(15, duration || 5))),
+      aspect_ratio: '16:9',
+      generate_audio: useAudio
+    }, function(d){
+      var url = falExtractVideoUrl(d);
+      if(url) onDone(url);
+      else onErr('Seedance Mini 영상 URL 없음. Console [FAL result] 확인.');
+    }, onErr);
+  }, onErr);
+}
+
 // ── Kling v3 Pro (image-to-video) ─────────────────────────────────
 function runKling(imgDataUrl, prompt, duration, onDone, onErr) {
   var ldst=gE('ldst');
@@ -4860,7 +4883,7 @@ function executeSingleRender(task){
     _eta = _slowCombo ? 150 : 30;
   }
   if(task.wf==='video'){
-    var _vidEtaMap={kling3:120,veo31:150,seedance2:180};
+    var _vidEtaMap={kling3:120,veo31:150,seedance2:180,seedance2mini:90};
     _eta = _vidEtaMap[task.vidEng||'kling3']||90;
   }
   function _startTimer(){
@@ -4956,7 +4979,7 @@ function executeSingleRender(task){
         // Kling:    오디오ON $0.168/초 → ₩244/초 → 약 25cr/초
         // Veo:      $0.90/6초=$0.15/초 → ₩218/초 → 약 22cr/초
         // Seedance: $1.52/5초=$0.304/초 → ₩441/초 → 약 45cr/초
-        var crPerSec={kling3:40, veo31:37, seedance2:72};
+        var crPerSec={kling3:40, veo31:37, seedance2:72, seedance2mini:36};
         var cps=crPerSec[task.vidEng]||25;
         cost=Math.round(cps*vidDur);
       } else {
@@ -5365,6 +5388,8 @@ function procImgWithTask(task, onDone, onErr){
       runVeo31(img, vp, vdur, onDone, onErr);
     } else if(engK==='seedance2'){
       runSeedance(img, vp, vdur, false, onDone, onErr);
+    } else if(engK==='seedance2mini'){
+      runSeedanceMini(img, vp, vdur, onDone, onErr);
     } else {
       runKling(img, vp, vdur, onDone, onErr);
     }
