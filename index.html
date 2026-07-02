@@ -8084,13 +8084,23 @@ var _supaUser = null;
 function initSupabase(){
   if(!SUPA_URL||!SUPA_KEY){return;}
   try{
-    _supa = supabase.createClient(SUPA_URL, SUPA_KEY);
-    // 세션 복원
+    _supa = supabase.createClient(SUPA_URL, SUPA_KEY, {
+      auth: {
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true  // 구글 OAuth redirect 후 URL에서 세션 자동 파싱
+      }
+    });
     // onAuthStateChange 하나만 사용 (중복 호출 방지)
     _supa.auth.onAuthStateChange(function(event, session){
+      console.log('[Supabase] auth event:', event);
       if((event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session&&session.user){
         _supaUser=session.user;
         onSupaLogin(session.user);
+        // 구글 redirect 후 돌아온 경우 URL 해시/파라미터 정리
+        if(window.location.hash&&window.location.hash.indexOf('access_token')!==-1){
+          history.replaceState(null,'',window.location.pathname);
+        }
       } else if(event==='SIGNED_OUT'){
         _supaUser=null;
         onSupaLogout();
@@ -8272,12 +8282,17 @@ function supaSignIn(){
     if(msg){msg.style.color='#fca5a5';msg.textContent='Google 로그인은 Chrome 브라우저에서 이용해주세요.';}
     return;
   }
-  // 아이폰 Safari는 팝업을 차단하므로 redirect 방식으로 처리
+  // 아이폰 Safari 포함 모든 브라우저에서 redirect 방식으로 처리
+  // (Safari는 팝업 차단, redirectTo는 Supabase 대시보드에 등록된 URL이어야 함)
+  var redirectUrl = window.location.origin + window.location.pathname;
   _supa.auth.signInWithOAuth({
-    provider:'google',
-    options:{
-      redirectTo: window.location.origin + '/',
-      skipBrowserRedirect: false
+    provider: 'google',
+    options: {
+      redirectTo: redirectUrl,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent'
+      }
     }
   });
 }
