@@ -2488,26 +2488,44 @@ function _shortsRestoreVideosFromIDB(){
   });
 }
 
+// 고정 역할 카탈로그 — 항상 이 순서대로 쇼츠가 구성된다
+var SHORTS_ROLES = [
+  {k:'site',      l:'SITE PHOTO'},
+  {k:'ai_design', l:'AI DESIGN'},
+  {k:'furniture', l:'FURNITURE EDIT'},
+  {k:'people',    l:'PEOPLE ADD'},
+  {k:'iso',       l:'ISOMETRIC VIEW'},
+  {k:'multi',     l:'MULTI VIEW'},
+];
+function _shortsRoleLabel(k){
+  var r=SHORTS_ROLES.find(function(x){return x.k===k;});
+  return r?r.l:k;
+}
+// CLOVER AI에서 만든 이미지는 wf/tags 메타데이터로 역할을 자동 추론한다.
+// 외부(Midjourney/ChatGPT/Flux/ComfyUI 등) 이미지는 메타데이터가 없으므로 null → 사용자가 직접 지정.
+function _shortsAutoDetectRole(item){
+  if(!item)return null;
+  var hay=(((item.tags||[]).join(' '))+' '+(item.ai||'')+' '+(item.memo||'')).toLowerCase();
+  function has(words){return words.some(function(w){return hay.indexOf(w)!==-1;});}
+  if(has(['isometric','아이소','iso view']))return 'iso';
+  if(has(['multi view','멀티뷰','multiview','multi-view']))return 'multi';
+  if(has(['people','사람','인물']))return 'people';
+  if(has(['furniture','가구','소파','의자']))return 'furniture';
+  if(item.wf==='space'||item.wf==='render')return 'ai_design';
+  if(item.wf==='edit')return 'furniture';
+  return null;
+}
+
 var G_SHORTS = {
-  slots: [
-    {k:'site',      l:'SITE PHOTO',     ko:'현장사진',    img:null, orig:null, enabled:true},
-    {k:'ai_design', l:'AI DESIGN',      ko:'AI 렌더링',   img:null, orig:null, enabled:true},
-    {k:'furniture', l:'FURNITURE EDIT', ko:'AI 편집',     img:null, orig:null, enabled:false},
-    {k:'people',    l:'PEOPLE ADD',     ko:'사람 추가',   img:null, orig:null, enabled:false},
-    {k:'multi',     l:'MULTI VIEW',     ko:'멀티뷰',      img:null, orig:null, enabled:false},
-    {k:'iso',       l:'ISOMETRIC VIEW', ko:'아이소뷰',    img:null, orig:null, enabled:false},
-  ],
+  images: [], // {id, img(after), orig(before|null), role('auto'|role key), autoRole(감지된 역할|null), source('clover'|'upload')}
   opts: {
     template: 'Standard',
-    textPreset: 'Modern',
-    transition: 'Fade',
     bgmFile: null,
     bgmUrl: null,
     watermark: true,
     ending: true,
     fps: 30,
     quality: 'FHD',
-    beforeAfter: true,
   },
   generating: false,
   progress: 0,
@@ -2516,20 +2534,28 @@ var G_SHORTS = {
 
 // 템플릿별 타이밍 (초)
 var SHORTS_TEMPLATES = {
-  Quick:     {holdFirst:1.0, transDur:0.4, baHoldBefore:0.5, baWipe:1.8, holdAfter:1.0, endingHold:1.6},
-  Standard:  {holdFirst:1.3, transDur:0.6, baHoldBefore:0.7, baWipe:2.5, holdAfter:1.6, endingHold:2.0},
-  Cinematic: {holdFirst:1.8, transDur:0.9, baHoldBefore:0.9, baWipe:3.0, holdAfter:2.2, endingHold:2.6},
+  Quick:     {holdFirst:1.0, transDur:0.4, baHoldBefore:0.5, baWipe:1.6, holdAfter:1.4, endingHold:1.6},
+  Standard:  {holdFirst:1.3, transDur:0.5, baHoldBefore:0.6, baWipe:2.0, holdAfter:2.2, endingHold:2.2},
+  Cinematic: {holdFirst:1.8, transDur:0.7, baHoldBefore:0.8, baWipe:2.4, holdAfter:2.8, endingHold:2.8},
 };
+
+// 이미지의 최종 역할 결정: role이 명시적으로 지정되어 있으면 그 값, 'auto'면 자동감지값(없으면 null=미지정)
+function _shortsResolvedRole(im){
+  if(im.role && im.role!=='auto')return im.role;
+  return im.autoRole||null;
+}
+
+
 
 // ── 사이드바 UI ───────────────────────────────────────────────────
 function sbShorts(p){
-  var slots = G_SHORTS.slots;
+  var images = G_SHORTS.images;
   var opts = G_SHORTS.opts;
 
   // 안내
   var note=dv('');
   note.style.cssText='font-size:12px;color:var(--t2);line-height:1.6;padding:10px;background:var(--acg);border-radius:9px;margin-bottom:4px;border:1px solid var(--acb)';
-  note.innerHTML='&#127916; 이미지를 슬롯에 넣고 <strong style="color:var(--ac)">쇼츠 생성</strong>을 누르면<br>9:16 세로 영상이 자동으로 만들어집니다.';
+  note.innerHTML='&#127916; 이미지만 추가하면 역할·순서·전환·텍스트를 <strong style="color:var(--ac)">자동으로 구성</strong>해서<br>바로 SNS에 올릴 수 있는 9:16 쇼츠를 만들어드립니다.';
   p.appendChild(note);
 
   // 템플릿 선택
@@ -2552,86 +2578,63 @@ function sbShorts(p){
   tplWrap.appendChild(tplRow);
   p.appendChild(tplWrap);
 
-  // 이미지 슬롯들
-  var slotsLabel=dv('ss');
-  slotsLabel.innerHTML='<div class="lbl">영상 슬롯 <span class="lbl-en">Image Slots</span></div>';
-  p.appendChild(slotsLabel);
+  // 이미지 목록 — 추가 순서 상관없이 역할에 따라 자동 정렬되어 쇼츠가 구성된다
+  var listLabel=dv('ss');
+  listLabel.innerHTML='<div class="lbl">이미지 <span class="lbl-en">'+images.length+'개 · 자동 구성</span></div>';
+  p.appendChild(listLabel);
 
-  slots.forEach(function(slot, i){
+  images.forEach(function(im){
+    var resolved=_shortsResolvedRole(im);
+    var unresolved=!resolved;
     var row=dv('');
-    row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--c2);border-radius:9px;border:1px solid '+(slot.enabled?'var(--acb)':'var(--bd2)');
-    // 순서 번호
-    var num=dv('');num.style.cssText='width:20px;height:20px;border-radius:50%;background:'+(slot.enabled?'var(--ac)':'var(--bd2)')+';color:'+(slot.enabled?'#000':'var(--m2)')+';font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0';
-    num.textContent=i+1;
-    row.appendChild(num);
-    // 이미지 썸네일 or 업로드
-    var imgBox=dv('');imgBox.id='shorts-slot-'+slot.k;
-    imgBox.style.cssText='width:48px;height:48px;border-radius:6px;background:var(--bd2);flex-shrink:0;overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;border:1px dashed var(--bd2)';
-    if(slot.img){
-      imgBox.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
-    } else {
-      imgBox.innerHTML='&#43;';
+    row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--c2);border-radius:9px;border:1px solid '+(unresolved?'#f59e0b':'var(--acb)');
+    var thumb=dv('');thumb.style.cssText='width:44px;height:44px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bd2)';
+    thumb.innerHTML='<img src="'+im.img+'" style="width:100%;height:100%;object-fit:cover">';
+    row.appendChild(thumb);
+
+    var info=dv('');info.style.cssText='flex:1;min-width:0;display:flex;flex-direction:column;gap:4px';
+    var sel=document.createElement('select');
+    sel.style.cssText='width:100%;padding:5px 6px;background:var(--card);border:1px solid '+(unresolved?'#f59e0b':'var(--bd2)')+';border-radius:6px;color:var(--t);font-size:11.5px;font-family:inherit;cursor:pointer';
+    var autoOpt=document.createElement('option');autoOpt.value='auto';
+    autoOpt.textContent=im.autoRole?('자동 감지 → '+_shortsRoleLabel(im.autoRole)):'자동 감지 (선택 필요)';
+    sel.appendChild(autoOpt);
+    SHORTS_ROLES.forEach(function(r){
+      var o=document.createElement('option');o.value=r.k;o.textContent=r.l;sel.appendChild(o);
+    });
+    sel.value=im.role||'auto';
+    (function(item,selEl){
+      selEl.onchange=function(){item.role=selEl.value;renderSB();renderMain('shorts');};
+    })(im,sel);
+    info.appendChild(sel);
+    if(im.source==='clover'){
+      var srcTag=dv('');srcTag.style.cssText='font-size:9.5px;color:var(--m2)';
+      srcTag.textContent='CLOVER AI 결과물' + (im.orig?' · Before/After 자동 포함':'');
+      info.appendChild(srcTag);
+    } else if(unresolved){
+      var warnTag=dv('');warnTag.style.cssText='font-size:9.5px;color:#f59e0b';
+      warnTag.textContent='외부 이미지 — 역할을 선택해주세요';
+      info.appendChild(warnTag);
     }
-    // 클릭 시 파일 선택 또는 갤러리에서 가져오기
-    (function(sl){
-      imgBox.onclick=function(){
-        _shortsPickImage(sl, imgBox);
-      };
-    })(slot);
-    row.appendChild(imgBox);
-    // 텍스트
-    var info=dv('');info.style.cssText='flex:1;min-width:0';
-    info.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--t);letter-spacing:.5px">'+slot.l+'</div><div style="font-size:10px;color:var(--m2)">'+slot.ko+'</div>';
     row.appendChild(info);
-    // 토글
-    var tog=mk('input','');tog.type='checkbox';tog.checked=slot.enabled;
-    tog.style.cssText='width:15px;height:15px;accent-color:var(--ac);cursor:pointer;flex-shrink:0';
-    (function(sl){
-      tog.onchange=function(){sl.enabled=tog.checked;renderSB();};
-    })(slot);
-    row.appendChild(tog);
+
+    var delBtn=mk('button','');delBtn.type='button';
+    delBtn.style.cssText='width:22px;height:22px;border-radius:50%;border:none;background:var(--bd2);color:var(--t2);font-size:12px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center';
+    delBtn.innerHTML='&#10005;';
+    (function(item){
+      delBtn.onclick=function(){
+        G_SHORTS.images=G_SHORTS.images.filter(function(x){return x!==item;});
+        renderSB();renderMain('shorts');
+      };
+    })(im);
+    row.appendChild(delBtn);
     p.appendChild(row);
   });
 
-  // Before/After 옵션
-  var baWrap=dv('ss');
-  var baLabel=document.createElement('label');
-  baLabel.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);cursor:pointer;padding:8px 10px;background:var(--c2);border-radius:8px';
-  var baCk=document.createElement('input');baCk.type='checkbox';baCk.checked=opts.beforeAfter;
-  baCk.style.cssText='width:14px;height:14px;accent-color:var(--ac)';
-  baCk.onchange=function(){opts.beforeAfter=baCk.checked;};
-  baLabel.appendChild(baCk);
-  baLabel.appendChild(document.createTextNode('Before / After 슬라이더 (2.5초)'));
-  baWrap.appendChild(baLabel);
-  p.appendChild(baWrap);
-
-  // 텍스트 프리셋
-  var txtWrap=dv('ss');
-  txtWrap.innerHTML='<div class="lbl">텍스트 스타일</div>';
-  var txtSel=document.createElement('select');
-  txtSel.style.cssText='width:100%;padding:8px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;cursor:pointer';
-  ['Modern','Minimal','Bold','None'].forEach(function(v){
-    var o=document.createElement('option');o.value=v;o.textContent=v;
-    if(v===opts.textPreset)o.selected=true;
-    txtSel.appendChild(o);
-  });
-  txtSel.onchange=function(){opts.textPreset=txtSel.value;};
-  txtWrap.appendChild(txtSel);
-  p.appendChild(txtWrap);
-
-  // 전환 효과
-  var transWrap=dv('ss');
-  transWrap.innerHTML='<div class="lbl">전환 효과</div>';
-  var transSel=document.createElement('select');
-  transSel.style.cssText='width:100%;padding:8px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;cursor:pointer';
-  ['Fade','Cross Dissolve','Cut','Push','Zoom'].forEach(function(v){
-    var o=document.createElement('option');o.value=v;o.textContent=v;
-    if(v===opts.transition)o.selected=true;
-    transSel.appendChild(o);
-  });
-  transSel.onchange=function(){opts.transition=transSel.value;};
-  transWrap.appendChild(transSel);
-  p.appendChild(transWrap);
+  var addBtn=mk('button','');addBtn.type='button';
+  addBtn.style.cssText='width:100%;padding:11px;border-radius:9px;border:1.5px dashed var(--bd2);background:transparent;color:var(--t2);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:4px';
+  addBtn.innerHTML='&#43; 이미지 추가';
+  addBtn.onclick=function(){ _shortsAddImageFlow(); };
+  p.appendChild(addBtn);
 
   // 해상도/FPS
   var resWrap=dv('ss');
@@ -2734,7 +2737,7 @@ function sbShorts(p){
   p.appendChild(genWrap);
 }
 
-// ── 메인 캔버스: 슬롯 순차 채우기 + 결과 영상 미리보기/다운로드 ─────────
+// ── 메인 캔버스: 이미지 목록 + 결과 영상 미리보기/다운로드 ─────────
 function _shortsRenderCanvas(ub){
   var zone=ub.querySelector('.cub-zone');
   if(zone)zone.style.display='none';
@@ -2773,74 +2776,82 @@ function _shortsRenderCanvas(ub){
     return;
   }
 
-  // 2) 슬롯 진행 상황 — 순서대로 채워나가기
-  var slots=G_SHORTS.slots.filter(function(s){return s.enabled;});
-  var nextSlot=slots.find(function(s){return !s.img;});
+  // 2) 이미지 목록 — 순서 상관없이 추가하면 역할별로 자동 정렬되어 구성된다
+  var images=G_SHORTS.images;
+  var unresolvedCount=images.filter(function(im){return !_shortsResolvedRole(im);}).length;
 
   var head=document.createElement('div');
   head.style.cssText='text-align:center;max-width:360px';
-  head.innerHTML = nextSlot
-    ? '<div style="font-size:17px;font-weight:800;color:var(--t)">'+nextSlot.l+' <span style="color:var(--ac)">이미지를 넣어주세요</span></div><div style="font-size:12.5px;color:var(--m2);margin-top:6px;line-height:1.6">아래 타일을 클릭해서 갤러리에서 고르거나 파일을 업로드하세요</div>'
-    : '<div style="font-size:17px;font-weight:800;color:var(--t)">모든 이미지가 준비됐어요 <span style="color:var(--ac)">&#10003;</span></div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽 사이드바에서 &#127916; 쇼츠 생성하기를 눌러주세요</div>';
+  if(images.length===0){
+    head.innerHTML='<div style="font-size:17px;font-weight:800;color:var(--t)">이미지를 <span style="color:var(--ac)">추가해주세요</span></div><div style="font-size:12.5px;color:var(--m2);margin-top:6px;line-height:1.6">CLOVER AI 결과물은 역할이 자동으로 인식되고,<br>외부 이미지는 역할만 골라주면 됩니다</div>';
+  } else if(unresolvedCount>0){
+    head.innerHTML='<div style="font-size:16px;font-weight:800;color:#f59e0b">역할을 지정해주세요 ('+unresolvedCount+'개)</div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽 사이드바에서 외부 이미지의 역할을 선택하세요</div>';
+  } else {
+    head.innerHTML='<div style="font-size:17px;font-weight:800;color:var(--t)">준비 완료 <span style="color:var(--ac)">&#10003;</span></div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽 사이드바에서 &#127916; 쇼츠 생성하기를 눌러주세요</div>';
+  }
   box.appendChild(head);
 
   var grid=document.createElement('div');
   grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:12px;max-width:420px';
-  slots.forEach(function(slot){
-    var isNext = slot===nextSlot;
+  images.forEach(function(im){
+    var resolved=_shortsResolvedRole(im);
     var tile=document.createElement('div');
-    tile.style.cssText='width:88px;height:88px;border-radius:12px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:var(--c2);border:2px '+(isNext?'dashed var(--ac)':(slot.img?'solid var(--acb)':'dashed var(--bd2)'))+';position:relative;flex-shrink:0';
-    if(slot.img){
-      tile.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
-    } else {
-      tile.innerHTML='<div style="font-size:20px;color:'+(isNext?'var(--ac)':'var(--m2)')+'">&#43;</div><div style="font-size:9.5px;color:var(--m2);text-align:center;padding:0 4px;line-height:1.3">'+slot.l+'</div>';
-    }
-    (function(sl){
-      tile.onclick=function(){ _shortsPickImage(sl, gE('shorts-slot-'+sl.k)); };
-    })(slot);
+    tile.style.cssText='width:88px;height:88px;border-radius:12px;overflow:hidden;cursor:default;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;background:var(--c2);border:2px solid '+(resolved?'var(--acb)':'#f59e0b')+';position:relative;flex-shrink:0';
+    tile.innerHTML='<img src="'+im.img+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">'+
+      '<div style="position:relative;z-index:1;font-size:8.5px;font-weight:800;color:#fff;background:'+(resolved?'rgba(0,0,0,.6)':'rgba(245,158,11,.9)')+';padding:2px 5px;border-radius:5px;margin:4px">'+(resolved?_shortsRoleLabel(resolved):'?')+'</div>';
     grid.appendChild(tile);
   });
+  // 이미지 추가 타일
+  var addTile=document.createElement('div');
+  addTile.style.cssText='width:88px;height:88px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;background:var(--c2);border:2px dashed var(--ac);flex-shrink:0;font-size:26px;color:var(--ac)';
+  addTile.innerHTML='&#43;';
+  addTile.onclick=function(){ _shortsAddImageFlow(); };
+  grid.appendChild(addTile);
   box.appendChild(grid);
 
-  if(slots.length<2){
+  if(images.length>0 && images.filter(function(im){return _shortsResolvedRole(im);}).length<2){
     var warn=document.createElement('div');
     warn.style.cssText='font-size:11.5px;color:var(--m2);text-align:center;max-width:320px';
-    warn.textContent='최소 2개 슬롯을 켜고 이미지를 넣어야 쇼츠를 만들 수 있어요 (왼쪽 사이드바에서 슬롯 토글).';
+    warn.textContent='역할이 정해진 이미지가 최소 2개 있어야 쇼츠를 만들 수 있어요.';
     box.appendChild(warn);
   }
 }
 
-
-function _shortsPickImage(slot, thumbEl){
+// ── 이미지 추가 (갤러리/파일) — 고른 이미지는 자동으로 역할이 인식되어 목록에 추가된다 ──
+function _shortsAddImageFlow(){
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:99999;display:flex;flex-direction:column';
   // 헤더
   var header=document.createElement('div');
   header.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;background:rgba(255,255,255,.03)';
-  var htitle=dv('');htitle.style.cssText='font-size:15px;font-weight:700;color:#fff';htitle.textContent=slot.l+' — 이미지 선택';
+  var htitle=dv('');htitle.style.cssText='font-size:15px;font-weight:700;color:#fff';htitle.textContent='이미지 추가';
   header.appendChild(htitle);
   var closeBtn=document.createElement('button');closeBtn.type='button';
   closeBtn.style.cssText='background:rgba(255,255,255,.1);border:none;color:#fff;width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;font-family:inherit';
   closeBtn.innerHTML='✕';closeBtn.onclick=function(){ov.remove();};
   header.appendChild(closeBtn);
   ov.appendChild(header);
-  // 업로드 영역
-  var fi=document.createElement('input');fi.type='file';fi.accept='image/*';fi.style.display='none';
+  // 업로드 영역 (외부 이미지 — Midjourney/ChatGPT/Flux/ComfyUI 등)
+  var fi=document.createElement('input');fi.type='file';fi.accept='image/*';fi.multiple=true;fi.style.display='none';
   fi.onchange=function(){
-    if(!fi.files[0])return;
-    var reader=new FileReader();
-    reader.onload=function(e){
-      slot.img=e.target.result;slot.orig=null;slot.enabled=true;
-      if(thumbEl)thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
-      ov.remove();renderSB();renderMain('shorts');
-    };
-    reader.readAsDataURL(fi.files[0]);
+    var files=Array.prototype.slice.call(fi.files||[]);
+    if(!files.length)return;
+    var remain=files.length;
+    files.forEach(function(f){
+      var reader=new FileReader();
+      reader.onload=function(e){
+        G_SHORTS.images.push({id:Date.now()+Math.random(), img:e.target.result, orig:null, role:'auto', autoRole:null, source:'upload'});
+        remain--;
+        if(remain===0){ ov.remove();renderSB();renderMain('shorts'); }
+      };
+      reader.readAsDataURL(f);
+    });
   };
   var uploadRow=document.createElement('div');
   uploadRow.style.cssText='padding:12px 20px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0';
   var uploadBtn=document.createElement('button');uploadBtn.type='button';
   uploadBtn.style.cssText='width:100%;padding:14px;border-radius:10px;border:1px solid rgba(18,230,230,.4);background:rgba(18,230,230,.08);color:#12E6E6;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit';
-  uploadBtn.innerHTML='&#128190; 파일에서 직접 업로드';
+  uploadBtn.innerHTML='&#128190; 파일에서 직접 업로드 (Midjourney·ChatGPT·Flux 등 외부 이미지 가능)';
   uploadBtn.onclick=function(){fi.click();};
   uploadRow.appendChild(uploadBtn);uploadRow.appendChild(fi);
   ov.appendChild(uploadRow);
@@ -2853,7 +2864,7 @@ function _shortsPickImage(slot, thumbEl){
   });
   var galLabel=document.createElement('div');
   galLabel.style.cssText='font-size:12px;color:rgba(255,255,255,.45);padding:12px 20px 8px;flex-shrink:0';
-  galLabel.textContent=allItems.length>0?'또는 갤러리에서 선택 ('+allItems.length+'개):':'갤러리가 비어있어요 — 파일에서 업로드해주세요.';
+  galLabel.textContent=allItems.length>0?'또는 내 CLOVER AI 갤러리에서 선택 (역할 자동 인식, '+allItems.length+'개):':'갤러리가 비어있어요 — 파일에서 업로드해주세요.';
   ov.appendChild(galLabel);
   // 그리드
   var scroll=document.createElement('div');scroll.style.cssText='flex:1;overflow-y:auto;padding:8px 16px 24px';
@@ -2861,21 +2872,28 @@ function _shortsPickImage(slot, thumbEl){
   grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px';
   allItems.slice(0,60).forEach(function(item){
     var wrap=document.createElement('div');
-    wrap.style.cssText='border-radius:10px;overflow:hidden;cursor:pointer;border:3px solid transparent;transition:border-color .15s;aspect-ratio:1;background:#111';
+    wrap.style.cssText='border-radius:10px;overflow:hidden;cursor:pointer;border:3px solid transparent;transition:border-color .15s;aspect-ratio:1;background:#111;position:relative';
     var img2=document.createElement('img');
     img2.src=item.result;
     img2.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
     wrap.appendChild(img2);
+    var autoRole=_shortsAutoDetectRole(item);
+    if(autoRole){
+      var badge=document.createElement('div');
+      badge.style.cssText='position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.65);color:#12E6E6;font-size:10px;font-weight:700;padding:3px 7px;border-radius:6px';
+      badge.textContent=_shortsRoleLabel(autoRole);
+      wrap.appendChild(badge);
+    }
     wrap.onmouseover=function(){wrap.style.borderColor='#12E6E6';};
     wrap.onmouseout=function(){wrap.style.borderColor='transparent';};
     wrap.onclick=function(){
-      slot.img=item.result;
-      // SITE PHOTO 슬롯은 '편집 전' 원본이라 Before/After 기준이 없다.
-      // 그 외 슬롯은 이 결과물의 원본(item.orig)을 Before 이미지로 함께 저장해서
+      // 이 결과물의 원본(item.orig)을 Before 이미지로 함께 저장해서
       // 쇼츠에서 진짜 Before→After(편집 전/후) 슬라이더를 보여줄 수 있게 한다.
-      slot.orig=(slot.k!=='site' && item.orig) ? item.orig : null;
-      slot.enabled=true;
-      if(thumbEl)thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
+      G_SHORTS.images.push({
+        id:Date.now()+Math.random(), img:item.result,
+        orig:(autoRole!=='site' && item.orig) ? item.orig : null,
+        role:'auto', autoRole:autoRole, source:'clover'
+      });
       ov.remove();renderSB();renderMain('shorts');
     };
     grid.appendChild(wrap);
@@ -2887,11 +2905,17 @@ function _shortsPickImage(slot, thumbEl){
 
 // ── 영상 생성 메인 함수 ───────────────────────────────────────────
 function _shortsGenerate(){
-  var slots=G_SHORTS.slots;
   var opts=G_SHORTS.opts;
 
-  var activeSlots=slots.filter(function(s){return s.enabled&&s.img;});
-  if(activeSlots.length<2){alert('최소 2개 이상의 이미지를 넣어주세요.');return;}
+  // 역할이 정해진 이미지만, 정해진 브랜드 순서(SITE PHOTO → AI DESIGN → FURNITURE EDIT →
+  // PEOPLE ADD → ISOMETRIC VIEW → MULTI VIEW)대로 자동 정렬한다. 업로드 순서는 무관하다.
+  var byRole={};
+  G_SHORTS.images.forEach(function(im){
+    var r=_shortsResolvedRole(im);
+    if(r)byRole[r]=im; // 같은 역할이 여러 개면 마지막으로 지정된 것을 사용
+  });
+  var activeList=SHORTS_ROLES.map(function(r){return {role:r.k,label:r.l,item:byRole[r.k]};}).filter(function(x){return !!x.item;});
+  if(activeList.length<2){alert('역할이 정해진 이미지를 최소 2개 이상 추가해주세요.');return;}
 
   var progWrap=gE('shorts-prog-wrap');
   var progFill=gE('shorts-prog-fill');
@@ -2906,21 +2930,20 @@ function _shortsGenerate(){
   var dim=RES[opts.quality]||RES['FHD'];
   var W=dim.w, H=dim.h, FPS=opts.fps||30;
 
-  // 슬라이드 구성 — 모든 활성 슬롯을 순서대로 나열
-  // after = 실제 보여줄 이미지(AI 결과/현재 슬롯 이미지), before = 그 결과물의 편집 전 원본(있을 때만)
-  // 텍스트는 영어 라벨만 사용한다 (한국어 서브텍스트 제거)
-  var slides=[];
-  activeSlots.forEach(function(slot){
-    slides.push({type:'slide',after:slot.img,before:slot.orig||null,label:slot.l});
+  // 슬라이드 구성 — 브랜드 순서대로 자동 정렬된 장면들
+  // after = 실제 보여줄 이미지, before = 그 결과물의 편집 전 원본(있을 때만, Before/After 슬라이더에 사용)
+  // 텍스트는 항상 동일한 브랜드 스타일(흰색·고정 폰트/크기/위치)의 영어 라벨만 사용한다
+  var slides=activeList.map(function(x){
+    return {type:'slide', after:x.item.img, before:x.item.orig||null, label:x.label};
   });
   if(opts.ending){
     slides.push({type:'ending',label:'CLOVER AI',after:null,before:null});
   }
 
   // ── 타임라인 모델 ────────────────────────────────────────────
-  // 1) 슬라이드 사이는 opts.transition(Fade/Cross Dissolve/Cut/Push/Zoom)으로 전환
-  // 2) 슬라이드 자체에 before(편집 전)가 있으면 Before 홀드 → Before/After 슬라이더로
-  //    실제 "편집 전/후"를 보여준 뒤 After를 홀드한다 (다른 콘텐츠끼리 와이프하던 기존 버그 수정)
+  // 1) 슬라이드 사이는 항상 동일한 자연스러운 Fade(Cross Dissolve 느낌)로 전환한다
+  // 2) 슬라이드 자체에 before(편집 전)가 있으면 Before(좌측 기준) 홀드 → 슬라이더가 우→좌로
+  //    이동하며 After가 드러나는 방식으로 자동 진행한 뒤 After를 홀드한다
   var TPL=SHORTS_TEMPLATES[opts.template]||SHORTS_TEMPLATES.Standard;
   var HOLD_FIRST=TPL.holdFirst, TRANS_DUR=TPL.transDur;
   var BA_HOLD_BEFORE=TPL.baHoldBefore, BA_WIPE=TPL.baWipe, HOLD_AFTER=TPL.holdAfter, ENDING_HOLD=TPL.endingHold;
@@ -2931,7 +2954,7 @@ function _shortsGenerate(){
       timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+TRANS_DUR});
       t+=TRANS_DUR;
     }
-    var hasBA = opts.beforeAfter && slide.type==='slide' && slide.before && slide.before!==slide.after;
+    var hasBA = slide.type==='slide' && slide.before && slide.before!==slide.after;
     if(hasBA){
       timeline.push({type:'ba_before',idx:i,start:t,end:t+BA_HOLD_BEFORE});
       t+=BA_HOLD_BEFORE;
@@ -3130,61 +3153,53 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, useBefore){
   var src = useBefore ? (slide.before||slide.after) : slide.after;
   var img=imgCache[src];
   if(img)_shortsDrawCoverImage(ctx,W,H,img);
-  if(opts.textPreset!=='None'&&slide.label){
-    _shortsDrawText(ctx,W,H,slide.label,'','',opts.textPreset);
+  if(slide.label){
+    _shortsDrawText(ctx,W,H,slide.label);
   }
 }
 
-// 같은 장면의 Before→After 슬라이더 (좌→우로 슬라이더가 이동하며 After가 드러남)
+// 같은 장면의 Before→After 슬라이더
+// Before(편집 전)가 배경 전체 → 핸들이 우측(W)에서 좌측(0)으로 이동하며
+// 핸들 오른쪽 영역에 After(편집 후)가 자연스럽게 드러난다.
 function _shortsDrawBAWipe(ctx, W, H, slide, progress, opts, imgCache){
-  var lineX=Math.round(W*progress); // 0: Before 전체, 1: After 전체
+  var lineX=Math.round(W*(1-progress)); // progress 0: lineX=W(전체 Before), 1: lineX=0(전체 After)
 
-  // 1. After(편집 후) 전체를 배경에 먼저 그리기
-  _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,false);
+  // 1. Before(편집 전) 전체를 배경에 먼저 그리기
+  _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,true);
 
-  // 2. Before(편집 전)를 왼쪽에 클립해서 덮어 그리기
-  if(lineX>0){
+  // 2. After(편집 후)를 핸들 오른쪽 영역에 클립해서 덮어 그리기
+  if(lineX<W){
     ctx.save();
-    ctx.beginPath();ctx.rect(0,0,lineX,H);ctx.clip();
-    _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,true);
+    ctx.beginPath();ctx.rect(lineX,0,W-lineX,H);ctx.clip();
+    _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,false);
     ctx.restore();
   }
 
-  // 3. 구분선 + BEFORE/AFTER 레이블
+  // 3. 구분선 + 핸들 (검은 배경 박스 없이 심플하게)
   if(lineX>2&&lineX<W-2){
     ctx.save();
     ctx.strokeStyle='rgba(255,255,255,0.92)';
     ctx.lineWidth=Math.max(2,Math.round(W/270));
     ctx.beginPath();ctx.moveTo(lineX,0);ctx.lineTo(lineX,H);ctx.stroke();
-    // 슬라이더 원형 핸들
-    var r=Math.round(W/22);
-    ctx.fillStyle='rgba(255,255,255,0.92)';
+    var r=Math.round(W/24);
+    ctx.fillStyle='rgba(255,255,255,0.95)';
     ctx.beginPath();ctx.arc(lineX,H/2,r,0,Math.PI*2);ctx.fill();
-    ctx.strokeStyle='rgba(0,0,0,0.3)';ctx.lineWidth=1;ctx.stroke();
-    ctx.fillStyle='#222';ctx.font='bold '+Math.round(r*0.8)+'px Arial';
+    ctx.fillStyle='#111';ctx.font='bold '+Math.round(r*0.8)+'px Arial';
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('◀▶',lineX,H/2);
-    // BEFORE 레이블 (왼쪽)
-    var fs=Math.round(W*0.038);
-    ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
-    ctx.textBaseline='top';
-    if(lineX>W*0.12){
-      ctx.fillStyle='rgba(0,0,0,0.55)';
-      ctx.fillRect(Math.round(W*0.03)-6, Math.round(H*0.04)-4, Math.round(fs*4.5), fs+10);
-      ctx.fillStyle='rgba(255,255,255,0.9)';
-      ctx.textAlign='left';
-      ctx.fillText('BEFORE',Math.round(W*0.03),Math.round(H*0.04));
-    }
-    // AFTER 레이블 (오른쪽)
-    if(lineX<W*0.88){
-      var afterW=Math.round(fs*3.6);
-      ctx.fillStyle='rgba(0,0,0,0.55)';
-      ctx.fillRect(W-Math.round(W*0.03)-afterW-6, Math.round(H*0.04)-4, afterW+12, fs+10);
-      ctx.fillStyle='#12E6E6';
-      ctx.textAlign='right';
-      ctx.fillText('AFTER',W-Math.round(W*0.03),Math.round(H*0.04));
-    }
     ctx.restore();
   }
+
+  // BEFORE / AFTER 레이블 — 배경 박스 없이 순백색 텍스트만, 항상 같은 위치(좌상단/우상단)
+  ctx.save();
+  var fs=Math.round(W*0.034);
+  ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#fff';
+  ctx.textBaseline='top';
+  ctx.textAlign='left';
+  ctx.fillText('BEFORE', Math.round(W*0.06), Math.round(H*0.045));
+  ctx.textAlign='right';
+  ctx.fillText('AFTER', W-Math.round(W*0.06), Math.round(H*0.045));
+  ctx.restore();
 }
 
 // 이미지 Cover 방식 그리기
@@ -3232,66 +3247,24 @@ function _shortsDrawBeforeAfter(ctx, W, H, origImg, aiImg, sliderX){
   }
 }
 
-// 텍스트 오버레이
-function _shortsDrawText(ctx, W, H, label, ko, sub, preset){
-  if(!preset||preset==='None')return;
+// 텍스트 오버레이 — 항상 동일한 브랜드 스타일(흰색·같은 폰트/크기/위치)만 사용한다
+function _shortsDrawText(ctx, W, H, label){
+  if(!label)return;
   ctx.save();
-  var fs=Math.round(W*0.052);
-  var pad=Math.round(W*0.055);
-  var y=H;
-  if(preset==='Modern'){
-    // 하단 반투명 바
-    var barH=Math.round(H*0.14);
-    var barY=H-barH;
-    ctx.fillStyle='rgba(0,0,0,0.5)';
-    ctx.fillRect(0,barY,W,barH);
-    // 민트 포인트 라인
-    ctx.fillStyle='#12E6E6';
-    ctx.fillRect(pad,barY+Math.round(barH*0.15),Math.round(W*0.04),Math.round(W*0.006));
-    // 라벨 텍스트
-    ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
-    ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
-    ctx.letterSpacing='2px';
-    ctx.fillText(label,pad,barY+Math.round(barH*0.42));
-    if(ko){
-      ctx.font='400 '+Math.round(fs*0.55)+'px Helvetica,Arial,sans-serif';
-      ctx.fillStyle='rgba(255,255,255,0.7)';
-      ctx.fillText(ko,pad,barY+Math.round(barH*0.72));
-    }
-  } else if(preset==='Classic'){
-    var shadowSize=Math.round(W/120);
-    ctx.shadowColor='rgba(0,0,0,0.85)';ctx.shadowBlur=shadowSize*4;
-    ctx.font='bold '+fs+'px Georgia,serif';
-    ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='bottom';
-    ctx.fillText(label,W/2,H-Math.round(H*0.07));
-    if(ko){
-      ctx.shadowBlur=shadowSize*3;
-      ctx.font=Math.round(fs*0.55)+'px Georgia,serif';
-      ctx.fillStyle='#FFD700';
-      ctx.fillText(ko,W/2,H-Math.round(H*0.03));
-    }
-    ctx.shadowBlur=0;
-  } else if(preset==='Minimal'){
-    ctx.font='300 '+Math.round(fs*0.65)+'px Helvetica,Arial,sans-serif';
-    ctx.fillStyle='rgba(255,255,255,0.85)';ctx.textAlign='left';ctx.textBaseline='top';
-    ctx.fillText(label.toUpperCase(),pad,Math.round(H*0.05));
-    if(ko){
-      ctx.font='300 '+Math.round(fs*0.42)+'px Helvetica,Arial,sans-serif';
-      ctx.fillStyle='rgba(255,255,255,0.5)';
-      ctx.fillText(ko,pad,Math.round(H*0.05)+Math.round(fs*0.8));
-    }
-  } else if(preset==='Bold'){
-    ctx.font='900 '+Math.round(fs*1.2)+'px Helvetica,Arial,sans-serif';
-    ctx.fillStyle='#12E6E6';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.shadowColor='rgba(0,0,0,0.9)';ctx.shadowBlur=Math.round(W/60);
-    ctx.fillText(label,W/2,H/2);
-    if(ko){
-      ctx.font='400 '+Math.round(fs*0.55)+'px Helvetica,Arial,sans-serif';
-      ctx.fillStyle='#fff';ctx.shadowBlur=Math.round(W/80);
-      ctx.fillText(ko,W/2,H/2+Math.round(fs*1.4));
-    }
-    ctx.shadowBlur=0;
-  }
+  var fs=Math.round(W*0.05);
+  var pad=Math.round(W*0.07);
+  var barH=Math.round(H*0.16);
+  // 얼굴/주요 공간을 가리지 않도록 하단 가장자리에만, 은은한 그라데이션 위에 표시
+  var grad=ctx.createLinearGradient(0,H-barH,0,H);
+  grad.addColorStop(0,'rgba(0,0,0,0)');
+  grad.addColorStop(1,'rgba(0,0,0,0.5)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,H-barH,W,barH);
+  ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#fff';
+  ctx.textAlign='left';ctx.textBaseline='bottom';
+  try{ctx.letterSpacing='2px';}catch(e){}
+  ctx.fillText(label, pad, H-Math.round(H*0.055));
   ctx.restore();
 }
 
@@ -3463,47 +3436,12 @@ function _shortsDrawEnding(ctx, W, H){
 }
 
 // 전환 효과
+// 모든 장면 전환은 항상 동일한 자연스러운 Cross Dissolve(크로스 디졸브) 페이드를 사용한다
 function _shortsDrawTransition(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
-  var trans=opts.transition||'Fade';
-  if(trans==='Cut'){
-    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
-  } else if(trans==='Fade'){
-    // 검정으로 페이드아웃 후 페이드인
-    if(progress<0.5){
-      _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
-      ctx.fillStyle='rgba(0,0,0,'+(progress*2)+')';
-      ctx.fillRect(0,0,W,H);
-    } else {
-      _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
-      ctx.fillStyle='rgba(0,0,0,'+(1-(progress-0.5)*2)+')';
-      ctx.fillRect(0,0,W,H);
-    }
-  } else if(trans==='Cross Dissolve'){
-    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
-    ctx.save();ctx.globalAlpha=progress;
-    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
-    ctx.globalAlpha=1;ctx.restore();
-  } else if(trans==='Push'){
-    // 왼쪽으로 밀려나가며 다음 장면이 오른쪽에서 들어옴
-    ctx.save();
-    ctx.beginPath();ctx.rect(0,0,W-Math.round(W*progress),H);ctx.clip();
-    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
-    ctx.restore();
-    ctx.save();
-    ctx.beginPath();ctx.rect(W-Math.round(W*progress),0,Math.round(W*progress),H);ctx.clip();
-    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
-    ctx.restore();
-  } else if(trans==='Zoom'){
-    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
-    ctx.save();
-    var scale=1+progress*0.15;
-    ctx.globalAlpha=progress;
-    ctx.translate(W/2,H/2);ctx.scale(scale,scale);ctx.translate(-W/2,-H/2);
-    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
-    ctx.restore();
-  } else { // 알 수 없는 값은 Cut으로 처리
-    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
-  }
+  _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
+  ctx.save();ctx.globalAlpha=progress;
+  _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
+  ctx.globalAlpha=1;ctx.restore();
 }
 
 // 워터마크
@@ -8762,7 +8700,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
   if(cub){
     cub.onclick=function(e){
       if(e.target.closest('button'))return;
-      if(G.wf==='shorts')return; // 쇼츠 탭은 슬롯 타일 자체 클릭으로 처리
+      if(G.wf==='shorts')return; // 쇼츠 탭은 "+" 타일 자체 클릭으로 처리 (중복 오픈 방지)
       gE('fi').click();
     };
     cub.ondragover=function(e){e.preventDefault();};
