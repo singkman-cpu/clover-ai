@@ -176,7 +176,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 .otag{font-size:10px;padding:2px 8px;border-radius:4px;background:var(--acg);border:1px solid var(--acb);color:var(--ac)}
 .cnv{flex:1;position:relative;overflow:hidden;background:#070709}
 .home-s{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;z-index:40;background:var(--bg)}
-.hgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:640px;width:100%}
+.hgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:860px;width:100%}
 .hc{background:var(--card);border:1px solid var(--bd2);border-radius:11px;padding:16px;cursor:pointer}
 .hc:hover{border-color:var(--acb)}
 .hc.feat{border-color:var(--acb);background:rgba(0,229,204,.04)}
@@ -2569,17 +2569,20 @@ function _shortsResolvedRole(im){
   return im.autoRole||null;
 }
 
-// 역할이 정해진 이미지들을 브랜드 순서(SITE PHOTO → AI DESIGN → FURNITURE EDIT →
-// PEOPLE ADD → ISOMETRIC VIEW → MULTI VIEW)로 자동 정렬 + 엔딩 슬라이드 포함한 장면 리스트를 만든다.
+// 사이드바(왼쪽) 목록에 나열된 순서 그대로 쇼츠 장면을 구성한다 — 역할별 고정 순서가 아니라
+// 사용자가 이미지를 배치한 순서를 그대로 따른다. + 엔딩 슬라이드 포함.
 // _shortsGenerate()와 길이 미리보기(estimate)가 이 로직을 공유한다.
 function _shortsBuildSlides(){
   var opts=G_SHORTS.opts;
-  var byRole={};
+  var seenRoles={};
+  var activeList=[];
   G_SHORTS.images.forEach(function(im){
     var r=_shortsResolvedRole(im);
-    if(r)byRole[r]=im;
+    if(!r)return;
+    if(seenRoles[r])return; // 같은 역할이 여러 개면 먼저 나온(리스트 위쪽) 것을 사용
+    seenRoles[r]=true;
+    activeList.push({role:r, label:_shortsRoleLabel(r), item:im});
   });
-  var activeList=SHORTS_ROLES.map(function(r){return {role:r.k,label:r.l,item:byRole[r.k]};}).filter(function(x){return !!x.item;});
   var slides=activeList.map(function(x){
     return {type:'slide', after:x.item.img, before:x.item.orig||null, label:x.label};
   });
@@ -2666,12 +2669,45 @@ function sbShorts(p){
   p.appendChild(listLabel);
 
   var conflictIds=_shortsConflictImageIds();
-  images.forEach(function(im){
+  images.forEach(function(im, idx){
     var resolved=_shortsResolvedRole(im);
     var unresolved=!resolved;
     var conflict=resolved && conflictIds.indexOf(im.id)!==-1;
     var row=dv('');
     row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--c2);border-radius:9px;border:1px solid '+((unresolved||conflict)?'#f59e0b':'var(--acb)');
+
+    // 순서 번호 — 위에서 아래로 나열된 순서가 곧 쇼츠 재생 순서
+    var num=dv('');num.style.cssText='width:20px;height:20px;border-radius:50%;background:'+(resolved&&!conflict?'var(--ac)':'var(--bd2)')+';color:'+(resolved&&!conflict?'#000':'var(--m2)')+';font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0';
+    num.textContent=idx+1;
+    row.appendChild(num);
+
+    // 순서 이동 버튼 (위/아래)
+    var moveWrap=dv('');moveWrap.style.cssText='display:flex;flex-direction:column;gap:2px;flex-shrink:0';
+    var upBtn=mk('button','');upBtn.type='button';
+    upBtn.style.cssText='width:18px;height:15px;border-radius:4px;border:none;background:var(--bd2);color:var(--t2);font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;opacity:'+(idx===0?'.35':'1');
+    upBtn.innerHTML='&#9650;';
+    upBtn.disabled=(idx===0);
+    var downBtn=mk('button','');downBtn.type='button';
+    downBtn.style.cssText='width:18px;height:15px;border-radius:4px;border:none;background:var(--bd2);color:var(--t2);font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;opacity:'+(idx===images.length-1?'.35':'1');
+    downBtn.innerHTML='&#9660;';
+    downBtn.disabled=(idx===images.length-1);
+    (function(i){
+      upBtn.onclick=function(){
+        if(i<=0)return;
+        var arr=G_SHORTS.images;
+        var tmp=arr[i-1];arr[i-1]=arr[i];arr[i]=tmp;
+        renderSB();renderMain('shorts');
+      };
+      downBtn.onclick=function(){
+        if(i>=images.length-1)return;
+        var arr=G_SHORTS.images;
+        var tmp=arr[i+1];arr[i+1]=arr[i];arr[i]=tmp;
+        renderSB();renderMain('shorts');
+      };
+    })(idx);
+    moveWrap.appendChild(upBtn);moveWrap.appendChild(downBtn);
+    row.appendChild(moveWrap);
+
     var thumb=dv('');thumb.style.cssText='width:44px;height:44px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bd2)';
     thumb.innerHTML='<img src="'+im.img+'" style="width:100%;height:100%;object-fit:cover">';
     row.appendChild(thumb);
@@ -2893,13 +2929,14 @@ function _shortsRenderCanvas(ub){
 
   var grid=document.createElement('div');
   grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:16px;max-width:640px';
-  images.forEach(function(im){
+  images.forEach(function(im, idx){
     var resolved=_shortsResolvedRole(im);
     var conflict=resolved && conflictIds2.indexOf(im.id)!==-1;
     var tile=document.createElement('div');
     tile.style.cssText='width:160px;height:160px;border-radius:16px;overflow:hidden;cursor:default;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;background:var(--c2);border:3px solid '+((resolved&&!conflict)?'var(--acb)':'#f59e0b')+';position:relative;flex-shrink:0;box-shadow:0 4px 16px rgba(0,0,0,.35)';
     var badgeTxt = conflict ? '⚠ 역할 중복' : (resolved?_shortsRoleLabel(resolved):'역할 미지정');
     tile.innerHTML='<img src="'+im.img+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">'+
+      '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+((resolved&&!conflict)?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">'+(idx+1)+'</div>'+
       '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+((resolved&&!conflict)?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px">'+badgeTxt+'</div>';
     grid.appendChild(tile);
   });
