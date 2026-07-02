@@ -1132,7 +1132,7 @@ var G={
     }
   },
   // ── 히스토리 (Single Source Of Truth) ────────────────────────────
-  HIST:{space:[],render:[],edit:[],video:[],upscale:[],world3d:[]},
+  HIST:{space:[],render:[],edit:[],video:[],upscale:[],world3d:[],shorts:[]},
   QUEUE:[],
   renderQueue:[],
   activeRenders:0,
@@ -2452,9 +2452,11 @@ function idbDeleteVideo(key){
 // 쇼츠는 브라우저 내에서만 만들어지는 영상이라 클라우드 계정과 무관하게
 // 항상 로컬(IndexedDB + 전용 localStorage 키)에 메타데이터를 남긴다.
 // (saveHistToStorage는 로그인 시 clover_hist를 통째로 지우기 때문에 별도 보관)
+// G.HIST.shorts라는 전용 버킷에 저장하므로 "영상 제작" 탭(G.HIST.video)에는 노출되지 않고
+// 갤러리(모든 G.HIST 버킷을 합쳐서 보여줌)에서만 보인다.
 function _shortsSaveGalleryMeta(){
   try{
-    var list=(G.HIST.video||[]).filter(function(x){return x.idbKey;}).slice(0,30).map(function(x){
+    var list=(G.HIST.shorts||[]).filter(function(x){return x.idbKey;}).slice(0,30).map(function(x){
       return {id:x.id, orig:(x.orig&&x.orig.startsWith('data:')&&x.orig.length>300000)?null:(x.orig||null),
         idbKey:x.idbKey, videoExt:x.videoExt||'webm', tags:x.tags||['쇼츠 자동생성'], fav:!!x.fav};
     });
@@ -2466,24 +2468,23 @@ function _shortsLoadGalleryMeta(){
     var raw=localStorage.getItem('clover_shorts_gallery');
     if(!raw)return;
     var list=JSON.parse(raw)||[];
-    if(!G.HIST.video)G.HIST.video=[];
+    if(!G.HIST.shorts)G.HIST.shorts=[];
     list.forEach(function(x){
-      if(G.HIST.video.find(function(h){return h.id===x.id;}))return;
-      G.HIST.video.unshift({id:x.id, orig:x.orig||null, result:null, idbKey:x.idbKey, videoExt:x.videoExt||'webm',
-        tags:x.tags||['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:!!x.fav, wf:'video'});
+      if(G.HIST.shorts.find(function(h){return h.id===x.id;}))return;
+      G.HIST.shorts.unshift({id:x.id, orig:x.orig||null, result:null, idbKey:x.idbKey, videoExt:x.videoExt||'webm',
+        tags:x.tags||['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:!!x.fav, wf:'shorts'});
     });
   }catch(e){console.warn('[Shorts] 갤러리 메타 복원 실패:',e.message);}
 }
-// 새로고침/재방문 후 idbKey를 가진 video 항목들을 실제 blob: URL로 복원
+// 새로고침/재방문 후 idbKey를 가진 쇼츠 항목들을 실제 blob: URL로 복원
 function _shortsRestoreVideosFromIDB(){
-  var list=(G.HIST&&G.HIST.video)||[];
+  var list=(G.HIST&&G.HIST.shorts)||[];
   var pending=list.filter(function(x){return x.idbKey && (!x.result||!x.result.startsWith('blob:'));});
   if(!pending.length)return;
   pending.forEach(function(item){
     idbLoadVideo(item.idbKey).then(function(blob){
       if(!blob)return;
       item.result=URL.createObjectURL(blob);
-      if(G.wf==='video')renderMain('video');
     }).catch(function(){});
   });
 }
@@ -2492,8 +2493,8 @@ function _shortsRestoreVideosFromIDB(){
 var SHORTS_ROLES = [
   {k:'site',      l:'SITE PHOTO'},
   {k:'ai_design', l:'AI DESIGN'},
-  {k:'furniture', l:'FURNITURE EDIT'},
-  {k:'people',    l:'PEOPLE ADD'},
+  {k:'furniture', l:'AI EDIT'},
+  {k:'people',    l:'ASSET ADD'},
   {k:'iso',       l:'ISOMETRIC VIEW'},
   {k:'multi',     l:'MULTI VIEW'},
 ];
@@ -2533,10 +2534,11 @@ var G_SHORTS = {
 };
 
 // 템플릿별 타이밍 (초)
+// transDur=0 → 장면 전환에 페이드 없이 바로 컷. baHoldBefore=0 → 장면이 나오자마자 바로 슬라이더가 시작.
 var SHORTS_TEMPLATES = {
-  Quick:     {holdFirst:1.0, transDur:0.4, baHoldBefore:0.5, baWipe:1.6, holdAfter:1.4, endingHold:1.6},
-  Standard:  {holdFirst:1.3, transDur:0.5, baHoldBefore:0.6, baWipe:2.0, holdAfter:2.2, endingHold:2.2},
-  Cinematic: {holdFirst:1.8, transDur:0.7, baHoldBefore:0.8, baWipe:2.4, holdAfter:2.8, endingHold:2.8},
+  Quick:     {holdFirst:1.2, transDur:0, baHoldBefore:0, baWipe:1.2, holdAfter:1.8, endingHold:1.6},
+  Standard:  {holdFirst:2.0, transDur:0, baHoldBefore:0, baWipe:1.8, holdAfter:3.0, endingHold:2.2},
+  Cinematic: {holdFirst:2.5, transDur:0, baHoldBefore:0, baWipe:2.2, holdAfter:3.6, endingHold:2.8},
 };
 
 // 이미지의 최종 역할 결정: role이 명시적으로 지정되어 있으면 그 값, 'auto'면 자동감지값(없으면 null=미지정)
@@ -2544,6 +2546,64 @@ function _shortsResolvedRole(im){
   if(im.role && im.role!=='auto')return im.role;
   return im.autoRole||null;
 }
+
+// 역할이 정해진 이미지들을 브랜드 순서(SITE PHOTO → AI DESIGN → FURNITURE EDIT →
+// PEOPLE ADD → ISOMETRIC VIEW → MULTI VIEW)로 자동 정렬 + 엔딩 슬라이드 포함한 장면 리스트를 만든다.
+// _shortsGenerate()와 길이 미리보기(estimate)가 이 로직을 공유한다.
+function _shortsBuildSlides(){
+  var opts=G_SHORTS.opts;
+  var byRole={};
+  G_SHORTS.images.forEach(function(im){
+    var r=_shortsResolvedRole(im);
+    if(r)byRole[r]=im;
+  });
+  var activeList=SHORTS_ROLES.map(function(r){return {role:r.k,label:r.l,item:byRole[r.k]};}).filter(function(x){return !!x.item;});
+  var slides=activeList.map(function(x){
+    return {type:'slide', after:x.item.img, before:x.item.orig||null, label:x.label};
+  });
+  if(opts.ending){
+    slides.push({type:'ending',label:'CLOVER AI',after:null,before:null});
+  }
+  return slides;
+}
+
+// slides로부터 타임라인 + 총 길이(초)를 계산 (장면 전환은 항상 컷, 페이드 없음)
+function _shortsBuildTimeline(slides){
+  var opts=G_SHORTS.opts;
+  var TPL=SHORTS_TEMPLATES[opts.template]||SHORTS_TEMPLATES.Standard;
+  var HOLD_FIRST=TPL.holdFirst;
+  var BA_HOLD_BEFORE=TPL.baHoldBefore, BA_WIPE=TPL.baWipe, HOLD_AFTER=TPL.holdAfter, ENDING_HOLD=TPL.endingHold;
+  var timeline=[];
+  var t=0;
+  slides.forEach(function(slide,i){
+    var hasBA = slide.type==='slide' && slide.before && slide.before!==slide.after;
+    if(hasBA){
+      if(BA_HOLD_BEFORE>0){
+        timeline.push({type:'ba_before',idx:i,start:t,end:t+BA_HOLD_BEFORE});
+        t+=BA_HOLD_BEFORE;
+      }
+      timeline.push({type:'ba_wipe',idx:i,start:t,end:t+BA_WIPE});
+      t+=BA_WIPE;
+      timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_AFTER});
+      t+=HOLD_AFTER;
+    } else {
+      var dur = i===0 ? HOLD_FIRST : (slide.type==='ending' ? ENDING_HOLD : HOLD_AFTER);
+      timeline.push({type:'hold',idx:i,start:t,end:t+dur});
+      t+=dur;
+    }
+  });
+  return {timeline:timeline, totalDuration:t};
+}
+
+// 사이드바/메인 화면에 표시할 "예상 길이" 텍스트
+function _shortsEstimateLabel(){
+  var slides=_shortsBuildSlides();
+  var sceneCount=slides.filter(function(s){return s.type==='slide';}).length;
+  if(sceneCount<2)return null;
+  var dur=_shortsBuildTimeline(slides).totalDuration;
+  return Math.round(dur)+'초';
+}
+
 
 
 
@@ -2711,6 +2771,15 @@ function sbShorts(p){
   });
   p.appendChild(optRow);
 
+  // 예상 길이 — 이미지/역할/템플릿이 바뀔 때마다 실시간으로 갱신된다
+  var estLabel=_shortsEstimateLabel();
+  var estWrap=dv('');
+  estWrap.style.cssText='display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border-radius:9px;background:var(--c2);border:1px solid var(--bd2);font-size:12.5px;color:'+(estLabel?'var(--t)':'var(--m2)')+';margin-top:2px';
+  estWrap.innerHTML = estLabel
+    ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+estLabel+'</strong>'
+    : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
+  p.appendChild(estWrap);
+
   // 생성 버튼
   var genWrap=dv('');genWrap.style.cssText='margin-top:8px';
   var genBtn=mk('button','');genBtn.id='shorts-gen-btn';
@@ -2792,22 +2861,30 @@ function _shortsRenderCanvas(ub){
   box.appendChild(head);
 
   var grid=document.createElement('div');
-  grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:12px;max-width:420px';
+  grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:16px;max-width:640px';
   images.forEach(function(im){
     var resolved=_shortsResolvedRole(im);
     var tile=document.createElement('div');
-    tile.style.cssText='width:88px;height:88px;border-radius:12px;overflow:hidden;cursor:default;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;background:var(--c2);border:2px solid '+(resolved?'var(--acb)':'#f59e0b')+';position:relative;flex-shrink:0';
+    tile.style.cssText='width:160px;height:160px;border-radius:16px;overflow:hidden;cursor:default;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;background:var(--c2);border:3px solid '+(resolved?'var(--acb)':'#f59e0b')+';position:relative;flex-shrink:0;box-shadow:0 4px 16px rgba(0,0,0,.35)';
     tile.innerHTML='<img src="'+im.img+'" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">'+
-      '<div style="position:relative;z-index:1;font-size:8.5px;font-weight:800;color:#fff;background:'+(resolved?'rgba(0,0,0,.6)':'rgba(245,158,11,.9)')+';padding:2px 5px;border-radius:5px;margin:4px">'+(resolved?_shortsRoleLabel(resolved):'?')+'</div>';
+      '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(resolved?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px">'+(resolved?_shortsRoleLabel(resolved):'역할 미지정')+'</div>';
     grid.appendChild(tile);
   });
   // 이미지 추가 타일
   var addTile=document.createElement('div');
-  addTile.style.cssText='width:88px;height:88px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;background:var(--c2);border:2px dashed var(--ac);flex-shrink:0;font-size:26px;color:var(--ac)';
+  addTile.style.cssText='width:160px;height:160px;border-radius:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;background:var(--c2);border:3px dashed var(--ac);flex-shrink:0;font-size:44px;color:var(--ac)';
   addTile.innerHTML='&#43;';
   addTile.onclick=function(){ _shortsAddImageFlow(); };
   grid.appendChild(addTile);
   box.appendChild(grid);
+
+  var estLabel2=_shortsEstimateLabel();
+  if(estLabel2){
+    var estBox=document.createElement('div');
+    estBox.style.cssText='font-size:13px;color:var(--t2);text-align:center';
+    estBox.innerHTML='&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:15px">'+estLabel2+'</strong>';
+    box.appendChild(estBox);
+  }
 
   if(images.length>0 && images.filter(function(im){return _shortsResolvedRole(im);}).length<2){
     var warn=document.createElement('div');
@@ -2907,15 +2984,9 @@ function _shortsAddImageFlow(){
 function _shortsGenerate(){
   var opts=G_SHORTS.opts;
 
-  // 역할이 정해진 이미지만, 정해진 브랜드 순서(SITE PHOTO → AI DESIGN → FURNITURE EDIT →
-  // PEOPLE ADD → ISOMETRIC VIEW → MULTI VIEW)대로 자동 정렬한다. 업로드 순서는 무관하다.
-  var byRole={};
-  G_SHORTS.images.forEach(function(im){
-    var r=_shortsResolvedRole(im);
-    if(r)byRole[r]=im; // 같은 역할이 여러 개면 마지막으로 지정된 것을 사용
-  });
-  var activeList=SHORTS_ROLES.map(function(r){return {role:r.k,label:r.l,item:byRole[r.k]};}).filter(function(x){return !!x.item;});
-  if(activeList.length<2){alert('역할이 정해진 이미지를 최소 2개 이상 추가해주세요.');return;}
+  var slides=_shortsBuildSlides();
+  var sceneCount=slides.filter(function(s){return s.type==='slide';}).length;
+  if(sceneCount<2){alert('역할이 정해진 이미지를 최소 2개 이상 추가해주세요.');return;}
 
   var progWrap=gE('shorts-prog-wrap');
   var progFill=gE('shorts-prog-fill');
@@ -2930,45 +3001,12 @@ function _shortsGenerate(){
   var dim=RES[opts.quality]||RES['FHD'];
   var W=dim.w, H=dim.h, FPS=opts.fps||30;
 
-  // 슬라이드 구성 — 브랜드 순서대로 자동 정렬된 장면들
-  // after = 실제 보여줄 이미지, before = 그 결과물의 편집 전 원본(있을 때만, Before/After 슬라이더에 사용)
-  // 텍스트는 항상 동일한 브랜드 스타일(흰색·고정 폰트/크기/위치)의 영어 라벨만 사용한다
-  var slides=activeList.map(function(x){
-    return {type:'slide', after:x.item.img, before:x.item.orig||null, label:x.label};
-  });
-  if(opts.ending){
-    slides.push({type:'ending',label:'CLOVER AI',after:null,before:null});
-  }
-
   // ── 타임라인 모델 ────────────────────────────────────────────
-  // 1) 슬라이드 사이는 항상 동일한 자연스러운 Fade(Cross Dissolve 느낌)로 전환한다
-  // 2) 슬라이드 자체에 before(편집 전)가 있으면 Before(좌측 기준) 홀드 → 슬라이더가 우→좌로
-  //    이동하며 After가 드러나는 방식으로 자동 진행한 뒤 After를 홀드한다
-  var TPL=SHORTS_TEMPLATES[opts.template]||SHORTS_TEMPLATES.Standard;
-  var HOLD_FIRST=TPL.holdFirst, TRANS_DUR=TPL.transDur;
-  var BA_HOLD_BEFORE=TPL.baHoldBefore, BA_WIPE=TPL.baWipe, HOLD_AFTER=TPL.holdAfter, ENDING_HOLD=TPL.endingHold;
-  var timeline=[];
-  var t=0;
-  slides.forEach(function(slide,i){
-    if(i>0){
-      timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+TRANS_DUR});
-      t+=TRANS_DUR;
-    }
-    var hasBA = slide.type==='slide' && slide.before && slide.before!==slide.after;
-    if(hasBA){
-      timeline.push({type:'ba_before',idx:i,start:t,end:t+BA_HOLD_BEFORE});
-      t+=BA_HOLD_BEFORE;
-      timeline.push({type:'ba_wipe',idx:i,start:t,end:t+BA_WIPE});
-      t+=BA_WIPE;
-      timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_AFTER});
-      t+=HOLD_AFTER;
-    } else {
-      var dur = i===0 ? HOLD_FIRST : (slide.type==='ending' ? ENDING_HOLD : HOLD_AFTER);
-      timeline.push({type:'hold',idx:i,start:t,end:t+dur});
-      t+=dur;
-    }
-  });
-  var totalDuration=t;
+  // 장면 전환은 페이드 없이 항상 바로 컷된다. 슬라이드에 before(편집 전)가 있으면
+  // 등장하자마자 곧바로 슬라이더가 우→좌로 이동하며 After가 드러나고, 끝나면 After를 홀드한다.
+  var tlBuild=_shortsBuildTimeline(slides);
+  var timeline=tlBuild.timeline;
+  var totalDuration=tlBuild.totalDuration;
   var totalFrames=Math.ceil(totalDuration*FPS);
 
   if(progTxt)progTxt.textContent='이미지 로딩 중...';
@@ -3038,10 +3076,11 @@ function _shortsGenerate(){
         if(progFill)progFill.style.width='100%';
         // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
         // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
-        if(!G.HIST.video)G.HIST.video=[];
+        // 전용 버킷(G.HIST.shorts)에 저장하므로 "영상 제작" 탭에는 뜨지 않고 갤러리에만 보인다.
+        if(!G.HIST.shorts)G.HIST.shorts=[];
         var vidId=Date.now()+Math.random();
         idbSaveVideo(vidId, blob).catch(function(){});
-        G.HIST.video.unshift({id:vidId, orig:slides[0]&&(slides[0].before||slides[0].after), result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'video'});
+        G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&(slides[0].before||slides[0].after), result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
         saveHistToStorage();
         _shortsSaveGalleryMeta();
         // 메인 화면에서 바로 미리보기+다운로드 가능하도록 즉시 갱신
@@ -3989,7 +4028,7 @@ function addHistEl(item, scroll, targetHs){
       if(scroll)hs.scrollTop=0;
       return;
     }
-    var isVideo = item.wf==='video' || item.result.includes('.mp4') || item.result.includes('.webm');
+    var isVideo = item.wf==='video' || item.wf==='shorts' || item.result.includes('.mp4') || item.result.includes('.webm');
     var IMG_STYLE='display:block;width:100%;height:auto;min-height:300px;max-height:calc(100vh - 180px);object-fit:contain;background:#1a1a22';
     var VID_STYLE='display:block;width:100%;max-height:calc(100vh - 200px);background:#1a1a22';
     var hasBefore = !!(beforeSrc);  // BEFORE 이미지 유무
@@ -4148,7 +4187,7 @@ function addHistEl(item, scroll, targetHs){
       e.stopPropagation();
       var src=item.result||item.orig;
       if(!src)return;
-      var isVid=src.includes('.mp4')||src.includes('.webm')||item.wf==='video';
+      var isVid=src.includes('.mp4')||src.includes('.webm')||item.wf==='video'||item.wf==='shorts';
       var fname='clover-ai-'+Date.now()+(isVid?'.mp4':'.jpg');
       cloverDownload(src, fname);
     },false);
@@ -7913,7 +7952,7 @@ function openPanel(id){
   searchInp.placeholder='🔍 태그·메모로 검색...';
   searchInp.style.cssText='flex:1;min-width:160px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
   searchBar.appendChild(searchInp);
-  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['upscale','업스케일'],['world3d','VR 투어']];
+  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['shorts','쇼츠'],['upscale','업스케일'],['world3d','VR 투어']];
   var wfSel=document.createElement('select');
   wfSel.id='gallery-wf-filter';
   wfSel.style.cssText='padding:7px 10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
@@ -7976,7 +8015,7 @@ function renderGalleryGrid(items){
     if(!src)return;
     var card=document.createElement('div');
     card.style.cssText='position:relative;border-radius:10px;overflow:hidden;background:var(--card);cursor:pointer;aspect-ratio:4/3;border:1px solid var(--bd);box-shadow:0 2px 8px rgba(0,0,0,.3)';
-    var isVid=item.wf==='video'||String(src).includes('.mp4')||String(src).includes('.webm');
+    var isVid=item.wf==='video'||item.wf==='shorts'||String(src).includes('.mp4')||String(src).includes('.webm');
     if(isVid){
       var v=document.createElement('video');
       v.src=src;v.muted=true;v.style.cssText='width:100%;height:100%;object-fit:cover';
@@ -8048,7 +8087,7 @@ function renderGalleryGrid(items){
         e.stopPropagation();
         var dlSrc=it.wf==='world3d' ? (it.orig||'') : (it.result||it.cloud_url||it.orig||'');
         if(!dlSrc)return;
-        var isVid=dlSrc.includes('.mp4')||dlSrc.includes('.webm')||it.wf==='video';
+        var isVid=dlSrc.includes('.mp4')||dlSrc.includes('.webm')||it.wf==='video'||it.wf==='shorts';
         var fname='clover-ai-'+Date.now()+(isVid?'.mp4':'.jpg');
         cloverDownload(dlSrc, fname);
       };
@@ -8090,7 +8129,7 @@ function renderGalleryGrid(items){
         var ov=document.createElement('div');
         ov.id='gallery-popup-ov';
         ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
-        var isVidItem=src.includes('.mp4')||src.includes('.webm')||it.wf==='video';
+        var isVidItem=src.includes('.mp4')||src.includes('.webm')||it.wf==='video'||it.wf==='shorts';
         var mediaEl;
         if(isVidItem){
           mediaEl=document.createElement('video');
@@ -9024,7 +9063,7 @@ function mobGalleryItem(id){
   }
   var url=item.result||item.img||'';
   if(!url) return;
-  var isVidItem=url.includes('.mp4')||url.includes('.webm')||item.wf==='video';
+  var isVidItem=url.includes('.mp4')||url.includes('.webm')||item.wf==='video'||item.wf==='shorts';
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
   var dlBtn=document.createElement('button');
@@ -9221,7 +9260,8 @@ function onSupaLogin(user){
     localStorage.removeItem('clover_hist');
     localStorage.removeItem('clover_cr');
     localStorage.removeItem('clover_plan');
-    G.HIST = {space:[], render:[], edit:[], video:[], upscale:[]};
+    G.HIST = {space:[], render:[], edit:[], video:[], upscale:[], shorts:[]};
+    try{localStorage.removeItem('clover_shorts_gallery');}catch(e){}
     if(typeof renderMain==='function' && G.wf) renderMain(G.wf);
   }
   localStorage.setItem('clover_last_uid', user.id);
@@ -9337,7 +9377,8 @@ function onSupaLogout(){
   // 보안: 로그아웃 시 로컬에 남은 갤러리 데이터 즉시 삭제 (다음 사용자에게 노출 방지)
   localStorage.removeItem('clover_hist');
   localStorage.removeItem('clover_last_uid');
-  G.HIST = {space:[], render:[], edit:[], video:[], upscale:[]};
+  try{localStorage.removeItem('clover_shorts_gallery');}catch(e){}
+  G.HIST = {space:[], render:[], edit:[], video:[], upscale:[], shorts:[]};
   if(typeof renderMain==='function' && G.wf) renderMain(G.wf);
 }
 
