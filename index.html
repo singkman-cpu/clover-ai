@@ -428,6 +428,7 @@ select option{background:var(--c2)}
       <div class="wft" data-w="video" onclick="selectWF('video')"><div class="wft-ic">&#9654;</div><div><div class="wft-ko">영상 제작</div><div class="wft-en">Video</div></div></div>
       <div class="wft" data-w="upscale" onclick="selectWF('upscale')"><div class="wft-ic">&#11014;</div><div><div class="wft-ko">업스케일</div><div class="wft-en">Upscale</div></div></div>
       <div class="wft" data-w="world3d" onclick="selectWF('world3d')"><div class="wft-ic">&#127760;</div><div><div class="wft-ko">VR 투어 <span style="font-size:8px;background:var(--ac);color:#000;border-radius:3px;padding:0 3px;font-weight:800">NEW</span></div><div class="wft-en">VR Tour</div></div></div>
+      <div class="wft" data-w="shorts" onclick="selectWF('shorts')"><div class="wft-ic">&#127916;</div><div><div class="wft-ko">쇼츠 제작</div><div class="wft-en">Shorts</div></div></div>
     </div>
     <div class="sdiv"></div>
     <div class="sb-scroll"><div id="ssets"></div></div>
@@ -1044,7 +1045,7 @@ var EV=[
 ];
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
 var WFC={space:20,render:20,edit:20,video:60,upscale:20};
-var WFL={space:'AI 공간 변환',render:'렌더 실사화',edit:'AI 편집',video:'영상 생성',upscale:'업스케일'};
+var WFL={space:'AI 공간 변환',render:'렌더 실사화',edit:'AI 편집',video:'영상 생성',upscale:'업스케일',shorts:'쇼츠 제작'};
 var SCR={'2x':{'clarity':20,'creative':35,'topaz':15},'4x':{'clarity':40,'creative':60,'topaz':30}};
 var OPTIMIZED=['Standard','Portraits (Soft)','Portraits (Hard)','Art & Illustrations','Nature & Landscapes','Films & Photography','3d Renders','Science Fiction'];
 var FAQS=[
@@ -1203,6 +1204,7 @@ function getBaseCost(wf,scale,resolution){
 function canRun(){
   var tab=getTab(G.wf);
   if(!G.wf) return false; // 탭 미선택
+  if(G.wf==='shorts') return false; // 쇼츠는 자체 버튼 사용
   if(G.wf==='video'&&tab.vidMode==='prompt')return (tab.prompt||'').length>2;
   if(!tab.inputImg)return false;
   // 관리자는 크레딧 무제한 (이미지만 있으면 실행 가능)
@@ -1214,6 +1216,12 @@ function canRun(){
 }
 function updBtn(){
   var ok=canRun();
+  // 쇼츠 탭에서는 actbtn 숨김 (자체 생성 버튼 사용)
+  var isShorts=G.wf==='shorts';
+  document.querySelectorAll('.actbtn').forEach(function(b){
+    b.style.display=isShorts?'none':'';
+  });
+  if(isShorts)return;
   // actbtn이 데스크탑/모바일 두 곳 → 전부 업데이트
   document.querySelectorAll('.actbtn').forEach(function(b){
     b.className='actbtn '+(ok?'ok':'dis');
@@ -1443,7 +1451,7 @@ function renderSB(){
   var allS=document.querySelectorAll('#ssets');
   if(!allS.length)return;
   if(!G.wf)return;
-  var map={space:sbSpace,render:sbRender,edit:sbEdit,video:sbVideo,upscale:sbUpscale,world3d:sbWorld3d};
+  var map={space:sbSpace,render:sbRender,edit:sbEdit,video:sbVideo,upscale:sbUpscale,world3d:sbWorld3d,shorts:sbShorts};
   allS.forEach(function(s){
     s.innerHTML='';
     if(map[G.wf])map[G.wf](s);
@@ -2038,6 +2046,7 @@ var RES_OPTS = [
 function getResObj(){ return RES_OPTS.find(function(r){return r.k===(getTab(G.wf).resolution||'1K');})||RES_OPTS[0]; }
 function getCost(){
   var base;
+  if(G.wf==='shorts') return 0; // 브라우저 내 처리, 크레딧 없음
   if(G.wf==='video'){
     var dur=G.vdur||5;
     var eng=G.vidEng||'kling3';
@@ -2360,6 +2369,748 @@ function sbWorld3d(p){
   goWrap.appendChild(statusEl);
   p.appendChild(goWrap);
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// CLOVER AI — SHORTS AUTO GENERATOR (쇼츠 자동 생성기)
+// 렌더링 결과 이미지들을 9:16 세로 쇼츠 영상으로 자동 생성
+// Canvas + MediaRecorder 기반, 브라우저 내 완전 동작
+// ═══════════════════════════════════════════════════════════════════════
+
+var G_SHORTS = {
+  slots: [
+    {k:'site',      l:'SITE PHOTO',     ko:'현장사진',    img:null, enabled:true},
+    {k:'ai_design', l:'AI DESIGN',      ko:'AI 렌더링',   img:null, enabled:true},
+    {k:'furniture', l:'FURNITURE EDIT', ko:'AI 편집',     img:null, enabled:false},
+    {k:'people',    l:'PEOPLE ADD',     ko:'사람 추가',   img:null, enabled:false},
+    {k:'multi',     l:'MULTI VIEW',     ko:'멀티뷰',      img:null, enabled:false},
+    {k:'iso',       l:'ISOMETRIC VIEW', ko:'아이소뷰',    img:null, enabled:false},
+  ],
+  opts: {
+    textPreset: 'Modern',
+    transition: 'Fade',
+    bgmFile: null,
+    bgmUrl: null,
+    watermark: true,
+    ending: true,
+    fps: 30,
+    quality: 'FHD',
+    beforeAfter: true,
+  },
+  generating: false,
+  progress: 0,
+  resultUrl: null,
+};
+
+// ── 사이드바 UI ───────────────────────────────────────────────────
+function sbShorts(p){
+  var slots = G_SHORTS.slots;
+  var opts = G_SHORTS.opts;
+
+  // 안내
+  var note=dv('');
+  note.style.cssText='font-size:12px;color:var(--t2);line-height:1.6;padding:10px;background:var(--acg);border-radius:9px;margin-bottom:4px;border:1px solid var(--acb)';
+  note.innerHTML='&#127916; 이미지를 슬롯에 넣고 <strong style="color:var(--ac)">쇼츠 생성</strong>을 누르면<br>9:16 세로 영상이 자동으로 만들어집니다.';
+  p.appendChild(note);
+
+  // 이미지 슬롯들
+  var slotsLabel=dv('ss');
+  slotsLabel.innerHTML='<div class="lbl">영상 슬롯 <span class="lbl-en">Image Slots</span></div>';
+  p.appendChild(slotsLabel);
+
+  slots.forEach(function(slot, i){
+    var row=dv('');
+    row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--c2);border-radius:9px;border:1px solid '+(slot.enabled?'var(--acb)':'var(--bd2)');
+    // 순서 번호
+    var num=dv('');num.style.cssText='width:20px;height:20px;border-radius:50%;background:'+(slot.enabled?'var(--ac)':'var(--bd2)')+';color:'+(slot.enabled?'#000':'var(--m2)')+';font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0';
+    num.textContent=i+1;
+    row.appendChild(num);
+    // 이미지 썸네일 or 업로드
+    var imgBox=dv('');imgBox.id='shorts-slot-'+slot.k;
+    imgBox.style.cssText='width:48px;height:48px;border-radius:6px;background:var(--bd2);flex-shrink:0;overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;border:1px dashed var(--bd2)';
+    if(slot.img){
+      imgBox.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
+    } else {
+      imgBox.innerHTML='&#43;';
+    }
+    // 클릭 시 파일 선택 또는 갤러리에서 가져오기
+    (function(sl){
+      imgBox.onclick=function(){
+        _shortsPickImage(sl, imgBox);
+      };
+    })(slot);
+    row.appendChild(imgBox);
+    // 텍스트
+    var info=dv('');info.style.cssText='flex:1;min-width:0';
+    info.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--t);letter-spacing:.5px">'+slot.l+'</div><div style="font-size:10px;color:var(--m2)">'+slot.ko+'</div>';
+    row.appendChild(info);
+    // 토글
+    var tog=mk('input','');tog.type='checkbox';tog.checked=slot.enabled;
+    tog.style.cssText='width:15px;height:15px;accent-color:var(--ac);cursor:pointer;flex-shrink:0';
+    (function(sl){
+      tog.onchange=function(){sl.enabled=tog.checked;renderSB();};
+    })(slot);
+    row.appendChild(tog);
+    p.appendChild(row);
+  });
+
+  // Before/After 옵션
+  var baWrap=dv('ss');
+  var baLabel=document.createElement('label');
+  baLabel.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);cursor:pointer;padding:8px 10px;background:var(--c2);border-radius:8px';
+  var baCk=document.createElement('input');baCk.type='checkbox';baCk.checked=opts.beforeAfter;
+  baCk.style.cssText='width:14px;height:14px;accent-color:var(--ac)';
+  baCk.onchange=function(){opts.beforeAfter=baCk.checked;};
+  baLabel.appendChild(baCk);
+  baLabel.appendChild(document.createTextNode('Before / After 슬라이더 (2.5초)'));
+  baWrap.appendChild(baLabel);
+  p.appendChild(baWrap);
+
+  // 텍스트 프리셋
+  var txtWrap=dv('ss');
+  txtWrap.innerHTML='<div class="lbl">텍스트 스타일</div>';
+  var txtSel=document.createElement('select');
+  txtSel.style.cssText='width:100%;padding:8px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;cursor:pointer';
+  ['Modern','Classic','Minimal','Bold','None'].forEach(function(v){
+    var o=document.createElement('option');o.value=v;o.textContent=v;
+    if(v===opts.textPreset)o.selected=true;
+    txtSel.appendChild(o);
+  });
+  txtSel.onchange=function(){opts.textPreset=txtSel.value;};
+  txtWrap.appendChild(txtSel);
+  p.appendChild(txtWrap);
+
+  // 전환 효과
+  var transWrap=dv('ss');
+  transWrap.innerHTML='<div class="lbl">전환 효과</div>';
+  var transSel=document.createElement('select');
+  transSel.style.cssText='width:100%;padding:8px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;cursor:pointer';
+  ['Fade','Cross Dissolve','Cut','Push','Zoom'].forEach(function(v){
+    var o=document.createElement('option');o.value=v;o.textContent=v;
+    if(v===opts.transition)o.selected=true;
+    transSel.appendChild(o);
+  });
+  transSel.onchange=function(){opts.transition=transSel.value;};
+  transWrap.appendChild(transSel);
+  p.appendChild(transWrap);
+
+  // 해상도/FPS
+  var resWrap=dv('ss');
+  resWrap.innerHTML='<div class="lbl">해상도</div>';
+  var resRow=dv('');resRow.style.cssText='display:flex;gap:6px';
+  ['HD','FHD','4K'].forEach(function(q){
+    var btn=mk('button','');
+    btn.type='button';
+    btn.textContent=q;
+    btn.style.cssText='flex:1;padding:7px;border-radius:7px;border:1px solid '+(opts.quality===q?'var(--ac)':'var(--bd2)')+';background:'+(opts.quality===q?'var(--acg)':'var(--c2)')+';color:'+(opts.quality===q?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
+    btn.onclick=function(){
+      opts.quality=q;
+      resRow.querySelectorAll('button').forEach(function(b){
+        b.style.borderColor=b.textContent===q?'var(--ac)':'var(--bd2)';
+        b.style.background=b.textContent===q?'var(--acg)':'var(--c2)';
+        b.style.color=b.textContent===q?'var(--ac)':'var(--t2)';
+      });
+    };
+    resRow.appendChild(btn);
+  });
+  resWrap.appendChild(resRow);
+  if(opts.quality==='4K'){
+    var warnEl=dv('');warnEl.style.cssText='font-size:10px;color:#fca5a5;margin-top:5px';
+    warnEl.textContent='⚠️ 4K는 생성 시간이 5~10분 이상 걸릴 수 있어요';
+    resWrap.appendChild(warnEl);
+  }
+  p.appendChild(resWrap);
+
+  var fpsWrap=dv('ss');
+  fpsWrap.innerHTML='<div class="lbl">FPS</div>';
+  var fpsRow=dv('');fpsRow.style.cssText='display:flex;gap:6px';
+  [30,60].forEach(function(f){
+    var btn=mk('button','');btn.type='button';btn.textContent=f+'fps';
+    btn.style.cssText='flex:1;padding:7px;border-radius:7px;border:1px solid '+(opts.fps===f?'var(--ac)':'var(--bd2)')+';background:'+(opts.fps===f?'var(--acg)':'var(--c2)')+';color:'+(opts.fps===f?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
+    btn.onclick=function(){
+      opts.fps=f;
+      fpsRow.querySelectorAll('button').forEach(function(b){
+        var isMe=b.textContent===f+'fps';
+        b.style.borderColor=isMe?'var(--ac)':'var(--bd2)';
+        b.style.background=isMe?'var(--acg)':'var(--c2)';
+        b.style.color=isMe?'var(--ac)':'var(--t2)';
+      });
+    };
+    fpsRow.appendChild(btn);
+  });
+  fpsWrap.appendChild(fpsRow);
+  p.appendChild(fpsWrap);
+
+  // BGM
+  var bgmWrap=dv('ss');
+  bgmWrap.innerHTML='<div class="lbl">배경음악 <span class="lbl-en">(선택)</span></div>';
+  var bgmInput=document.createElement('input');
+  bgmInput.type='file';bgmInput.accept='audio/*';bgmInput.style.cssText='width:100%;font-size:12px;color:var(--t2);cursor:pointer;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px';
+  bgmInput.onchange=function(){
+    if(bgmInput.files[0]){
+      opts.bgmFile=bgmInput.files[0];
+      opts.bgmUrl=URL.createObjectURL(bgmInput.files[0]);
+    }
+  };
+  bgmWrap.appendChild(bgmInput);
+  p.appendChild(bgmWrap);
+
+  // 워터마크/엔딩
+  var optRow=dv('ss');
+  optRow.style.cssText='display:flex;gap:12px';
+  [['watermark','CLOVER AI 워터마크'],['ending','엔딩 슬라이드']].forEach(function(item){
+    var label=document.createElement('label');
+    label.style.cssText='display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2);cursor:pointer';
+    var ck=document.createElement('input');ck.type='checkbox';ck.checked=opts[item[0]];
+    ck.style.cssText='width:13px;height:13px;accent-color:var(--ac)';
+    (function(key){ck.onchange=function(){opts[key]=ck.checked;};})(item[0]);
+    label.appendChild(ck);label.appendChild(document.createTextNode(item[1]));
+    optRow.appendChild(label);
+  });
+  p.appendChild(optRow);
+
+  // 생성 버튼
+  var genWrap=dv('');genWrap.style.cssText='margin-top:8px';
+  var genBtn=mk('button','');genBtn.id='shorts-gen-btn';
+  genBtn.style.cssText='width:100%;padding:14px;border-radius:11px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:15px;cursor:pointer;font-family:inherit;letter-spacing:.5px';
+  genBtn.innerHTML='&#127916; 쇼츠 생성하기';
+  genBtn.onclick=function(){_shortsGenerate();};
+  genWrap.appendChild(genBtn);
+  // 진행바
+  var progWrap=dv('');progWrap.id='shorts-prog-wrap';progWrap.style.cssText='display:none;margin-top:10px';
+  var progBar=dv('');progBar.style.cssText='height:4px;background:var(--bd2);border-radius:2px;overflow:hidden;margin-bottom:6px';
+  var progFill=dv('');progFill.id='shorts-prog-fill';progFill.style.cssText='height:100%;width:0%;background:var(--ac);transition:width .2s';
+  progBar.appendChild(progFill);
+  var progTxt=dv('');progTxt.id='shorts-prog-txt';progTxt.style.cssText='font-size:11px;color:var(--m2);text-align:center';
+  progTxt.textContent='생성 중...';
+  progWrap.appendChild(progBar);progWrap.appendChild(progTxt);
+  genWrap.appendChild(progWrap);
+  // 다운로드 버튼
+  var dlWrap=dv('');dlWrap.id='shorts-dl-wrap';dlWrap.style.cssText='display:none;margin-top:10px;display:none';
+  var dlBtn=mk('button','');dlBtn.id='shorts-dl-btn';
+  dlBtn.style.cssText='width:100%;padding:12px;border-radius:10px;border:none;background:#10b981;color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit';
+  dlBtn.innerHTML='&#11015; 쇼츠 다운로드 (MP4/WebM)';
+  dlWrap.appendChild(dlBtn);
+  genWrap.appendChild(dlWrap);
+  p.appendChild(genWrap);
+}
+
+// ── 이미지 선택 (갤러리/파일) ──────────────────────────────────────
+function _shortsPickImage(slot, thumbEl){
+  // 미니 팝업: 갤러리에서 선택 or 파일 업로드
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  var box=document.createElement('div');
+  box.style.cssText='background:var(--card);border-radius:14px;padding:18px;max-width:500px;width:100%;max-height:80vh;overflow:auto';
+  box.innerHTML='<div style="font-size:14px;font-weight:700;color:var(--t);margin-bottom:12px">'+slot.l+' — 이미지 선택</div>';
+
+  // 파일 업로드 버튼
+  var fi=document.createElement('input');fi.type='file';fi.accept='image/*';fi.style.display='none';
+  fi.onchange=function(){
+    if(!fi.files[0])return;
+    var reader=new FileReader();
+    reader.onload=function(e){
+      slot.img=e.target.result;
+      slot.enabled=true;
+      thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
+      ov.remove();renderSB();
+    };
+    reader.readAsDataURL(fi.files[0]);
+  };
+  var uploadBtn=mk('button','');uploadBtn.type='button';
+  uploadBtn.style.cssText='padding:9px 16px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit;margin-bottom:14px;width:100%';
+  uploadBtn.innerHTML='&#128190; 파일에서 업로드';
+  uploadBtn.onclick=function(){fi.click();};
+  box.appendChild(uploadBtn);box.appendChild(fi);
+
+  // 갤러리 이미지들
+  var galLabel=dv('');galLabel.style.cssText='font-size:11px;color:var(--m2);margin-bottom:8px';
+  galLabel.textContent='또는 갤러리에서 선택:';
+  box.appendChild(galLabel);
+
+  var grid=dv('');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px';
+  var allItems=[];
+  Object.keys(G.HIST||{}).forEach(function(wf){
+    (G.HIST[wf]||[]).forEach(function(item){
+      if(item.result&&!item.result.includes('.mp4')&&!item.result.includes('.webm')){
+        allItems.push(item);
+      }
+    });
+  });
+  // 최근 24개
+  allItems.slice(0,24).forEach(function(item){
+    var img=document.createElement('img');
+    img.src=item.result;
+    img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:border-color .15s';
+    img.onmouseover=function(){img.style.borderColor='var(--ac)';};
+    img.onmouseout=function(){img.style.borderColor='transparent';};
+    img.onclick=function(){
+      slot.img=item.result;
+      slot.enabled=true;
+      thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
+      ov.remove();renderSB();
+    };
+    grid.appendChild(img);
+  });
+  if(allItems.length===0){
+    var noItems=dv('');noItems.style.cssText='color:var(--m2);font-size:12px;text-align:center;padding:20px';
+    noItems.textContent='갤러리에 이미지가 없어요. 파일에서 업로드해주세요.';
+    grid.appendChild(noItems);
+  }
+  box.appendChild(grid);
+
+  // 닫기
+  var closeBtn=mk('button','');closeBtn.type='button';
+  closeBtn.style.cssText='margin-top:14px;width:100%;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--m2);font-size:12px;cursor:pointer;font-family:inherit';
+  closeBtn.textContent='취소';closeBtn.onclick=function(){ov.remove();};
+  box.appendChild(closeBtn);
+
+  ov.appendChild(box);document.body.appendChild(ov);
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+}
+
+// ── 영상 생성 메인 함수 ───────────────────────────────────────────
+function _shortsGenerate(){
+  var slots=G_SHORTS.slots;
+  var opts=G_SHORTS.opts;
+
+  var activeSlots=slots.filter(function(s){return s.enabled&&s.img;});
+  if(activeSlots.length<2){alert('최소 2개 이상의 이미지를 넣어주세요.');return;}
+
+  var progWrap=gE('shorts-prog-wrap');
+  var progFill=gE('shorts-prog-fill');
+  var progTxt=gE('shorts-prog-txt');
+  var dlWrap=gE('shorts-dl-wrap');
+  var genBtn=gE('shorts-gen-btn');
+  if(genBtn){genBtn.disabled=true;genBtn.style.opacity='0.5';}
+  if(progWrap){progWrap.style.display='';}
+  if(dlWrap){dlWrap.style.display='none';}
+
+  var RES={'HD':{w:720,h:1280},'FHD':{w:1080,h:1920},'4K':{w:2160,h:3840}};
+  var dim=RES[opts.quality]||RES['FHD'];
+  var W=dim.w, H=dim.h, FPS=opts.fps||30;
+
+  // 슬라이드 구성
+  var slides=[];
+  var siteSlot=slots.find(function(s){return s.k==='site'&&s.img&&s.enabled;});
+  var aiSlot=slots.find(function(s){return s.k==='ai_design'&&s.img&&s.enabled;});
+
+  if(opts.beforeAfter&&siteSlot&&aiSlot){
+    slides.push({type:'before_after',orig:siteSlot.img,ai:aiSlot.img,label:'BEFORE / AFTER',duration:2.5});
+  }
+  activeSlots.forEach(function(slot){
+    slides.push({type:'slide',img:slot.img,label:slot.l,ko:slot.ko,duration:3.5});
+  });
+  if(opts.ending){
+    slides.push({type:'ending',label:'CLOVER AI',duration:3.0});
+  }
+
+  var TRANS=opts.transition==='Cut'?0:0.5;
+  // 타임라인 빌드
+  var timeline=[];
+  var t=0;
+  slides.forEach(function(slide,i){
+    timeline.push({type:'slide',idx:i,start:t,end:t+slide.duration});
+    t+=slide.duration;
+    if(i<slides.length-1&&TRANS>0){
+      timeline.push({type:'trans',from:i,to:i+1,start:t,end:t+TRANS});
+      t+=TRANS;
+    }
+  });
+  var totalDuration=t;
+  var totalFrames=Math.ceil(totalDuration*FPS);
+
+  if(progTxt)progTxt.textContent='이미지 로딩 중...';
+
+  // 이미지 프리로드
+  var imgCache={};
+  var imgUrls=[];
+  slides.forEach(function(s){
+    if(s.img&&imgUrls.indexOf(s.img)===-1)imgUrls.push(s.img);
+    if(s.orig&&imgUrls.indexOf(s.orig)===-1)imgUrls.push(s.orig);
+    if(s.ai&&imgUrls.indexOf(s.ai)===-1)imgUrls.push(s.ai);
+  });
+
+  var loaded=0;
+  function loadNext(){
+    if(loaded>=imgUrls.length){startRender();return;}
+    var url=imgUrls[loaded];
+    var img=new Image();
+    img.crossOrigin='anonymous';
+    img.onload=function(){imgCache[url]=img;loaded++;loadNext();};
+    img.onerror=function(){
+      // blob 경유 재시도
+      fetch(url).then(function(r){return r.blob();}).then(function(b){
+        var bu=URL.createObjectURL(b);
+        var img2=new Image();
+        img2.onload=function(){imgCache[url]=img2;loaded++;loadNext();};
+        img2.src=bu;
+      }).catch(function(){loaded++;loadNext();});
+    };
+    img.src=url;
+  }
+  loadNext();
+
+  function startRender(){
+    var canvas=document.createElement('canvas');
+    canvas.width=W;canvas.height=H;
+    var ctx=canvas.getContext('2d');
+
+    // 오디오 설정
+    var audioCtx=null, bgmSource=null, dest=null;
+    var streamWithAudio=null;
+    var vidStream=canvas.captureStream(FPS);
+
+    function beginRecord(stream){
+      var mimeType='video/webm;codecs=vp9';
+      if(!MediaRecorder.isTypeSupported(mimeType)){
+        mimeType=MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':'video/webm';
+      }
+      var chunks=[];
+      var recorder=new MediaRecorder(stream,{mimeType:mimeType,videoBitsPerSecond:W>=2160?40000000:W>=1080?8000000:3000000});
+      recorder.ondataavailable=function(e){if(e.data&&e.data.size>0)chunks.push(e.data);};
+      recorder.onstop=function(){
+        var blob=new Blob(chunks,{type:mimeType});
+        var url=URL.createObjectURL(blob);
+        G_SHORTS.resultUrl=url;
+        var dlBtn=gE('shorts-dl-btn');
+        if(dlBtn){
+          dlBtn.onclick=function(){
+            var a=document.createElement('a');
+            a.href=url;
+            a.download='cloverai_shorts_'+Date.now()+'.'+(mimeType.includes('mp4')?'mp4':'webm');
+            document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},500);
+          };
+        }
+        if(dlWrap){dlWrap.style.display='';}
+        if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
+        if(progTxt)progTxt.textContent='✅ 완성! 아래 버튼으로 다운로드하세요.';
+        if(progFill)progFill.style.width='100%';
+        // 갤러리에 비디오로도 추가
+        if(!G.HIST.video)G.HIST.video=[];
+        G.HIST.video.unshift({id:Date.now()+Math.random(),orig:slides[0]&&(slides[0].orig||slides[0].img),result:url,tags:['쇼츠 자동생성'],ai:'',preview:false,cx:50,fav:false,wf:'video'});
+        saveHistToStorage();
+      };
+      recorder.start(100); // 100ms 단위로 chunk
+      return recorder;
+    }
+
+    // BGM 처리
+    if(opts.bgmUrl){
+      try{
+        audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+        dest=audioCtx.createMediaStreamDestination();
+        var audioEl=document.createElement('audio');
+        audioEl.src=opts.bgmUrl;audioEl.loop=true;audioEl.crossOrigin='anonymous';
+        audioEl.play().then(function(){
+          bgmSource=audioCtx.createMediaElementSource(audioEl);
+          var gainNode=audioCtx.createGain();gainNode.gain.value=0.6;
+          bgmSource.connect(gainNode);gainNode.connect(dest);
+          // 비디오+오디오 합성 스트림
+          var combined=new MediaStream([...vidStream.getVideoTracks(),...dest.stream.getAudioTracks()]);
+          var rec=beginRecord(combined);
+          runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
+            if(progFill)progFill.style.width=Math.round(p*100)+'%';
+            if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)';
+          },function(){
+            audioEl.pause();rec.stop();
+          });
+        }).catch(function(){
+          var rec=beginRecord(vidStream);
+          runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
+            if(progFill)progFill.style.width=Math.round(p*100)+'%';
+            if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'%';
+          },function(){rec.stop();});
+        });
+      }catch(e){
+        var rec=beginRecord(vidStream);
+        runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
+          if(progFill)progFill.style.width=Math.round(p*100)+'%';
+          if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'%';
+        },function(){rec.stop();});
+      }
+    } else {
+      var rec=beginRecord(vidStream);
+      runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
+        if(progFill)progFill.style.width=Math.round(p*100)+'%';
+        if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% (약 '+Math.round((totalDuration*(1-p))/opts.fps*opts.fps)+'초 남음)';
+      },function(){rec.stop();});
+    }
+  }
+}
+
+// ── 렌더링 루프 ───────────────────────────────────────────────────
+function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone){
+  var frame=0;
+  var interval=setInterval(function(){
+    if(frame>=totalFrames){clearInterval(interval);onDone();return;}
+    var t=frame/FPS;
+    _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache);
+    frame++;
+    if(frame%Math.max(1,Math.round(FPS/5))===0){
+      onProgress(frame/totalFrames);
+    }
+  },1000/FPS);
+}
+
+// ── 프레임 렌더링 ─────────────────────────────────────────────────
+function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  var entry=null;
+  for(var i=0;i<timeline.length;i++){
+    if(t>=timeline[i].start&&t<=timeline[i].end){entry=timeline[i];break;}
+  }
+  if(!entry)return;
+  if(entry.type==='slide'){
+    var slide=slides[entry.idx];
+    var slideT=t-entry.start;
+    _shortsDrawSlide(ctx,W,H,slide,slideT,opts,imgCache);
+  } else {
+    var progress=(t-entry.start)/(entry.end-entry.start);
+    _shortsDrawTransition(ctx,W,H,slides[entry.from],slides[entry.to],progress,opts,imgCache);
+  }
+  if(opts.watermark)_shortsDrawWatermark(ctx,W,H);
+}
+
+// 슬라이드 그리기
+function _shortsDrawSlide(ctx, W, H, slide, slideT, opts, imgCache){
+  if(slide.type==='ending'){
+    _shortsDrawEnding(ctx,W,H);
+    return;
+  }
+  if(slide.type==='before_after'){
+    var progress=Math.min(1,slideT/slide.duration);
+    // 0→0.2: 왼쪽에서 슬라이더 시작, 0.2→0.8: 오른쪽으로 이동, 0.8→1: 잠깐 멈춤
+    var sliderX=progress<0.1?0:progress>0.9?W:(progress-0.1)/0.8*W;
+    var origImg=imgCache[slide.orig];
+    var aiImg=imgCache[slide.ai];
+    _shortsDrawBeforeAfter(ctx,W,H,origImg,aiImg,sliderX);
+    if(opts.textPreset!=='None'){
+      _shortsDrawText(ctx,W,H,'BEFORE / AFTER','','',opts.textPreset);
+    }
+    return;
+  }
+  // 일반 슬라이드
+  var img=imgCache[slide.img];
+  if(img){
+    _shortsDrawCoverImage(ctx,W,H,img);
+  }
+  if(opts.textPreset!=='None'&&slide.label){
+    _shortsDrawText(ctx,W,H,slide.label,slide.ko||'','',opts.textPreset);
+  }
+}
+
+// 이미지 Cover 방식 그리기
+function _shortsDrawCoverImage(ctx, W, H, img){
+  if(!img)return;
+  var iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+  if(!iw||!ih)return;
+  var scale=Math.max(W/iw, H/ih);
+  var dw=iw*scale, dh=ih*scale;
+  var dx=(W-dw)/2, dy=(H-dh)/2;
+  ctx.drawImage(img,dx,dy,dw,dh);
+}
+
+// Before/After 슬라이더
+function _shortsDrawBeforeAfter(ctx, W, H, origImg, aiImg, sliderX){
+  // AI (오른쪽 전체)
+  if(aiImg)_shortsDrawCoverImage(ctx,W,H,aiImg);
+  // 원본 (왼쪽 클립)
+  if(origImg){
+    ctx.save();
+    ctx.beginPath();ctx.rect(0,0,sliderX,H);ctx.clip();
+    _shortsDrawCoverImage(ctx,W,H,origImg);
+    ctx.restore();
+  }
+  // 구분선
+  if(sliderX>2&&sliderX<W-2){
+    ctx.save();
+    ctx.strokeStyle='rgba(255,255,255,0.95)';ctx.lineWidth=Math.round(W/270);
+    ctx.beginPath();ctx.moveTo(sliderX,0);ctx.lineTo(sliderX,H);ctx.stroke();
+    // 아이콘
+    var cx=sliderX, cy=H/2;
+    var r=Math.round(W/36);
+    ctx.fillStyle='rgba(255,255,255,0.95)';
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#333';ctx.font='bold '+Math.round(r*0.9)+'px Arial';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('◀▶',cx,cy);
+    // BEFORE/AFTER 레이블
+    var fs=Math.round(W*0.025);
+    ctx.font='bold '+fs+'px Arial';ctx.textBaseline='middle';
+    ctx.fillStyle='rgba(255,255,255,0.9)';
+    if(sliderX>W*0.15){ctx.textAlign='left';ctx.fillText('BEFORE',Math.round(W*0.04),Math.round(H*0.06));}
+    if(sliderX<W*0.85){ctx.textAlign='right';ctx.fillText('AFTER',Math.round(W*0.96),Math.round(H*0.06));}
+    ctx.restore();
+  }
+}
+
+// 텍스트 오버레이
+function _shortsDrawText(ctx, W, H, label, ko, sub, preset){
+  if(!preset||preset==='None')return;
+  ctx.save();
+  var fs=Math.round(W*0.052);
+  var pad=Math.round(W*0.055);
+  var y=H;
+  if(preset==='Modern'){
+    // 하단 반투명 바
+    var barH=Math.round(H*0.14);
+    var barY=H-barH;
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.fillRect(0,barY,W,barH);
+    // 민트 포인트 라인
+    ctx.fillStyle='#12E6E6';
+    ctx.fillRect(pad,barY+Math.round(barH*0.15),Math.round(W*0.04),Math.round(W*0.006));
+    // 라벨 텍스트
+    ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
+    ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.letterSpacing='2px';
+    ctx.fillText(label,pad,barY+Math.round(barH*0.42));
+    if(ko){
+      ctx.font='400 '+Math.round(fs*0.55)+'px Helvetica,Arial,sans-serif';
+      ctx.fillStyle='rgba(255,255,255,0.7)';
+      ctx.fillText(ko,pad,barY+Math.round(barH*0.72));
+    }
+  } else if(preset==='Classic'){
+    var shadowSize=Math.round(W/120);
+    ctx.shadowColor='rgba(0,0,0,0.85)';ctx.shadowBlur=shadowSize*4;
+    ctx.font='bold '+fs+'px Georgia,serif';
+    ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='bottom';
+    ctx.fillText(label,W/2,H-Math.round(H*0.07));
+    if(ko){
+      ctx.shadowBlur=shadowSize*3;
+      ctx.font=Math.round(fs*0.55)+'px Georgia,serif';
+      ctx.fillStyle='#FFD700';
+      ctx.fillText(ko,W/2,H-Math.round(H*0.03));
+    }
+    ctx.shadowBlur=0;
+  } else if(preset==='Minimal'){
+    ctx.font='300 '+Math.round(fs*0.65)+'px Helvetica,Arial,sans-serif';
+    ctx.fillStyle='rgba(255,255,255,0.85)';ctx.textAlign='left';ctx.textBaseline='top';
+    ctx.fillText(label.toUpperCase(),pad,Math.round(H*0.05));
+    if(ko){
+      ctx.font='300 '+Math.round(fs*0.42)+'px Helvetica,Arial,sans-serif';
+      ctx.fillStyle='rgba(255,255,255,0.5)';
+      ctx.fillText(ko,pad,Math.round(H*0.05)+Math.round(fs*0.8));
+    }
+  } else if(preset==='Bold'){
+    ctx.font='900 '+Math.round(fs*1.2)+'px Helvetica,Arial,sans-serif';
+    ctx.fillStyle='#12E6E6';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.shadowColor='rgba(0,0,0,0.9)';ctx.shadowBlur=Math.round(W/60);
+    ctx.fillText(label,W/2,H/2);
+    if(ko){
+      ctx.font='400 '+Math.round(fs*0.55)+'px Helvetica,Arial,sans-serif';
+      ctx.fillStyle='#fff';ctx.shadowBlur=Math.round(W/80);
+      ctx.fillText(ko,W/2,H/2+Math.round(fs*1.4));
+    }
+    ctx.shadowBlur=0;
+  }
+  ctx.restore();
+}
+
+// 엔딩 슬라이드
+function _shortsDrawEnding(ctx, W, H){
+  // 배경: 진한 다크
+  var grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#0b0b10');grad.addColorStop(1,'#111118');
+  ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+  // 민트 글로우
+  ctx.save();
+  ctx.shadowColor='#12E6E6';ctx.shadowBlur=Math.round(W/8);
+  ctx.fillStyle='rgba(18,230,230,0.08)';
+  ctx.beginPath();ctx.arc(W/2,H*0.38,W*0.35,0,Math.PI*2);ctx.fill();
+  ctx.restore();
+  // 로고 사각형
+  var logoSize=Math.round(W*0.22);
+  var logoX=(W-logoSize)/2, logoY=H*0.28-logoSize/2;
+  ctx.save();
+  ctx.strokeStyle='#12E6E6';ctx.lineWidth=Math.round(W/120);
+  ctx.beginPath();
+  var r=Math.round(logoSize*0.18);
+  ctx.moveTo(logoX+r,logoY);
+  ctx.lineTo(logoX+logoSize-r,logoY);ctx.quadraticCurveTo(logoX+logoSize,logoY,logoX+logoSize,logoY+r);
+  ctx.lineTo(logoX+logoSize,logoY+logoSize-r);ctx.quadraticCurveTo(logoX+logoSize,logoY+logoSize,logoX+logoSize-r,logoY+logoSize);
+  ctx.lineTo(logoX+r,logoY+logoSize);ctx.quadraticCurveTo(logoX,logoY+logoSize,logoX,logoY+logoSize-r);
+  ctx.lineTo(logoX,logoY+r);ctx.quadraticCurveTo(logoX,logoY,logoX+r,logoY);
+  ctx.closePath();ctx.stroke();
+  // C 글자
+  ctx.fillStyle='#12E6E6';ctx.font='bold '+Math.round(logoSize*0.55)+'px Helvetica,Arial,sans-serif';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('C',W/2,logoY+logoSize/2);
+  ctx.restore();
+  // CLOVER AI 텍스트
+  ctx.save();
+  ctx.font='800 '+Math.round(W*0.09)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.shadowColor='rgba(18,230,230,0.4)';ctx.shadowBlur=Math.round(W/30);
+  ctx.fillText('CLOVER AI',W/2,H*0.52);
+  ctx.restore();
+  // 태그라인
+  ctx.save();
+  ctx.font='400 '+Math.round(W*0.038)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='rgba(255,255,255,0.45)';ctx.textAlign='center';ctx.textBaseline='top';
+  ctx.fillText('건축 · 인테리어 · 전시 전용 AI 플랫폼',W/2,H*0.64);
+  ctx.restore();
+  // 사이트 URL
+  ctx.save();
+  ctx.font='400 '+Math.round(W*0.032)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#12E6E6';ctx.textAlign='center';ctx.textBaseline='bottom';
+  ctx.fillText('www.cloverai.kr',W/2,H*0.92);
+  ctx.restore();
+}
+
+// 전환 효과
+function _shortsDrawTransition(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  var trans=opts.transition||'Fade';
+  if(trans==='Fade'){
+    // 검정으로 페이드아웃 후 페이드인
+    if(progress<0.5){
+      _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
+      ctx.fillStyle='rgba(0,0,0,'+progress*2+')';
+      ctx.fillRect(0,0,W,H);
+    } else {
+      _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+      ctx.fillStyle='rgba(0,0,0,'+(1-(progress-0.5)*2)+')';
+      ctx.fillRect(0,0,W,H);
+    }
+  } else if(trans==='Cross Dissolve'){
+    _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
+    ctx.save();ctx.globalAlpha=progress;
+    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+    ctx.globalAlpha=1;ctx.restore();
+  } else if(trans==='Push'){
+    // 오른쪽에서 밀려오기
+    var offset=Math.round(W*(1-progress));
+    ctx.save();ctx.translate(-offset*(1-progress)*0,0); // from slide stays
+    _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
+    ctx.restore();
+    ctx.save();
+    ctx.beginPath();ctx.rect(W-Math.round(W*progress),0,Math.round(W*progress),H);ctx.clip();
+    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+    ctx.restore();
+  } else if(trans==='Zoom'){
+    _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
+    ctx.save();
+    var scale=1+progress*0.15;
+    ctx.globalAlpha=progress;
+    ctx.translate(W/2,H/2);ctx.scale(scale,scale);ctx.translate(-W/2,-H/2);
+    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+    ctx.restore();
+  } else { // Cut
+    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+  }
+}
+
+// 워터마크
+function _shortsDrawWatermark(ctx, W, H){
+  ctx.save();
+  ctx.font='600 '+Math.round(W*0.028)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='rgba(255,255,255,0.55)';
+  ctx.textAlign='right';ctx.textBaseline='bottom';
+  ctx.fillText('CLOVER AI',W-Math.round(W*0.04),H-Math.round(H*0.02));
+  ctx.restore();
+}
+
+
 // 가격은 항상 고정(W3D_COST) — 일반 사진일 때의 자동 360도 보정 비용은 이미 기본가에 포함되어 있어 고객에게 따로 안 보임
 function _w3dTotalCost(){
   return W3D_COST;
