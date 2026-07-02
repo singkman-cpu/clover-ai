@@ -1413,11 +1413,33 @@ function renderMain(wf){
     G.HIST[wf]=G.HIST[wf].filter(function(x){
       if(x.loading)return true;
       if(x.preview)return !!x.orig;
+      if(x.idbKey && !x.result)return true; // IndexedDB에서 아직 복원 중인 쇼츠 영상
       return !!(x.result||x.origThumb);
     });
   }
   // 화면 렌더는 현재 보이는 탭일 때만 (다른 탭 결과가 화면 덮어쓰기 방지)
   if(wf !== G.wf) return;
+
+  // 쇼츠 탭은 hist-s를 쓰지 않고, 메인 캔버스에 슬롯 진행상황/미리보기를 직접 그린다
+  if(wf==='shorts'){
+    hsAll.forEach(function(hs, hsIdx){
+      var ub=ubAll[hsIdx]||ubAll[0];
+      hs.style.display='none';
+      window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
+      hs.innerHTML='';
+      ub.classList.add('active');
+      _shortsRenderCanvas(ub);
+    });
+    return;
+  }
+  // 쇼츠 탭이 아니면 혹시 남아있을 쇼츠 전용 UI를 숨기고 기본 업로드 박스를 복원
+  ubAll.forEach(function(ub){
+    var sBox=ub.querySelector('#shorts-canvas-ui');
+    if(sBox)sBox.style.display='none';
+    var zone=ub.querySelector('.cub-zone');
+    if(zone)zone.style.display='';
+  });
+
   var items=G.HIST[wf]||[];
   // addHistEl이 내부적으로 gE('hist-s')(=첫번째 hist-s)에 append하므로,
   // 각 hist-s마다 순서대로 동일하게 채워준다.
@@ -2381,16 +2403,102 @@ function sbWorld3d(p){
 // Canvas + MediaRecorder 기반, 브라우저 내 완전 동작
 // ═══════════════════════════════════════════════════════════════════════
 
+// ── IndexedDB 기반 쇼츠 영상 영구 저장 ──────────────────────────────
+// blob: URL은 페이지를 벗어나거나 새로고침하면 즉시 무효화되어
+// "쇼츠가 갤러리에서 사라진다"는 버그의 원인이었다.
+// → 실제 영상 바이너리를 IndexedDB에 저장해두고, 필요할 때마다
+//   새 blob: URL을 재발급해서 쓴다 (localStorage에는 메타데이터만 저장).
+function _idbOpen(){
+  return new Promise(function(resolve,reject){
+    if(!window.indexedDB){reject(new Error('no idb'));return;}
+    var req=indexedDB.open('cloverai_shorts',1);
+    req.onupgradeneeded=function(){ if(!req.result.objectStoreNames.contains('videos')) req.result.createObjectStore('videos'); };
+    req.onsuccess=function(){resolve(req.result);};
+    req.onerror=function(){reject(req.error);};
+  });
+}
+function idbSaveVideo(key, blob){
+  return _idbOpen().then(function(db){
+    return new Promise(function(resolve,reject){
+      var tx=db.transaction('videos','readwrite');
+      tx.objectStore('videos').put(blob,String(key));
+      tx.oncomplete=function(){resolve();};
+      tx.onerror=function(){reject(tx.error);};
+    });
+  });
+}
+function idbLoadVideo(key){
+  return _idbOpen().then(function(db){
+    return new Promise(function(resolve,reject){
+      var tx=db.transaction('videos','readonly');
+      var req=tx.objectStore('videos').get(String(key));
+      req.onsuccess=function(){resolve(req.result||null);};
+      req.onerror=function(){reject(req.error);};
+    });
+  });
+}
+function idbDeleteVideo(key){
+  return _idbOpen().then(function(db){
+    return new Promise(function(resolve){
+      try{
+        var tx=db.transaction('videos','readwrite');
+        tx.objectStore('videos').delete(String(key));
+        tx.oncomplete=function(){resolve();};
+        tx.onerror=function(){resolve();};
+      }catch(e){resolve();}
+    });
+  }).catch(function(){});
+}
+// 쇼츠는 브라우저 내에서만 만들어지는 영상이라 클라우드 계정과 무관하게
+// 항상 로컬(IndexedDB + 전용 localStorage 키)에 메타데이터를 남긴다.
+// (saveHistToStorage는 로그인 시 clover_hist를 통째로 지우기 때문에 별도 보관)
+function _shortsSaveGalleryMeta(){
+  try{
+    var list=(G.HIST.video||[]).filter(function(x){return x.idbKey;}).slice(0,30).map(function(x){
+      return {id:x.id, orig:(x.orig&&x.orig.startsWith('data:')&&x.orig.length>300000)?null:(x.orig||null),
+        idbKey:x.idbKey, videoExt:x.videoExt||'webm', tags:x.tags||['쇼츠 자동생성'], fav:!!x.fav};
+    });
+    localStorage.setItem('clover_shorts_gallery', JSON.stringify(list));
+  }catch(e){console.warn('[Shorts] 갤러리 메타 저장 실패:',e.message);}
+}
+function _shortsLoadGalleryMeta(){
+  try{
+    var raw=localStorage.getItem('clover_shorts_gallery');
+    if(!raw)return;
+    var list=JSON.parse(raw)||[];
+    if(!G.HIST.video)G.HIST.video=[];
+    list.forEach(function(x){
+      if(G.HIST.video.find(function(h){return h.id===x.id;}))return;
+      G.HIST.video.unshift({id:x.id, orig:x.orig||null, result:null, idbKey:x.idbKey, videoExt:x.videoExt||'webm',
+        tags:x.tags||['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:!!x.fav, wf:'video'});
+    });
+  }catch(e){console.warn('[Shorts] 갤러리 메타 복원 실패:',e.message);}
+}
+// 새로고침/재방문 후 idbKey를 가진 video 항목들을 실제 blob: URL로 복원
+function _shortsRestoreVideosFromIDB(){
+  var list=(G.HIST&&G.HIST.video)||[];
+  var pending=list.filter(function(x){return x.idbKey && (!x.result||!x.result.startsWith('blob:'));});
+  if(!pending.length)return;
+  pending.forEach(function(item){
+    idbLoadVideo(item.idbKey).then(function(blob){
+      if(!blob)return;
+      item.result=URL.createObjectURL(blob);
+      if(G.wf==='video')renderMain('video');
+    }).catch(function(){});
+  });
+}
+
 var G_SHORTS = {
   slots: [
-    {k:'site',      l:'SITE PHOTO',     ko:'현장사진',    img:null, enabled:true},
-    {k:'ai_design', l:'AI DESIGN',      ko:'AI 렌더링',   img:null, enabled:true},
-    {k:'furniture', l:'FURNITURE EDIT', ko:'AI 편집',     img:null, enabled:false},
-    {k:'people',    l:'PEOPLE ADD',     ko:'사람 추가',   img:null, enabled:false},
-    {k:'multi',     l:'MULTI VIEW',     ko:'멀티뷰',      img:null, enabled:false},
-    {k:'iso',       l:'ISOMETRIC VIEW', ko:'아이소뷰',    img:null, enabled:false},
+    {k:'site',      l:'SITE PHOTO',     ko:'현장사진',    img:null, orig:null, enabled:true},
+    {k:'ai_design', l:'AI DESIGN',      ko:'AI 렌더링',   img:null, orig:null, enabled:true},
+    {k:'furniture', l:'FURNITURE EDIT', ko:'AI 편집',     img:null, orig:null, enabled:false},
+    {k:'people',    l:'PEOPLE ADD',     ko:'사람 추가',   img:null, orig:null, enabled:false},
+    {k:'multi',     l:'MULTI VIEW',     ko:'멀티뷰',      img:null, orig:null, enabled:false},
+    {k:'iso',       l:'ISOMETRIC VIEW', ko:'아이소뷰',    img:null, orig:null, enabled:false},
   ],
   opts: {
+    template: 'Standard',
     textPreset: 'Modern',
     transition: 'Fade',
     bgmFile: null,
@@ -2406,6 +2514,13 @@ var G_SHORTS = {
   resultUrl: null,
 };
 
+// 템플릿별 타이밍 (초)
+var SHORTS_TEMPLATES = {
+  Quick:     {holdFirst:1.0, transDur:0.4, baHoldBefore:0.5, baWipe:1.8, holdAfter:1.0, endingHold:1.6},
+  Standard:  {holdFirst:1.3, transDur:0.6, baHoldBefore:0.7, baWipe:2.5, holdAfter:1.6, endingHold:2.0},
+  Cinematic: {holdFirst:1.8, transDur:0.9, baHoldBefore:0.9, baWipe:3.0, holdAfter:2.2, endingHold:2.6},
+};
+
 // ── 사이드바 UI ───────────────────────────────────────────────────
 function sbShorts(p){
   var slots = G_SHORTS.slots;
@@ -2416,6 +2531,26 @@ function sbShorts(p){
   note.style.cssText='font-size:12px;color:var(--t2);line-height:1.6;padding:10px;background:var(--acg);border-radius:9px;margin-bottom:4px;border:1px solid var(--acb)';
   note.innerHTML='&#127916; 이미지를 슬롯에 넣고 <strong style="color:var(--ac)">쇼츠 생성</strong>을 누르면<br>9:16 세로 영상이 자동으로 만들어집니다.';
   p.appendChild(note);
+
+  // 템플릿 선택
+  var tplWrap=dv('ss');
+  tplWrap.innerHTML='<div class="lbl">템플릿 <span class="lbl-en">Template</span></div>';
+  var tplRow=dv('');tplRow.style.cssText='display:flex;flex-direction:column;gap:6px';
+  var TPL_INFO={
+    Quick:['Quick','SNS용 · 10~12초'],
+    Standard:['Standard','기본 · 15~20초'],
+    Cinematic:['Cinematic','여유있는 전환 · 20~30초'],
+  };
+  Object.keys(TPL_INFO).forEach(function(k){
+    var on=opts.template===k;
+    var btn=mk('button','');btn.type='button';
+    btn.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:9px;border:1px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c2)')+';color:'+(on?'var(--ac)':'var(--t2)')+';font-family:inherit;cursor:pointer;text-align:left';
+    btn.innerHTML='<span style="font-size:12.5px;font-weight:700">'+TPL_INFO[k][0]+'</span><span style="font-size:10.5px;opacity:.8">'+TPL_INFO[k][1]+'</span>';
+    btn.onclick=function(){opts.template=k;renderSB();};
+    tplRow.appendChild(btn);
+  });
+  tplWrap.appendChild(tplRow);
+  p.appendChild(tplWrap);
 
   // 이미지 슬롯들
   var slotsLabel=dv('ss');
@@ -2475,7 +2610,7 @@ function sbShorts(p){
   txtWrap.innerHTML='<div class="lbl">텍스트 스타일</div>';
   var txtSel=document.createElement('select');
   txtSel.style.cssText='width:100%;padding:8px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;cursor:pointer';
-  ['Modern','Classic','Minimal','Bold','None'].forEach(function(v){
+  ['Modern','Minimal','Bold','None'].forEach(function(v){
     var o=document.createElement('option');o.value=v;o.textContent=v;
     if(v===opts.textPreset)o.selected=true;
     txtSel.appendChild(o);
@@ -2599,7 +2734,83 @@ function sbShorts(p){
   p.appendChild(genWrap);
 }
 
-// ── 이미지 선택 (갤러리/파일) ──────────────────────────────────────
+// ── 메인 캔버스: 슬롯 순차 채우기 + 결과 영상 미리보기/다운로드 ─────────
+function _shortsRenderCanvas(ub){
+  var zone=ub.querySelector('.cub-zone');
+  if(zone)zone.style.display='none';
+  var box=ub.querySelector('#shorts-canvas-ui');
+  if(!box){
+    box=document.createElement('div');
+    box.id='shorts-canvas-ui';
+    box.style.cssText='position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:18px;overflow:auto';
+    ub.appendChild(box);
+  }
+  box.style.display='flex';
+  box.innerHTML='';
+
+  // 1) 영상이 이미 만들어졌으면 → 스크롤/사이드바 없이 메인 화면에서 바로 미리보기+다운로드
+  if(G_SHORTS.resultUrl){
+    var vidWrap=document.createElement('div');
+    vidWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:14px;max-width:340px;width:100%';
+    var video=document.createElement('video');
+    video.src=G_SHORTS.resultUrl;video.controls=true;video.loop=true;video.playsInline=true;
+    video.style.cssText='width:100%;max-width:260px;aspect-ratio:9/16;border-radius:16px;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.5)';
+    vidWrap.appendChild(video);
+    var dlBtn2=document.createElement('button');dlBtn2.type='button';
+    dlBtn2.style.cssText='padding:13px 26px;border-radius:11px;border:none;background:#10b981;color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit;width:100%';
+    dlBtn2.innerHTML='&#11015; 쇼츠 다운로드 (MP4/WebM)';
+    dlBtn2.onclick=function(){ if(G_SHORTS.resultDownload)G_SHORTS.resultDownload(); };
+    vidWrap.appendChild(dlBtn2);
+    var newBtn=document.createElement('button');newBtn.type='button';
+    newBtn.style.cssText='padding:9px 18px;border-radius:9px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+    newBtn.textContent='새 쇼츠 만들기';
+    newBtn.onclick=function(){
+      G_SHORTS.resultUrl=null;G_SHORTS.resultDownload=null;
+      renderMain('shorts');
+    };
+    vidWrap.appendChild(newBtn);
+    box.appendChild(vidWrap);
+    return;
+  }
+
+  // 2) 슬롯 진행 상황 — 순서대로 채워나가기
+  var slots=G_SHORTS.slots.filter(function(s){return s.enabled;});
+  var nextSlot=slots.find(function(s){return !s.img;});
+
+  var head=document.createElement('div');
+  head.style.cssText='text-align:center;max-width:360px';
+  head.innerHTML = nextSlot
+    ? '<div style="font-size:17px;font-weight:800;color:var(--t)">'+nextSlot.l+' <span style="color:var(--ac)">이미지를 넣어주세요</span></div><div style="font-size:12.5px;color:var(--m2);margin-top:6px;line-height:1.6">아래 타일을 클릭해서 갤러리에서 고르거나 파일을 업로드하세요</div>'
+    : '<div style="font-size:17px;font-weight:800;color:var(--t)">모든 이미지가 준비됐어요 <span style="color:var(--ac)">&#10003;</span></div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽 사이드바에서 &#127916; 쇼츠 생성하기를 눌러주세요</div>';
+  box.appendChild(head);
+
+  var grid=document.createElement('div');
+  grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:12px;max-width:420px';
+  slots.forEach(function(slot){
+    var isNext = slot===nextSlot;
+    var tile=document.createElement('div');
+    tile.style.cssText='width:88px;height:88px;border-radius:12px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:var(--c2);border:2px '+(isNext?'dashed var(--ac)':(slot.img?'solid var(--acb)':'dashed var(--bd2)'))+';position:relative;flex-shrink:0';
+    if(slot.img){
+      tile.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
+    } else {
+      tile.innerHTML='<div style="font-size:20px;color:'+(isNext?'var(--ac)':'var(--m2)')+'">&#43;</div><div style="font-size:9.5px;color:var(--m2);text-align:center;padding:0 4px;line-height:1.3">'+slot.l+'</div>';
+    }
+    (function(sl){
+      tile.onclick=function(){ _shortsPickImage(sl, gE('shorts-slot-'+sl.k)); };
+    })(slot);
+    grid.appendChild(tile);
+  });
+  box.appendChild(grid);
+
+  if(slots.length<2){
+    var warn=document.createElement('div');
+    warn.style.cssText='font-size:11.5px;color:var(--m2);text-align:center;max-width:320px';
+    warn.textContent='최소 2개 슬롯을 켜고 이미지를 넣어야 쇼츠를 만들 수 있어요 (왼쪽 사이드바에서 슬롯 토글).';
+    box.appendChild(warn);
+  }
+}
+
+
 function _shortsPickImage(slot, thumbEl){
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:99999;display:flex;flex-direction:column';
@@ -2619,9 +2830,9 @@ function _shortsPickImage(slot, thumbEl){
     if(!fi.files[0])return;
     var reader=new FileReader();
     reader.onload=function(e){
-      slot.img=e.target.result;slot.enabled=true;
-      thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
-      ov.remove();renderSB();
+      slot.img=e.target.result;slot.orig=null;slot.enabled=true;
+      if(thumbEl)thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
+      ov.remove();renderSB();renderMain('shorts');
     };
     reader.readAsDataURL(fi.files[0]);
   };
@@ -2647,7 +2858,7 @@ function _shortsPickImage(slot, thumbEl){
   // 그리드
   var scroll=document.createElement('div');scroll.style.cssText='flex:1;overflow-y:auto;padding:8px 16px 24px';
   var grid=document.createElement('div');
-  grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px';
+  grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px';
   allItems.slice(0,60).forEach(function(item){
     var wrap=document.createElement('div');
     wrap.style.cssText='border-radius:10px;overflow:hidden;cursor:pointer;border:3px solid transparent;transition:border-color .15s;aspect-ratio:1;background:#111';
@@ -2658,9 +2869,14 @@ function _shortsPickImage(slot, thumbEl){
     wrap.onmouseover=function(){wrap.style.borderColor='#12E6E6';};
     wrap.onmouseout=function(){wrap.style.borderColor='transparent';};
     wrap.onclick=function(){
-      slot.img=item.result;slot.enabled=true;
-      thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
-      ov.remove();renderSB();
+      slot.img=item.result;
+      // SITE PHOTO 슬롯은 '편집 전' 원본이라 Before/After 기준이 없다.
+      // 그 외 슬롯은 이 결과물의 원본(item.orig)을 Before 이미지로 함께 저장해서
+      // 쇼츠에서 진짜 Before→After(편집 전/후) 슬라이더를 보여줄 수 있게 한다.
+      slot.orig=(slot.k!=='site' && item.orig) ? item.orig : null;
+      slot.enabled=true;
+      if(thumbEl)thumbEl.innerHTML='<img src="'+slot.img+'" style="width:100%;height:100%;object-fit:cover">';
+      ov.remove();renderSB();renderMain('shorts');
     };
     grid.appendChild(wrap);
   });
@@ -2691,38 +2907,42 @@ function _shortsGenerate(){
   var W=dim.w, H=dim.h, FPS=opts.fps||30;
 
   // 슬라이드 구성 — 모든 활성 슬롯을 순서대로 나열
+  // after = 실제 보여줄 이미지(AI 결과/현재 슬롯 이미지), before = 그 결과물의 편집 전 원본(있을 때만)
+  // 텍스트는 영어 라벨만 사용한다 (한국어 서브텍스트 제거)
   var slides=[];
   activeSlots.forEach(function(slot){
-    slides.push({type:'slide',img:slot.img,label:slot.l,ko:slot.ko||''});
+    slides.push({type:'slide',after:slot.img,before:slot.orig||null,label:slot.l});
   });
   if(opts.ending){
-    slides.push({type:'ending',label:'CLOVER AI',ko:''});
+    slides.push({type:'ending',label:'CLOVER AI',after:null,before:null});
   }
 
-  // ── 새 타임라인 모델 ──────────────────────────────────────────
-  // 기본 전환: 우→좌 와이프 슬라이더 (BEFORE = 현재 슬라이드, AFTER = 다음 슬라이드)
-  // 구조: [hold_0] [wipe_0→1] [hold_1] [wipe_1→2] [hold_2] ... [ending]
-  // hold_0: 첫 슬라이드 등장 (1.5s)
-  // wipe_i→i+1: 우측에서 좌측으로 슬라이더 이동 (1.5s)
-  // hold_i+1: 다음 슬라이드 완전히 나온 후 정지 (2.0s)
-  var HOLD_FIRST = 1.5;   // 첫 슬라이드 등장 시간
-  var WIPE_DUR   = 1.5;   // 와이프 이동 시간
-  var HOLD_AFTER = 2.0;   // 와이프 후 정지 시간
+  // ── 타임라인 모델 ────────────────────────────────────────────
+  // 1) 슬라이드 사이는 opts.transition(Fade/Cross Dissolve/Cut/Push/Zoom)으로 전환
+  // 2) 슬라이드 자체에 before(편집 전)가 있으면 Before 홀드 → Before/After 슬라이더로
+  //    실제 "편집 전/후"를 보여준 뒤 After를 홀드한다 (다른 콘텐츠끼리 와이프하던 기존 버그 수정)
+  var TPL=SHORTS_TEMPLATES[opts.template]||SHORTS_TEMPLATES.Standard;
+  var HOLD_FIRST=TPL.holdFirst, TRANS_DUR=TPL.transDur;
+  var BA_HOLD_BEFORE=TPL.baHoldBefore, BA_WIPE=TPL.baWipe, HOLD_AFTER=TPL.holdAfter, ENDING_HOLD=TPL.endingHold;
   var timeline=[];
   var t=0;
   slides.forEach(function(slide,i){
-    if(i===0){
-      // 첫 슬라이드: 그냥 표시
-      timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_FIRST});
-      t+=HOLD_FIRST;
+    if(i>0){
+      timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+TRANS_DUR});
+      t+=TRANS_DUR;
     }
-    if(i<slides.length-1){
-      // 다음 슬라이드로 와이프
-      timeline.push({type:'wipe',from:i,to:i+1,start:t,end:t+WIPE_DUR});
-      t+=WIPE_DUR;
-      // 도착 후 홀드
-      timeline.push({type:'hold',idx:i+1,start:t,end:t+HOLD_AFTER});
+    var hasBA = opts.beforeAfter && slide.type==='slide' && slide.before && slide.before!==slide.after;
+    if(hasBA){
+      timeline.push({type:'ba_before',idx:i,start:t,end:t+BA_HOLD_BEFORE});
+      t+=BA_HOLD_BEFORE;
+      timeline.push({type:'ba_wipe',idx:i,start:t,end:t+BA_WIPE});
+      t+=BA_WIPE;
+      timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_AFTER});
       t+=HOLD_AFTER;
+    } else {
+      var dur = i===0 ? HOLD_FIRST : (slide.type==='ending' ? ENDING_HOLD : HOLD_AFTER);
+      timeline.push({type:'hold',idx:i,start:t,end:t+dur});
+      t+=dur;
     }
   });
   var totalDuration=t;
@@ -2734,9 +2954,8 @@ function _shortsGenerate(){
   var imgCache={};
   var imgUrls=[];
   slides.forEach(function(s){
-    if(s.img&&imgUrls.indexOf(s.img)===-1)imgUrls.push(s.img);
-    if(s.orig&&imgUrls.indexOf(s.orig)===-1)imgUrls.push(s.orig);
-    if(s.ai&&imgUrls.indexOf(s.ai)===-1)imgUrls.push(s.ai);
+    if(s.after&&imgUrls.indexOf(s.after)===-1)imgUrls.push(s.after);
+    if(s.before&&imgUrls.indexOf(s.before)===-1)imgUrls.push(s.before);
   });
 
   var loaded=0;
@@ -2781,23 +3000,30 @@ function _shortsGenerate(){
         var blob=new Blob(chunks,{type:mimeType});
         var url=URL.createObjectURL(blob);
         G_SHORTS.resultUrl=url;
-        var dlBtn=gE('shorts-dl-btn');
-        if(dlBtn){
-          dlBtn.onclick=function(){
-            var a=document.createElement('a');
-            a.href=url;
-            a.download='cloverai_shorts_'+Date.now()+'.'+(mimeType.includes('mp4')?'mp4':'webm');
-            document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},500);
-          };
+        var ext=mimeType.includes('mp4')?'mp4':'webm';
+        function doDownload(){
+          var a=document.createElement('a');
+          a.href=url;
+          a.download='cloverai_shorts_'+Date.now()+'.'+ext;
+          document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},500);
         }
+        var dlBtn=gE('shorts-dl-btn');
+        if(dlBtn)dlBtn.onclick=doDownload;
         if(dlWrap){dlWrap.style.display='';}
         if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
-        if(progTxt)progTxt.textContent='✅ 완성! 아래 버튼으로 다운로드하세요.';
+        if(progTxt)progTxt.textContent='✅ 완성! 메인 화면에서 바로 다운로드하세요.';
         if(progFill)progFill.style.width='100%';
-        // 갤러리에 비디오로도 추가
+        // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
+        // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
         if(!G.HIST.video)G.HIST.video=[];
-        G.HIST.video.unshift({id:Date.now()+Math.random(),orig:slides[0]&&(slides[0].orig||slides[0].img),result:url,tags:['쇼츠 자동생성'],ai:'',preview:false,cx:50,fav:false,wf:'video'});
+        var vidId=Date.now()+Math.random();
+        idbSaveVideo(vidId, blob).catch(function(){});
+        G.HIST.video.unshift({id:vidId, orig:slides[0]&&(slides[0].before||slides[0].after), result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'video'});
         saveHistToStorage();
+        _shortsSaveGalleryMeta();
+        // 메인 화면에서 바로 미리보기+다운로드 가능하도록 즉시 갱신
+        G_SHORTS.resultDownload=doDownload;
+        if(G.wf==='shorts')renderMain('shorts');
       };
       recorder.start(100); // 100ms 단위로 chunk
       return recorder;
@@ -2871,48 +3097,56 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache){
   if(!entry){
     // 타임라인 끝 이후 → 마지막 슬라이드 표시
     var last=slides[slides.length-1];
-    _shortsDrawSlide(ctx,W,H,last,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,last,opts,imgCache,false);
     if(opts.watermark)_shortsDrawWatermark(ctx,W,H);
     return;
   }
   if(entry.type==='hold'){
-    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache);
-  } else if(entry.type==='wipe'){
-    // 우→좌 와이프: progress 0=BEFORE만, 1=AFTER만
-    var progress=(t-entry.start)/(entry.end-entry.start);
-    progress=Math.max(0,Math.min(1,progress));
-    _shortsDrawWipe(ctx,W,H,slides[entry.from],slides[entry.to],progress,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,false);
+  } else if(entry.type==='ba_before'){
+    // Before/After 슬라이더 시작 전, '편집 전' 원본을 잠시 보여준다
+    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,true);
+  } else if(entry.type==='ba_wipe'){
+    // 같은 장면(slide) 안에서 Before → After로 슬라이더가 이동한다 (다른 장면끼리 섞이지 않음)
+    var p1=(t-entry.start)/(entry.end-entry.start);
+    p1=Math.max(0,Math.min(1,p1));
+    _shortsDrawBAWipe(ctx,W,H,slides[entry.idx],p1,opts,imgCache);
+  } else if(entry.type==='trans'){
+    // 장면(슬롯) 자체가 바뀔 때는 옵션에서 고른 전환 효과(Fade/Cross Dissolve/Cut/Push/Zoom)를 사용
+    var p2=(t-entry.start)/(entry.end-entry.start);
+    p2=Math.max(0,Math.min(1,p2));
+    _shortsDrawTransition(ctx,W,H,slides[entry.from],slides[entry.to],p2,opts,imgCache);
   }
   if(opts.watermark)_shortsDrawWatermark(ctx,W,H);
 }
 
-// 슬라이드 그리기
-function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache){
+// 슬라이드 그리기 (useBefore=true면 편집 전 원본을, 아니면 After 결과물을 그린다)
+function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, useBefore){
   if(!slide)return;
   if(slide.type==='ending'){
     _shortsDrawEnding(ctx,W,H);
     return;
   }
-  var img=imgCache[slide.img];
+  var src = useBefore ? (slide.before||slide.after) : slide.after;
+  var img=imgCache[src];
   if(img)_shortsDrawCoverImage(ctx,W,H,img);
   if(opts.textPreset!=='None'&&slide.label){
-    _shortsDrawText(ctx,W,H,slide.label,slide.ko||'','',opts.textPreset);
+    _shortsDrawText(ctx,W,H,slide.label,'','',opts.textPreset);
   }
 }
 
-// 우→좌 와이프 슬라이더 (BEFORE=현재, AFTER=다음)
-function _shortsDrawWipe(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
-  // progress 0: 우측 끝에서 시작, 1: 완전히 좌측으로 이동 (After 전체 노출)
-  var lineX=Math.round(W*(1-progress)); // 우→좌: W에서 0으로
+// 같은 장면의 Before→After 슬라이더 (좌→우로 슬라이더가 이동하며 After가 드러남)
+function _shortsDrawBAWipe(ctx, W, H, slide, progress, opts, imgCache){
+  var lineX=Math.round(W*progress); // 0: Before 전체, 1: After 전체
 
-  // 1. AFTER(다음 슬라이드) 전체 배경에 먼저 그리기
-  _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
+  // 1. After(편집 후) 전체를 배경에 먼저 그리기
+  _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,false);
 
-  // 2. BEFORE(현재 슬라이드) 왼쪽에 클립해서 덮어 그리기
+  // 2. Before(편집 전)를 왼쪽에 클립해서 덮어 그리기
   if(lineX>0){
     ctx.save();
     ctx.beginPath();ctx.rect(0,0,lineX,H);ctx.clip();
-    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,true);
     ctx.restore();
   }
 
@@ -3062,95 +3296,213 @@ function _shortsDrawText(ctx, W, H, label, ko, sub, preset){
 }
 
 // 엔딩 슬라이드
-function _shortsDrawEnding(ctx, W, H){
-  // 배경: 진한 다크
-  var grad=ctx.createLinearGradient(0,0,0,H);
-  grad.addColorStop(0,'#0b0b10');grad.addColorStop(1,'#111118');
-  ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
-  // 민트 글로우
-  ctx.save();
-  ctx.shadowColor='#12E6E6';ctx.shadowBlur=Math.round(W/8);
-  ctx.fillStyle='rgba(18,230,230,0.08)';
-  ctx.beginPath();ctx.arc(W/2,H*0.38,W*0.35,0,Math.PI*2);ctx.fill();
-  ctx.restore();
-  // 로고 사각형
-  var logoSize=Math.round(W*0.22);
-  var logoX=(W-logoSize)/2, logoY=H*0.28-logoSize/2;
-  ctx.save();
-  ctx.strokeStyle='#12E6E6';ctx.lineWidth=Math.round(W/120);
+function _roundRectPath(ctx,x,y,w,h,r){
   ctx.beginPath();
-  var r=Math.round(logoSize*0.18);
-  ctx.moveTo(logoX+r,logoY);
-  ctx.lineTo(logoX+logoSize-r,logoY);ctx.quadraticCurveTo(logoX+logoSize,logoY,logoX+logoSize,logoY+r);
-  ctx.lineTo(logoX+logoSize,logoY+logoSize-r);ctx.quadraticCurveTo(logoX+logoSize,logoY+logoSize,logoX+logoSize-r,logoY+logoSize);
-  ctx.lineTo(logoX+r,logoY+logoSize);ctx.quadraticCurveTo(logoX,logoY+logoSize,logoX,logoY+logoSize-r);
-  ctx.lineTo(logoX,logoY+r);ctx.quadraticCurveTo(logoX,logoY,logoX+r,logoY);
-  ctx.closePath();ctx.stroke();
-  // C 글자
-  ctx.fillStyle='#12E6E6';ctx.font='bold '+Math.round(logoSize*0.55)+'px Helvetica,Arial,sans-serif';
-  ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText('C',W/2,logoY+logoSize/2);
-  ctx.restore();
-  // CLOVER AI 텍스트
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+function _shortsDrawEndingDivider(ctx, W, y){
+  var grad=ctx.createLinearGradient(W*0.15,0,W*0.85,0);
+  grad.addColorStop(0,'rgba(18,230,230,0)');
+  grad.addColorStop(0.5,'rgba(18,230,230,0.85)');
+  grad.addColorStop(1,'rgba(18,230,230,0)');
   ctx.save();
-  ctx.font='800 '+Math.round(W*0.09)+'px Helvetica,Arial,sans-serif';
-  ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='top';
-  ctx.shadowColor='rgba(18,230,230,0.4)';ctx.shadowBlur=Math.round(W/30);
-  ctx.fillText('CLOVER AI',W/2,H*0.52);
+  ctx.strokeStyle=grad;ctx.lineWidth=Math.max(1.5,W*0.0022);
+  ctx.beginPath();ctx.moveTo(W*0.15,y);ctx.lineTo(W*0.85,y);ctx.stroke();
   ctx.restore();
+}
+function _shortsDrawEndingIcon(ctx, type, cx, cy, s){
+  ctx.save();
+  ctx.strokeStyle='#12E6E6';ctx.fillStyle='#12E6E6';
+  ctx.lineWidth=Math.max(1.5, s*0.09);
+  ctx.lineCap='round';ctx.lineJoin='round';
+  if(type==='home'){
+    ctx.beginPath();
+    ctx.moveTo(cx-s*0.52,cy+s*0.08);
+    ctx.lineTo(cx,cy-s*0.52);
+    ctx.lineTo(cx+s*0.52,cy+s*0.08);
+    ctx.stroke();
+    ctx.strokeRect(cx-s*0.34,cy+s*0.04,s*0.68,s*0.5);
+  } else if(type==='clover'){
+    var r=s*0.22;
+    [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(function(d){
+      ctx.beginPath();ctx.arc(cx+d[0]*r*0.9, cy+d[1]*r*0.9, r, 0, Math.PI*2);ctx.fill();
+    });
+  } else if(type==='spark'){
+    ctx.beginPath();
+    ctx.moveTo(cx,cy-s*0.52);ctx.lineTo(cx+s*0.15,cy-s*0.15);
+    ctx.lineTo(cx+s*0.52,cy);ctx.lineTo(cx+s*0.15,cy+s*0.15);
+    ctx.lineTo(cx,cy+s*0.52);ctx.lineTo(cx-s*0.15,cy+s*0.15);
+    ctx.lineTo(cx-s*0.52,cy);ctx.lineTo(cx-s*0.15,cy-s*0.15);
+    ctx.closePath();ctx.fill();
+  } else if(type==='vr'){
+    _roundRectPath(ctx, cx-s*0.56, cy-s*0.3, s*1.12, s*0.6, s*0.2);
+    ctx.stroke();
+    ctx.beginPath();ctx.arc(cx-s*0.24,cy,s*0.15,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.arc(cx+s*0.24,cy,s*0.15,0,Math.PI*2);ctx.stroke();
+  }
+  ctx.restore();
+}
+function _shortsDrawEnding(ctx, W, H){
+  // 배경: 완전한 블랙
+  ctx.fillStyle='#050506';
+  ctx.fillRect(0,0,W,H);
+
+  // 로고 박스 (둥근 사각형 + 민트 글로우 테두리)
+  var logoBoxSize=Math.round(W*0.33);
+  var logoBoxX=(W-logoBoxSize)/2;
+  var logoBoxY=H*0.238;
+  var boxR=Math.round(logoBoxSize*0.28);
+  ctx.save();
+  ctx.shadowColor='#12E6E6';ctx.shadowBlur=Math.round(W/22);
+  ctx.strokeStyle='#12E6E6';ctx.lineWidth=Math.max(2,Math.round(W/160));
+  _roundRectPath(ctx, logoBoxX, logoBoxY, logoBoxSize, logoBoxSize, boxR);
+  ctx.stroke();
+  ctx.restore();
+
+  // 클로버(네잎) 마크 — 둥근 꽃잎 4개를 2x2로 배치
+  var lcx=W/2, lcy=logoBoxY+logoBoxSize/2;
+  var petalR=logoBoxSize*0.165;
+  var gap=logoBoxSize*0.02;
+  ctx.save();
+  ctx.fillStyle='#12E6E6';
+  [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(function(d){
+    ctx.beginPath();
+    ctx.arc(lcx+d[0]*(petalR+gap), lcy+d[1]*(petalR+gap), petalR, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.restore();
+
+  // CLOVER AI 워드마크
+  ctx.save();
+  ctx.font='900 '+Math.round(W*0.112)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#12E6E6';
+  ctx.textAlign='center';ctx.textBaseline='alphabetic';
+  ctx.shadowColor='rgba(18,230,230,0.65)';ctx.shadowBlur=Math.round(W/20);
+  try{ctx.letterSpacing=Math.round(W*0.01)+'px';}catch(e){}
+  ctx.fillText('CLOVER AI', W/2, H*0.516);
+  ctx.restore();
+
+  _shortsDrawEndingDivider(ctx, W, H*0.552);
+
   // 태그라인
   ctx.save();
-  ctx.font='400 '+Math.round(W*0.038)+'px Helvetica,Arial,sans-serif';
-  ctx.fillStyle='rgba(255,255,255,0.45)';ctx.textAlign='center';ctx.textBaseline='top';
-  ctx.fillText('건축 · 인테리어 · 전시 전용 AI 플랫폼',W/2,H*0.64);
+  ctx.font='700 '+Math.round(W*0.05)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#fff';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('사진 한 장으로 내 집이 바뀝니다', W/2, H*0.605);
   ctx.restore();
-  // 사이트 URL
+
+  // 기능 4개 아이콘 행
+  var icons=[
+    {type:'home',   label:'현장사진 업로드'},
+    {type:'clover', label:'스타일 선택'},
+    {type:'spark',  label:'AI 디자인'},
+    {type:'vr',     label:'VR 공간'}
+  ];
+  var rowY=H*0.68;
+  var n=icons.length;
+  var slotW=W*0.78/n;
+  var startX=W*0.11+slotW/2;
+  var iconSize=W*0.075;
+  icons.forEach(function(ic,i){
+    var ix=startX+i*slotW;
+    _shortsDrawEndingIcon(ctx, ic.type, ix, rowY, iconSize);
+    ctx.save();
+    ctx.font='500 '+Math.round(W*0.024)+'px Helvetica,Arial,sans-serif';
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.textAlign='center';ctx.textBaseline='top';
+    ctx.fillText(ic.label, ix, rowY+iconSize*0.85);
+    ctx.restore();
+    if(i<n-1){
+      ctx.save();
+      ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.lineWidth=1;
+      var lx=ix+slotW/2;
+      ctx.beginPath();ctx.moveTo(lx,rowY-W*0.03);ctx.lineTo(lx,rowY+W*0.03);ctx.stroke();
+      ctx.restore();
+    }
+  });
+
+  // CTA 문구
   ctx.save();
-  ctx.font='400 '+Math.round(W*0.032)+'px Helvetica,Arial,sans-serif';
-  ctx.fillStyle='#12E6E6';ctx.textAlign='center';ctx.textBaseline='bottom';
-  ctx.fillText('www.cloverai.kr',W/2,H*0.92);
+  ctx.font='800 '+Math.round(W*0.06)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#fff';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('직접 경험해보세요', W/2, H*0.817);
+  ctx.restore();
+
+  _shortsDrawEndingDivider(ctx, W, H*0.858);
+
+  // URL 필 버튼
+  var pillW=W*0.66, pillH=H*0.05;
+  var pillX=(W-pillW)/2, pillY=H*0.902-pillH/2;
+  ctx.save();
+  ctx.shadowColor='#12E6E6';ctx.shadowBlur=Math.round(W/26);
+  ctx.strokeStyle='#12E6E6';ctx.lineWidth=Math.max(2,Math.round(W/220));
+  _roundRectPath(ctx, pillX, pillY, pillW, pillH, pillH/2);
+  ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.font='700 '+Math.round(W*0.04)+'px Helvetica,Arial,sans-serif';
+  ctx.fillStyle='#fff';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('www.cloverai.kr', W/2+Math.round(W*0.018), pillY+pillH/2);
+  ctx.restore();
+  // 지구본 아이콘 (URL 텍스트 왼쪽)
+  ctx.save();
+  ctx.strokeStyle='#12E6E6';ctx.lineWidth=Math.max(1.3,W*0.0022);
+  var gx=W/2-W*0.155, gy=pillY+pillH/2, gr=pillH*0.28;
+  ctx.beginPath();ctx.arc(gx,gy,gr,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.ellipse(gx,gy,gr*0.45,gr,0,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(gx-gr,gy);ctx.lineTo(gx+gr,gy);ctx.stroke();
   ctx.restore();
 }
 
 // 전환 효과
 function _shortsDrawTransition(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
   var trans=opts.transition||'Fade';
-  if(trans==='Fade'){
+  if(trans==='Cut'){
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
+  } else if(trans==='Fade'){
     // 검정으로 페이드아웃 후 페이드인
     if(progress<0.5){
-      _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
-      ctx.fillStyle='rgba(0,0,0,'+progress*2+')';
+      _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
+      ctx.fillStyle='rgba(0,0,0,'+(progress*2)+')';
       ctx.fillRect(0,0,W,H);
     } else {
-      _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+      _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
       ctx.fillStyle='rgba(0,0,0,'+(1-(progress-0.5)*2)+')';
       ctx.fillRect(0,0,W,H);
     }
   } else if(trans==='Cross Dissolve'){
-    _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
     ctx.save();ctx.globalAlpha=progress;
-    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
     ctx.globalAlpha=1;ctx.restore();
   } else if(trans==='Push'){
-    // 오른쪽에서 밀려오기
-    var offset=Math.round(W*(1-progress));
-    ctx.save();ctx.translate(-offset*(1-progress)*0,0); // from slide stays
-    _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
+    // 왼쪽으로 밀려나가며 다음 장면이 오른쪽에서 들어옴
+    ctx.save();
+    ctx.beginPath();ctx.rect(0,0,W-Math.round(W*progress),H);ctx.clip();
+    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
     ctx.restore();
     ctx.save();
     ctx.beginPath();ctx.rect(W-Math.round(W*progress),0,Math.round(W*progress),H);ctx.clip();
-    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
     ctx.restore();
   } else if(trans==='Zoom'){
-    _shortsDrawSlide(ctx,W,H,fromSlide,fromSlide.duration,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
     ctx.save();
     var scale=1+progress*0.15;
     ctx.globalAlpha=progress;
     ctx.translate(W/2,H/2);ctx.scale(scale,scale);ctx.translate(-W/2,-H/2);
-    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
     ctx.restore();
-  } else { // Cut
-    _shortsDrawSlide(ctx,W,H,toSlide,0,opts,imgCache);
+  } else { // 알 수 없는 값은 Cut으로 처리
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
   }
 }
 
@@ -3611,7 +3963,7 @@ function addHistEl(item, scroll, targetHs){
 
   // result 유효성 검사
   if(item.result){
-    var resOk=item.result.startsWith('http')||item.result.startsWith('data:');
+    var resOk=item.result.startsWith('http')||item.result.startsWith('data:')||item.result.startsWith('blob:');
     if(!resOk){console.warn('[addHistEl] 유효하지 않은 result URL, 생략:',item.id);return;}
   }
 
@@ -8277,6 +8629,8 @@ document.addEventListener('DOMContentLoaded',function(){try{
   renderSB();
   updBtn();
   loadHistFromStorage();
+  _shortsLoadGalleryMeta();
+  _shortsRestoreVideosFromIDB();
 
   // 새로고침/재방문 전에 진행 중이던 VR 투어 작업이 있으면 복구 (크레딧은 이미 차감된 상태이므로 잃어버리지 않도록)
   try{
@@ -8408,11 +8762,13 @@ document.addEventListener('DOMContentLoaded',function(){try{
   if(cub){
     cub.onclick=function(e){
       if(e.target.closest('button'))return;
+      if(G.wf==='shorts')return; // 쇼츠 탭은 슬롯 타일 자체 클릭으로 처리
       gE('fi').click();
     };
     cub.ondragover=function(e){e.preventDefault();};
     cub.ondrop=function(e){
       e.preventDefault();
+      if(G.wf==='shorts')return;
       var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
       if(f)loadF(f,'main');
     };
