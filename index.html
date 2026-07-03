@@ -1930,11 +1930,6 @@ function makePi(q, g){
         }
         return;
       }
-      // 실내 공간을 좌우로 크게 돌려서 사진에 없던 벽/가구까지 새로 그려야 하는 프리셋(왼쪽뷰·오른쪽뷰·
-      // 방향 지정 보기)은 Nano Banana Pro로 바꿔도 실제로는 카메라가 거의 안 돌아가는 문제가 실사용
-      // 테스트에서 확인됨 (모델이 텍스트로는 "왼쪽으로 크게 회전했다"고 설명하면서 정작 이미지는 원본과
-      // 거의 동일하게 나옴) — 카메라/구도 변환에 특화된 Flux Pro Kontext로 전환한다.
-      var fluxViewPresets=['view_left','view_right','custom_direction'];
       // 구조 보존이 중요한 한국 아파트 핵심 4종은 Nano Banana Pro로 자동 전환 (디테일·구조 정확도 우수)
       var proPresets=['apartment_living','kitchen_dining','bathroom','bedroom','isometric','cad_isometric','axonometry','topview','hq_real'];
       var aerialNano2Presets=['aerial_to_eye','iso_to_eye','eye_to_aerial','eye_to_aerial_r45','eye_to_aerial_l45','eye_to_wide_aerial','eye_to_wide_aerial_r45','eye_to_wide_aerial_l45','aerial_to_wide_aerial','people_focus'];
@@ -1945,19 +1940,13 @@ function makePi(q, g){
         setTimeout(function(){_showPresetHints(_t3);},0);
         return;
       }
-      if(_t3.selK && fluxViewPresets.indexOf(_t3.selK)!==-1){
-        G.eng='flux2';
-        renderSB();
-        setTimeout(function(){_showPresetHints(_t3);},0);
-        return;
-      }
       if(_t3.selK && proPresets.indexOf(_t3.selK)!==-1){
         G.eng='nano_pro';
         renderSB();
         setTimeout(function(){_showPresetHints(_t3);},0);
         return;
       }
-      // Pro/Flux 강제 대상이 아닌 프리셋을 선택했거나, 프리셋을 해제(selK=null)했는데 엔진이 nano_pro/flux2라면, 기본값(나노바나나2)으로 복원
+      // Pro 강제 대상이 아닌 프리셋을 선택했거나, 프리셋을 해제(selK=null)했는데 엔진이 nano_pro/flux2라면, 기본값(나노바나나2)으로 복원
       if(G.eng==='nano_pro'||G.eng==='flux2'){
         G.eng='nano2';
         renderSB();
@@ -9698,6 +9687,15 @@ function loadCloudGallery(){
           }
           return;
         }
+        var tags=[row.engine||'AI', row.resolution||'1K'];
+        // style_key에는 사용한 프리셋의 key가 저장되어 있다(world3d는 JSON 메타라서 제외) —
+        // 이걸 프리셋 이름으로 되살려서 태그에 넣어야, 새로고침 후에도 우측 상단에 어떤 프리셋으로
+        // 만들었는지가 계속 보인다 (예전엔 engine/resolution만 복원해서 새로고침하면 사라졌음).
+        if(wf!=='world3d' && row.style_key){
+          var _allPS=[].concat(PS_SPACE||[],PS_RENDER||[],PS_EDIT||[],PS_VIDEO||[]);
+          var _ps=_allPS.find(function(p){return p.k===row.style_key;});
+          if(_ps) tags.push('preset:'+_ps.l);
+        }
         G.HIST[wf].unshift({
           id: new Date(row.created_at).getTime() || Date.now()+Math.random(),
           gallery_id: row.id,
@@ -9708,7 +9706,7 @@ function loadCloudGallery(){
           origThumb: null,
           spzUrl: spzUrl,
           metricScale: metricScale,
-          tags: [row.engine||'AI', row.resolution||'1K'],
+          tags: tags,
           wf: wf,
           fav: false,
           cx: 50,
