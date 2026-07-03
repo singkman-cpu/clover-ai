@@ -2592,45 +2592,48 @@ function _shortsBuildSlides(){
     activeList.push({role:r, label:_shortsRoleLabel(r), item:im});
   });
   var slides=activeList.map(function(x){
-    return {type:'slide', after:x.item.img, before:x.item.orig||null, label:x.label};
+    return {type:'slide', img:x.item.img, label:x.label};
   });
   if(opts.ending){
-    slides.push({type:'ending',label:'',after:SHORTS_ENDING_IMG,before:null});
+    slides.push({type:'ending',label:'',img:SHORTS_ENDING_IMG});
   }
   return slides;
 }
 
-// slides로부터 타임라인 + 총 길이(초)를 계산 (장면 전환은 항상 컷, 페이드 없음)
+// slides로부터 타임라인 + 총 길이(초)를 계산
+// 구조: [1번 홀드] → [1→2 슬라이더 전환] → [2번 홀드] → [2→3 슬라이더 전환] → [3번 홀드] → ...
+// 즉, 슬라이더는 "장면 하나 안의 편집 전/후"가 아니라 "이전 장면 → 다음 장면"으로 넘어가는 전환 그 자체다.
+// Before/After 슬라이더를 끄면 슬라이더 대신 페이드 인/아웃으로 전환한다.
+// 엔딩으로 들어갈 때는 설정과 무관하게 항상 컷(슬라이더도 페이드도 없음) — 브랜드 엔딩은 깔끔하게 딱 끊어져야 하므로.
 function _shortsBuildTimeline(slides){
   var opts=G_SHORTS.opts;
   var TPL=SHORTS_TEMPLATES[opts.template]||SHORTS_TEMPLATES.Standard;
-  var HOLD_FIRST=TPL.holdFirst;
-  var BA_HOLD_BEFORE=TPL.baHoldBefore, BA_WIPE=TPL.baWipe, HOLD_AFTER=TPL.holdAfter, ENDING_HOLD=TPL.endingHold;
-  var FADE_DUR=TPL.transDur;
+  var HOLD_FIRST=TPL.holdFirst, HOLD_AFTER=TPL.holdAfter, ENDING_HOLD=TPL.endingHold;
+  var WIPE_DUR=TPL.baWipe, FADE_DUR=TPL.transDur;
   var useSlider = opts.beforeAfter!==false;
   var timeline=[];
   var t=0;
   slides.forEach(function(slide,i){
-    // 슬라이더를 껐을 때만 장면 사이에 페이드 인/아웃을 넣는다.
-    // 엔딩 슬라이드로 들어갈 때는 슬라이더 설정과 무관하게 항상 컷(페이드 없음).
-    if(i>0 && !useSlider && slide.type!=='ending'){
-      timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+FADE_DUR});
-      t+=FADE_DUR;
+    if(i===0){
+      timeline.push({type:'hold',idx:0,start:t,end:t+HOLD_FIRST});
+      t+=HOLD_FIRST;
+      return;
     }
-    var hasBA = useSlider && slide.type==='slide' && slide.before && slide.before!==slide.after;
-    if(hasBA){
-      if(BA_HOLD_BEFORE>0){
-        timeline.push({type:'ba_before',idx:i,start:t,end:t+BA_HOLD_BEFORE});
-        t+=BA_HOLD_BEFORE;
-      }
-      timeline.push({type:'ba_wipe',idx:i,start:t,end:t+BA_WIPE});
-      t+=BA_WIPE;
+    var isEnding = slide.type==='ending';
+    if(isEnding){
+      // 엔딩은 항상 하드 컷으로 들어간다 (슬라이더/페이드 없음)
+      timeline.push({type:'hold',idx:i,start:t,end:t+ENDING_HOLD});
+      t+=ENDING_HOLD;
+    } else if(useSlider){
+      timeline.push({type:'wipe',from:i-1,to:i,start:t,end:t+WIPE_DUR});
+      t+=WIPE_DUR;
       timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_AFTER});
       t+=HOLD_AFTER;
     } else {
-      var dur = i===0 ? HOLD_FIRST : (slide.type==='ending' ? ENDING_HOLD : HOLD_AFTER);
-      timeline.push({type:'hold',idx:i,start:t,end:t+dur});
-      t+=dur;
+      timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+FADE_DUR});
+      t+=FADE_DUR;
+      timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_AFTER});
+      t+=HOLD_AFTER;
     }
   });
   return {timeline:timeline, totalDuration:t};
@@ -2763,6 +2766,7 @@ function sbShorts(p){
     (function(item){
       delBtn.onclick=function(){
         G_SHORTS.images=G_SHORTS.images.filter(function(x){return x!==item;});
+        if(item.img&&item.img.startsWith('blob:')){try{URL.revokeObjectURL(item.img);}catch(e){}}
         renderSB();renderMain('shorts');
       };
     })(im);
@@ -2847,7 +2851,7 @@ function sbShorts(p){
   baLabel.appendChild(baCk);
   var baTextWrap=dv('');
   baTextWrap.innerHTML='<div>Before / After 슬라이더</div><div style="font-size:10px;color:var(--m2);margin-top:2px">'+
-    (opts.beforeAfter!==false ? '편집 전/후가 있는 장면은 슬라이더로 보여줍니다' : '슬라이더 없이 모든 장면을 페이드 인/아웃으로 전환합니다')+'</div>';
+    (opts.beforeAfter!==false ? '장면이 바뀔 때마다 우→좌 슬라이더로 자연스럽게 넘어갑니다' : '슬라이더 없이 모든 장면을 페이드 인/아웃으로 전환합니다')+'</div>';
   baLabel.appendChild(baTextWrap);
   baWrap.appendChild(baLabel);
   p.appendChild(baWrap);
@@ -2996,8 +3000,10 @@ function _shortsRenderCanvas(ub){
 }
 
 // ── 이미지 추가 (갤러리/파일) — 고른 이미지는 자동으로 역할이 인식되어 목록에 추가된다 ──
-// 업로드된 원본 이미지를 화면에 쓰기 적당한 크기로 축소해서 data URL로 반환
-// (마우스가 느려지는 문제 — 원본 고화질 사진을 그대로 여러 썸네일에 두면 브라우저가 매번 무겁게 디코딩한다)
+// 업로드된 원본 이미지를 화면에 쓰기 적당한 크기로 축소해서 blob: URL로 반환
+// (마우스가 느려지는 문제의 실제 원인 — data URL은 이미지 전체를 수백KB~수MB짜리 긴 문자열로
+//  DOM에 그대로 박아넣는 방식이라, 사이드바/메인 화면을 다시 그릴 때마다 그 긴 문자열을 통째로
+//  다시 쓰게 되어 무거워진다. blob: URL은 실제 데이터는 메모리에 두고 짧은 참조만 쓰기 때문에 훨씬 가볍다.)
 function _shortsResizeImageFile(file, maxDim, cb){
   try{
     var reader=new FileReader();
@@ -3012,7 +3018,14 @@ function _shortsResizeImageFile(file, maxDim, cb){
           canvas.width=nw;canvas.height=nh;
           var ctx=canvas.getContext('2d');
           ctx.drawImage(img,0,0,nw,nh);
-          cb(canvas.toDataURL('image/jpeg',0.86));
+          if(canvas.toBlob){
+            canvas.toBlob(function(blob){
+              if(blob) cb(URL.createObjectURL(blob));
+              else cb(canvas.toDataURL('image/jpeg',0.86)); // toBlob 미지원 환경 대비
+            }, 'image/jpeg', 0.86);
+          } else {
+            cb(canvas.toDataURL('image/jpeg',0.86));
+          }
         }catch(err){ cb(e.target.result); } // 축소 실패 시 원본 그대로 사용
       };
       img.onerror=function(){ cb(e.target.result); };
@@ -3147,8 +3160,7 @@ function _shortsGenerate(){
   var imgCache={};
   var imgUrls=[];
   slides.forEach(function(s){
-    if(s.after&&imgUrls.indexOf(s.after)===-1)imgUrls.push(s.after);
-    if(s.before&&imgUrls.indexOf(s.before)===-1)imgUrls.push(s.before);
+    if(s.img&&imgUrls.indexOf(s.img)===-1)imgUrls.push(s.img);
   });
 
   var loaded=0;
@@ -3212,7 +3224,7 @@ function _shortsGenerate(){
         if(!G.HIST.shorts)G.HIST.shorts=[];
         var vidId=Date.now()+Math.random();
         idbSaveVideo(vidId, blob).catch(function(){});
-        G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&(slides[0].before||slides[0].after), result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
+        G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&slides[0].img, result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
         saveHistToStorage();
         _shortsSaveGalleryMeta();
         // 메인 화면에서 바로 미리보기+다운로드 가능하도록 즉시 갱신
@@ -3291,22 +3303,20 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache){
   if(!entry){
     // 타임라인 끝 이후 → 마지막 슬라이드 표시
     var last=slides[slides.length-1];
-    _shortsDrawSlide(ctx,W,H,last,opts,imgCache,false);
+    _shortsDrawSlide(ctx,W,H,last,opts,imgCache);
     if(opts.watermark)_shortsDrawWatermark(ctx,W,H);
     return;
   }
   if(entry.type==='hold'){
-    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,false);
-  } else if(entry.type==='ba_before'){
-    // Before/After 슬라이더 시작 전, '편집 전' 원본을 잠시 보여준다
-    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,true);
-  } else if(entry.type==='ba_wipe'){
-    // 같은 장면(slide) 안에서 Before → After로 슬라이더가 이동한다 (다른 장면끼리 섞이지 않음)
+    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache);
+  } else if(entry.type==='wipe'){
+    // 이전 장면 → 다음 장면으로: 우측에서 슬라이더 바가 생성되어 좌측으로 이동하며
+    // 그 자리에 다음 장면(오른쪽 영역)이 자연스럽게 드러난다.
     var p1=(t-entry.start)/(entry.end-entry.start);
     p1=Math.max(0,Math.min(1,p1));
-    _shortsDrawBAWipe(ctx,W,H,slides[entry.idx],p1,opts,imgCache);
+    _shortsDrawSlideWipe(ctx,W,H,slides[entry.from],slides[entry.to],p1,opts,imgCache);
   } else if(entry.type==='trans'){
-    // 장면(슬롯) 자체가 바뀔 때는 옵션에서 고른 전환 효과(Fade/Cross Dissolve/Cut/Push/Zoom)를 사용
+    // Before/After 슬라이더를 껐을 때만 쓰는 페이드 인/아웃 전환
     var p2=(t-entry.start)/(entry.end-entry.start);
     p2=Math.max(0,Math.min(1,p2));
     _shortsDrawTransition(ctx,W,H,slides[entry.from],slides[entry.to],p2,opts,imgCache);
@@ -3314,11 +3324,11 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache){
   if(opts.watermark)_shortsDrawWatermark(ctx,W,H);
 }
 
-// 슬라이드 그리기 (useBefore=true면 편집 전 원본을, 아니면 After 결과물을 그린다)
-function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, useBefore){
+// 슬라이드 그리기
+function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache){
   if(!slide)return;
   if(slide.type==='ending'){
-    var endImg=slide.after&&imgCache[slide.after];
+    var endImg=slide.img&&imgCache[slide.img];
     if(endImg){
       // 실제 업로드된 브랜드 엔딩 이미지를 그대로 사용 (벡터로 다시 그리지 않음)
       _shortsDrawCoverImage(ctx,W,H,endImg);
@@ -3327,32 +3337,31 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, useBefore){
     }
     return;
   }
-  var src = useBefore ? (slide.before||slide.after) : slide.after;
-  var img=imgCache[src];
+  var img=imgCache[slide.img];
   if(img)_shortsDrawCoverImage(ctx,W,H,img);
   if(slide.label){
     _shortsDrawText(ctx,W,H,slide.label);
   }
 }
 
-// 같은 장면의 Before→After 슬라이더
-// Before(편집 전)가 배경 전체 → 핸들이 우측(W)에서 좌측(0)으로 이동하며
-// 핸들 오른쪽 영역에 After(편집 후)가 자연스럽게 드러난다.
-function _shortsDrawBAWipe(ctx, W, H, slide, progress, opts, imgCache){
-  var lineX=Math.round(W*(1-progress)); // progress 0: lineX=W(전체 Before), 1: lineX=0(전체 After)
+// 이전 장면(fromSlide) → 다음 장면(toSlide) 슬라이더 전환
+// progress 0: fromSlide 전체 그대로 → progress 1: toSlide 전체로 자연스럽게 넘어감
+// 우측에서 슬라이더 바가 나타나 좌측으로 이동하면서, 핸들 오른쪽 영역에 다음 장면이 드러난다.
+function _shortsDrawSlideWipe(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  var lineX=Math.round(W*(1-progress)); // progress 0: lineX=W(전체 이전 장면), 1: lineX=0(전체 다음 장면)
 
-  // 1. Before(편집 전) 전체를 배경에 먼저 그리기
-  _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,true);
+  // 1. 이전 장면을 배경 전체에 먼저 그리기
+  _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
 
-  // 2. After(편집 후)를 핸들 오른쪽 영역에 클립해서 덮어 그리기
+  // 2. 다음 장면을 핸들 오른쪽 영역에 클립해서 덮어 그리기
   if(lineX<W){
     ctx.save();
     ctx.beginPath();ctx.rect(lineX,0,W-lineX,H);ctx.clip();
-    _shortsDrawSlide(ctx,W,H,slide,opts,imgCache,false);
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
     ctx.restore();
   }
 
-  // 3. 구분선 + 핸들 (검은 배경 박스 없이 심플하게)
+  // 3. 구분선 + 핸들
   if(lineX>2&&lineX<W-2){
     ctx.save();
     ctx.strokeStyle='rgba(255,255,255,0.92)';
@@ -3365,18 +3374,6 @@ function _shortsDrawBAWipe(ctx, W, H, slide, progress, opts, imgCache){
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('◀▶',lineX,H/2);
     ctx.restore();
   }
-
-  // BEFORE / AFTER 레이블 — 배경 박스 없이 순백색 텍스트만, 항상 같은 위치(좌상단/우상단)
-  ctx.save();
-  var fs=Math.round(W*0.034);
-  ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
-  ctx.fillStyle='#fff';
-  ctx.textBaseline='top';
-  ctx.textAlign='left';
-  ctx.fillText('BEFORE', Math.round(W*0.06), Math.round(H*0.045));
-  ctx.textAlign='right';
-  ctx.fillText('AFTER', W-Math.round(W*0.06), Math.round(H*0.045));
-  ctx.restore();
 }
 
 // 이미지 Cover 방식 그리기
@@ -3581,9 +3578,9 @@ function _shortsDrawEnding(ctx, W, H){
 // 전환 효과
 // 모든 장면 전환은 항상 동일한 자연스러운 Cross Dissolve(크로스 디졸브) 페이드를 사용한다
 function _shortsDrawTransition(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
-  _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache,false);
+  _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
   ctx.save();ctx.globalAlpha=progress;
-  _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache,false);
+  _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
   ctx.globalAlpha=1;ctx.restore();
 }
 
