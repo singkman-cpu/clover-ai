@@ -4767,7 +4767,12 @@ function falPoll(baseUrl, reqId, onDone, onErr, attempt) {
         errMsg = errMsg.msg || JSON.stringify(errMsg);
       }
       console.error('[FAL FAILED]', JSON.stringify(d));
-      onErr('생성 실패: ' + String(errMsg).slice(0,150) + ' — 레퍼런스 이미지 개수를 줄이거나 프롬프트를 단순하게 바꿔 다시 시도해보세요.');
+      var errStr = String(errMsg);
+      if(errStr.indexOf('too large')>-1 || errStr.indexOf('image_too_large')>-1 || errStr.toLowerCase().indexOf('maximum area')>-1){
+        onErr('생성 실패: 이미지 해상도가 너무 큽니다 (업스케일된 이미지를 다시 편집/변환하려 할 때 자주 발생해요). 업스케일 전 원본 이미지로 다시 시도하거나, 렌더링 해상도를 1K로 낮춰서 다시 시도해보세요.');
+      } else {
+        onErr('생성 실패: ' + errStr.slice(0,150) + ' — 레퍼런스 이미지 개수를 줄이거나 프롬프트를 단순하게 바꿔 다시 시도해보세요.');
+      }
     } else {
       var wait = attempt < 15 ? 300 : attempt < 30 ? 500 : 1000;
       setTimeout(function(){ falPoll(baseUrl, reqId, onDone, onErr, attempt + 1); }, wait);
@@ -5365,19 +5370,54 @@ function _autoCropFloorPlan(dataUrl, cb){
   }catch(e){ cb(dataUrl); }
 }
 // ── Upload image to fal storage ────────────────────────────────────
+// fal.ai 편집 엔드포인트(nano-banana 등)는 이미지 면적이 89,478,485px²를 넘으면
+// 422 에러("Image dimensions are too large")를 낸다. 업스케일된 결과물을 다시
+// 뷰 변환/편집할 때처럼, 이미 업로드된(http) 이미지가 이 한도를 넘는 경우가 있어서
+// 보내기 전에 실제 크기를 확인하고 필요하면 줄인 뒤 다시 올린다.
+var FAL_MAX_AREA = 89000000; // 89,478,485보다 살짝 여유 있게
+function _checkAndResizeRemoteImage(url, onDone, onErr){
+  var img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=function(){
+    var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+    var area=w*h;
+    if(!area || area<=FAL_MAX_AREA){ onDone(url); return; } // 크기 확인 불가하거나 한도 이내면 그대로 사용
+    var scale=Math.sqrt(FAL_MAX_AREA/area);
+    var nw=Math.max(1,Math.floor(w*scale)), nh=Math.max(1,Math.floor(h*scale));
+    console.warn('['+'이미지 크기 보정'+'] '+w+'x'+h+'('+area+'px²) → '+nw+'x'+nh+'로 축소 (fal.ai 한도 초과)');
+    try{
+      var cv=document.createElement('canvas');
+      cv.width=nw;cv.height=nh;
+      var ctx=cv.getContext('2d');
+      ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+      ctx.drawImage(img,0,0,nw,nh);
+      var out=cv.toDataURL('image/jpeg',0.92);
+      _doUpload(out, onDone, onErr);
+    }catch(e){
+      // CORS 등으로 캔버스 처리에 실패하면 원본 URL 그대로 시도 (기존 동작과 동일, 더 나빠지진 않음)
+      console.warn('[이미지 크기 보정] 캔버스 처리 실패, 원본 그대로 시도:', e.message);
+      onDone(url);
+    }
+  };
+  img.onerror=function(){
+    console.warn('[이미지 크기 보정] 원격 이미지 로드 실패, 원본 URL 그대로 사용');
+    onDone(url);
+  };
+  img.src=url;
+}
 function uploadImgToFal(dataUrl, onDone, onErr) {
   var key = FAL_KEY || '';
   if(!key){ onErr('fal.ai API 키가 없습니다. 계정 탭에서 입력하세요.'); return; }
   if(!dataUrl){ onErr('이미지가 없습니다.'); return; }
   var res = getTab(G.wf).resolution || '1K';
   function proceed(srcUrl){
-    if(srcUrl.startsWith('http')){ onDone(srcUrl); return; }
+    if(srcUrl.startsWith('http')){ _checkAndResizeRemoteImage(srcUrl, onDone, onErr); return; }
     resizeForUpload(srcUrl, function(optimized){
       _doUpload(optimized, onDone, onErr);
     }, res);
   }
   if(dataUrl.startsWith('http')){
-    if(getTab(G.wf).selK!=='cad_isometric'){ onDone(dataUrl); return; }
+    if(getTab(G.wf).selK!=='cad_isometric'){ _checkAndResizeRemoteImage(dataUrl, onDone, onErr); return; }
     // http URL이라도 캐드→아이소면 텍스트 제거까지는 거쳐야 함 (아래 분기로 계속 진행)
   }
   if(getTab(G.wf).selK==='cad_isometric'){
