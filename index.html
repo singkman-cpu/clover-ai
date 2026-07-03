@@ -4425,7 +4425,9 @@ function addHistEl(item, scroll, targetHs){
 function delItem(id){
   var w=gE('hi-'+id);if(w)w.remove();
   var wf=G.wf;
-  G.HIST[wf]=(G.HIST[wf]||[]).filter(function(x){return x.id!==id;});
+  // 로컬(localStorage) + 클라우드(Supabase) 갤러리에서도 실제로 삭제한다.
+  // (예전엔 화면(G.HIST)에서만 지워서 새로고침하면 다시 나타났음)
+  deleteHistItem(id);
   // 히스토리 비었으면 탭 상태 초기화
   if(!(G.HIST[wf]||[]).length){
     var tab=getTab(wf);
@@ -5396,9 +5398,11 @@ function _checkAndResizeRemoteImage(url, onDone, onErr){
       var out=cv.toDataURL('image/jpeg',0.92);
       _doUpload(out, onDone, onErr);
     }catch(e){
-      // CORS 등으로 캔버스 처리에 실패하면 원본 URL 그대로 시도 (기존 동작과 동일, 더 나빠지진 않음)
-      console.warn('[이미지 크기 보정] 캔버스 처리 실패, 원본 그대로 시도:', e.message);
-      onDone(url);
+      // 이미지가 이미 한도를 초과한 걸 알고 있는 상태이므로, 여기서 축소에 실패하면
+      // 그대로 보내봐야 fal.ai에서 다시 같은 422 에러가 날 뿐이다 — 조용히 통과시키지 말고
+      // 바로 명확한 에러로 알려준다 (제출→대기→실패의 헛수고를 막기 위함).
+      console.warn('[이미지 크기 보정] 캔버스 처리 실패(브라우저 보안 정책으로 원격 이미지 축소 불가):', e.message);
+      onErr('이미지 해상도가 너무 커서('+w+'×'+h+') 브라우저에서 자동으로 줄이지 못했습니다. 이미지를 다운로드한 뒤 다시 업로드해서 시도해주세요.');
     }
   };
   img.onerror=function(){
@@ -5489,8 +5493,11 @@ function _doUpload(dataUrl, onDone, onErr){
   var key = FAL_KEY || '';
   if(!key){ onErr('fal.ai API 키가 없습니다. 계정 탭에서 입력하세요.'); return; }
   if(!dataUrl){ onErr('이미지가 없습니다.'); return; }
-  // http URL은 바로 사용 (이미 업로드된 이미지)
-  if(dataUrl.startsWith('http')){ onDone(dataUrl); return; }
+  // http URL은 이미 업로드된 이미지이지만, fal.ai 편집 엔드포인트의 면적 제한(89,478,485px²)을
+  // 넘을 수 있으므로(예: 업스케일된 결과물을 다시 편집) 바로 통과시키지 않고 크기부터 확인한다.
+  // (예전엔 uploadImgToFal()에서만 이 체크를 했는데, _doUpload가 직접 호출되는 경로들은
+  //  그 체크를 완전히 건너뛰고 있어서 같은 422 에러가 계속 재발했다 — 이제 이 함수 자체에서 처리)
+  if(dataUrl.startsWith('http')){ _checkAndResizeRemoteImage(dataUrl, onDone, onErr); return; }
   if(!dataUrl.startsWith('data:')){ onErr('이미지 data URL 없음'); return; }
   var mimeMatch=dataUrl.match(/^data:([^;]+);/);
   var mimeType=mimeMatch?mimeMatch[1]:'image/jpeg';
