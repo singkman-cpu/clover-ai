@@ -3063,8 +3063,14 @@ function sbShorts(p){
   images.forEach(function(im, idx){
     var resolved=_shortsResolvedRole(im);
     var unresolved=!resolved && !_shortsHasCustomLabel(im);
-    var row=dv('');
-    row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--c2);border-radius:9px;border:1px solid '+(unresolved?'#f59e0b':'var(--acb)');
+    var row=dv('shorts-img-row');
+    row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--c2);border-radius:9px;border:1px solid '+(unresolved?'#f59e0b':'var(--acb)')+';touch-action:pan-y';
+
+    // 드래그 핸들 — 마우스(또는 터치)로 눌러서 원하는 위치로 끌어다 놓을 수 있게
+    var dragHandle=dv('');
+    dragHandle.textContent='⠿';
+    dragHandle.style.cssText='cursor:grab;color:var(--m2);font-size:15px;padding:0 1px;flex-shrink:0;user-select:none;touch-action:none;line-height:1';
+    row.appendChild(dragHandle);
 
     // 순서 번호 — 위에서 아래로 나열된 순서가 곧 쇼츠 재생 순서
     var num=dv('');num.style.cssText='width:20px;height:20px;border-radius:50%;background:'+(resolved?'var(--ac)':'var(--bd2)')+';color:'+(resolved?'#000':'var(--m2)')+';font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0';
@@ -3152,6 +3158,63 @@ function sbShorts(p){
     })(im);
     row.appendChild(delBtn);
     p.appendChild(row);
+
+    // ── 드래그로 순서 변경 ──────────────────────────────────────
+    // 핸들을 누른 채로 위/아래로 끌면, 놓는 위치에 맞춰 이미지 순서를 바꾼다.
+    (function(item, rowEl, handleEl){
+      var dragging=false, order=null, pointerId=null;
+      function computeTargetIdx(clientY){
+        var count=0;
+        order.forEach(function(o){ if(o.i!==order.myIdx && clientY>o.centerY) count++; });
+        return count;
+      }
+      function onMove(e){
+        if(!dragging)return;
+        e.preventDefault();
+        var dy=e.clientY-order.startY;
+        rowEl.style.transform='translateY('+dy+'px)';
+      }
+      function onUp(e){
+        if(!dragging)return;
+        dragging=false;
+        rowEl.style.transform='';
+        rowEl.style.zIndex='';
+        rowEl.style.boxShadow='';
+        rowEl.style.opacity='';
+        try{handleEl.releasePointerCapture(pointerId);}catch(ex){}
+        document.removeEventListener('pointermove',onMove);
+        document.removeEventListener('pointerup',onUp);
+        var fromIdx=G_SHORTS.images.indexOf(item);
+        var toIdx=computeTargetIdx(e.clientY);
+        toIdx=Math.max(0,Math.min(G_SHORTS.images.length-1,toIdx));
+        if(fromIdx!==-1 && toIdx!==fromIdx){
+          var arr=G_SHORTS.images;
+          arr.splice(fromIdx,1);
+          arr.splice(toIdx,0,item);
+        }
+        renderSB();renderMain('shorts');
+      }
+      handleEl.addEventListener('pointerdown', function(e){
+        e.preventDefault();
+        dragging=true;
+        pointerId=e.pointerId;
+        try{handleEl.setPointerCapture(pointerId);}catch(ex){}
+        var rows=Array.prototype.slice.call(p.querySelectorAll('.shorts-img-row'));
+        var myIdx=rows.indexOf(rowEl);
+        order={startY:e.clientY, myIdx:myIdx, forEach:function(fn){
+          rows.forEach(function(r,i){
+            var rect=r.getBoundingClientRect();
+            fn({i:i, centerY:rect.top+rect.height/2});
+          });
+        }};
+        rowEl.style.position='relative';
+        rowEl.style.zIndex='50';
+        rowEl.style.boxShadow='0 8px 24px rgba(0,0,0,.45)';
+        rowEl.style.opacity='0.92';
+        document.addEventListener('pointermove',onMove);
+        document.addEventListener('pointerup',onUp);
+      });
+    })(im, row, dragHandle);
   });
 
   var addBtn=mk('button','');addBtn.type='button';
