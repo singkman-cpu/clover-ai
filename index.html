@@ -2788,6 +2788,7 @@ var G_SHORTS = {
     textPos: 'bottom-left', // 화면 문구 위치: top-left|top-right|center|bottom-left|bottom-right
     spaceType: '', // SNS 업로드 문구 생성용 — 주거공간/카페/음식점/상업매장/사무공간/기타
     fontFamily: 'default', // 화면 문구 폰트: default|blackhan|jua|dohyeon|gugi
+    holdByRole: {site:1.0, ai_design:2.0, furniture:2.0, 'default':2.5}, // 역할별 머무는 시간(초) — 예: 현장사진 1초, AI디자인 2초
   },
   generating: false,
   progress: 0,
@@ -2823,7 +2824,7 @@ function _shortsBuildSlides(){
     var custom=_shortsHasCustomLabel(im);
     if(!r && !custom)return;
     var lbl=custom?im.customLabel.trim():_shortsRoleLabel(r);
-    slides.push({type:'slide', img:im.img, label:lbl});
+    slides.push({type:'slide', img:im.img, label:lbl, role:r});
   });
   if(opts.ending){
     slides.push({type:'ending',label:'',img:SHORTS_ENDING_IMG});
@@ -2836,17 +2837,26 @@ function _shortsBuildSlides(){
 // 즉, 슬라이더는 "장면 하나 안의 편집 전/후"가 아니라 "이전 장면 → 다음 장면"으로 넘어가는 전환 그 자체다.
 // Before/After 슬라이더를 끄면 슬라이더 대신 페이드 인/아웃으로 전환한다.
 // 엔딩으로 들어갈 때는 설정과 무관하게 항상 컷(슬라이더도 페이드도 없음) — 브랜드 엔딩은 깔끔하게 딱 끊어져야 하므로.
+// 역할별로 화면에 머무는 시간(초)을 계산 — opts.holdByRole에 지정된 값이 있으면 그걸 쓰고,
+// 없는 역할(도면/3D모델/조감도 등)은 'default' 값을 쓴다.
+function _shortsHoldDuration(role){
+  var h=(G_SHORTS.opts&&G_SHORTS.opts.holdByRole)||{};
+  if(role && h[role]!=null) return h[role];
+  return h['default']!=null ? h['default'] : SHORTS_TIMING.holdAfter;
+}
+
 function _shortsBuildTimeline(slides){
   var opts=G_SHORTS.opts;
-  var HOLD_FIRST=SHORTS_TIMING.holdFirst, HOLD_AFTER=SHORTS_TIMING.holdAfter, ENDING_HOLD=SHORTS_TIMING.endingHold;
+  var ENDING_HOLD=SHORTS_TIMING.endingHold;
   var WIPE_DUR=SHORTS_TIMING.wipeDur, FADE_DUR=SHORTS_TIMING.transDur;
   var useSlider = opts.beforeAfter!==false;
   var timeline=[];
   var t=0;
   slides.forEach(function(slide,i){
     if(i===0){
-      timeline.push({type:'hold',idx:0,start:t,end:t+HOLD_FIRST});
-      t+=HOLD_FIRST;
+      var d0 = slide.type==='ending' ? ENDING_HOLD : _shortsHoldDuration(slide.role);
+      timeline.push({type:'hold',idx:0,start:t,end:t+d0});
+      t+=d0;
       return;
     }
     var isEnding = slide.type==='ending';
@@ -2857,13 +2867,15 @@ function _shortsBuildTimeline(slides){
     } else if(useSlider){
       timeline.push({type:'wipe',from:i-1,to:i,start:t,end:t+WIPE_DUR});
       t+=WIPE_DUR;
-      timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_AFTER});
-      t+=HOLD_AFTER;
+      var d=_shortsHoldDuration(slide.role);
+      timeline.push({type:'hold',idx:i,start:t,end:t+d});
+      t+=d;
     } else {
       timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+FADE_DUR});
       t+=FADE_DUR;
-      timeline.push({type:'hold',idx:i,start:t,end:t+HOLD_AFTER});
-      t+=HOLD_AFTER;
+      var d2=_shortsHoldDuration(slide.role);
+      timeline.push({type:'hold',idx:i,start:t,end:t+d2});
+      t+=d2;
     }
   });
   return {timeline:timeline, totalDuration:t};
@@ -3280,6 +3292,45 @@ function sbShorts(p){
   });
   fontWrap.appendChild(fontRow);
   p.appendChild(fontWrap);
+
+  // 역할별 머무는 시간 조절 — 예: 현장사진은 짧게 훅 지나가고, AI디자인 결과는 좀 더 오래 보여주고 싶을 때
+  var holdWrap=dv('ss');
+  holdWrap.innerHTML='<div class="lbl">장면별 머무는 시간 <span class="lbl-en">역할마다 다르게</span></div>';
+  var HOLD_ROWS=[
+    {role:'site', l:'🏚 현장사진(Before)'},
+    {role:'ai_design', l:'✨ AI 디자인(After)'},
+    {role:'default', l:'🗂 그 외 장면(도면·조감도 등)'}
+  ];
+  HOLD_ROWS.forEach(function(hr){
+    var row=dv('');row.style.cssText='margin-bottom:10px';
+    var top=dv('');top.style.cssText='display:flex;justify-content:space-between;font-size:11.5px;color:var(--t2);margin-bottom:4px';
+    var curVal=(opts.holdByRole&&opts.holdByRole[hr.role]!=null)?opts.holdByRole[hr.role]:2.5;
+    var valSpan=mk('span','');valSpan.style.cssText='color:var(--ac);font-weight:700';valSpan.textContent=curVal.toFixed(1)+'초';
+    var nameSpan=mk('span','');nameSpan.textContent=hr.l;
+    top.appendChild(nameSpan);top.appendChild(valSpan);
+    row.appendChild(top);
+    var rng=document.createElement('input');
+    rng.type='range';rng.min='0.5';rng.max='5';rng.step='0.5';
+    rng.style.cssText='width:100%;height:5px;border-radius:3px;-webkit-appearance:none;cursor:pointer';
+    slBg(rng,curVal,0.5,5);
+    rng.oninput=function(){
+      var v=parseFloat(rng.value);
+      slBg(rng,v,0.5,5);
+      valSpan.textContent=v.toFixed(1)+'초';
+      if(!opts.holdByRole)opts.holdByRole={};
+      opts.holdByRole[hr.role]=v;
+      // 아직 역할이 지정 안 된(자동감지) 이미지에도 'default' 값이 쓰이므로, 예상 길이·미리보기 즉시 갱신
+      var estEl=p.querySelector('#shorts-hold-est');
+      if(estEl){ var lbl=_shortsEstimateLabel(); estEl.textContent = lbl ? ('예상 길이 '+lbl) : ''; }
+      renderMain('shorts');
+    };
+    row.appendChild(rng);
+    holdWrap.appendChild(row);
+  });
+  var holdEst=dv('');holdEst.id='shorts-hold-est';holdEst.style.cssText='font-size:10.5px;color:var(--m2);text-align:right';
+  holdWrap.appendChild(holdEst);
+  p.appendChild(holdWrap);
+
 
 
   // 워터마크/엔딩
