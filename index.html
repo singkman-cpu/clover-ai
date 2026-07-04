@@ -2858,6 +2858,36 @@ function _shortsEstimateLabel(){
   return Math.round(dur)+'초';
 }
 
+// 실제 영상 렌더링과 동일한 함수(_shortsDrawCoverImage, _shortsDrawText)로 프레임 하나를 그려서,
+// "쇼츠 생성하기"를 누르기 전에도 문구 위치·워터마크 등이 실제로 어떻게 들어가는지 미리 볼 수 있게 함.
+function _shortsRenderLivePreview(container){
+  var slides=_shortsBuildSlides();
+  var firstSlide=slides.find(function(s){return s.type==='slide';});
+  if(!firstSlide)return null;
+  var wrap=document.createElement('div');
+  wrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:6px';
+  var lbl=document.createElement('div');
+  lbl.style.cssText='font-size:11px;color:var(--m2);font-weight:600';
+  lbl.textContent='📱 미리보기 — 실제 영상에 이렇게 들어가요';
+  wrap.appendChild(lbl);
+  var PW=203, PH=360; // 화면에 보이는 축소 사이즈(9:16)
+  var canvas=document.createElement('canvas');
+  canvas.width=1080;canvas.height=1920; // 실제 렌더 해상도와 같은 비율로 그려야 글자 크기 등이 실제와 일치함
+  canvas.style.cssText='width:'+PW+'px;height:'+PH+'px;border-radius:14px;border:2px solid var(--bd2);box-shadow:0 6px 24px rgba(0,0,0,.4);background:#111;display:block';
+  wrap.appendChild(canvas);
+  container.appendChild(wrap);
+  var ctx=canvas.getContext('2d');
+  var img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=function(){
+    _shortsDrawCoverImage(ctx,1080,1920,img);
+    if(firstSlide.label)_shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos);
+    if(G_SHORTS.opts.watermark)_shortsDrawWatermark(ctx,1080,1920);
+  };
+  img.src=firstSlide.img;
+  return wrap;
+}
+
 // ── SNS 업로드용 문구 생성 (유튜브/인스타/틱톡) — API 없이 템플릿+해시태그 뱅크로 조합 ──
 var SNS_SPACE_TYPES=[
   {k:'residential',l:'주거공간'},
@@ -3029,7 +3059,7 @@ function sbShorts(p){
     labelInput.placeholder=resolvedForPlaceholder?('화면 문구 직접 입력 (비우면 "'+_shortsRoleLabel(resolvedForPlaceholder)+'")'):'화면 문구 직접 입력 (비우면 자동)';
     labelInput.style.cssText='width:100%;padding:5px 6px;margin-top:4px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:11px;font-family:inherit';
     (function(item,inputEl){
-      inputEl.oninput=function(){ item.customLabel=inputEl.value; };
+      inputEl.oninput=function(){ item.customLabel=inputEl.value; renderMain('shorts'); };
     })(im,labelInput);
     info.appendChild(labelInput);
     if(im.source==='clover'){
@@ -3150,9 +3180,9 @@ function sbShorts(p){
   var posGrid=dv('');
   posGrid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,36px);gap:6px;max-width:220px';
   var POS_CELLS=[
-    ['top-left','◤','좌상단'],['','',''],['top-right','◥','우상단'],
+    ['top-left','◤','좌상단'],['top-center','▲','상단중앙'],['top-right','◥','우상단'],
     ['','',''],['center','●','중앙'],['','',''],
-    ['bottom-left','◣','좌하단'],['','',''],['bottom-right','◢','우하단']
+    ['bottom-left','◣','좌하단'],['bottom-center','▼','하단중앙'],['bottom-right','◢','우하단']
   ];
   POS_CELLS.forEach(function(c){
     var key=c[0];
@@ -3344,6 +3374,10 @@ function _shortsRenderCanvas(ub){
     head.innerHTML='<div style="font-size:17px;font-weight:800;color:var(--t)">준비 완료 <span style="color:var(--ac)">&#10003;</span></div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽 사이드바에서 &#127916; 쇼츠 생성하기를 눌러주세요</div>';
   }
   box.appendChild(head);
+
+  if(images.length>0){
+    _shortsRenderLivePreview(box);
+  }
 
   var grid=document.createElement('div');
   grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:16px;max-width:640px';
@@ -3856,19 +3890,19 @@ function _shortsDrawText(ctx, W, H, label, pos){
   var fs=Math.round(W*0.05);
   var pad=Math.round(W*0.07);
   var barH=Math.round(H*0.16);
-  var isTop = pos.indexOf('top')===0;
-  var isCenter = pos==='center';
-  var align = pos.indexOf('right')!==-1 ? 'right' : (isCenter ? 'center' : 'left');
+  // 7개 위치: top-left/top-center/top-right, center, bottom-left/bottom-center/bottom-right
+  var vert = pos==='center' ? 'middle' : (pos.indexOf('top')===0 ? 'top' : 'bottom');
+  var align = pos.indexOf('right')!==-1 ? 'right' : (pos.indexOf('left')!==-1 ? 'left' : 'center');
   // 인스타/틱톡 업로드 시 자체 제목·아이콘과 겹치지 않도록, 위치에 따라 은은한 그라데이션 바를
   // 위/아래/중앙 중 알맞은 자리에 깔아준다 (얼굴/주요 피사체를 가리지 않게 폭 전체에 옅게).
   var grad;
-  if(isCenter){
+  if(vert==='middle'){
     grad=ctx.createLinearGradient(0,H/2-barH/2,0,H/2+barH/2);
     grad.addColorStop(0,'rgba(0,0,0,0)');
     grad.addColorStop(0.5,'rgba(0,0,0,0.45)');
     grad.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=grad;ctx.fillRect(0,H/2-barH/2,W,barH);
-  } else if(isTop){
+  } else if(vert==='top'){
     grad=ctx.createLinearGradient(0,0,0,barH);
     grad.addColorStop(0,'rgba(0,0,0,0.5)');
     grad.addColorStop(1,'rgba(0,0,0,0)');
@@ -3885,9 +3919,10 @@ function _shortsDrawText(ctx, W, H, label, pos){
   try{ctx.letterSpacing='2px';}catch(e){}
   var tx = align==='left' ? pad : (align==='right' ? W-pad : W/2);
   var ty;
-  if(isCenter){ ctx.textBaseline='middle'; ty=Math.round(H/2); }
-  else if(isTop){ ctx.textBaseline='top'; ty=Math.round(H*0.075); }
-  else { ctx.textBaseline='bottom'; ty=H-Math.round(H*0.055); }
+  ctx.textBaseline=vert;
+  if(vert==='middle') ty=Math.round(H/2);
+  else if(vert==='top') ty=Math.round(H*0.075);
+  else ty=H-Math.round(H*0.055);
   ctx.fillText(label, tx, ty);
   ctx.restore();
 }
