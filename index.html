@@ -2802,6 +2802,14 @@ function _shortsResolvedRole(im){
   if(im.role && im.role!=='auto')return im.role;
   return im.autoRole||null;
 }
+// 역할이 자동감지로 안 잡혀도, 사용자가 화면 문구를 직접 입력했다면 그 자체로 "쓰겠다는 의사표시"이므로
+// 슬라이드에 포함시킨다 (그동안은 역할 미지정 이미지가 문구를 입력해도 통째로 빠지는 버그가 있었음).
+function _shortsHasCustomLabel(im){
+  return !!(im.customLabel && im.customLabel.trim());
+}
+function _shortsIsUsable(im){
+  return !!_shortsResolvedRole(im) || _shortsHasCustomLabel(im);
+}
 
 // 사이드바(왼쪽) 목록에 나열된 순서 그대로 쇼츠 장면을 구성한다 — 역할별 고정 순서가 아니라
 // 사용자가 이미지를 배치한 순서를 그대로 따른다. 같은 역할에 이미지를 여러 개 넣어도 된다
@@ -2812,8 +2820,9 @@ function _shortsBuildSlides(){
   var slides=[];
   G_SHORTS.images.forEach(function(im){
     var r=_shortsResolvedRole(im);
-    if(!r)return;
-    var lbl=(im.customLabel&&im.customLabel.trim())?im.customLabel.trim():_shortsRoleLabel(r);
+    var custom=_shortsHasCustomLabel(im);
+    if(!r && !custom)return;
+    var lbl=custom?im.customLabel.trim():_shortsRoleLabel(r);
     slides.push({type:'slide', img:im.img, label:lbl});
   });
   if(opts.ending){
@@ -3041,7 +3050,7 @@ function sbShorts(p){
 
   images.forEach(function(im, idx){
     var resolved=_shortsResolvedRole(im);
-    var unresolved=!resolved;
+    var unresolved=!resolved && !_shortsHasCustomLabel(im);
     var row=dv('');
     row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--c2);border-radius:9px;border:1px solid '+(unresolved?'#f59e0b':'var(--acb)');
 
@@ -3431,7 +3440,7 @@ function _shortsRenderCanvas(ub){
 
   // 2) 이미지 목록 — 위에서부터 순서대로 그 순서 그대로 쇼츠가 구성된다
   var images=G_SHORTS.images;
-  var unresolvedCount=images.filter(function(im){return !_shortsResolvedRole(im);}).length;
+  var unresolvedCount=images.filter(function(im){return !_shortsResolvedRole(im) && !_shortsHasCustomLabel(im);}).length;
 
   var head=document.createElement('div');
   head.style.cssText='text-align:center;max-width:360px';
@@ -3452,12 +3461,13 @@ function _shortsRenderCanvas(ub){
   grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:16px;max-width:640px';
   images.forEach(function(im, idx){
     var resolved=_shortsResolvedRole(im);
+    var usable=_shortsIsUsable(im);
     var tile=document.createElement('div');
-    tile.style.cssText='width:160px;height:160px;border-radius:16px;overflow:hidden;cursor:default;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;background:var(--c2);border:3px solid '+(resolved?'var(--acb)':'#f59e0b')+';position:relative;flex-shrink:0;box-shadow:0 4px 16px rgba(0,0,0,.35)';
+    tile.style.cssText='width:160px;height:160px;border-radius:16px;overflow:hidden;cursor:default;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;background:var(--c2);border:3px solid '+(usable?'var(--acb)':'#f59e0b')+';position:relative;flex-shrink:0;box-shadow:0 4px 16px rgba(0,0,0,.35)';
     var badgeTxt = im.customLabel&&im.customLabel.trim() ? im.customLabel.trim() : (resolved?_shortsRoleLabel(resolved):'역할 미지정');
     tile.innerHTML='<img src="'+im.img+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">'+
-      '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+(resolved?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">'+(idx+1)+'</div>'+
-      '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(resolved?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px">'+badgeTxt+'</div>';
+      '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+(usable?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">'+(idx+1)+'</div>'+
+      '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(usable?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px">'+badgeTxt+'</div>';
     grid.appendChild(tile);
   });
   // 이미지 추가 타일
@@ -3476,10 +3486,10 @@ function _shortsRenderCanvas(ub){
     box.appendChild(estBox);
   }
 
-  if(images.length>0 && images.filter(function(im){return _shortsResolvedRole(im);}).length<2){
+  if(images.length>0 && images.filter(function(im){return _shortsIsUsable(im);}).length<2){
     var warn=document.createElement('div');
     warn.style.cssText='font-size:11.5px;color:var(--m2);text-align:center;max-width:320px';
-    warn.textContent='역할이 정해진 이미지가 최소 2개 있어야 쇼츠를 만들 수 있어요.';
+    warn.textContent='역할을 정하거나 화면 문구를 직접 입력한 이미지가 최소 2개 있어야 쇼츠를 만들 수 있어요.';
     box.appendChild(warn);
   }
 }
