@@ -2777,6 +2777,7 @@ var G_SHORTS = {
     beforeAfter: true, // OFF면 슬라이더 없이 전체 장면을 페이드 인/아웃으로 전환
     textPos: 'bottom-left', // 화면 문구 위치: top-left|top-right|center|bottom-left|bottom-right
     spaceType: '', // SNS 업로드 문구 생성용 — 주거공간/카페/음식점/상업매장/사무공간/기타
+    fontFamily: 'default', // 화면 문구 폰트: default|blackhan|jua|dohyeon|gugi
   },
   generating: false,
   progress: 0,
@@ -2850,6 +2851,29 @@ function _shortsBuildTimeline(slides){
 }
 
 // 사이드바/메인 화면에 표시할 "예상 길이" 텍스트
+// ── 화면 문구 폰트 ────────────────────────────────────────────────
+var SHORTS_FONTS=[
+  {k:'default',l:'기본',css:'800 SZ Helvetica,Arial,sans-serif',google:null},
+  {k:'blackhan',l:'블랙한사체',css:'400 SZ "Black Han Sans",sans-serif',google:'Black+Han+Sans'},
+  {k:'jua',l:'주아체',css:'400 SZ "Jua",sans-serif',google:'Jua'},
+  {k:'dohyeon',l:'도현체',css:'400 SZ "Do Hyeon",sans-serif',google:'Do+Hyeon'},
+  {k:'gugi',l:'구기체',css:'400 SZ "Gugi",sans-serif',google:'Gugi'}
+];
+var _shortsFontLoaded={};
+function _shortsLoadGoogleFont(fontDef){
+  if(!fontDef||!fontDef.google||_shortsFontLoaded[fontDef.k])return;
+  _shortsFontLoaded[fontDef.k]=true;
+  var link=document.createElement('link');
+  link.rel='stylesheet';
+  link.href='https://fonts.googleapis.com/css2?family='+fontDef.google+'&display=swap';
+  document.head.appendChild(link);
+  try{ document.fonts.load(fontDef.css.replace('SZ','40px')); }catch(e){}
+}
+function _shortsFontCss(key, sizePx){
+  var f=SHORTS_FONTS.find(function(x){return x.k===key;})||SHORTS_FONTS[0];
+  return f.css.replace('SZ', Math.round(sizePx)+'px');
+}
+
 function _shortsEstimateLabel(){
   var slides=_shortsBuildSlides();
   var sceneCount=slides.filter(function(s){return s.type==='slide';}).length;
@@ -2881,7 +2905,7 @@ function _shortsRenderLivePreview(container){
   img.crossOrigin='anonymous';
   img.onload=function(){
     _shortsDrawCoverImage(ctx,1080,1920,img);
-    if(firstSlide.label)_shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos);
+    if(firstSlide.label)_shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos,G_SHORTS.opts.fontFamily);
     if(G_SHORTS.opts.watermark)_shortsDrawWatermark(ctx,1080,1920);
   };
   img.src=firstSlide.img;
@@ -2918,13 +2942,25 @@ function _shortsDetectContentMode(){
 }
 function _pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 function _shuffle(arr){ var a=arr.slice(); for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
+var SNS_TAG_TOP5={
+  residential:[['인테리어','셀프인테리어','홈스타일링','AI인테리어','리모델링'],['아파트인테리어','인테리어','신혼집인테리어','AI인테리어','집꾸미기']],
+  cafe:[['카페인테리어','인테리어','카페창업','AI인테리어','상업공간디자인'],['카페인테리어','감성카페','인테리어디자인','AI인테리어','카페창업']],
+  restaurant:[['식당인테리어','인테리어','요식업창업','AI인테리어','상업공간디자인'],['레스토랑인테리어','인테리어','맛집인테리어','AI인테리어','요식업창업']],
+  retail:[['매장인테리어','인테리어','상업공간디자인','AI인테리어','리테일디자인'],['매장리모델링','인테리어','브랜드공간','AI인테리어','상업공간디자인']],
+  office:[['오피스인테리어','인테리어','사무실인테리어','AI인테리어','인테리어디자인'],['사무공간','오피스디자인','인테리어','AI인테리어','업무공간']],
+  other:[['인테리어','공간디자인','AI인테리어','건축디자인','인테리어디자인'],['인테리어','인테리어디자인','AI인테리어','공간디자인','건축디자인']]
+};
+function _shortsTop5Tags(typeKey){
+  var sets=SNS_TAG_TOP5[typeKey]||SNS_TAG_TOP5.other;
+  return _pick(sets).slice();
+}
 
 function _shortsGenerateSNSCopy(){
   var opts=G_SHORTS.opts;
   var typeInfo=SNS_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||SNS_SPACE_TYPES[5];
   var label=typeInfo.l;
   var mode=_shortsDetectContentMode();
-  var tagPool=_shuffle((SNS_TAG_BANK[typeInfo.k]||SNS_TAG_BANK.other).concat(SNS_TAG_COMMON));
+  var top5=_shortsTop5Tags(typeInfo.k);
 
   var modeHook={
     beforeafter:['AI로 순식간에 바꿔봤습니다','AI 인테리어로 완전히 달라졌어요','30초 만에 나온 AI 시안 결과'],
@@ -2939,7 +2975,7 @@ function _shortsGenerateSNSCopy(){
     'AI 인테리어로 '+label+' 이렇게 바뀝니다',
     label+' 리모델링, '+_pick(modeHook)
   ];
-  var ytTags=tagPool.slice(0,14);
+  var ytTags=top5;
   var ytDesc=label+' 공간을 AI로 새롭게 디자인해봤습니다.\n\n'+
     '사진 한 장으로 시작해서 순식간에 완성되는 인테리어 시안, 함께 보시죠!\n'+
     '마음에 드셨다면 구독과 좋아요 부탁드려요 :)\n\n'+
@@ -2951,7 +2987,7 @@ function _shortsGenerateSNSCopy(){
     'AI로 완성한 '+label+' 디자인 제안 ✨',
     label+' 인테리어, 저장해두고 참고하세요 📌'
   ];
-  var igTags=tagPool.slice(0,24);
+  var igTags=top5;
   var igCaption=_pick(igHookTpl)+'\n\n'+
     label+' 공간을 AI 인테리어로 새롭게 제안해봤어요.\n'+
     '마음에 드는 스타일 있으면 댓글로 알려주세요!\n\n'+
@@ -2964,7 +3000,7 @@ function _shortsGenerateSNSCopy(){
     'AI 인테리어 실화냐?!',
     label+' 순삭 변신 🔥'
   ];
-  var ttTags=_shuffle([typeInfo.k!=='other'?SNS_TAG_BANK[typeInfo.k][0]:'인테리어','AI인테리어','beforeafter','인테리어디자인','클로버AI'].filter(Boolean)).slice(0,6);
+  var ttTags=top5;
   var ttCaption=_pick(ttHookTpl)+' '+ttTags.map(function(t){return '#'+t;}).join(' ');
 
   return {
@@ -3203,6 +3239,29 @@ function sbShorts(p){
   });
   posWrap.appendChild(posGrid);
   p.appendChild(posWrap);
+
+  // 화면 문구 폰트 선택
+  var fontWrap=dv('ss');
+  fontWrap.innerHTML='<div class="lbl">화면 문구 폰트</div>';
+  var fontRow=dv('');fontRow.style.cssText='display:flex;gap:5px;flex-wrap:wrap';
+  SHORTS_FONTS.forEach(function(f){
+    var fbtn=mk('button','');fbtn.type='button';fbtn.textContent=f.l;
+    var isOn=(opts.fontFamily||'default')===f.k;
+    fbtn.style.cssText='padding:7px 12px;border-radius:20px;border:1px solid '+(isOn?'var(--ac)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
+    fbtn.onclick=function(){
+      opts.fontFamily=f.k;
+      _shortsLoadGoogleFont(f);
+      fontRow.querySelectorAll('button').forEach(function(b){b.style.borderColor='var(--bd2)';b.style.background='var(--c2)';b.style.color='var(--t2)';});
+      fbtn.style.borderColor='var(--ac)';fbtn.style.background='var(--acg)';fbtn.style.color='var(--ac)';
+      // 구글 폰트는 로드에 약간 시간이 걸릴 수 있어 살짝 지연 후 미리보기 갱신
+      renderMain('shorts');
+      setTimeout(function(){renderMain('shorts');}, 350);
+    };
+    fontRow.appendChild(fbtn);
+  });
+  fontWrap.appendChild(fontRow);
+  p.appendChild(fontWrap);
+
 
   // 워터마크/엔딩
   var optRow=dv('ss');
@@ -3586,6 +3645,8 @@ function _shortsAddImageFlow(){
 // ── 영상 생성 메인 함수 ───────────────────────────────────────────
 function _shortsGenerate(){
   var opts=G_SHORTS.opts;
+  var _fontDef=SHORTS_FONTS.find(function(f){return f.k===(opts.fontFamily||'default');});
+  if(_fontDef)_shortsLoadGoogleFont(_fontDef);
 
   var slides=_shortsBuildSlides();
   var sceneCount=slides.filter(function(s){return s.type==='slide';}).length;
@@ -3835,7 +3896,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache){
   var img=imgCache[slide.img];
   if(img)_shortsDrawCoverImage(ctx,W,H,img);
   if(slide.label){
-    _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos);
+    _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily);
   }
 }
 
@@ -3883,7 +3944,7 @@ function _shortsDrawCoverImage(ctx, W, H, img){
 }
 
 // 텍스트 오버레이 — 항상 동일한 브랜드 스타일(흰색·같은 폰트/크기/위치)만 사용한다
-function _shortsDrawText(ctx, W, H, label, pos){
+function _shortsDrawText(ctx, W, H, label, pos, fontKey){
   if(!label)return;
   pos = pos || 'bottom-left';
   ctx.save();
@@ -3913,7 +3974,7 @@ function _shortsDrawText(ctx, W, H, label, pos){
     grad.addColorStop(1,'rgba(0,0,0,0.5)');
     ctx.fillStyle=grad;ctx.fillRect(0,H-barH,W,barH);
   }
-  ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
+  ctx.font=_shortsFontCss(fontKey, fs);
   ctx.fillStyle='#fff';
   ctx.textAlign=align;
   try{ctx.letterSpacing='2px';}catch(e){}
