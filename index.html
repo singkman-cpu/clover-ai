@@ -1531,7 +1531,30 @@ function renderMain(wf){
       // 방금 시작한 로딩 카드가 맨 위가 아니라 중간에 끼어드는 버그가 있었음.
       // → id 값에 의존하지 않고 그냥 배열을 반전(oldest-first)해서 넣는다.
       var sorted=items.slice().reverse();
-      sorted.forEach(function(item){ addHistEl(item,false,hs); });
+      // 성능 최적화: 히스토리가 많이 쌓이면(수십~수백 개) 탭을 열 때마다 전부 DOM에
+      // 새로 그리느라 버벅였음 → 최근 N개만 먼저 그리고, 나머지는 "더 보기" 버튼으로 지연 로드.
+      var HIST_INITIAL_LIMIT=30;
+      if(sorted.length>HIST_INITIAL_LIMIT){
+        var initialBatch=sorted.slice(sorted.length-HIST_INITIAL_LIMIT); // 최신 N개(오래된→최신 순)
+        var olderRest=sorted.slice(0,sorted.length-HIST_INITIAL_LIMIT); // 그보다 오래된 나머지
+        initialBatch.forEach(function(item){ addHistEl(item,false,hs); });
+        var moreWrap=dv('');moreWrap.style.cssText='display:flex;justify-content:center;padding:14px 0';
+        var moreBtn=mk('button','');
+        moreBtn.textContent='이전 항목 '+olderRest.length+'개 더 보기';
+        moreBtn.style.cssText='padding:10px 20px;border-radius:10px;background:var(--c2);border:1px solid var(--bd2);color:var(--t2);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit';
+        moreBtn.onclick=function(){
+          moreBtn.disabled=true;moreBtn.textContent='불러오는 중...';
+          // 다음 프레임으로 미뤄서 버튼 텍스트가 먼저 화면에 반영되게 함
+          setTimeout(function(){
+            olderRest.slice().reverse().forEach(function(item){ addHistEl(item,false,hs,true); });
+            moreWrap.remove();
+          },20);
+        };
+        moreWrap.appendChild(moreBtn);
+        hs.appendChild(moreWrap);
+      } else {
+        sorted.forEach(function(item){ addHistEl(item,false,hs); });
+      }
       hs.scrollTop=0;
     } else {
       hs.style.display='none';
@@ -2752,6 +2775,8 @@ var G_SHORTS = {
     fps: 30,
     quality: 'FHD',
     beforeAfter: true, // OFF면 슬라이더 없이 전체 장면을 페이드 인/아웃으로 전환
+    textPos: 'bottom-left', // 화면 문구 위치: top-left|top-right|center|bottom-left|bottom-right
+    spaceType: '', // SNS 업로드 문구 생성용 — 주거공간/카페/음식점/상업매장/사무공간/기타
   },
   generating: false,
   progress: 0,
@@ -2831,6 +2856,92 @@ function _shortsEstimateLabel(){
   if(sceneCount<2)return null;
   var dur=_shortsBuildTimeline(slides).totalDuration;
   return Math.round(dur)+'초';
+}
+
+// ── SNS 업로드용 문구 생성 (유튜브/인스타/틱톡) — API 없이 템플릿+해시태그 뱅크로 조합 ──
+var SNS_SPACE_TYPES=[
+  {k:'residential',l:'주거공간'},
+  {k:'cafe',l:'카페'},
+  {k:'restaurant',l:'음식점'},
+  {k:'retail',l:'상업매장'},
+  {k:'office',l:'사무공간'},
+  {k:'other',l:'공간'}
+];
+var SNS_TAG_BANK={
+  residential:['인테리어','셀프인테리어','홈스타일링','집꾸미기','아파트인테리어','신혼집인테리어','원룸인테리어','리모델링','홈데코','미니멀인테리어','북유럽인테리어','인테리어디자인','집들이','인테리어추천'],
+  cafe:['카페인테리어','카페창업','카페디자인','감성카페','카페추천','상업공간디자인','카페사장님','예비창업자','카페스타그램','인테리어디자인'],
+  restaurant:['식당인테리어','레스토랑인테리어','요식업창업','상업공간디자인','맛집인테리어','인테리어디자인','외식업창업'],
+  retail:['매장인테리어','상업공간디자인','리테일디자인','인테리어시공','매장리모델링','브랜드공간','스토어디자인'],
+  office:['사무실인테리어','오피스디자인','사무공간','업무공간','오피스인테리어','인테리어디자인'],
+  other:['인테리어','공간디자인','건축디자인','인테리어디자인']
+};
+var SNS_TAG_COMMON=['AI인테리어','인테리어AI','beforeafter','비포애프터','클로버AI','인테리어시공','공간디자인','interiordesign','homedesign','건축디자인'];
+
+function _shortsDetectContentMode(){
+  var roles=G_SHORTS.images.map(function(im){return _shortsResolvedRole(im);}).filter(Boolean);
+  var hasBefore=roles.indexOf('site')!==-1;
+  var hasAfter=roles.indexOf('ai_design')!==-1||roles.indexOf('furniture')!==-1;
+  if(hasBefore&&hasAfter)return 'beforeafter';
+  if(roles.indexOf('aerial')!==-1||roles.indexOf('perspective')!==-1||roles.indexOf('multi')!==-1||roles.indexOf('iso')!==-1)return 'multiview';
+  if(roles.indexOf('cad')!==-1||roles.indexOf('model3d')!==-1)return 'technical';
+  return 'showcase';
+}
+function _pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+function _shuffle(arr){ var a=arr.slice(); for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
+
+function _shortsGenerateSNSCopy(){
+  var opts=G_SHORTS.opts;
+  var typeInfo=SNS_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||SNS_SPACE_TYPES[5];
+  var label=typeInfo.l;
+  var mode=_shortsDetectContentMode();
+  var tagPool=_shuffle((SNS_TAG_BANK[typeInfo.k]||SNS_TAG_BANK.other).concat(SNS_TAG_COMMON));
+
+  var modeHook={
+    beforeafter:['AI로 순식간에 바꿔봤습니다','AI 인테리어로 완전히 달라졌어요','30초 만에 나온 AI 시안 결과'],
+    multiview:['여러 각도로 한눈에 보는','다양한 뷰로 미리 확인하는','조감도부터 투시도까지'],
+    technical:['도면 한 장으로 시작해서','3D 모델링까지 이어지는','설계 과정을 담은'],
+    showcase:['이렇게 완성됐습니다','디자인 제안을 담아봤어요','새로운 공간 제안']
+  }[mode];
+
+  // ── YouTube ──
+  var ytTitleTpl=[
+    label+' '+_pick(modeHook)+' (Before & After) 🏠',
+    'AI 인테리어로 '+label+' 이렇게 바뀝니다',
+    label+' 리모델링, '+_pick(modeHook)
+  ];
+  var ytTags=tagPool.slice(0,14);
+  var ytDesc=label+' 공간을 AI로 새롭게 디자인해봤습니다.\n\n'+
+    '사진 한 장으로 시작해서 순식간에 완성되는 인테리어 시안, 함께 보시죠!\n'+
+    '마음에 드셨다면 구독과 좋아요 부탁드려요 :)\n\n'+
+    ytTags.map(function(t){return '#'+t;}).join(' ');
+
+  // ── Instagram ──
+  var igHookTpl=[
+    label+' 이렇게 바뀔 수 있다고?😳',
+    'AI로 완성한 '+label+' 디자인 제안 ✨',
+    label+' 인테리어, 저장해두고 참고하세요 📌'
+  ];
+  var igTags=tagPool.slice(0,24);
+  var igCaption=_pick(igHookTpl)+'\n\n'+
+    label+' 공간을 AI 인테리어로 새롭게 제안해봤어요.\n'+
+    '마음에 드는 스타일 있으면 댓글로 알려주세요!\n\n'+
+    '.\n.\n.\n'+
+    igTags.map(function(t){return '#'+t;}).join(' ');
+
+  // ── TikTok ──
+  var ttHookTpl=[
+    label+' 이거 AI가 한 거라고?😱',
+    'AI 인테리어 실화냐?!',
+    label+' 순삭 변신 🔥'
+  ];
+  var ttTags=_shuffle([typeInfo.k!=='other'?SNS_TAG_BANK[typeInfo.k][0]:'인테리어','AI인테리어','beforeafter','인테리어디자인','클로버AI'].filter(Boolean)).slice(0,6);
+  var ttCaption=_pick(ttHookTpl)+' '+ttTags.map(function(t){return '#'+t;}).join(' ');
+
+  return {
+    youtube:{title:_pick(ytTitleTpl), desc:ytDesc, tags:ytTags.join(', ')},
+    instagram:{caption:igCaption},
+    tiktok:{caption:ttCaption}
+  };
 }
 
 
@@ -3011,6 +3122,10 @@ function sbShorts(p){
     }
   };
   bgmWrap.appendChild(bgmInput);
+  var bgmNote=dv('');
+  bgmNote.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.5';
+  bgmNote.innerHTML='음악은 영상 길이에 맞춰 자동으로 잘리고, 끝나기 2초 전부터 서서히 페이드아웃돼요.<br>장면이 전환될 때마다 잔잔한 스윽~ 효과음도 자동으로 들어갑니다.';
+  bgmWrap.appendChild(bgmNote);
   p.appendChild(bgmWrap);
 
   // Before/After 슬라이더 on/off
@@ -3027,6 +3142,37 @@ function sbShorts(p){
   baLabel.appendChild(baTextWrap);
   baWrap.appendChild(baLabel);
   p.appendChild(baWrap);
+
+  // 화면 문구 위치 선택 — 인스타/틱톡 업로드 시 자체 제목·아이콘과 겹치지 않게 직접 고를 수 있게.
+  // 이미지별이 아니라 영상 전체에 한 번에 적용됨.
+  var posWrap=dv('ss');
+  posWrap.innerHTML='<div class="lbl">화면 문구 위치 <span class="lbl-en">전체 영상에 한번에 적용</span></div>';
+  var posGrid=dv('');
+  posGrid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,36px);gap:6px;max-width:220px';
+  var POS_CELLS=[
+    ['top-left','◤','좌상단'],['','',''],['top-right','◥','우상단'],
+    ['','',''],['center','●','중앙'],['','',''],
+    ['bottom-left','◣','좌하단'],['','',''],['bottom-right','◢','우하단']
+  ];
+  POS_CELLS.forEach(function(c){
+    var key=c[0];
+    if(!key){ posGrid.appendChild(dv('')); return; }
+    var pbtn=mk('button','');pbtn.type='button';
+    var isOn=(opts.textPos||'bottom-left')===key;
+    pbtn.style.cssText='border-radius:7px;border:1px solid '+(isOn?'var(--ac)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:14px;cursor:pointer;font-family:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.1;gap:1px';
+    pbtn.innerHTML=c[1]+'<span style="font-size:8px">'+c[2]+'</span>';
+    pbtn.onclick=function(){
+      opts.textPos=key;
+      posGrid.querySelectorAll('button').forEach(function(b){
+        b.style.borderColor='var(--bd2)';b.style.background='var(--c2)';b.style.color='var(--t2)';
+      });
+      pbtn.style.borderColor='var(--ac)';pbtn.style.background='var(--acg)';pbtn.style.color='var(--ac)';
+      renderMain('shorts'); // 미리보기 캔버스에도 즉시 반영
+    };
+    posGrid.appendChild(pbtn);
+  });
+  posWrap.appendChild(posGrid);
+  p.appendChild(posWrap);
 
   // 워터마크/엔딩
   var optRow=dv('ss');
@@ -3050,6 +3196,74 @@ function sbShorts(p){
     ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+estLabel+'</strong>'
     : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
   p.appendChild(estWrap);
+
+  // ── SNS 업로드용 문구 생성 (유튜브/인스타/틱톡) ──
+  var snsWrap=dv('ss');
+  snsWrap.innerHTML='<div class="lbl">SNS 업로드 문구 추천 <span class="lbl-en">직접 수정 가능</span></div>';
+  var snsHint=dv('');snsHint.style.cssText='font-size:10.5px;color:var(--m2);margin-bottom:8px;line-height:1.5';
+  snsHint.textContent='공간 종류와 영상 구성(Before/After, 여러 뷰 등)을 기반으로 조회수에 잘 통하는 패턴으로 추천해드려요. 아래에서 바로 고쳐서 쓰셔도 됩니다.';
+  snsWrap.appendChild(snsHint);
+  var snsTypeRow=dv('');snsTypeRow.style.cssText='display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px';
+  SNS_SPACE_TYPES.forEach(function(t){
+    var tbtn=mk('button','');tbtn.type='button';tbtn.textContent=t.l;
+    var isOn=opts.spaceType===t.k;
+    tbtn.style.cssText='padding:6px 11px;border-radius:20px;border:1px solid '+(isOn?'var(--ac)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
+    tbtn.onclick=function(){
+      opts.spaceType=t.k;
+      snsTypeRow.querySelectorAll('button').forEach(function(b){b.style.borderColor='var(--bd2)';b.style.background='var(--c2)';b.style.color='var(--t2)';});
+      tbtn.style.borderColor='var(--ac)';tbtn.style.background='var(--acg)';tbtn.style.color='var(--ac)';
+    };
+    snsTypeRow.appendChild(tbtn);
+  });
+  snsWrap.appendChild(snsTypeRow);
+
+  var snsResultBox=dv('');snsResultBox.id='shorts-sns-result';snsResultBox.style.cssText='display:none;flex-direction:column;gap:10px;margin-top:4px';
+  function _mkSnsCard(title, text){
+    var card=dv('');card.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:9px;padding:10px';
+    var head=dv('');head.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:6px';
+    var htitle=dv('');htitle.style.cssText='font-size:11.5px;font-weight:800;color:var(--ac)';htitle.textContent=title;
+    var copyBtn=mk('button','');copyBtn.type='button';copyBtn.textContent='복사';
+    copyBtn.style.cssText='padding:4px 10px;border-radius:6px;border:1px solid var(--ac);background:transparent;color:var(--ac);font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    var body=document.createElement('textarea');
+    body.style.cssText='width:100%;font-size:11.5px;color:var(--t);background:var(--card);border:1px solid var(--bd2);border-radius:6px;padding:7px 8px;line-height:1.5;min-height:70px;max-height:200px;resize:vertical;font-family:inherit;box-sizing:border-box';
+    body.value=text;
+    copyBtn.onclick=function(){
+      var current=body.value; // 사용자가 직접 수정했으면 수정된 내용 그대로 복사
+      (navigator.clipboard&&navigator.clipboard.writeText? navigator.clipboard.writeText(current) : Promise.reject())
+        .then(function(){ copyBtn.textContent='✓ 복사됨';setTimeout(function(){copyBtn.textContent='복사';},1500); })
+        .catch(function(){
+          body.select();
+          try{document.execCommand('copy');}catch(e){}
+          copyBtn.textContent='✓ 복사됨';setTimeout(function(){copyBtn.textContent='복사';},1500);
+        });
+    };
+    head.appendChild(htitle);head.appendChild(copyBtn);
+    card.appendChild(head);card.appendChild(body);
+    return card;
+  }
+  var snsGenBtn=mk('button','');snsGenBtn.type='button';
+  snsGenBtn.textContent='✨ 유튜브·인스타·틱톡 문구 만들기';
+  snsGenBtn.style.cssText='width:100%;padding:10px;border-radius:9px;border:1px solid var(--ac);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
+  snsGenBtn.onclick=function(){
+    if(!opts.spaceType){ snsGenBtn.textContent='먼저 위에서 공간 종류를 골라주세요';setTimeout(function(){snsGenBtn.textContent='✨ 유튜브·인스타·틱톡 문구 만들기';},1800);return; }
+    var copy=_shortsGenerateSNSCopy();
+    snsResultBox.innerHTML='';
+    snsResultBox.appendChild(_mkSnsCard('▶ YouTube 제목', copy.youtube.title));
+    snsResultBox.appendChild(_mkSnsCard('▶ YouTube 설명란', copy.youtube.desc));
+    snsResultBox.appendChild(_mkSnsCard('▶ YouTube 태그', copy.youtube.tags));
+    snsResultBox.appendChild(_mkSnsCard('📷 Instagram 캡션', copy.instagram.caption));
+    snsResultBox.appendChild(_mkSnsCard('🎵 TikTok 캡션', copy.tiktok.caption));
+    var regenRow=dv('');regenRow.style.cssText='display:flex;justify-content:center';
+    var regenBtn=mk('button','');regenBtn.type='button';regenBtn.textContent='🔄 다른 버전으로 다시 만들기';
+    regenBtn.style.cssText='padding:7px 14px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
+    regenBtn.onclick=snsGenBtn.onclick;
+    regenRow.appendChild(regenBtn);
+    snsResultBox.appendChild(regenRow);
+    snsResultBox.style.display='flex';
+  };
+  snsWrap.appendChild(snsGenBtn);
+  snsWrap.appendChild(snsResultBox);
+  p.appendChild(snsWrap);
 
   // 생성 버튼
   var genWrap=dv('');genWrap.style.cssText='margin-top:8px';
@@ -3445,41 +3659,48 @@ function _shortsGenerate(){
       return recorder;
     }
 
-    // BGM 처리
-    if(opts.bgmUrl){
-      try{
-        audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-        dest=audioCtx.createMediaStreamDestination();
-        var audioEl=document.createElement('audio');
+    // 오디오 처리 — BGM 유무와 무관하게 항상 AudioContext를 켠다.
+    // (BGM이 없어도 장면 전환 효과음은 재생돼야 하므로)
+    try{
+      audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+      dest=audioCtx.createMediaStreamDestination();
+      var audioEl=null;
+      var finishWithAudio=function(){
+        // 장면이 바뀔 때마다(슬라이더든 페이드든) 스윽~ 효과음을 예약
+        _shortsScheduleSwooshes(audioCtx,dest,timeline,audioCtx.currentTime);
+        var combined=new MediaStream([].concat(vidStream.getVideoTracks(),dest.stream.getAudioTracks()));
+        var rec=beginRecord(combined);
+        runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
+          if(progFill)progFill.style.width=Math.round(p*100)+'%';
+          if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)';
+        },function(){
+          if(audioEl)audioEl.pause();
+          rec.stop();
+        });
+      };
+      if(opts.bgmUrl){
+        audioEl=document.createElement('audio');
         audioEl.src=opts.bgmUrl;audioEl.loop=true;audioEl.crossOrigin='anonymous';
         audioEl.play().then(function(){
           bgmSource=audioCtx.createMediaElementSource(audioEl);
-          var gainNode=audioCtx.createGain();gainNode.gain.value=0.6;
+          var gainNode=audioCtx.createGain();
+          var startT=audioCtx.currentTime;
+          // 영상 길이(totalDuration)에 맞춰 자동으로 끊기고, 끝나기 2초 전부터 서서히 줄어들며 페이드아웃
+          var fadeStart=Math.max(0,totalDuration-2);
+          gainNode.gain.setValueAtTime(0.6,startT);
+          gainNode.gain.setValueAtTime(0.6,startT+fadeStart);
+          gainNode.gain.linearRampToValueAtTime(0.0001,startT+totalDuration);
           bgmSource.connect(gainNode);gainNode.connect(dest);
-          // 비디오+오디오 합성 스트림
-          var combined=new MediaStream([...vidStream.getVideoTracks(),...dest.stream.getAudioTracks()]);
-          var rec=beginRecord(combined);
-          runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
-            if(progFill)progFill.style.width=Math.round(p*100)+'%';
-            if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)';
-          },function(){
-            audioEl.pause();rec.stop();
-          });
+          finishWithAudio();
         }).catch(function(){
-          var rec=beginRecord(vidStream);
-          runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
-            if(progFill)progFill.style.width=Math.round(p*100)+'%';
-            if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'%';
-          },function(){rec.stop();});
+          audioEl=null; // BGM 재생 실패해도 전환 효과음은 그대로 진행
+          finishWithAudio();
         });
-      }catch(e){
-        var rec=beginRecord(vidStream);
-        runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
-          if(progFill)progFill.style.width=Math.round(p*100)+'%';
-          if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'%';
-        },function(){rec.stop();});
+      } else {
+        finishWithAudio();
       }
-    } else {
+    }catch(e){
+      // AudioContext 자체를 만들 수 없는 예외적 환경 — 오디오 없이 영상만 생성
       var rec=beginRecord(vidStream);
       runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
         if(progFill)progFill.style.width=Math.round(p*100)+'%';
@@ -3489,7 +3710,37 @@ function _shortsGenerate(){
   }
 }
 
-// ── 렌더링 루프 ───────────────────────────────────────────────────
+// ── 전환 효과음(스윽~) 합성 ──────────────────────────────────────
+// 별도 음원 파일 없이, 화이트노이즈를 대역통과 필터로 스윕해서 가볍고 잔잔한 "스윽" 소리를 그때그때 만든다.
+function _shortsPlaySwoosh(audioCtx, dest, atTime, volume){
+  var duration=0.35;
+  var bufferSize=Math.max(1,Math.round(audioCtx.sampleRate*duration));
+  var buffer=audioCtx.createBuffer(1,bufferSize,audioCtx.sampleRate);
+  var data=buffer.getChannelData(0);
+  for(var i=0;i<bufferSize;i++){ data[i]=Math.random()*2-1; }
+  var noise=audioCtx.createBufferSource();noise.buffer=buffer;
+  var filter=audioCtx.createBiquadFilter();filter.type='bandpass';filter.Q.value=0.9;
+  filter.frequency.setValueAtTime(250,atTime);
+  filter.frequency.exponentialRampToValueAtTime(2600,atTime+duration*0.45);
+  filter.frequency.exponentialRampToValueAtTime(220,atTime+duration);
+  var g=audioCtx.createGain();
+  g.gain.setValueAtTime(0.0001,atTime);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.001,volume),atTime+duration*0.18);
+  g.gain.exponentialRampToValueAtTime(0.0001,atTime+duration);
+  noise.connect(filter);filter.connect(g);g.connect(dest);
+  noise.start(atTime);noise.stop(atTime+duration+0.02);
+}
+// 타임라인의 장면 전환(wipe/trans) 시점마다 효과음을 미리 예약 재생.
+// 엔딩으로 들어가는 컷은 제외 — 브랜드 엔딩은 항상 깔끔한 하드컷이어야 하므로 효과음도 넣지 않는다.
+function _shortsScheduleSwooshes(audioCtx, dest, timeline, baseTime){
+  timeline.forEach(function(seg){
+    if(seg.type==='wipe'||seg.type==='trans'){
+      _shortsPlaySwoosh(audioCtx, dest, baseTime+seg.start, 0.22);
+    }
+  });
+}
+
+
 function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone){
   var frame=0;
   var interval=setInterval(function(){
@@ -3550,7 +3801,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache){
   var img=imgCache[slide.img];
   if(img)_shortsDrawCoverImage(ctx,W,H,img);
   if(slide.label){
-    _shortsDrawText(ctx,W,H,slide.label);
+    _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos);
   }
 }
 
@@ -3598,23 +3849,46 @@ function _shortsDrawCoverImage(ctx, W, H, img){
 }
 
 // 텍스트 오버레이 — 항상 동일한 브랜드 스타일(흰색·같은 폰트/크기/위치)만 사용한다
-function _shortsDrawText(ctx, W, H, label){
+function _shortsDrawText(ctx, W, H, label, pos){
   if(!label)return;
+  pos = pos || 'bottom-left';
   ctx.save();
   var fs=Math.round(W*0.05);
   var pad=Math.round(W*0.07);
   var barH=Math.round(H*0.16);
-  // 얼굴/주요 공간을 가리지 않도록 하단 가장자리에만, 은은한 그라데이션 위에 표시
-  var grad=ctx.createLinearGradient(0,H-barH,0,H);
-  grad.addColorStop(0,'rgba(0,0,0,0)');
-  grad.addColorStop(1,'rgba(0,0,0,0.5)');
-  ctx.fillStyle=grad;
-  ctx.fillRect(0,H-barH,W,barH);
+  var isTop = pos.indexOf('top')===0;
+  var isCenter = pos==='center';
+  var align = pos.indexOf('right')!==-1 ? 'right' : (isCenter ? 'center' : 'left');
+  // 인스타/틱톡 업로드 시 자체 제목·아이콘과 겹치지 않도록, 위치에 따라 은은한 그라데이션 바를
+  // 위/아래/중앙 중 알맞은 자리에 깔아준다 (얼굴/주요 피사체를 가리지 않게 폭 전체에 옅게).
+  var grad;
+  if(isCenter){
+    grad=ctx.createLinearGradient(0,H/2-barH/2,0,H/2+barH/2);
+    grad.addColorStop(0,'rgba(0,0,0,0)');
+    grad.addColorStop(0.5,'rgba(0,0,0,0.45)');
+    grad.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grad;ctx.fillRect(0,H/2-barH/2,W,barH);
+  } else if(isTop){
+    grad=ctx.createLinearGradient(0,0,0,barH);
+    grad.addColorStop(0,'rgba(0,0,0,0.5)');
+    grad.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grad;ctx.fillRect(0,0,W,barH);
+  } else {
+    grad=ctx.createLinearGradient(0,H-barH,0,H);
+    grad.addColorStop(0,'rgba(0,0,0,0)');
+    grad.addColorStop(1,'rgba(0,0,0,0.5)');
+    ctx.fillStyle=grad;ctx.fillRect(0,H-barH,W,barH);
+  }
   ctx.font='800 '+fs+'px Helvetica,Arial,sans-serif';
   ctx.fillStyle='#fff';
-  ctx.textAlign='left';ctx.textBaseline='bottom';
+  ctx.textAlign=align;
   try{ctx.letterSpacing='2px';}catch(e){}
-  ctx.fillText(label, pad, H-Math.round(H*0.055));
+  var tx = align==='left' ? pad : (align==='right' ? W-pad : W/2);
+  var ty;
+  if(isCenter){ ctx.textBaseline='middle'; ty=Math.round(H/2); }
+  else if(isTop){ ctx.textBaseline='top'; ty=Math.round(H*0.075); }
+  else { ctx.textBaseline='bottom'; ty=H-Math.round(H*0.055); }
+  ctx.fillText(label, tx, ty);
   ctx.restore();
 }
 
@@ -4217,7 +4491,7 @@ function loadHistFromStorage(){
     localStorage.removeItem('clover_hist');
   }
 }
-function addHistEl(item, scroll, targetHs){
+function addHistEl(item, scroll, targetHs, atBottom){
   var hs=targetHs||gE('hist-s');if(!hs)return;
   // ── 중복 방지: 이미 같은 id의 카드가 이 컨테이너 안에 있으면 스킵 ──
   if(hs.querySelector('#hi-'+CSS.escape(String(item.id))))return;
@@ -4335,7 +4609,7 @@ function addHistEl(item, scroll, targetHs){
       var cwWrap0=dv('');cwWrap0.style.cssText='flex:1;position:relative;overflow:hidden;min-width:0';
       cwWrap0.appendChild(w3card);bfWrap0.appendChild(cwWrap0);
       w.appendChild(bfWrap0);
-      hs.insertBefore(w, hs.firstChild);
+      if(atBottom) hs.appendChild(w); else hs.insertBefore(w, hs.firstChild);
       if(scroll)hs.scrollTop=0;
       return;
     }
@@ -4377,6 +4651,7 @@ function addHistEl(item, scroll, targetHs){
         var thumbDiv=dv('');
         thumbDiv.style.cssText='position:relative;width:100%;margin-top:4px;';
         var thumbImg=mk('img','');
+        thumbImg.loading='lazy';thumbImg.decoding='async';
         thumbImg.setAttribute('style','width:100%;max-height:120px;object-fit:cover;opacity:.4;filter:blur(2px);border-radius:6px');
         thumbImg.src=beforeSrc;
         var vidLabel=dv('');
@@ -4401,6 +4676,7 @@ function addHistEl(item, scroll, targetHs){
 
       // BEFORE 이미지
       var imgB=mk('img','');
+      imgB.loading='lazy';imgB.decoding='async';
       imgB.setAttribute('style',IMG_STYLE);
       imgB.onload=function(){
         this.style.background='';
@@ -4414,6 +4690,7 @@ function addHistEl(item, scroll, targetHs){
       // AFTER overlay (슬라이더용)
       var ov=dv('cmp-ov');ov.id='co-'+item.id;ov.style.clipPath='inset(0 0 0 50%)';
       var imgA=mk('img','');
+      imgA.loading='lazy';imgA.decoding='async';
       imgA.setAttribute('style', IMG_STYLE);
       imgA.onload=function(){
         this.style.background='';
@@ -4432,6 +4709,7 @@ function addHistEl(item, scroll, targetHs){
     } else {
       // BEFORE 없을 때: AFTER(결과) 이미지만 전체 표시
       var imgOnly=mk('img','');
+      imgOnly.loading='lazy';imgOnly.decoding='async';
       imgOnly.setAttribute('style',IMG_STYLE);
       imgOnly.onload=function(){
         this.style.background='';
@@ -4651,6 +4929,7 @@ function addHistEl(item, scroll, targetHs){
     if(typeof origSrc==='string' && origSrc.indexOf('marble.worldlabs.ai')!==-1) return;
     var pw=dv('');pw.style.cssText='position:relative;width:100%';
     var img2=mk('img','');
+    img2.loading='lazy';img2.decoding='async';
     img2.setAttribute('style','width:100%;min-height:300px;max-height:calc(100vh - 220px);object-fit:contain;display:block;background:#1a1a22;cursor:crosshair');
     img2.onload=function(){this.style.background='';};
     img2.onerror=function(){console.error('[PREVIEW] 로드 실패:',this.src.slice(0,60));};
@@ -4691,7 +4970,7 @@ function addHistEl(item, scroll, targetHs){
     document.querySelectorAll('#ub-main').forEach(function(ub){ rUB(ub,'main'); });
     updBtn();
   });
-  hs.insertBefore(w, hs.firstChild); // 최신을 맨 위에
+  if(atBottom) hs.appendChild(w); else hs.insertBefore(w, hs.firstChild); // 최신을 맨 위에 (atBottom=true면 '더 보기'로 아래에 추가)
   if(scroll) hs.scrollTop=0;
 }
 function delItem(id){
