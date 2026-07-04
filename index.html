@@ -3899,6 +3899,8 @@ function _shortsGenerate(){
       audioCtx=new(window.AudioContext||window.webkitAudioContext)();
       dest=audioCtx.createMediaStreamDestination();
       var audioEl=null;
+      var bgmGainNode=null; // 실제 렌더 진행률에 맞춰 매 프레임 갱신할 볼륨 노드
+      var BGM_VOL=0.6, FADE_SECONDS=2;
       var finishWithAudio=function(){
         // 장면이 바뀔 때마다(슬라이더든 페이드든) 스윽~ 효과음을 예약
         _shortsScheduleSwooshes(audioCtx,dest,timeline,audioCtx.currentTime);
@@ -3907,7 +3909,16 @@ function _shortsGenerate(){
         runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
           if(progFill)progFill.style.width=Math.round(p*100)+'%';
           if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)';
+          // 오디오 볼륨을 "정해진 시간"이 아니라 "실제 렌더링 진행률(p)"에 맞춰 갱신.
+          // 탭이 백그라운드로 밀려 렌더링이 느려지더라도, 음악은 항상 실제 영상 진행 상황과 정확히 맞물려 끝난다.
+          if(bgmGainNode){
+            var elapsedNow=p*totalDuration;
+            var remain=totalDuration-elapsedNow;
+            var targetVol = remain<=FADE_SECONDS ? Math.max(0.0001, BGM_VOL*(remain/FADE_SECONDS)) : BGM_VOL;
+            bgmGainNode.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.08);
+          }
         },function(){
+          if(bgmGainNode){ try{bgmGainNode.gain.setValueAtTime(0.0001, audioCtx.currentTime);}catch(e){} }
           if(audioEl)audioEl.pause();
           rec.stop();
         });
@@ -3917,14 +3928,9 @@ function _shortsGenerate(){
         audioEl.src=opts.bgmUrl;audioEl.loop=true;audioEl.crossOrigin='anonymous';
         audioEl.play().then(function(){
           bgmSource=audioCtx.createMediaElementSource(audioEl);
-          var gainNode=audioCtx.createGain();
-          var startT=audioCtx.currentTime;
-          // 영상 길이(totalDuration)에 맞춰 자동으로 끊기고, 끝나기 2초 전부터 서서히 줄어들며 페이드아웃
-          var fadeStart=Math.max(0,totalDuration-2);
-          gainNode.gain.setValueAtTime(0.6,startT);
-          gainNode.gain.setValueAtTime(0.6,startT+fadeStart);
-          gainNode.gain.linearRampToValueAtTime(0.0001,startT+totalDuration);
-          bgmSource.connect(gainNode);gainNode.connect(dest);
+          bgmGainNode=audioCtx.createGain();
+          bgmGainNode.gain.setValueAtTime(BGM_VOL, audioCtx.currentTime);
+          bgmSource.connect(bgmGainNode);bgmGainNode.connect(dest);
           finishWithAudio();
         }).catch(function(){
           audioEl=null; // BGM 재생 실패해도 전환 효과음은 그대로 진행
