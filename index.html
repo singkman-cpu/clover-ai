@@ -4298,14 +4298,15 @@ function _proposalRenderCanvas(ub){
     return;
   }
 
-  // 2) 아직 없으면 → 장면 목록 그리드 + 안내
+  // 2) 아직 없으면 → 안내 문구, 있으면 → 실제 디자인을 닮은 "편집 가능한" 미리보기
   var scenes=G_PROPOSAL.scenes;
+  var opts=G_PROPOSAL.opts;
   var head=document.createElement('div');
   head.style.cssText='text-align:center';
   if(scenes.length===0){
     head.innerHTML='<div style="font-size:16px;font-weight:800;color:var(--t)">📄 제안서에 넣을 장면을 추가해주세요</div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">거실·주방·침실처럼 장면을 원하는 만큼 추가할 수 있어요</div>';
   } else {
-    head.innerHTML='<div style="font-size:16px;font-weight:800;color:var(--t)">장면 '+scenes.length+'개 준비됨</div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽에서 내용을 채우고 "제안서 생성하기"를 눌러주세요</div>';
+    head.innerHTML='<div style="font-size:16px;font-weight:800;color:var(--t)">장면 '+scenes.length+'개 준비됨</div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">아래 미리보기에서 문구를 직접 고친 뒤 "제안서 생성하기"를 눌러주세요</div>';
   }
   box.appendChild(head);
 
@@ -4315,36 +4316,91 @@ function _proposalRenderCanvas(ub){
     addBigBtn.style.cssText='padding:16px 28px;border-radius:14px;border:2px dashed var(--acb);background:var(--acg);color:var(--ac);font-size:15px;font-weight:800;cursor:pointer;font-family:inherit';
     addBigBtn.onclick=function(e){ e.stopPropagation(); _proposalOpenAddScenePicker(); };
     box.appendChild(addBigBtn);
+    return;
   }
 
-  if(scenes.length>0){
-    var TILE=240;
-    var grid=document.createElement('div');
-    grid.style.cssText='display:flex;flex-wrap:wrap;gap:16px;justify-content:center;max-width:820px';
-    scenes.forEach(function(sc, idx){
+  var GOLD='#c9a468', MOCKW=560;
+  var mockWrap=document.createElement('div');
+  mockWrap.style.cssText='display:flex;flex-direction:column;gap:22px;width:100%;max-width:'+MOCKW+'px';
 
-      var tile=document.createElement('div');
-      tile.style.cssText='width:'+TILE+'px;height:'+TILE+'px;border-radius:16px;overflow:hidden;position:relative;border:2px solid var(--acb);background:var(--c2)';
-      var imgHtml = sc.orig
-        ? '<img src="'+sc.orig+'" loading="lazy" decoding="async" style="position:absolute;top:0;left:0;width:50%;height:100%;object-fit:cover">'+
-          '<img src="'+sc.result+'" loading="lazy" decoding="async" style="position:absolute;top:0;right:0;width:50%;height:100%;object-fit:cover">'+
-          '<div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(255,255,255,.5)"></div>'+
-          '<div style="position:absolute;top:8px;left:8px;font-size:9.5px;font-weight:800;letter-spacing:.5px;color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px">BEFORE</div>'+
-          '<div style="position:absolute;top:8px;right:8px;font-size:9.5px;font-weight:800;letter-spacing:.5px;color:#fff;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px">AFTER</div>'
-        : '<img src="'+sc.result+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">';
-      tile.innerHTML=imgHtml+
-        '<div style="position:absolute;bottom:34px;left:8px;width:26px;height:26px;border-radius:50%;background:var(--ac);color:#000;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">'+(idx+1)+'</div>'+
-        '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.68);color:#fff;font-size:14px;font-weight:700;padding:8px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(sc.label&&sc.label.trim()?sc.label.trim():'장면 '+(idx+1))+'</div>';
-      grid.appendChild(tile);
-    });
-    var addTile=document.createElement('button');
-    addTile.type='button';
-    addTile.style.cssText='width:'+TILE+'px;height:'+TILE+'px;border-radius:16px;border:2px dashed var(--bd2);background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--m2);font-size:28px;font-weight:300;font-family:inherit';
-    addTile.textContent='+';
-    addTile.onclick=function(e){ e.stopPropagation(); _proposalOpenAddScenePicker(); };
-    grid.appendChild(addTile);
-    box.appendChild(grid);
-  }
+  // ── 표지 미리보기 (실제 표지와 동일한 톤 — 여기서 DESIGN CONCEPT를 바로 고칠 수 있음) ──
+  var coverCard=document.createElement('div');
+  coverCard.style.cssText='position:relative;width:100%;aspect-ratio:1240/1754;border-radius:12px;overflow:hidden;background:#1c1a17;box-shadow:0 8px 30px rgba(0,0,0,.4);border:1px solid var(--bd2)';
+  var coverBgImg=document.createElement('img');
+  coverBgImg.src=scenes[0].result;
+  coverBgImg.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.9';
+  coverCard.appendChild(coverBgImg);
+  var coverGrad=document.createElement('div');
+  coverGrad.style.cssText='position:absolute;inset:0;background:linear-gradient(to bottom, rgba(12,11,9,0) 30%, rgba(10,9,7,.96) 100%)';
+  coverCard.appendChild(coverGrad);
+  var coverText=document.createElement('div');
+  coverText.style.cssText='position:absolute;left:8%;right:8%;bottom:5%;color:#fff';
+  var clientDisp=(opts.client||'프로젝트 제안서');
+  coverText.innerHTML=
+    '<div style="color:'+GOLD+';font-weight:700;font-size:2.1vw;letter-spacing:2px;margin-bottom:1.2%">'+((opts.company||'INTERIOR PROPOSAL').toUpperCase())+'</div>'+
+    '<div style="font-weight:800;font-size:4.6vw;margin-bottom:1.5%;line-height:1.15">'+clientDisp+'</div>'+
+    '<div style="color:rgba(255,255,255,.8);font-size:2vw;margin-bottom:2.5%">'+((opts.spaceType?(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l:'공간')||'공간')+'  ·  전체 '+scenes.length+'개 공간</div>'+
+    '<div style="border-top:2px solid '+GOLD+';width:14%;margin-bottom:2.5%"></div>'+
+    '<div style="color:'+GOLD+';font-weight:700;font-size:1.5vw;letter-spacing:1.5px;margin-bottom:1%">DESIGN CONCEPT</div>';
+  var summaryTa=document.createElement('textarea');
+  summaryTa.value=opts.summary||'';
+  summaryTa.placeholder='이 프로젝트의 전체 디자인 컨셉을 직접 써보세요. 예: 자연스러운 빛 느낌을 최대한 살리고...';
+  summaryTa.style.cssText='width:100%;min-height:15%;background:rgba(255,255,255,.06);border:1px dashed rgba(255,255,255,.35);border-radius:6px;color:rgba(255,255,255,.95);font-size:1.5vw;line-height:1.5;font-family:inherit;padding:1.5%;box-sizing:border-box;resize:vertical';
+  summaryTa.oninput=function(){ opts.summary=summaryTa.value; };
+  coverText.appendChild(summaryTa);
+  var coverSub=document.createElement('div');
+  coverSub.style.cssText='color:rgba(255,255,255,.55);font-size:1.4vw;letter-spacing:1.5px;margin-top:2.5%';
+  coverSub.textContent='INTERIOR DESIGN PROPOSAL';
+  coverText.appendChild(coverSub);
+  coverCard.appendChild(coverText);
+  var coverTag=document.createElement('div');
+  coverTag.style.cssText='position:absolute;top:10px;left:10px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px';
+  coverTag.textContent='표지 미리보기 · 직접 수정 가능';
+  coverCard.appendChild(coverTag);
+  mockWrap.appendChild(coverCard);
+
+  // ── 장면별 미리보기 (실제 내용 페이지와 동일한 톤 — 설명을 바로 고칠 수 있음) ──
+  var _tone=_proposalParseDescription(opts.description).tone;
+  scenes.forEach(function(sc, idx){
+    var sceneCard=document.createElement('div');
+    sceneCard.style.cssText='width:100%;background:#faf7f2;border-radius:12px;border:1px solid var(--bd2);padding:5%;box-sizing:border-box;box-shadow:0 4px 18px rgba(0,0,0,.25)';
+    var sceneHead=document.createElement('div');
+    sceneHead.style.cssText='display:flex;align-items:baseline;gap:10px;margin-bottom:3%';
+    sceneHead.innerHTML='<span style="color:'+GOLD+';font-weight:700;font-size:15px;letter-spacing:1px">'+(idx+1<10?'0':'')+(idx+1)+'</span><span style="color:#2a2723;font-weight:700;font-size:20px">'+(sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(idx+1))+'</span>';
+    sceneCard.appendChild(sceneHead);
+
+    var imgRow=document.createElement('div');
+    imgRow.style.cssText='display:flex;gap:2%;margin-bottom:3%';
+    if(sc.orig){
+      var bWrap=document.createElement('div');bWrap.style.cssText='position:relative;flex:1;min-width:0;background:#eee;border-radius:8px;overflow:hidden';
+      bWrap.innerHTML='<img src="'+sc.orig+'" style="width:100%;height:auto;display:block;object-fit:contain">'+
+        '<div style="position:absolute;top:6px;left:6px;color:#fff;font-size:10px;font-weight:800;letter-spacing:.5px;text-shadow:0 1px 4px rgba(0,0,0,.8)">BEFORE</div>';
+      imgRow.appendChild(bWrap);
+    }
+    var aWrap=document.createElement('div');aWrap.style.cssText='position:relative;flex:1;min-width:0;background:#eee;border-radius:8px;overflow:hidden';
+    aWrap.innerHTML='<img src="'+sc.result+'" style="width:100%;height:auto;display:block;object-fit:contain">'+
+      '<div style="position:absolute;top:6px;left:6px;color:#fff;font-size:10px;font-weight:800;letter-spacing:.5px;text-shadow:0 1px 4px rgba(0,0,0,.8)">AFTER</div>';
+    imgRow.appendChild(aWrap);
+    sceneCard.appendChild(imgRow);
+
+    var descTa=document.createElement('textarea');
+    descTa.value = sc.desc&&sc.desc.trim() ? sc.desc : _proposalSceneDesc(sc.label, _tone);
+    descTa.placeholder='이 공간을 어떻게 인테리어했는지 직접 써보세요.';
+    descTa.style.cssText='width:100%;min-height:70px;background:#fff;border:1px dashed var(--bd2);border-radius:6px;color:#55504a;font-size:13px;line-height:1.6;font-family:inherit;padding:8px;box-sizing:border-box;resize:vertical';
+    descTa.oninput=function(){ sc.desc=descTa.value; sc._descEdited=true; };
+    sceneCard.appendChild(descTa);
+
+    mockWrap.appendChild(sceneCard);
+  });
+
+  var addMoreBtn=document.createElement('button');
+  addMoreBtn.type='button';
+  addMoreBtn.innerHTML='+ 다른 장면 추가하기';
+  addMoreBtn.style.cssText='width:100%;padding:14px;border-radius:12px;border:2px dashed var(--bd2);background:transparent;color:var(--m2);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+  addMoreBtn.onclick=function(e){ e.stopPropagation(); _proposalOpenAddScenePicker(); };
+  mockWrap.appendChild(addMoreBtn);
+
+  box.appendChild(mockWrap);
 }
 
 // 갤러리 카드에서 "제안서 만들기" 클릭 시 → 제안서 탭으로 전환하면서 해당 장면을 자동 추가
