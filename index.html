@@ -3978,7 +3978,7 @@ function sbShorts(p){
   bgmWrap.appendChild(bgmInput);
   var bgmNote=dv('');
   bgmNote.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.5';
-  bgmNote.innerHTML='음악은 영상 길이에 맞춰 자동으로 잘리고, 끝나기 2초 전부터 서서히 페이드아웃돼요.<br>장면이 전환될 때마다 잔잔한 스윽~ 효과음도 자동으로 들어갑니다.';
+  bgmNote.innerHTML='음악은 영상 길이에 맞춰 자동으로 잘리고, 끝나기 2초 전부터 서서히 페이드아웃돼요.<br>장면이 전환될 때마다 잔잔한 스윽~ 효과음도 자동으로 들어갑니다.<br>완성된 영상은 항상 <b style="color:var(--t2)">MP4</b>로 내려받아져요 (녹화 후 자동 변환, 몇~수십 초 더 걸릴 수 있어요).';
   bgmWrap.appendChild(bgmNote);
   p.appendChild(bgmWrap);
 
@@ -4948,6 +4948,59 @@ function _shortsAddImageFlow(){
 }
 
 // ── 영상 생성 메인 함수 ───────────────────────────────────────────
+// ── webm → mp4 변환 (FFmpeg.wasm) ─────────────────────────────────
+// 크롬 계열 브라우저는 MediaRecorder로 진짜 mp4를 직접 못 만들기 때문에,
+// 일단 webm으로 녹화한 뒤 여기서 mp4(H.264+AAC)로 다시 인코딩해서 항상 mp4로 내려준다.
+// 필요할 때만 라이브러리를 불러오고(첫 변환 시 한 번), 실패하면 webm으로 조용히 폴백한다.
+var _shortsFFmpegInstance=null, _shortsFFmpegLoading=null;
+function _shortsLoadFFmpeg(){
+  if(_shortsFFmpegInstance) return Promise.resolve(_shortsFFmpegInstance);
+  if(_shortsFFmpegLoading) return _shortsFFmpegLoading;
+  _shortsFFmpegLoading=new Promise(function(resolve, reject){
+    if(window.FFmpegWASM){ afterScriptLoaded(); return; }
+    var s=document.createElement('script');
+    s.src='https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
+    s.onload=afterScriptLoaded;
+    s.onerror=function(){ reject(new Error('ffmpeg.js 로드 실패')); };
+    document.head.appendChild(s);
+    function afterScriptLoaded(){
+      try{
+        var ffmpeg=new window.FFmpegWASM.FFmpeg();
+        ffmpeg.load({
+          coreURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+          wasmURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
+        }).then(function(){
+          _shortsFFmpegInstance=ffmpeg;
+          resolve(ffmpeg);
+        }).catch(reject);
+      }catch(e){ reject(e); }
+    }
+  });
+  return _shortsFFmpegLoading;
+}
+// webmBlob → mp4 Blob. onProgress(0~1)로 진행률 콜백. 실패하면 reject(그러면 호출부가 webm으로 폴백).
+function _shortsTranscodeToMp4(webmBlob, onProgress){
+  return _shortsLoadFFmpeg().then(function(ffmpeg){
+    var progressHandler=function(ev){ if(onProgress) onProgress(Math.max(0,Math.min(1,ev.progress||0))); };
+    ffmpeg.on('progress', progressHandler);
+    return webmBlob.arrayBuffer().then(function(buf){
+      return ffmpeg.writeFile('input.webm', new Uint8Array(buf));
+    }).then(function(){
+      return ffmpeg.exec(['-i','input.webm','-c:v','libx264','-preset','veryfast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','output.mp4']);
+    }).then(function(){
+      return ffmpeg.readFile('output.mp4');
+    }).then(function(data){
+      ffmpeg.off('progress', progressHandler);
+      try{ ffmpeg.deleteFile('input.webm'); ffmpeg.deleteFile('output.mp4'); }catch(e){}
+      return new Blob([data.buffer], {type:'video/mp4'});
+    }).catch(function(err){
+      ffmpeg.off('progress', progressHandler);
+      throw err;
+    });
+  });
+}
+
+
 function _shortsGenerate(){
   var opts=G_SHORTS.opts;
   var _fontDef=SHORTS_FONTS.find(function(f){return f.k===(opts.fontFamily||'default');});
@@ -5026,34 +5079,52 @@ function _shortsGenerate(){
       var recorder=new MediaRecorder(stream,{mimeType:mimeType,videoBitsPerSecond:W>=2160?40000000:W>=1080?8000000:3000000});
       recorder.ondataavailable=function(e){if(e.data&&e.data.size>0)chunks.push(e.data);};
       recorder.onstop=function(){
-        var blob=new Blob(chunks,{type:mimeType});
-        var url=URL.createObjectURL(blob);
-        G_SHORTS.resultUrl=url;
-        var ext=mimeType.includes('mp4')?'mp4':'webm';
-        function doDownload(){
-          var a=document.createElement('a');
-          a.href=url;
-          a.download='cloverai_shorts_'+Date.now()+'.'+ext;
-          document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},500);
+        var rawBlob=new Blob(chunks,{type:mimeType});
+        var needsTranscode = !mimeType.includes('mp4');
+
+        function finalize(finalBlob, finalExt){
+          var url=URL.createObjectURL(finalBlob);
+          G_SHORTS.resultUrl=url;
+          function doDownload(){
+            var a=document.createElement('a');
+            a.href=url;
+            a.download='cloverai_shorts_'+Date.now()+'.'+finalExt;
+            document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},500);
+          }
+          var dlBtn=gE('shorts-dl-btn');
+          if(dlBtn)dlBtn.onclick=doDownload;
+          if(dlWrap){dlWrap.style.display='';}
+          if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
+          if(progTxt)progTxt.textContent='✅ 완성! 메인 화면에서 바로 다운로드하세요.';
+          if(progFill)progFill.style.width='100%';
+          // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
+          // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
+          // 전용 버킷(G.HIST.shorts)에 저장하므로 "영상 제작" 탭에는 뜨지 않고 갤러리에만 보인다.
+          if(!G.HIST.shorts)G.HIST.shorts=[];
+          var vidId=Date.now()+Math.random();
+          idbSaveVideo(vidId, finalBlob).catch(function(){});
+          G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&slides[0].img, result:url, idbKey:vidId, videoExt:finalExt, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
+          saveHistToStorage();
+          _shortsSaveGalleryMeta();
+          // 메인 화면에서 바로 미리보기+다운로드 가능하도록 즉시 갱신
+          G_SHORTS.resultDownload=doDownload;
+          if(G.wf==='shorts')renderMain('shorts');
         }
-        var dlBtn=gE('shorts-dl-btn');
-        if(dlBtn)dlBtn.onclick=doDownload;
-        if(dlWrap){dlWrap.style.display='';}
-        if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
-        if(progTxt)progTxt.textContent='✅ 완성! 메인 화면에서 바로 다운로드하세요.';
-        if(progFill)progFill.style.width='100%';
-        // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
-        // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
-        // 전용 버킷(G.HIST.shorts)에 저장하므로 "영상 제작" 탭에는 뜨지 않고 갤러리에만 보인다.
-        if(!G.HIST.shorts)G.HIST.shorts=[];
-        var vidId=Date.now()+Math.random();
-        idbSaveVideo(vidId, blob).catch(function(){});
-        G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&slides[0].img, result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
-        saveHistToStorage();
-        _shortsSaveGalleryMeta();
-        // 메인 화면에서 바로 미리보기+다운로드 가능하도록 즉시 갱신
-        G_SHORTS.resultDownload=doDownload;
-        if(G.wf==='shorts')renderMain('shorts');
+
+        if(needsTranscode){
+          if(progTxt)progTxt.textContent='MP4로 변환 중... 0%';
+          _shortsTranscodeToMp4(rawBlob, function(p){
+            if(progTxt)progTxt.textContent='MP4로 변환 중... '+Math.round(p*100)+'%';
+            if(progFill)progFill.style.width=Math.round(p*100)+'%';
+          }).then(function(mp4Blob){
+            finalize(mp4Blob, 'mp4');
+          }).catch(function(err){
+            console.warn('[쇼츠] MP4 변환 실패, webm으로 대신 제공합니다:', err);
+            finalize(rawBlob, 'webm');
+          });
+        } else {
+          finalize(rawBlob, 'mp4');
+        }
       };
       recorder.start(100); // 100ms 단위로 chunk
       return recorder;
