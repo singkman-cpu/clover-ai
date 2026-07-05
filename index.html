@@ -810,6 +810,37 @@ function _proposalGenerateSummaryFromText(desc, fallbackSpaceLabel){
   return opening+' '+body.join(' ');
 }
 
+// ── 장면(방)별 설명 자동 생성 ────────────────────────────────────
+// 각 장면 이미지 아래에 "이 공간을 어떻게 인테리어했는지" 짧은 설명을 넣기 위한 방별 템플릿.
+var PROPOSAL_ROOM_DESC_BANK={
+  '거실':['가족이 가장 오래 머무는 공간인 만큼 {tone}자연광과 동선을 최우선으로 고려해 개방감을 살렸습니다.','벽면과 바닥 마감을 통일해 넓어 보이는 효과를 주고, {tone}조명 계획으로 저녁에도 아늑한 분위기를 연출했습니다.'],
+  '주방':['수납과 조리 동선을 함께 고려해 {tone}실용성과 심미성을 동시에 잡은 구성입니다.','상부장과 하부장의 마감을 대비시켜 답답하지 않으면서도 {tone}깔끔한 인상을 주도록 설계했습니다.'],
+  '안방':['숙면에 집중할 수 있도록 {tone}차분한 톤으로 통일하고, 조명 밝기를 조절할 수 있게 구성했습니다.','침대 헤드보드 벽면을 포인트로 살려 {tone}호텔 객실 같은 안정감을 더했습니다.'],
+  '침실':['숙면에 집중할 수 있도록 {tone}차분한 톤으로 통일하고, 조명 밝기를 조절할 수 있게 구성했습니다.'],
+  '욕실':['방수·배수 등 기본 공사를 재점검하면서, {tone}호텔 욕실 같은 깔끔한 마감으로 새 단장했습니다.'],
+  '화장실':['방수·배수 등 기본 공사를 재점검하면서, {tone}호텔 욕실 같은 깔끔한 마감으로 새 단장했습니다.'],
+  '드레스룸':['수납 효율을 최우선으로 계획하고, {tone}부티크 매장 같은 진열감을 살려 옷장 정리가 즐거워지는 공간으로 만들었습니다.'],
+  '현관':['첫인상이 되는 공간인 만큼 {tone}수납장과 조명을 정돈해 깔끔한 첫 느낌을 주도록 구성했습니다.'],
+  '아이방':['안전과 성장 단계를 함께 고려해, {tone}부드러운 톤과 안전한 소재로 아이 방을 꾸몄습니다.'],
+  '아기방':['안전과 성장 단계를 함께 고려해, {tone}부드러운 톤과 안전한 소재로 아이 방을 꾸몄습니다.'],
+  '서재':['집중이 필요한 공간인 만큼 {tone}차분한 톤과 충분한 조명으로 몰입하기 좋은 환경을 만들었습니다.'],
+  '베란다':['자투리 공간이 되지 않도록, {tone}실용적인 수납과 마감으로 활용도를 높였습니다.'],
+  '발코니':['자투리 공간이 되지 않도록, {tone}실용적인 수납과 마감으로 활용도를 높였습니다.'],
+  '복도':['이동 공간에도 디자인을 더해, {tone}포인트 조명과 마감으로 공간 전체의 통일감을 살렸습니다.']
+};
+function _proposalSceneDesc(label, toneDesc){
+  var key=(label||'').trim();
+  var tonePrefix = toneDesc ? toneDesc+' ' : '';
+  var bank=PROPOSAL_ROOM_DESC_BANK[key];
+  var template;
+  if(bank){
+    template=bank[Math.floor(Math.random()*bank.length)];
+  } else {
+    template=(key||'이 공간')+'을 기존 구조는 유지하면서 {tone}마감재와 가구 구성만 새롭게 제안해 실현 가능성을 높였습니다.';
+  }
+  return template.replace('{tone}', tonePrefix);
+}
+
 // 갤러리(현장사진/렌더/편집 탭)에서 before+after가 다 있는 유효한 항목들을 모아
 // "장면 추가하기" 피커에 보여줄 후보 목록을 만든다 (최신순, 중복 제거)
 function _proposalGatherCandidates(excludeIds){
@@ -955,155 +986,216 @@ function _proposalOpenAddScenePicker(){
 // 실제 제안서 이미지를 캔버스에 그려서 콜백으로 넘긴다.
 // scenes 배열 길이에 맞춰 캔버스 높이를 동적으로 계산하는 멀티신 버전.
 // 웜톤 배경 + 골드 악센트 + 둥근 모서리 이미지로 클라이언트에게 보내는 문서다운 고급스러운 톤을 지향한다.
-function _buildProposalCanvas(data, cb){
-  var W=1080;
+// ── 제안서 PDF 생성 (표지 1페이지 + 장면 3개씩 묶은 내용 페이지들) ──────────
+var PROPOSAL_PAGE_W=1240, PROPOSAL_PAGE_H=1754; // A4 비율(약 150dpi)
+var PROPOSAL_SCENES_PER_PAGE=3;
+var PROPOSAL_FONT="Pretendard,-apple-system,sans-serif";
+
+function _buildProposalPDF(data, cb){
   var scenes=data.scenes||[];
-  var GOLD='#b6884f', INK='#2a2723', MUTED='#8f887e', BG='#faf7f2', CARD='#f1ece3';
-  var HEADER_H=176, CLIENT_H=(data.budgetText?126:84), SCENE_LABEL_H=52, SCENE_IMG_H=420, SCENE_GAP=34, SUMMARY_PAD=32, LINE_H=33, FOOTER_H=110;
-  var pad=48;
+  var heroSrc = scenes.length ? scenes[0].result : null;
 
-  // 1단계: 요약 텍스트 줄바꿈 라인 수를 먼저 계산 (임시 캔버스로 measureText)
-  var measureCanvas=document.createElement('canvas');
-  var mctx=measureCanvas.getContext('2d');
-  mctx.font='400 22px Georgia,"Nanum Myeongjo",serif';
-  var summaryLines=_wrapCanvasText(mctx, data.summary||'', W-pad*2-SUMMARY_PAD*2);
+  var toLoad=[];
+  if(heroSrc) toLoad.push({key:'hero', src:heroSrc});
+  scenes.forEach(function(sc, i){
+    if(sc.orig) toLoad.push({key:'b'+i, src:sc.orig});
+    toLoad.push({key:'a'+i, src:sc.result});
+  });
 
-  var SUMMARY_BOX_H = SUMMARY_PAD*2 + 40 + summaryLines.length*LINE_H;
+  var loaded={};
+  var remaining=toLoad.length;
+  function finish(){
+    var pageCanvases=[];
+    pageCanvases.push(_proposalDrawCoverPage(data, loaded.hero));
+    var chunks=[];
+    for(var i=0;i<scenes.length;i+=PROPOSAL_SCENES_PER_PAGE){
+      var group=[];
+      for(var j=i;j<Math.min(i+PROPOSAL_SCENES_PER_PAGE, scenes.length);j++){
+        group.push({scene:scenes[j], idx:j});
+      }
+      chunks.push(group);
+    }
+    chunks.forEach(function(chunk, ci){
+      pageCanvases.push(_proposalDrawContentPage(chunk, loaded, data, ci+1, chunks.length+1));
+    });
 
-  var H = HEADER_H + CLIENT_H
-    + scenes.length*(SCENE_LABEL_H+SCENE_IMG_H+SCENE_GAP)
-    + SUMMARY_BOX_H + 40
-    + FOOTER_H;
+    var pdf=new window.jspdf.jsPDF({unit:'mm', format:'a4', orientation:'portrait'});
+    pageCanvases.forEach(function(canvas, i){
+      var imgData=canvas.toDataURL('image/jpeg', 0.92);
+      if(i>0)pdf.addPage();
+      pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
+    });
+    cb(pdf, pageCanvases);
+  }
+  if(remaining===0){ finish(); return; }
+  toLoad.forEach(function(spec){
+    var img=new Image();img.crossOrigin='anonymous';
+    img.onload=function(){ loaded[spec.key]=img; remaining--; if(remaining<=0)finish(); };
+    img.onerror=function(){ remaining--; if(remaining<=0)finish(); };
+    img.src=spec.src;
+  });
+}
 
-  var canvas=document.createElement('canvas');
-  canvas.width=W;canvas.height=H;
+// 표지 페이지 — 첫 장면의 완성본을 풀블리드 배경으로 쓰고, 그 위에 프로젝트명/업체명을 얹는다
+function _proposalDrawCoverPage(data, heroImg){
+  var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H;
+  var canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
   var ctx=canvas.getContext('2d');
+  var GOLD='#c9a468';
 
-  // 배경 — 순백 대신 은은한 웜 아이보리 톤 (클라이언트에게 보내는 문서다운 질감)
+  if(heroImg){
+    _proposalCoverDrawRounded(ctx, heroImg, 0, 0, W, H, 0);
+  } else {
+    ctx.fillStyle='#1c1a17';ctx.fillRect(0,0,W,H);
+  }
+  var grad=ctx.createLinearGradient(0,H*0.30,0,H);
+  grad.addColorStop(0,'rgba(12,11,9,0)');
+  grad.addColorStop(1,'rgba(10,9,7,0.95)');
+  ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+
+  var pad=100;
+  ctx.textAlign='left';ctx.textBaseline='bottom';
+  ctx.fillStyle=GOLD;
+  ctx.font='700 26px '+PROPOSAL_FONT;
+  try{ctx.letterSpacing='4px';}catch(e){}
+  ctx.fillText((data.company||'INTERIOR PROPOSAL').toUpperCase(), pad, H-360);
+  try{ctx.letterSpacing='0px';}catch(e){}
+
+  ctx.fillStyle='#ffffff';
+  ctx.font='800 58px '+PROPOSAL_FONT;
+  ctx.fillText(data.client||'프로젝트 제안서', pad, H-288);
+
+  ctx.fillStyle='rgba(255,255,255,.82)';
+  ctx.font='400 25px '+PROPOSAL_FONT;
+  var dateStr=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
+  ctx.fillText((data.spaceLabel||'공간')+'  ·  전체 '+(data.scenes?data.scenes.length:0)+'개 공간  ·  '+dateStr, pad, H-240);
+
+  ctx.strokeStyle=GOLD;ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(pad,H-206);ctx.lineTo(pad+70,H-206);ctx.stroke();
+
+  // 디자인 컨셉 요약 문단 (요청한 전체 디자인 요약을 표지에서 바로 보여줌)
+  if(data.summary){
+    ctx.fillStyle=GOLD;
+    ctx.font='700 15px '+PROPOSAL_FONT;
+    try{ctx.letterSpacing='2px';}catch(e){}
+    ctx.textBaseline='top';
+    ctx.fillText('DESIGN CONCEPT', pad, H-180);
+    try{ctx.letterSpacing='0px';}catch(e){}
+    ctx.fillStyle='rgba(255,255,255,.92)';
+    ctx.font='400 21px '+PROPOSAL_FONT;
+    var sumLines=_wrapCanvasText(ctx, data.summary, W-pad*2-40);
+    var sy=H-150;
+    sumLines.slice(0,3).forEach(function(line){ ctx.fillText(line, pad, sy); sy+=30; });
+  }
+
+  ctx.textBaseline='bottom';
+  ctx.fillStyle='rgba(255,255,255,.6)';
+  ctx.font='400 20px '+PROPOSAL_FONT;
+  try{ctx.letterSpacing='2px';}catch(e){}
+  ctx.fillText('INTERIOR DESIGN PROPOSAL', pad, H-56);
+  try{ctx.letterSpacing='0px';}catch(e){}
+
+  return canvas;
+}
+
+// 내용 페이지 — 장면 최대 3개, 각 장면마다 Before/After(흰 글씨 라벨) + 설명 문단
+function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages){
+  var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H;
+  var canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
+  var ctx=canvas.getContext('2d');
+  var GOLD='#b6884f', INK='#2a2723', MUTED='#9a927f', BG='#faf7f2';
   ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
 
-  // 헤더 — 짙은 차콜에 얇은 골드 라인으로 마무리, 로고타입은 절제된 스몰캡스 느낌
-  var grad=ctx.createLinearGradient(0,0,W,HEADER_H);
-  grad.addColorStop(0,'#1c1a17');grad.addColorStop(1,'#2b2823');
-  ctx.fillStyle=grad;ctx.fillRect(0,0,W,HEADER_H);
-  ctx.fillStyle=GOLD;
-  ctx.font='700 20px Helvetica,Arial,sans-serif';
-  ctx.textAlign='left';ctx.textBaseline='middle';
-  try{ctx.letterSpacing='3px';}catch(e){}
-  ctx.fillText((data.company||'INTERIOR PROPOSAL').toUpperCase(), pad, 56);
-  try{ctx.letterSpacing='0px';}catch(e){}
-  ctx.fillStyle='#f5f0e8';
-  ctx.font='400 46px Georgia,"Nanum Myeongjo",serif';
-  ctx.fillText('공간 제안서', pad, 118);
-  // 골드 언더라인
-  ctx.strokeStyle=GOLD;ctx.lineWidth=2;
-  ctx.beginPath();ctx.moveTo(pad,HEADER_H-1);ctx.lineTo(pad+70,HEADER_H-1);ctx.stroke();
+  var pad=92;
 
-  var y=HEADER_H+34;
-
-  // 고객/프로젝트 정보
-  ctx.fillStyle=INK;
-  ctx.font='700 27px Helvetica,Arial,sans-serif';
-  ctx.textBaseline='top';
-  if(data.client){ ctx.fillText(data.client, pad, y); y+=38; }
+  // 러닝 헤더 — 매 페이지 상단에 프로젝트명/공간종류를 얇게 반복해서, 낱장이 아니라
+  // 한 세트의 문서라는 느낌을 준다 (제본된 프로포절의 관례)
+  ctx.textBaseline='top';ctx.textAlign='left';
   ctx.fillStyle=MUTED;
-  ctx.font='400 19px Helvetica,Arial,sans-serif';
-  var dateStr=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
-  ctx.fillText(data.spaceLabel+'  ·  전체 '+scenes.length+'개 공간  ·  '+dateStr, pad, y);
-  y+=30;
-  if(data.budgetText){
-    ctx.font='700 21px Helvetica,Arial,sans-serif';
-    var badgeLabel='예상 공사 비용   '+data.budgetText;
-    var bw=ctx.measureText(badgeLabel).width+40;
-    ctx.strokeStyle=GOLD;ctx.lineWidth=1.5;
-    ctx.beginPath();
-    if(ctx.roundRect)ctx.roundRect(pad,y,bw,44,22); else ctx.rect(pad,y,bw,44);
-    ctx.stroke();
-    ctx.fillStyle=GOLD;
-    ctx.textBaseline='middle';
-    ctx.fillText(badgeLabel, pad+20, y+23);
-    ctx.textBaseline='top';
-    y+=58;
-  }
-  y += (CLIENT_H - (data.client?38:0) - 30 - (data.budgetText?58:0));
-
-  // 얇은 구분선
+  ctx.font='600 15px '+PROPOSAL_FONT;
+  try{ctx.letterSpacing='1.5px';}catch(e){}
+  ctx.fillText(((data.client||data.company||'INTERIOR PROPOSAL')+'').toUpperCase(), pad, 54);
+  try{ctx.letterSpacing='0px';}catch(e){}
+  ctx.textAlign='right';
+  ctx.fillText((data.spaceLabel||'').toUpperCase(), W-pad, 54);
   ctx.strokeStyle='#e4ddd0';ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(pad,y-14);ctx.lineTo(W-pad,y-14);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(pad,80);ctx.lineTo(W-pad,80);ctx.stroke();
 
-  // 장면별 Before/After — 번호는 "01" 스타일의 절제된 캡션으로
+  var y=112;
+  var imgH=384;
   var innerW=W-pad*2;
-  scenes.forEach(function(sc, i){
+
+  chunk.forEach(function(entry, ci){
+    var sc=entry.scene, i=entry.idx;
+    ctx.textAlign='left';
     ctx.fillStyle=GOLD;
-    ctx.font='700 16px Helvetica,Arial,sans-serif';
+    ctx.font='700 17px '+PROPOSAL_FONT;
     ctx.textBaseline='top';
     try{ctx.letterSpacing='2px';}catch(e){}
     ctx.fillText((i+1<10?'0':'')+(i+1), pad, y);
     try{ctx.letterSpacing='0px';}catch(e){}
     ctx.fillStyle=INK;
-    ctx.font='400 28px Georgia,"Nanum Myeongjo",serif';
-    ctx.fillText(sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), pad+38, y-4);
-    y+=SCENE_LABEL_H;
-    sc._drawY=y;
-    y+=SCENE_IMG_H+SCENE_GAP;
+    ctx.font='700 27px '+PROPOSAL_FONT;
+    ctx.fillText(sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), pad+40, y-4);
+    y+=48;
+
+    // 이미지 아래 은은한 그림자 — 종이 위에 사진을 올려놓은 듯한 입체감
+    ctx.save();
+    ctx.shadowColor='rgba(40,35,25,.22)';ctx.shadowBlur=22;ctx.shadowOffsetY=8;
+    ctx.fillStyle='#000';
+    if(ctx.roundRect){ctx.beginPath();ctx.roundRect(pad,y,innerW,imgH,12);ctx.fill();}
+    ctx.restore();
+
+    var beforeImg=loaded['b'+i], afterImg=loaded['a'+i];
+    if(beforeImg){
+      var halfW=(innerW-14)/2;
+      _proposalCoverDrawRounded(ctx, beforeImg, pad, y, halfW, imgH, 12);
+      _proposalCoverDrawRounded(ctx, afterImg, pad+halfW+14, y, halfW, imgH, 12);
+      ctx.fillStyle='#ffffff';
+      ctx.font='700 15px '+PROPOSAL_FONT;
+      ctx.textBaseline='top';
+      try{ctx.letterSpacing='1px';}catch(e){}
+      ctx.shadowColor='rgba(0,0,0,.65)';ctx.shadowBlur=7;ctx.shadowOffsetY=0;
+      ctx.fillText('BEFORE', pad+16, y+14);
+      ctx.fillText('AFTER', pad+halfW+14+16, y+14);
+      ctx.shadowBlur=0;
+      try{ctx.letterSpacing='0px';}catch(e){}
+    } else if(afterImg){
+      _proposalCoverDrawRounded(ctx, afterImg, pad, y, innerW, imgH, 12);
+      ctx.fillStyle='#ffffff';
+      ctx.font='700 15px '+PROPOSAL_FONT;
+      ctx.textBaseline='top';
+      try{ctx.letterSpacing='1px';}catch(e){}
+      ctx.shadowColor='rgba(0,0,0,.65)';ctx.shadowBlur=7;ctx.shadowOffsetY=0;
+      ctx.fillText('AFTER', pad+16, y+14);
+      ctx.shadowBlur=0;
+      try{ctx.letterSpacing='0px';}catch(e){}
+    }
+    y+=imgH+18;
+
+    ctx.fillStyle='#55504a';
+    ctx.font='400 20px '+PROPOSAL_FONT;
+    ctx.textBaseline='top';
+    var descText=(sc.desc&&sc.desc.trim())?sc.desc.trim():_proposalSceneDesc(sc.label, data._tone);
+    var lines=_wrapCanvasText(ctx, descText, innerW);
+    lines.slice(0,2).forEach(function(line){ ctx.fillText(line, pad, y); y+=26; });
+    y+=28;
   });
 
-  // 전체 디자인 요약 — 은은한 카드 배경의 "컨셉 노트" 섹션
-  var boxY=y;
-  ctx.fillStyle=CARD;
-  ctx.beginPath();
-  if(ctx.roundRect)ctx.roundRect(pad,boxY,innerW,SUMMARY_BOX_H,14); else ctx.rect(pad,boxY,innerW,SUMMARY_BOX_H);
-  ctx.fill();
-  ctx.fillStyle=GOLD;
-  ctx.font='700 15px Helvetica,Arial,sans-serif';
-  try{ctx.letterSpacing='2.5px';}catch(e){}
-  ctx.textBaseline='top';
-  ctx.fillText('DESIGN CONCEPT', pad+SUMMARY_PAD, boxY+SUMMARY_PAD);
-  try{ctx.letterSpacing='0px';}catch(e){}
-  var summaryY=boxY+SUMMARY_PAD+32;
-  ctx.fillStyle=INK;
-  ctx.font='400 22px Georgia,"Nanum Myeongjo",serif';
-  summaryLines.forEach(function(line){ ctx.fillText(line, pad+SUMMARY_PAD, summaryY); summaryY+=LINE_H; });
-  y=boxY+SUMMARY_BOX_H+40;
-
-  // 푸터 — 업체 정보만, 브랜드 워터마크 없이 깔끔하게
-  var footY=y+10;
+  // 러닝 푸터 — 모든 내용 페이지에 공통으로: 업체명(좌) · 페이지 번호(우)
+  var footY=H-64;
   ctx.strokeStyle='#e4ddd0';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(pad,footY);ctx.lineTo(W-pad,footY);ctx.stroke();
-  ctx.fillStyle=MUTED;ctx.font='400 19px Helvetica,Arial,sans-serif';
+  ctx.fillStyle=MUTED;
+  ctx.font='500 15px '+PROPOSAL_FONT;
   ctx.textAlign='left';ctx.textBaseline='top';
-  var footerText=[data.company, data.contact].filter(Boolean).join('     ·     ');
-  ctx.fillText(footerText||' ', pad, footY+24);
+  ctx.fillText([data.company,data.contact].filter(Boolean).join('   ·   '), pad, footY+16);
+  ctx.textAlign='right';
+  ctx.fillStyle=GOLD;
+  ctx.font='700 15px '+PROPOSAL_FONT;
+  ctx.fillText((pageIndex+1)+' / '+totalPages, W-pad, footY+16);
 
-  // 장면 이미지들을 전부 비동기로 로딩한 뒤, 준비되는 대로 각자의 자리에 그린다 (둥근 모서리, 라벨 뱃지 없음)
-  if(!scenes.length){ cb(canvas); return; }
-  var remaining=0;
-  scenes.forEach(function(sc){ remaining += sc.orig?2:1; });
-  function onOneLoaded(){
-    remaining--;
-    if(remaining<=0) cb(canvas);
-  }
-  scenes.forEach(function(sc){
-    var halfW=(innerW-14)/2;
-    function drawAfterOnly(afterImg){
-      _proposalCoverDrawRounded(ctx, afterImg, pad, sc._drawY, innerW, SCENE_IMG_H, 14);
-    }
-    function drawBoth(beforeImg, afterImg){
-      _proposalCoverDrawRounded(ctx, beforeImg, pad, sc._drawY, halfW, SCENE_IMG_H, 14);
-      _proposalCoverDrawRounded(ctx, afterImg, pad+halfW+14, sc._drawY, halfW, SCENE_IMG_H, 14);
-    }
-    var afterImg=null, beforeImg=null;
-    var ai=new Image();ai.crossOrigin='anonymous';
-    ai.onload=function(){ afterImg=ai; if(!sc.orig){ drawAfterOnly(afterImg); onOneLoaded(); } else if(beforeImg){ drawBoth(beforeImg, afterImg); onOneLoaded(); onOneLoaded(); } };
-    ai.onerror=function(){ onOneLoaded(); if(!sc.orig) return; };
-    ai.src=sc.result;
-    if(sc.orig){
-      var bi=new Image();bi.crossOrigin='anonymous';
-      bi.onload=function(){ beforeImg=bi; if(afterImg){ drawBoth(beforeImg, afterImg); onOneLoaded(); onOneLoaded(); } };
-      bi.onerror=function(){ onOneLoaded(); };
-      bi.src=sc.orig;
-    }
-  });
+  return canvas;
 }
 
 // object-fit:cover 방식으로 이미지를 지정 영역에 꽉 채워 그림 (비율 유지, 잘림 허용)
@@ -1927,6 +2019,11 @@ var WF_INFO={
     icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
     title:'왼쪽 슬롯에 <span>이미지를 넣어주세요</span>',
     sub:'이미지를 슬롯에 넣고 쇼츠 생성 버튼을 누르면 9:16 세로 영상이 자동으로 만들어집니다'
+  },
+  proposal:{
+    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+    title:'왼쪽에서 <span>장면을 추가해주세요</span>',
+    sub:'거실·주방·침실처럼 완성된 결과물을 장면으로 추가하면 종합 제안서 PDF로 만들어드립니다'
   }
 };
 
@@ -4009,11 +4106,13 @@ function _proposalRenderCanvas(ub){
   ub.classList.add('hide-zone');
   var zone=ub.querySelector('.cub-zone');
   if(zone)zone.style.display='none';
+  var sBox=ub.querySelector('#shorts-canvas-ui');
+  if(sBox)sBox.style.display='none';
   var box=ub.querySelector('#proposal-canvas-ui');
   if(!box){
     box=document.createElement('div');
     box.id='proposal-canvas-ui';
-    box.style.cssText='position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:18px;overflow:auto';
+    box.style.cssText='position:relative;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:36px 24px;gap:18px;overflow-y:auto';
     ub.appendChild(box);
   }
   box.style.display='flex';
@@ -4023,34 +4122,63 @@ function _proposalRenderCanvas(ub){
   if(G_PROPOSAL.resultUrl){
     var vidWrap=document.createElement('div');
     vidWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:12px;max-width:560px;width:100%';
-    var img=document.createElement('img');
-    img.src=G_PROPOSAL.resultUrl;
-    img.style.cssText='width:100%;border-radius:14px;border:1px solid var(--bd2);box-shadow:0 8px 30px rgba(0,0,0,.4)';
-    vidWrap.appendChild(img);
+
+    var pageLabel=document.createElement('div');
+    pageLabel.style.cssText='font-size:12px;color:var(--m2);font-weight:600';
+    pageLabel.textContent='총 '+(G_PROPOSAL.resultPages?G_PROPOSAL.resultPages.length:1)+'페이지 PDF';
+    vidWrap.appendChild(pageLabel);
+
+    (G_PROPOSAL.resultPages||[G_PROPOSAL.resultUrl]).forEach(function(pageSrc, pi){
+      var pageWrap=document.createElement('div');
+      pageWrap.style.cssText='width:100%;position:relative';
+      var img=document.createElement('img');
+      img.src=pageSrc;
+      img.style.cssText='width:100%;display:block;border-radius:10px;border:1px solid var(--bd2);box-shadow:0 8px 30px rgba(0,0,0,.4)';
+      pageWrap.appendChild(img);
+      var pageNum=document.createElement('div');
+      pageNum.style.cssText='position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px';
+      pageNum.textContent=(pi+1)+' / '+(G_PROPOSAL.resultPages?G_PROPOSAL.resultPages.length:1);
+      pageWrap.appendChild(pageNum);
+      vidWrap.appendChild(pageWrap);
+    });
 
     var shareBtn=document.createElement('button');
     shareBtn.innerHTML='📤 공유하기 (카카오톡 등)';
-    shareBtn.style.cssText='width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit';
-    shareBtn.onclick=function(){ _proposalSaveToGallery(); cloverShare(G_PROPOSAL.resultUrl, '제안서-'+Date.now()+'.png'); };
+    shareBtn.style.cssText='width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;margin-top:6px';
+    shareBtn.onclick=function(){
+      _proposalSaveToGallery();
+      if(G_PROPOSAL.resultPdf){
+        var blob=G_PROPOSAL.resultPdf.output('blob');
+        var file=new File([blob], '제안서-'+Date.now()+'.pdf', {type:'application/pdf'});
+        if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
+          navigator.share({files:[file], title:'인테리어 제안서', text:'제안서를 보내드립니다.'}).catch(function(){});
+        } else {
+          G_PROPOSAL.resultPdf.save('제안서-'+Date.now()+'.pdf');
+        }
+      }
+    };
     vidWrap.appendChild(shareBtn);
 
     var dlBtn=document.createElement('button');
-    dlBtn.textContent='⬇ 이미지로 저장';
+    dlBtn.textContent='⬇ PDF로 저장';
     dlBtn.style.cssText='width:100%;padding:12px;border-radius:10px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:13px;cursor:pointer;font-family:inherit';
-    dlBtn.onclick=function(){ _proposalSaveToGallery(); cloverDownload(G_PROPOSAL.resultUrl, '제안서-'+Date.now()+'.png'); };
+    dlBtn.onclick=function(){
+      _proposalSaveToGallery();
+      if(G_PROPOSAL.resultPdf) G_PROPOSAL.resultPdf.save('제안서-'+Date.now()+'.pdf');
+    };
     vidWrap.appendChild(dlBtn);
 
     var editBtn=document.createElement('button');
     editBtn.textContent='✎ 내용 수정하기';
     editBtn.style.cssText='width:100%;padding:11px;border-radius:9px;border:1px solid var(--ac);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
-    editBtn.onclick=function(){ G_PROPOSAL.resultUrl=null; renderMain('proposal'); };
+    editBtn.onclick=function(){ G_PROPOSAL.resultUrl=null;G_PROPOSAL.resultPdf=null;G_PROPOSAL.resultPages=null; renderMain('proposal'); };
     vidWrap.appendChild(editBtn);
 
     var newBtn=document.createElement('button');
     newBtn.textContent='완전히 새 제안서 만들기';
     newBtn.style.cssText='width:100%;padding:9px;border-radius:9px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
     newBtn.onclick=function(){
-      G_PROPOSAL.resultUrl=null;
+      G_PROPOSAL.resultUrl=null;G_PROPOSAL.resultPdf=null;G_PROPOSAL.resultPages=null;
       G_PROPOSAL.scenes=[];
       G_PROPOSAL.opts={client:'',description:'',spaceType:'residential',summary:'',company:G_PROPOSAL.opts.company,contact:G_PROPOSAL.opts.contact,logo:null};
       G_PROPOSAL._savedKey=null;
@@ -4339,18 +4467,22 @@ function sbProposal(p){
   if(genBtn.disabled)genBtn.style.opacity='0.5';
   genBtn.onclick=function(){
     if(!scenes.length)return;
-    genBtn.disabled=true;genBtn.textContent='생성 중...';
+    genBtn.disabled=true;genBtn.textContent='생성 중... (PDF '+(1+Math.ceil(scenes.length/PROPOSAL_SCENES_PER_PAGE))+'페이지)';
     var parsedDesc=_proposalParseDescription(opts.description);
-    _buildProposalCanvas({
+    _buildProposalPDF({
       client:opts.client,
       spaceLabel:(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l||'공간',
       summary:opts.summary,
       company:opts.company,
       contact:opts.contact,
       budgetText:parsedDesc.budgetManwon?_proposalFormatBudget(parsedDesc.budgetManwon):null,
-      scenes:scenes
-    }, function(canvas){
-      G_PROPOSAL.resultUrl=canvas.toDataURL('image/png');
+      scenes:scenes,
+      _tone:parsedDesc.tone
+    }, function(pdf, pageCanvases){
+      G_PROPOSAL.resultPdf=pdf;
+      G_PROPOSAL.resultPages=pageCanvases.map(function(c){return c.toDataURL('image/jpeg',0.9);});
+      G_PROPOSAL.resultUrl=G_PROPOSAL.resultPages[0]; // 갤러리 썸네일 = 표지
+      G_PROPOSAL._savedKey=null;
       genBtn.disabled=false;
       genBtn.innerHTML='✨ 제안서 생성하기 <span style="font-size:11px;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 8px;margin-left:4px;font-weight:700">무료 FREE</span>';
       renderMain('proposal');
@@ -4365,6 +4497,8 @@ function _shortsRenderCanvas(ub){
   ub.classList.add('hide-zone');
   var zone=ub.querySelector('.cub-zone');
   if(zone)zone.style.display='none';
+  var pBox=ub.querySelector('#proposal-canvas-ui');
+  if(pBox)pBox.style.display='none';
   var box=ub.querySelector('#shorts-canvas-ui');
   if(!box){
     box=document.createElement('div');
@@ -11818,5 +11952,6 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
   tryInit(40); // 최대 12초 정도 대기
 })();
 </script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 </body>
 </html>
