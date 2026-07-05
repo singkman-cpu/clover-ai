@@ -698,6 +698,271 @@ function cloverShare(src, fname){
   }
 }
 
+// ── 고객 제안서 생성 ─────────────────────────────────────────────
+// AI 디자인 결과(before/after)를 받아서, 1인 인테리어 업체·분양 담당자가
+// 상담 직후 고객에게 카카오톡으로 바로 보낼 수 있는 "제안서" 이미지를 만들어준다.
+var PROPOSAL_SPACE_TYPES=[
+  {k:'residential',l:'주거공간'},{k:'cafe',l:'카페'},{k:'restaurant',l:'음식점'},
+  {k:'retail',l:'상업매장'},{k:'office',l:'사무공간'},{k:'other',l:'공간'}
+];
+var PROPOSAL_SUMMARY_BANK={
+  residential:['자연광을 최대한 살리고 따뜻한 톤의 소재를 사용해 공간의 편안함을 극대화했습니다.','기존 구조는 그대로 유지하면서 마감재와 가구 구성만 새롭게 제안해 실현 가능성을 높였습니다.','수납과 동선을 함께 고려해 실용성과 심미성을 동시에 잡은 디자인입니다.'],
+  cafe:['고객이 머물고 싶은 공간이 되도록 조명과 좌석 배치를 중심으로 설계했습니다.','브랜드 분위기를 살리면서도 실제 시공 가능한 마감재 위주로 제안했습니다.','포토스팟이 될 수 있는 시그니처 요소를 한 곳에 배치해 자연스러운 홍보 효과까지 고려했습니다.'],
+  restaurant:['회전율과 분위기를 함께 고려한 좌석 배치로 실용성과 감성을 모두 잡았습니다.','조리 동선과 홀 동선을 분리해 운영 효율까지 고려한 디자인입니다.','메뉴와 어울리는 톤앤매너로 브랜드 이미지를 강화했습니다.'],
+  retail:['제품이 돋보이도록 조명과 진열 동선을 중심으로 설계했습니다.','브랜드 아이덴티티를 공간 전체에 일관되게 반영했습니다.','고객 체류시간을 늘릴 수 있는 동선과 포토존을 함께 고려했습니다.'],
+  office:['업무 집중도와 협업 공간의 균형을 고려한 레이아웃입니다.','밝고 정돈된 톤으로 방문객에게 신뢰감을 주는 공간으로 제안했습니다.','실용적인 수납과 동선을 함께 고려했습니다.'],
+  other:['공간의 용도와 분위기를 함께 고려해 실현 가능한 디자인으로 제안했습니다.','기존 구조를 최대한 활용해 합리적인 비용으로 완성도를 높였습니다.']
+};
+function _proposalSummaryText(spaceKey){
+  var bank=PROPOSAL_SUMMARY_BANK[spaceKey]||PROPOSAL_SUMMARY_BANK.other;
+  return bank.join(' ');
+}
+
+function _openProposalModal(item){
+  var overlay=dv('');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto';
+  overlay.onclick=function(e){ if(e.target===overlay) document.body.removeChild(overlay); };
+
+  var card=dv('');
+  card.style.cssText='background:var(--card);border-radius:16px;padding:20px;max-width:420px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)';
+  card.onclick=function(e){e.stopPropagation();};
+
+  var title=dv('');title.style.cssText='font-size:16px;font-weight:800;color:var(--t);margin-bottom:4px';
+  title.textContent='📄 고객 제안서 만들기';
+  var sub=dv('');sub.style.cssText='font-size:11.5px;color:var(--m2);margin-bottom:16px';
+  sub.textContent='상담 끝나고 고객에게 카톡으로 바로 보낼 수 있는 이미지를 만들어드려요.';
+  card.appendChild(title);card.appendChild(sub);
+
+  function field(labelText){
+    var w=dv('');w.style.cssText='margin-bottom:12px';
+    var l=dv('');l.style.cssText='font-size:11.5px;color:var(--t2);margin-bottom:5px;font-weight:600';l.textContent=labelText;
+    w.appendChild(l);
+    card.appendChild(w);
+    return w;
+  }
+  function textInput(placeholder){
+    var i=document.createElement('input');i.type='text';i.placeholder=placeholder;
+    i.style.cssText='width:100%;padding:9px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;box-sizing:border-box';
+    return i;
+  }
+
+  var wClient=field('고객명 / 프로젝트명');
+  var clientInput=textInput('예: 김OO 고객님 방배동 아파트');
+  wClient.appendChild(clientInput);
+
+  var wSpace=field('공간 종류');
+  var spaceRow=dv('');spaceRow.style.cssText='display:flex;gap:5px;flex-wrap:wrap';
+  var curSpaceKey='residential';
+  PROPOSAL_SPACE_TYPES.forEach(function(t){
+    var b=mk('button','');b.type='button';b.textContent=t.l;
+    var on=t.k===curSpaceKey;
+    b.style.cssText='padding:6px 11px;border-radius:20px;border:1px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c2)')+';color:'+(on?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
+    b.onclick=function(){
+      curSpaceKey=t.k;
+      spaceRow.querySelectorAll('button').forEach(function(x){x.style.borderColor='var(--bd2)';x.style.background='var(--c2)';x.style.color='var(--t2)';});
+      b.style.borderColor='var(--ac)';b.style.background='var(--acg)';b.style.color='var(--ac)';
+      summaryTa.value=_proposalSummaryText(curSpaceKey);
+    };
+    spaceRow.appendChild(b);
+  });
+  wSpace.appendChild(spaceRow);
+
+  var wSummary=field('디자인 요약 (직접 수정 가능)');
+  var summaryTa=document.createElement('textarea');
+  summaryTa.style.cssText='width:100%;min-height:70px;padding:9px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:12.5px;line-height:1.5;font-family:inherit;box-sizing:border-box;resize:vertical';
+  summaryTa.value=_proposalSummaryText(curSpaceKey);
+  wSummary.appendChild(summaryTa);
+
+  var wCompany=field('업체명 (선택)');
+  var companyInput=textInput('예: OO인테리어');
+  wCompany.appendChild(companyInput);
+
+  var wContact=field('연락처 (선택)');
+  var contactInput=textInput('예: 010-1234-5678 / 인스타 @OO_interior');
+  wContact.appendChild(contactInput);
+
+  var genBtn=mk('button','');genBtn.type='button';genBtn.textContent='✨ 제안서 생성하기';
+  genBtn.style.cssText='width:100%;padding:12px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;margin-top:6px';
+
+  var resultWrap=dv('');resultWrap.style.cssText='margin-top:16px;display:none;flex-direction:column;align-items:center;gap:10px';
+  card.appendChild(genBtn);
+  card.appendChild(resultWrap);
+
+  var closeBtn=mk('button','');closeBtn.type='button';closeBtn.textContent='닫기';
+  closeBtn.style.cssText='width:100%;padding:10px;border-radius:9px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:12.5px;cursor:pointer;font-family:inherit;margin-top:8px';
+  closeBtn.onclick=function(){ document.body.removeChild(overlay); };
+  card.appendChild(closeBtn);
+
+  genBtn.onclick=function(){
+    genBtn.disabled=true;genBtn.textContent='생성 중...';
+    _buildProposalCanvas({
+      client:clientInput.value.trim(),
+      spaceLabel:(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===curSpaceKey;})||{}).l||'공간',
+      summary:summaryTa.value.trim(),
+      company:companyInput.value.trim(),
+      contact:contactInput.value.trim(),
+      beforeSrc:item.orig||item.origThumb||null,
+      afterSrc:item.result
+    }, function(canvas){
+      genBtn.disabled=false;genBtn.textContent='✨ 제안서 생성하기';
+      resultWrap.innerHTML='';
+      resultWrap.style.display='flex';
+      var previewImg=document.createElement('img');
+      previewImg.src=canvas.toDataURL('image/png');
+      previewImg.style.cssText='width:100%;max-width:280px;border-radius:10px;border:1px solid var(--bd2);box-shadow:0 8px 24px rgba(0,0,0,.35)';
+      resultWrap.appendChild(previewImg);
+
+      var shareBtn=mk('button','');shareBtn.type='button';shareBtn.textContent='📤 공유하기 (카카오톡 등)';
+      shareBtn.style.cssText='width:100%;padding:11px;border-radius:9px;border:1px solid var(--ac);background:var(--acg);color:var(--ac);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+      shareBtn.onclick=function(){
+        canvas.toBlob(function(blob){
+          var file=new File([blob],'제안서-'+Date.now()+'.png',{type:'image/png'});
+          if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
+            navigator.share({files:[file], title:'인테리어 제안서', text:'제안서를 보내드립니다.'}).catch(function(){});
+          } else {
+            cloverDownload(previewImg.src, '제안서-'+Date.now()+'.png');
+          }
+        }, 'image/png');
+      };
+      resultWrap.appendChild(shareBtn);
+
+      var dlBtn2=mk('button','');dlBtn2.type='button';dlBtn2.textContent='⬇ 이미지로 저장';
+      dlBtn2.style.cssText='width:100%;padding:11px;border-radius:9px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:13px;cursor:pointer;font-family:inherit';
+      dlBtn2.onclick=function(){ cloverDownload(previewImg.src, '제안서-'+Date.now()+'.png'); };
+      resultWrap.appendChild(dlBtn2);
+    });
+  };
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+}
+
+// 실제 제안서 이미지를 캔버스에 그려서 콜백으로 넘긴다 (before/after 이미지 로딩을 기다려야 하므로 비동기)
+function _buildProposalCanvas(data, cb){
+  var W=1080, H=1528; // A4 비율에 가까운 세로형 — 카톡/문자로 보기 좋은 크기
+  var canvas=document.createElement('canvas');
+  canvas.width=W;canvas.height=H;
+  var ctx=canvas.getContext('2d');
+
+  // 배경 (밝은 톤 — 고객에게 보여줄 문서이므로 앱의 다크 테마가 아니라 화이트 기반)
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,W,H);
+
+  // 헤더 바
+  var headerH=140;
+  var grad=ctx.createLinearGradient(0,0,W,0);
+  grad.addColorStop(0,'#0f1115');grad.addColorStop(1,'#232733');
+  ctx.fillStyle=grad;ctx.fillRect(0,0,W,headerH);
+  ctx.fillStyle='#00e5cc';
+  ctx.font='800 30px Helvetica,Arial,sans-serif';
+  ctx.textAlign='left';ctx.textBaseline='middle';
+  ctx.fillText(data.company||'CLOVER AI', 44, 52);
+  ctx.fillStyle='#ffffff';
+  ctx.font='800 40px Helvetica,Arial,sans-serif';
+  ctx.fillText('인테리어 디자인 제안서', 44, 98);
+
+  var y=headerH+36;
+
+  // 고객/프로젝트 정보
+  ctx.fillStyle='#111111';
+  ctx.font='700 26px Helvetica,Arial,sans-serif';
+  ctx.textBaseline='top';
+  if(data.client){ ctx.fillText(data.client, 44, y); y+=38; }
+  ctx.fillStyle='#666666';
+  ctx.font='500 20px Helvetica,Arial,sans-serif';
+  var dateStr=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
+  ctx.fillText(data.spaceLabel+' · '+dateStr, 44, y);
+  y+=48;
+
+  function drawImagesAndFinish(beforeImg, afterImg){
+    var imgAreaY=y;
+    var imgH=520;
+    var pad=44;
+    var innerW=W-pad*2;
+    if(beforeImg){
+      var halfW=(innerW-12)/2;
+      _proposalCoverDraw(ctx, beforeImg, pad, imgAreaY, halfW, imgH);
+      _proposalCoverDraw(ctx, afterImg, pad+halfW+12, imgAreaY, halfW, imgH);
+      // 라벨
+      ctx.fillStyle='rgba(0,0,0,.6)';
+      ctx.fillRect(pad, imgAreaY, 74, 30);
+      ctx.fillRect(pad+halfW+12, imgAreaY, 66, 30);
+      ctx.fillStyle='#fff';ctx.font='800 15px Helvetica,Arial,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+      ctx.fillText('BEFORE', pad+10, imgAreaY+15);
+      ctx.fillText('AFTER', pad+halfW+12+10, imgAreaY+15);
+    } else {
+      _proposalCoverDraw(ctx, afterImg, pad, imgAreaY, innerW, imgH);
+    }
+    y=imgAreaY+imgH+40;
+
+    // 디자인 요약
+    ctx.fillStyle='#111111';
+    ctx.font='800 24px Helvetica,Arial,sans-serif';
+    ctx.textBaseline='top';
+    ctx.fillText('디자인 제안 요약', pad, y);
+    y+=38;
+    ctx.fillStyle='#444444';
+    ctx.font='500 21px Helvetica,Arial,sans-serif';
+    var summaryLines=_wrapCanvasText(ctx, data.summary||'', W-pad*2);
+    summaryLines.forEach(function(line){ ctx.fillText(line, pad, y); y+=32; });
+
+    // 푸터
+    var footY=H-90;
+    ctx.strokeStyle='#e5e5e5';ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(pad,footY);ctx.lineTo(W-pad,footY);ctx.stroke();
+    ctx.fillStyle='#888888';ctx.font='500 18px Helvetica,Arial,sans-serif';
+    var footerText=[data.company, data.contact].filter(Boolean).join('   ·   ');
+    ctx.fillText(footerText||'Clover AI로 제작된 제안서', pad, footY+20);
+    ctx.fillStyle='#00b8a3';ctx.font='700 18px Helvetica,Arial,sans-serif';ctx.textAlign='right';
+    ctx.fillText('Powered by CLOVER AI', W-pad, footY+20);
+
+    cb(canvas);
+  }
+
+  var beforeImg=null, afterImg=null, pending=data.beforeSrc?2:1;
+  function done(){ pending--; if(pending<=0) drawImagesAndFinish(beforeImg, afterImg); }
+  if(data.beforeSrc){
+    var bi=new Image();bi.crossOrigin='anonymous';
+    bi.onload=function(){beforeImg=bi;done();};
+    bi.onerror=function(){done();};
+    bi.src=data.beforeSrc;
+  }
+  var ai=new Image();ai.crossOrigin='anonymous';
+  ai.onload=function(){afterImg=ai;done();};
+  ai.onerror=function(){done();};
+  ai.src=data.afterSrc;
+}
+
+// object-fit:cover 방식으로 이미지를 지정 영역에 꽉 채워 그림 (비율 유지, 잘림 허용)
+function _proposalCoverDraw(ctx, img, x, y, w, h){
+  if(!img){ ctx.fillStyle='#eeeeee'; ctx.fillRect(x,y,w,h); return; }
+  var iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+  var scale=Math.max(w/iw, h/ih);
+  var sw=w/scale, sh=h/scale;
+  var sx=(iw-sw)/2, sy=(ih-sh)/2;
+  ctx.save();
+  ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+  ctx.drawImage(img, sx,sy,sw,sh, x,y,w,h);
+  ctx.restore();
+}
+
+// 캔버스 텍스트 줄바꿈 (한글 포함, 픽셀 폭 기준으로 자동 줄바꿈)
+function _wrapCanvasText(ctx, text, maxWidth){
+  var words=text.split(' ');
+  var lines=[];
+  var cur='';
+  words.forEach(function(w){
+    var test=cur?cur+' '+w:w;
+    if(ctx.measureText(test).width>maxWidth && cur){
+      lines.push(cur);
+      cur=w;
+    } else {
+      cur=test;
+    }
+  });
+  if(cur)lines.push(cur);
+  return lines;
+}
+
 // 여러 이미지를 ZIP으로 한 번에 다운로드 (분양/영업용 결과물 일괄 전달)
 // VR 투어는 이미지 파일이 아니라 "체험 가능한 링크"를 공유해야 함 (카카오톡 등에서 클릭하면 바로 VR 뷰어가 열림)
 function cloverShareVR(spzUrl, marbleUrl){
@@ -5022,6 +5287,17 @@ function addHistEl(item, scroll, targetHs, atBottom){
       cloverDownload(src, fname);
     },false);
     ib.appendChild(dlBtn);
+
+    // 제안서 만들기 — before/after를 고객에게 바로 보낼 수 있는 제안서 이미지로
+    if(item.result){
+      var propBtn=mk('button','ib');propBtn.type='button';propBtn.innerHTML='📄';propBtn.title='제안서 만들기';
+      propBtn.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      propBtn.addEventListener('click',function(e){
+        e.stopPropagation();
+        _openProposalModal(item);
+      },false);
+      ib.appendChild(propBtn);
+    }
 
     // se-btn들 → 별도 하단 바로 분리
     var sebar=dv('');
