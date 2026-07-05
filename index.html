@@ -1124,7 +1124,7 @@ function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages){
   ctx.beginPath();ctx.moveTo(pad,80);ctx.lineTo(W-pad,80);ctx.stroke();
 
   var y=112;
-  var imgH=400; // 박스 비율을 가로형(약 1.3:1)으로 — 16:9 사진을 넣어도 양옆이 과하게 잘리지 않도록
+  var maxImgH=440; // 페이지 안에 들어가야 하니 최대 높이만 캡을 두고, 그 안에서 원본 비율 그대로 유지
   var innerW=W-pad*2;
 
   chunk.forEach(function(entry, ci){
@@ -1141,39 +1141,50 @@ function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages){
     ctx.fillText(sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), pad+40, y-4);
     y+=48;
 
-    // 이미지 아래 은은한 그림자 — 종이 위에 사진을 올려놓은 듯한 입체감
-    ctx.save();
-    ctx.shadowColor='rgba(40,35,25,.22)';ctx.shadowBlur=22;ctx.shadowOffsetY=8;
-    ctx.fillStyle='#000';
-    if(ctx.roundRect){ctx.beginPath();ctx.roundRect(pad,y,innerW,imgH,12);ctx.fill();}
-    ctx.restore();
-
     var beforeImg=loaded['b'+i], afterImg=loaded['a'+i];
-    if(beforeImg){
-      var halfW=(innerW-14)/2;
-      _proposalCoverDrawRounded(ctx, beforeImg, pad, y, halfW, imgH, 12);
-      _proposalCoverDrawRounded(ctx, afterImg, pad+halfW+14, y, halfW, imgH, 12);
+    var halfW=(innerW-14)/2;
+    // 각 이미지를 "원본 비율 그대로" 박스 안에 맞춤(letterbox) — crop 없음
+    var fitB = beforeImg ? _proposalFitContain(beforeImg, halfW, maxImgH) : null;
+    var fitA = afterImg ? _proposalFitContain(afterImg, beforeImg?halfW:innerW, maxImgH) : null;
+    var rowH = Math.max(fitB?fitB.h:0, fitA?fitA.h:0, 1);
+
+    // 이미지 아래 은은한 그림자 — 종이 위에 사진을 올려놓은 듯한 입체감
+    function shadowBox(x,w,h){
+      ctx.save();
+      ctx.shadowColor='rgba(40,35,25,.22)';ctx.shadowBlur=22;ctx.shadowOffsetY=8;
+      ctx.fillStyle='#000';
+      if(ctx.roundRect){ctx.beginPath();ctx.roundRect(x,y+(rowH-h)/2,w,h,12);ctx.fill();}
+      ctx.restore();
+    }
+
+    if(beforeImg && fitB){
+      var bx=pad+(halfW-fitB.w)/2, by=y+(rowH-fitB.h)/2;
+      shadowBox(bx,fitB.w,fitB.h);
+      _proposalContainDrawRounded(ctx, beforeImg, bx, by, fitB.w, fitB.h, 12);
       ctx.fillStyle='#ffffff';
       ctx.font='700 15px '+PROPOSAL_FONT;
       ctx.textBaseline='top';
       try{ctx.letterSpacing='1px';}catch(e){}
       ctx.shadowColor='rgba(0,0,0,.65)';ctx.shadowBlur=7;ctx.shadowOffsetY=0;
-      ctx.fillText('BEFORE', pad+16, y+14);
-      ctx.fillText('AFTER', pad+halfW+14+16, y+14);
-      ctx.shadowBlur=0;
-      try{ctx.letterSpacing='0px';}catch(e){}
-    } else if(afterImg){
-      _proposalCoverDrawRounded(ctx, afterImg, pad, y, innerW, imgH, 12);
-      ctx.fillStyle='#ffffff';
-      ctx.font='700 15px '+PROPOSAL_FONT;
-      ctx.textBaseline='top';
-      try{ctx.letterSpacing='1px';}catch(e){}
-      ctx.shadowColor='rgba(0,0,0,.65)';ctx.shadowBlur=7;ctx.shadowOffsetY=0;
-      ctx.fillText('AFTER', pad+16, y+14);
+      ctx.fillText('BEFORE', bx+16, by+14);
       ctx.shadowBlur=0;
       try{ctx.letterSpacing='0px';}catch(e){}
     }
-    y+=imgH+24;
+    if(afterImg && fitA){
+      var ax = beforeImg ? pad+halfW+14+(halfW-fitA.w)/2 : pad+(innerW-fitA.w)/2;
+      var ay = y+(rowH-fitA.h)/2;
+      shadowBox(ax,fitA.w,fitA.h);
+      _proposalContainDrawRounded(ctx, afterImg, ax, ay, fitA.w, fitA.h, 12);
+      ctx.fillStyle='#ffffff';
+      ctx.font='700 15px '+PROPOSAL_FONT;
+      ctx.textBaseline='top';
+      try{ctx.letterSpacing='1px';}catch(e){}
+      ctx.shadowColor='rgba(0,0,0,.65)';ctx.shadowBlur=7;ctx.shadowOffsetY=0;
+      ctx.fillText('AFTER', ax+16, ay+14);
+      ctx.shadowBlur=0;
+      try{ctx.letterSpacing='0px';}catch(e){}
+    }
+    y+=rowH+24;
 
     ctx.fillStyle='#55504a';
     ctx.font='400 20px '+PROPOSAL_FONT;
@@ -1300,6 +1311,23 @@ function _proposalCoverDrawRounded(ctx, img, x, y, w, h, radius){
   var sw=w/scale, sh=h/scale;
   var sx=(iw-sw)/2, sy=(ih-sh)/2;
   ctx.drawImage(img, sx,sy,sw,sh, x,y,w,h);
+  ctx.restore();
+}
+
+// 원본 이미지의 실제 가로세로 비율 그대로, 주어진 최대 폭/높이 안에 맞는 크기를 계산 (crop 없음)
+function _proposalFitContain(img, maxW, maxH){
+  var iw=img.naturalWidth||img.width||1, ih=img.naturalHeight||img.height||1;
+  var scale=Math.min(maxW/iw, maxH/ih);
+  return {w: iw*scale, h: ih*scale};
+}
+// 계산된 크기 그대로, 잘라내지 않고 원본 비율 그대로 그림 (모서리만 둥글게)
+function _proposalContainDrawRounded(ctx, img, x, y, w, h, radius){
+  if(!img)return;
+  ctx.save();
+  ctx.beginPath();
+  if(ctx.roundRect) ctx.roundRect(x,y,w,h,radius); else ctx.rect(x,y,w,h);
+  ctx.clip();
+  ctx.drawImage(img, x, y, w, h);
   ctx.restore();
 }
 
