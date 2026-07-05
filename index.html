@@ -719,6 +719,95 @@ function _proposalSummaryText(spaceKey){
   return bank.join(' ');
 }
 
+// ── 자유 서술형 설명 → 프리미엄 제안서 문구 자동 생성 ──────────────────
+// "25년된 구축아파트 거실,주방,안방을 크림톤으로, 2500만원 정도" 같은 문장에서
+// 연식/공간/톤/예산을 뽑아내서 실제 상담 제안서에서 쓰는 톤으로 요약을 만든다.
+var PROPOSAL_ROOM_BANK=['거실','주방','안방','침실','드레스룸','드레스실','파우더룸','욕실','화장실','현관','베란다','발코니','서재','아이방','아기방','다용도실','복도','부엌','다이닝룸'];
+var PROPOSAL_TONE_BANK=['크림톤','웜톤','화이트톤','우드톤','그레이톤','베이지톤','내추럴톤','모던톤','다크톤','블랙톤','파스텔톤','그린톤','블루톤','미니멀톤','클래식톤'];
+
+function _proposalParseDescription(text){
+  text=(text||'').trim();
+  var out={years:null, rooms:[], tone:null, budgetManwon:null, budgetText:null, raw:text};
+  if(!text)return out;
+
+  // 연식: "25년된", "25년차", "지어진지 25년", "준공 25년", "25년 이상"
+  var yearMatch=text.match(/(\d{1,3})\s*년\s*(된|차|째|이상|이나|가\s*넘은|넘은)?/);
+  if(yearMatch) out.years=parseInt(yearMatch[1],10);
+
+  // 예산: "2500만원","2,500만원","2500만 원","2.5억","2억5000"
+  var eokMatch=text.match(/(\d+(?:\.\d+)?)\s*억\s*(\d{1,4})?\s*(만)?/);
+  var manMatch=text.match(/(\d[\d,]{2,})\s*만\s*원?/);
+  if(eokMatch){
+    var eok=parseFloat(eokMatch[1])*10000;
+    var extra=eokMatch[2]?parseInt(eokMatch[2],10):0;
+    out.budgetManwon=Math.round(eok+extra);
+    out.budgetText=eokMatch[0].replace(/\s+/g,'');
+  } else if(manMatch){
+    out.budgetManwon=parseInt(manMatch[1].replace(/,/g,''),10);
+    out.budgetText=manMatch[0].replace(/\s+/g,'');
+  }
+
+  // 톤/컬러
+  PROPOSAL_TONE_BANK.forEach(function(t){ if(!out.tone && text.indexOf(t)!==-1) out.tone=t; });
+
+  // 공간 리스트 (문장에 등장하는 순서 그대로)
+  var found=[];
+  PROPOSAL_ROOM_BANK.forEach(function(r){
+    var idx=text.indexOf(r);
+    if(idx!==-1 && out.rooms.indexOf(r)===-1){ found.push({r:r, idx:idx}); }
+  });
+  found.sort(function(a,b){return a.idx-b.idx;});
+  out.rooms=found.map(function(f){return f.r;});
+
+  return out;
+}
+
+function _proposalFormatBudget(manwon){
+  if(!manwon)return null;
+  if(manwon>=10000){
+    var eok=Math.floor(manwon/10000);
+    var rest=manwon%10000;
+    return '약 '+eok+'억'+(rest?' '+rest.toLocaleString()+'만':'')+'원';
+  }
+  return '약 '+manwon.toLocaleString()+'만원';
+}
+
+function _proposalGenerateSummaryFromText(desc, fallbackSpaceLabel){
+  var d=_proposalParseDescription(desc);
+  var ageDesc = d.years ? (d.years+'년 된 구축 아파트') : null;
+  var roomsDesc = d.rooms.length ? d.rooms.join('·') : null;
+  var toneDesc = d.tone;
+
+  var opening;
+  if(ageDesc && roomsDesc){
+    opening = ageDesc+'의 '+roomsDesc+'을 '+(toneDesc?toneDesc+' 감성으로 ':'')+'새롭게 제안합니다.';
+  } else if(roomsDesc){
+    opening = roomsDesc+' 공간을 '+(toneDesc?toneDesc+' 감성으로 ':'')+'새롭게 제안합니다.';
+  } else if(ageDesc){
+    opening = ageDesc+'을 '+(toneDesc?toneDesc+' 감성으로 ':'')+'새롭게 제안합니다.';
+  } else {
+    opening = (fallbackSpaceLabel||'공간')+'을 '+(toneDesc?toneDesc+' 감성으로 ':'')+'새롭게 제안합니다.';
+  }
+
+  var body=[];
+  if(toneDesc){
+    body.push(toneDesc+' 특유의 따뜻하고 고급스러운 분위기를 살려, 소재와 조명 색온도까지 세심하게 맞췄습니다.');
+  }
+  if(d.years && d.years>=15){
+    body.push('준공 '+d.years+'년 차 구축 아파트의 특성을 고려해, 겉으로 드러나는 마감뿐 아니라 배관·전기 등 기본 인프라 상태까지 함께 점검하는 것을 권해드립니다.');
+  }
+  if(d.rooms.length>1){
+    body.push(d.rooms.join('·')+' 전체를 하나의 톤앤매너로 통일해 공간 간 이질감 없이 자연스럽게 이어지도록 설계했습니다.');
+  } else {
+    body.push('공간의 용도와 동선을 함께 고려해 실현 가능성과 완성도를 동시에 높였습니다.');
+  }
+  if(d.budgetManwon){
+    body.push('말씀해주신 예산(' + _proposalFormatBudget(d.budgetManwon) + ') 안에서 실현 가능한 자재와 시공 범위로 구성했습니다.');
+  }
+
+  return opening+' '+body.join(' ');
+}
+
 // 갤러리(현장사진/렌더/편집 탭)에서 before+after가 다 있는 유효한 항목들을 모아
 // "장면 추가하기" 피커에 보여줄 후보 목록을 만든다 (최신순, 중복 제거)
 function _proposalGatherCandidates(excludeIds){
@@ -737,12 +826,124 @@ function _proposalGatherCandidates(excludeIds){
   return out;
 }
 
+// 장면 추가 피커 — 사이드바에서도, 메인 화면 빈 상태에서도 똑같이 이 함수 하나만 쓴다.
+// 1) 내 컴퓨터에 있는 파일을 직접 업로드하거나 2) 사이트에서 이미 렌더링한 결과물을 골라서 추가할 수 있다.
+function _proposalOpenAddScenePicker(){
+  var excludeIds=G_PROPOSAL.scenes.map(function(s){return s.id;});
+  var candidates=_proposalGatherCandidates(excludeIds);
+
+  function addSceneAndClose(scene, overlay){
+    G_PROPOSAL.scenes.push(scene);
+    document.body.removeChild(overlay);
+    renderSB();renderMain('proposal');
+  }
+
+  var pickOverlay=dv('');
+  pickOverlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;overflow-y:auto';
+  pickOverlay.onclick=function(e){ if(e.target===pickOverlay) document.body.removeChild(pickOverlay); };
+
+  var pickCard=dv('');
+  pickCard.style.cssText='background:var(--card);border-radius:16px;padding:20px;max-width:640px;width:100%;max-height:88vh;overflow-y:auto';
+  pickCard.onclick=function(e){e.stopPropagation();};
+
+  var pickTitle=dv('');pickTitle.style.cssText='font-size:17px;font-weight:800;color:var(--t);margin-bottom:14px';
+  pickTitle.textContent='추가할 장면 선택';
+  pickCard.appendChild(pickTitle);
+
+  // ── 1) 내 컴퓨터에서 불러오기 ──
+  var uploadSec=dv('');uploadSec.style.cssText='margin-bottom:20px;padding:14px;background:var(--c2);border-radius:12px;border:1px solid var(--bd2)';
+  var uploadTitle=dv('');uploadTitle.style.cssText='font-size:13px;font-weight:800;color:var(--ac);margin-bottom:10px';
+  uploadTitle.textContent='📁 내 컴퓨터에서 불러오기';
+  uploadSec.appendChild(uploadTitle);
+
+  var uploadRow=dv('');uploadRow.style.cssText='display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end';
+
+  function fileSlot(labelText, required){
+    var slot=dv('');slot.style.cssText='flex:1;min-width:130px';
+    var l=dv('');l.style.cssText='font-size:11px;color:var(--t2);margin-bottom:5px;font-weight:600';
+    l.textContent=labelText+(required?'':' (선택)');
+    slot.appendChild(l);
+    var box=dv('');box.style.cssText='width:100%;height:90px;border-radius:9px;border:1.5px dashed var(--bd2);background:var(--card);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;cursor:pointer';
+    var hint=dv('');hint.style.cssText='font-size:11px;color:var(--m2);text-align:center;padding:6px';hint.textContent='탭해서 선택';
+    box.appendChild(hint);
+    var input=document.createElement('input');input.type='file';input.accept='image/*';
+    input.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%';
+    box.appendChild(input);
+    slot.appendChild(box);
+    var dataUrl=null;
+    input.onchange=function(){
+      var f=input.files[0];if(!f)return;
+      var reader=new FileReader();
+      reader.onload=function(){
+        dataUrl=reader.result;
+        box.innerHTML='';
+        var prevImg=document.createElement('img');prevImg.src=dataUrl;
+        prevImg.style.cssText='width:100%;height:100%;object-fit:cover';
+        box.appendChild(prevImg);
+        box.appendChild(input);
+        input.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%';
+        checkUploadReady();
+      };
+      reader.readAsDataURL(f);
+    };
+    slot.getDataUrl=function(){return dataUrl;};
+    return slot;
+  }
+  var beforeSlot=fileSlot('BEFORE (현장사진)', false);
+  var afterSlot=fileSlot('AFTER (완성본)', true);
+  uploadRow.appendChild(beforeSlot);uploadRow.appendChild(afterSlot);
+  uploadSec.appendChild(uploadRow);
+
+  var uploadBtn=mk('button','');uploadBtn.type='button';uploadBtn.textContent='+ 이 장면 추가하기';
+  uploadBtn.disabled=true;
+  uploadBtn.style.cssText='width:100%;margin-top:12px;padding:10px;border-radius:9px;border:none;background:var(--bd2);color:var(--m2);font-size:13px;font-weight:700;cursor:not-allowed;font-family:inherit';
+  function checkUploadReady(){
+    var ready=!!afterSlot.getDataUrl();
+    uploadBtn.disabled=!ready;
+    uploadBtn.style.background=ready?'var(--ac)':'var(--bd2)';
+    uploadBtn.style.color=ready?'#000':'var(--m2)';
+    uploadBtn.style.cursor=ready?'pointer':'not-allowed';
+  }
+  uploadBtn.onclick=function(){
+    if(!afterSlot.getDataUrl())return;
+    addSceneAndClose({id:'local-'+Date.now(), orig:beforeSlot.getDataUrl(), result:afterSlot.getDataUrl(), label:''}, pickOverlay);
+  };
+  uploadSec.appendChild(uploadBtn);
+  pickCard.appendChild(uploadSec);
+
+  // ── 2) 사이트에서 렌더링한 것들 ──
+  if(candidates.length){
+    var galTitle=dv('');galTitle.style.cssText='font-size:13px;font-weight:800;color:var(--ac);margin-bottom:10px';
+    galTitle.textContent='🖼 사이트에서 렌더링한 것들';
+    pickCard.appendChild(galTitle);
+    var grid=dv('');grid.style.cssText='display:grid;grid-template-columns:repeat(2,1fr);gap:10px';
+    candidates.slice(0,60).forEach(function(cand){
+      var cell=dv('');cell.style.cssText='cursor:pointer;border-radius:10px;overflow:hidden;border:1px solid var(--bd2)';
+      var img=document.createElement('img');img.src=cand.result;img.loading='lazy';
+      img.style.cssText='width:100%;height:150px;object-fit:cover;display:block';
+      cell.appendChild(img);
+      cell.onclick=function(){
+        addSceneAndClose({id:cand.id, orig:cand.orig||cand.origThumb||null, result:cand.result, label:''}, pickOverlay);
+      };
+      grid.appendChild(cell);
+    });
+    pickCard.appendChild(grid);
+  } else {
+    var noGal=dv('');noGal.style.cssText='font-size:12px;color:var(--m2);text-align:center;padding:10px';
+    noGal.textContent='사이트에서 렌더링한 결과물이 아직 없어요. 위에서 직접 업로드해주세요.';
+    pickCard.appendChild(noGal);
+  }
+
+  pickOverlay.appendChild(pickCard);
+  document.body.appendChild(pickOverlay);
+}
+
 // 실제 제안서 이미지를 캔버스에 그려서 콜백으로 넘긴다.
 // scenes 배열 길이에 맞춰 캔버스 높이를 동적으로 계산하는 멀티신 버전.
 function _buildProposalCanvas(data, cb){
   var W=1080;
   var scenes=data.scenes||[];
-  var HEADER_H=140, CLIENT_H=90, SCENE_LABEL_H=44, SCENE_IMG_H=420, SCENE_GAP=28, SUMMARY_TITLE_H=38, LINE_H=32, FOOTER_H=130;
+  var HEADER_H=140, CLIENT_H=(data.budgetText?128:90), SCENE_LABEL_H=44, SCENE_IMG_H=420, SCENE_GAP=28, SUMMARY_TITLE_H=38, LINE_H=32, FOOTER_H=130;
   var pad=44;
 
   // 1단계: 요약 텍스트 줄바꿈 라인 수를 먼저 계산 (임시 캔버스로 measureText)
@@ -786,7 +987,21 @@ function _buildProposalCanvas(data, cb){
   ctx.font='500 20px Helvetica,Arial,sans-serif';
   var dateStr=new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
   ctx.fillText(data.spaceLabel+' · 총 '+scenes.length+'개 장면 · '+dateStr, pad, y);
-  y += (CLIENT_H - (data.client?38:0));
+  y+=32;
+  if(data.budgetText){
+    var budgeW=ctx.measureText(data.budgetText).width; // 임시 측정(폰트 재설정 전) — 아래에서 다시 정확히 측정
+    ctx.font='800 22px Helvetica,Arial,sans-serif';
+    var badgeLabel='예상 공사 비용  '+data.budgetText;
+    var bw=ctx.measureText(badgeLabel).width+36;
+    ctx.fillStyle='#00e5cc';
+    ctx.beginPath();ctx.roundRect?ctx.roundRect(pad,y,bw,42,8):ctx.rect(pad,y,bw,42);ctx.fill();
+    ctx.fillStyle='#062b27';
+    ctx.textBaseline='middle';
+    ctx.fillText(badgeLabel, pad+18, y+22);
+    ctx.textBaseline='top';
+    y+=56;
+  }
+  y += (CLIENT_H - (data.client?38:0) - 32 - (data.budgetText?56:0));
 
   // 장면별 Before/After
   var innerW=W-pad*2;
@@ -3010,6 +3225,7 @@ var G_PROPOSAL = {
   scenes: [], // {id, orig, result, label}
   opts: {
     client: '',
+    description: '', // 자유 서술형 현장/공간 설명 (연식·톤·예산 등을 여기서 파싱해서 요약 생성)
     spaceType: 'residential',
     summary: '',
     company: '',
@@ -3791,23 +4007,38 @@ function _proposalRenderCanvas(ub){
   var head=document.createElement('div');
   head.style.cssText='text-align:center';
   if(scenes.length===0){
-    head.innerHTML='<div style="font-size:16px;font-weight:800;color:var(--t)">📄 제안서에 넣을 장면을 추가해주세요</div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽에서 거실·주방·침실처럼 장면을 원하는 만큼 추가할 수 있어요</div>';
+    head.innerHTML='<div style="font-size:16px;font-weight:800;color:var(--t)">📄 제안서에 넣을 장면을 추가해주세요</div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">거실·주방·침실처럼 장면을 원하는 만큼 추가할 수 있어요</div>';
   } else {
     head.innerHTML='<div style="font-size:16px;font-weight:800;color:var(--t)">장면 '+scenes.length+'개 준비됨</div><div style="font-size:12.5px;color:var(--m2);margin-top:6px">왼쪽에서 내용을 채우고 "제안서 생성하기"를 눌러주세요</div>';
   }
   box.appendChild(head);
 
+  if(scenes.length===0){
+    var addBigBtn=document.createElement('button');
+    addBigBtn.innerHTML='+ 장면 추가하기';
+    addBigBtn.style.cssText='padding:16px 28px;border-radius:14px;border:2px dashed var(--acb);background:var(--acg);color:var(--ac);font-size:15px;font-weight:800;cursor:pointer;font-family:inherit';
+    addBigBtn.onclick=function(){ _proposalOpenAddScenePicker(); };
+    box.appendChild(addBigBtn);
+  }
+
   if(scenes.length>0){
+    var TILE=200;
     var grid=document.createElement('div');
-    grid.style.cssText='display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-width:640px';
+    grid.style.cssText='display:flex;flex-wrap:wrap;gap:14px;justify-content:center;max-width:720px';
     scenes.forEach(function(sc, idx){
+
       var tile=document.createElement('div');
-      tile.style.cssText='width:140px;height:140px;border-radius:14px;overflow:hidden;position:relative;border:2px solid var(--acb);background:var(--c2)';
+      tile.style.cssText='width:'+TILE+'px;height:'+TILE+'px;border-radius:16px;overflow:hidden;position:relative;border:2px solid var(--acb);background:var(--c2)';
       tile.innerHTML='<img src="'+sc.result+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">'+
-        '<div style="position:absolute;top:6px;left:6px;width:20px;height:20px;border-radius:50%;background:var(--ac);color:#000;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center">'+(idx+1)+'</div>'+
-        '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.65);color:#fff;font-size:11px;font-weight:700;padding:5px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(sc.label&&sc.label.trim()?sc.label.trim():'장면 '+(idx+1))+'</div>';
+        '<div style="position:absolute;top:8px;left:8px;width:26px;height:26px;border-radius:50%;background:var(--ac);color:#000;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center">'+(idx+1)+'</div>'+
+        '<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.68);color:#fff;font-size:14px;font-weight:700;padding:8px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(sc.label&&sc.label.trim()?sc.label.trim():'장면 '+(idx+1))+'</div>';
       grid.appendChild(tile);
     });
+    var addTile=document.createElement('div');
+    addTile.style.cssText='width:'+TILE+'px;height:'+TILE+'px;border-radius:16px;border:2px dashed var(--bd2);background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--m2);font-size:28px;font-weight:300';
+    addTile.textContent='+';
+    addTile.onclick=function(){ _proposalOpenAddScenePicker(); };
+    grid.appendChild(addTile);
     box.appendChild(grid);
   }
 }
@@ -3847,7 +4078,7 @@ function sbProposal(p){
       dragHandle.style.cssText='cursor:grab;color:var(--m2);font-size:14px;flex-shrink:0;user-select:none;touch-action:none';
       row.appendChild(dragHandle);
       var thumb=document.createElement('img');thumb.src=sc.result;thumb.loading='lazy';
-      thumb.style.cssText='width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0';
+      thumb.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:7px;flex-shrink:0';
       row.appendChild(thumb);
       var labelIn=document.createElement('input');labelIn.type='text';
       labelIn.placeholder='장면 이름 (거실, 주방...)';
@@ -3857,7 +4088,7 @@ function sbProposal(p){
       row.appendChild(labelIn);
       var rmBtn=mk('button','');rmBtn.type='button';rmBtn.textContent='✕';
       rmBtn.style.cssText='width:24px;height:24px;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:var(--m2);cursor:pointer;font-size:11px';
-      rmBtn.onclick=function(){ scenes.splice(idx,1); renderSceneList(); renderMain('proposal'); };
+      rmBtn.onclick=function(){ scenes.splice(idx,1); renderSB(); renderMain('proposal'); };
       row.appendChild(rmBtn);
       sceneListEl.appendChild(row);
 
@@ -3889,7 +4120,7 @@ function sbProposal(p){
             scenes.splice(fromIdx,1);
             scenes.splice(toIdx,0,item2);
           }
-          renderSceneList();renderMain('proposal');
+          renderSB();renderMain('proposal');
         }
         handleEl.addEventListener('pointerdown', function(e){
           e.preventDefault();
@@ -3912,35 +4143,7 @@ function sbProposal(p){
 
   var addSceneBtn=mk('button','');addSceneBtn.type='button';addSceneBtn.textContent='+ 다른 장면 추가하기';
   addSceneBtn.style.cssText='width:100%;padding:8px;border-radius:8px;border:1px dashed var(--bd2);background:transparent;color:var(--m2);font-size:12px;cursor:pointer;font-family:inherit';
-  addSceneBtn.onclick=function(){
-    var candidates=_proposalGatherCandidates(scenes.map(function(s){return s.id;}));
-    if(!candidates.length){ alert('추가할 수 있는 다른 결과물이 없어요. (Before/After가 모두 있는 항목만 추가할 수 있어요)'); return; }
-    var pickOverlay=dv('');
-    pickOverlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
-    pickOverlay.onclick=function(e){ if(e.target===pickOverlay) document.body.removeChild(pickOverlay); };
-    var pickCard=dv('');
-    pickCard.style.cssText='background:var(--card);border-radius:14px;padding:16px;max-width:400px;width:100%;max-height:80vh;overflow-y:auto';
-    pickCard.onclick=function(e){e.stopPropagation();};
-    var pickTitle=dv('');pickTitle.style.cssText='font-size:14px;font-weight:800;color:var(--t);margin-bottom:10px';
-    pickTitle.textContent='추가할 장면 선택';
-    pickCard.appendChild(pickTitle);
-    var grid=dv('');grid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:8px';
-    candidates.slice(0,60).forEach(function(cand){
-      var cell=dv('');cell.style.cssText='cursor:pointer;border-radius:8px;overflow:hidden;border:1px solid var(--bd2)';
-      var img=document.createElement('img');img.src=cand.result;img.loading='lazy';
-      img.style.cssText='width:100%;height:80px;object-fit:cover;display:block';
-      cell.appendChild(img);
-      cell.onclick=function(){
-        scenes.push({id:cand.id, orig:cand.orig||cand.origThumb||null, result:cand.result, label:''});
-        renderSceneList();renderMain('proposal');
-        document.body.removeChild(pickOverlay);
-      };
-      grid.appendChild(cell);
-    });
-    pickCard.appendChild(grid);
-    pickOverlay.appendChild(pickCard);
-    document.body.appendChild(pickOverlay);
-  };
+  addSceneBtn.onclick=function(){ _proposalOpenAddScenePicker(); };
   wScenes.appendChild(addSceneBtn);
   p.appendChild(wScenes);
 
@@ -3972,6 +4175,26 @@ function sbProposal(p){
   });
   wSpace.appendChild(spaceRow);
   p.appendChild(wSpace);
+
+  // 현장/공간 자유 서술 — "25년된 구축아파트 거실,주방,안방을 크림톤으로, 2500만원 정도" 처럼
+  // 자유롭게 쓰면, 연식·공간·톤·예산을 뽑아서 아래 요약 문구를 프리미엄하게 자동으로 채워준다.
+  var wDesc=dv('ss');wDesc.innerHTML='<div class="lbl">현장/공간 설명 <span class="lbl-en">자유롭게 작성</span></div>';
+  var descTa=document.createElement('textarea');
+  descTa.placeholder='예: 25년된 구축아파트 거실,주방,안방을 따뜻한 크림톤 느낌으로 리모델링했어요. 예산은 2500만원 정도 사용했습니다.';
+  descTa.style.cssText='width:100%;min-height:64px;padding:9px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:12.5px;line-height:1.5;font-family:inherit;box-sizing:border-box;resize:vertical';
+  descTa.value=opts.description;
+  descTa.oninput=function(){ opts.description=descTa.value; };
+  wDesc.appendChild(descTa);
+  var descGenBtn=mk('button','');descGenBtn.type='button';descGenBtn.textContent='✨ 이 설명으로 요약 만들기';
+  descGenBtn.style.cssText='width:100%;margin-top:8px;padding:9px;border-radius:8px;border:1px solid var(--ac);background:var(--acg);color:var(--ac);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+  descGenBtn.onclick=function(){
+    if(!descTa.value.trim()){ alert('현장/공간 설명을 먼저 적어주세요.'); return; }
+    var spaceLbl=(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l;
+    summaryTa.value=_proposalGenerateSummaryFromText(descTa.value, spaceLbl);
+    opts.summary=summaryTa.value;
+  };
+  wDesc.appendChild(descGenBtn);
+  p.appendChild(wDesc);
 
   // 전체 요약
   var wSummary=dv('ss');wSummary.innerHTML='<div class="lbl">전체 디자인 요약 <span class="lbl-en">직접 수정 가능</span></div>';
@@ -4010,12 +4233,14 @@ function sbProposal(p){
   genBtn.onclick=function(){
     if(!scenes.length)return;
     genBtn.disabled=true;genBtn.textContent='생성 중...';
+    var parsedDesc=_proposalParseDescription(opts.description);
     _buildProposalCanvas({
       client:opts.client,
       spaceLabel:(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l||'공간',
       summary:opts.summary,
       company:opts.company,
       contact:opts.contact,
+      budgetText:parsedDesc.budgetManwon?_proposalFormatBudget(parsedDesc.budgetManwon):null,
       scenes:scenes
     }, function(canvas){
       G_PROPOSAL.resultUrl=canvas.toDataURL('image/png');
