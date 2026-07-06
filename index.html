@@ -628,6 +628,22 @@ select option{background:var(--c2)}
 </div></div></div>
 <script>
 var FAL_KEY = localStorage.getItem('clover_fal_key') || localStorage.getItem('clover_fal_key_platform') || "";
+// 신규(비관리자) 회원은 로그인 직후 서버에서 공용 fal_key를 비동기로 받아온다.
+// 그 요청이 아직 끝나기 전에 사용자가 바로 "생성하기"를 누르면 키가 없어서 실패/로컬처리로
+// 새버리는 경쟁 상태(race condition)가 생길 수 있어서, 짧게 기다렸다가 재확인하는 헬퍼를 둔다.
+var _falKeyFetchPending = false;
+function _ensureFalKeyThen(cb, maxWaitMs){
+  maxWaitMs = maxWaitMs || 4000;
+  if(FAL_KEY || !_falKeyFetchPending){ cb(); return; }
+  var waited=0;
+  var iv=setInterval(function(){
+    waited += 150;
+    if(FAL_KEY || !_falKeyFetchPending || waited >= maxWaitMs){
+      clearInterval(iv);
+      cb();
+    }
+  }, 150);
+}
 
 
 // ── 다운로드 함수 (페이지 이동 없음) ──────────────────────────
@@ -4957,44 +4973,55 @@ function _shortsLoadFFmpeg(){
   if(_shortsFFmpegInstance) return Promise.resolve(_shortsFFmpegInstance);
   if(_shortsFFmpegLoading) return _shortsFFmpegLoading;
   _shortsFFmpegLoading=new Promise(function(resolve, reject){
-    if(window.FFmpegWASM){ afterScriptLoaded(); return; }
-    var s=document.createElement('script');
-    s.src='https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
-    s.onload=afterScriptLoaded;
-    s.onerror=function(){ reject(new Error('ffmpeg.js 로드 실패')); };
-    document.head.appendChild(s);
     function afterScriptLoaded(){
       try{
-        var ffmpeg=new window.FFmpegWASM.FFmpeg();
-        ffmpeg.load({
-          coreURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-          wasmURL:'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
-        }).then(function(){
+        if(!window.FFmpeg || !window.FFmpeg.createFFmpeg){
+          reject(new Error('[쇼츠 MP4] FFmpeg 전역 객체를 찾을 수 없음 (window.FFmpeg.createFFmpeg 없음)'));
+          return;
+        }
+        var ffmpeg=window.FFmpeg.createFFmpeg({
+          log:true,
+          corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js'
+        });
+        console.log('[쇼츠 MP4] ffmpeg.load() 시작...');
+        ffmpeg.load().then(function(){
+          console.log('[쇼츠 MP4] ffmpeg.load() 완료');
           _shortsFFmpegInstance=ffmpeg;
           resolve(ffmpeg);
-        }).catch(reject);
-      }catch(e){ reject(e); }
+        }).catch(function(e){
+          console.error('[쇼츠 MP4] ffmpeg.load() 실패:', e);
+          reject(e);
+        });
+      }catch(e){
+        console.error('[쇼츠 MP4] FFmpeg 초기화 중 예외:', e);
+        reject(e);
+      }
     }
+    if(window.FFmpeg && window.FFmpeg.createFFmpeg){ afterScriptLoaded(); return; }
+    var s=document.createElement('script');
+    s.src='https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
+    s.onload=function(){ console.log('[쇼츠 MP4] ffmpeg.min.js 로드 완료'); afterScriptLoaded(); };
+    s.onerror=function(){ console.error('[쇼츠 MP4] ffmpeg.min.js 스크립트 로드 실패 (네트워크/CDN 차단 가능성)'); reject(new Error('ffmpeg.js 로드 실패')); };
+    document.head.appendChild(s);
   });
   return _shortsFFmpegLoading;
 }
-// webmBlob → mp4 Blob. onProgress(0~1)로 진행률 콜백. 실패하면 reject(그러면 호출부가 webm으로 폴백).
+// webmBlob → mp4 Blob. onProgress(0~1)로 진행률 콜백. 실패하면 reject(그러면 호출부가 webm으로 폴백하되, 콘솔에 원인이 남는다).
 function _shortsTranscodeToMp4(webmBlob, onProgress){
   return _shortsLoadFFmpeg().then(function(ffmpeg){
-    var progressHandler=function(ev){ if(onProgress) onProgress(Math.max(0,Math.min(1,ev.progress||0))); };
-    ffmpeg.on('progress', progressHandler);
-    return webmBlob.arrayBuffer().then(function(buf){
-      return ffmpeg.writeFile('input.webm', new Uint8Array(buf));
+    var progressHandler=function(ev){ if(onProgress) onProgress(Math.max(0,Math.min(1,(ev&&ev.ratio)||0))); };
+    ffmpeg.setProgress(progressHandler);
+    return fetch(URL.createObjectURL(webmBlob)).then(function(r){return r.arrayBuffer();}).then(function(buf){
+      ffmpeg.FS('writeFile','input.webm', new Uint8Array(buf));
+      console.log('[쇼츠 MP4] 입력 파일 기록 완료, 인코딩 시작');
+      return ffmpeg.run('-i','input.webm','-c:v','libx264','-preset','veryfast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','output.mp4');
     }).then(function(){
-      return ffmpeg.exec(['-i','input.webm','-c:v','libx264','-preset','veryfast','-crf','23','-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart','output.mp4']);
-    }).then(function(){
-      return ffmpeg.readFile('output.mp4');
-    }).then(function(data){
-      ffmpeg.off('progress', progressHandler);
-      try{ ffmpeg.deleteFile('input.webm'); ffmpeg.deleteFile('output.mp4'); }catch(e){}
+      console.log('[쇼츠 MP4] 인코딩 완료, 결과 파일 읽는 중');
+      var data=ffmpeg.FS('readFile','output.mp4');
+      try{ ffmpeg.FS('unlink','input.webm'); ffmpeg.FS('unlink','output.mp4'); }catch(e){}
       return new Blob([data.buffer], {type:'video/mp4'});
     }).catch(function(err){
-      ffmpeg.off('progress', progressHandler);
+      console.error('[쇼츠 MP4] 변환 단계 실패:', err);
       throw err;
     });
   });
@@ -5082,7 +5109,7 @@ function _shortsGenerate(){
         var rawBlob=new Blob(chunks,{type:mimeType});
         var needsTranscode = !mimeType.includes('mp4');
 
-        function finalize(finalBlob, finalExt){
+        function finalize(finalBlob, finalExt, transcodeFailed){
           var url=URL.createObjectURL(finalBlob);
           G_SHORTS.resultUrl=url;
           function doDownload(){
@@ -5095,7 +5122,9 @@ function _shortsGenerate(){
           if(dlBtn)dlBtn.onclick=doDownload;
           if(dlWrap){dlWrap.style.display='';}
           if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
-          if(progTxt)progTxt.textContent='✅ 완성! 메인 화면에서 바로 다운로드하세요.';
+          if(progTxt)progTxt.textContent = transcodeFailed
+            ? '✅ 완성! (MP4 변환에 실패해 WebM으로 대신 받아져요 — 브라우저 콘솔에 원인이 남아있어요)'
+            : '✅ 완성! 메인 화면에서 바로 다운로드하세요.';
           if(progFill)progFill.style.width='100%';
           // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
           // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
@@ -5119,8 +5148,8 @@ function _shortsGenerate(){
           }).then(function(mp4Blob){
             finalize(mp4Blob, 'mp4');
           }).catch(function(err){
-            console.warn('[쇼츠] MP4 변환 실패, webm으로 대신 제공합니다:', err);
-            finalize(rawBlob, 'webm');
+            console.error('[쇼츠] MP4 변환 실패, webm으로 대신 제공합니다. 원인:', err);
+            finalize(rawBlob, 'webm', true);
           });
         } else {
           finalize(rawBlob, 'mp4');
@@ -5190,21 +5219,31 @@ function _shortsGenerate(){
 // ── 전환 효과음(스윽~) 합성 ──────────────────────────────────────
 // 별도 음원 파일 없이, 화이트노이즈를 대역통과 필터로 스윕해서 가볍고 잔잔한 "스윽" 소리를 그때그때 만든다.
 function _shortsPlaySwoosh(audioCtx, dest, atTime, volume){
-  var duration=0.38;
+  var duration=0.32;
   var bufferSize=Math.max(1,Math.round(audioCtx.sampleRate*duration));
   var buffer=audioCtx.createBuffer(1,bufferSize,audioCtx.sampleRate);
   var data=buffer.getChannelData(0);
   for(var i=0;i<bufferSize;i++){ data[i]=Math.random()*2-1; }
   var noise=audioCtx.createBufferSource();noise.buffer=buffer;
-  var filter=audioCtx.createBiquadFilter();filter.type='bandpass';filter.Q.value=1.1;
-  filter.frequency.setValueAtTime(220,atTime);
-  filter.frequency.exponentialRampToValueAtTime(3400,atTime+duration*0.4);
-  filter.frequency.exponentialRampToValueAtTime(200,atTime+duration);
+
+  // 하이패스로 저음의 "먹먹함"을 걷어내고, 밝고 바람 소리 같은 성분만 남긴다
+  var hp=audioCtx.createBiquadFilter();hp.type='highpass';hp.Q.value=0.7;
+  hp.frequency.setValueAtTime(600,atTime);
+  hp.frequency.exponentialRampToValueAtTime(4200,atTime+duration*0.42);
+  hp.frequency.exponentialRampToValueAtTime(900,atTime+duration);
+
+  // 대역통과로 "쉭~" 하는 결을 얹어서 밋밋하지 않게
+  var bp=audioCtx.createBiquadFilter();bp.type='bandpass';bp.Q.value=1.6;
+  bp.frequency.setValueAtTime(1200,atTime);
+  bp.frequency.exponentialRampToValueAtTime(6500,atTime+duration*0.42);
+  bp.frequency.exponentialRampToValueAtTime(1500,atTime+duration);
+
   var g=audioCtx.createGain();
   g.gain.setValueAtTime(0.0001,atTime);
-  g.gain.exponentialRampToValueAtTime(Math.max(0.001,volume),atTime+duration*0.12);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.001,volume),atTime+duration*0.16);
   g.gain.exponentialRampToValueAtTime(0.0001,atTime+duration);
-  noise.connect(filter);filter.connect(g);g.connect(dest);
+
+  noise.connect(hp);hp.connect(bp);bp.connect(g);g.connect(dest);
   noise.start(atTime);noise.stop(atTime+duration+0.02);
 }
 // 타임라인의 장면 전환(wipe/trans) 시점마다 효과음을 미리 예약 재생.
@@ -5212,7 +5251,7 @@ function _shortsPlaySwoosh(audioCtx, dest, atTime, volume){
 function _shortsScheduleSwooshes(audioCtx, dest, timeline, baseTime){
   timeline.forEach(function(seg){
     if(seg.type==='wipe'||seg.type==='trans'){
-      _shortsPlaySwoosh(audioCtx, dest, baseTime+seg.start, 0.5);
+      _shortsPlaySwoosh(audioCtx, dest, baseTime+seg.start, 0.75);
     }
   });
 }
@@ -8082,6 +8121,14 @@ function runTool(){
 }
 
 function _runToolWithPrompt(translatedPrompt){
+  // 신규 회원은 로그인 직후 공용 fal_key를 서버에서 비동기로 받아오는 중일 수 있다.
+  // 그 요청이 끝나기 전에 바로 생성 버튼을 눌러도 실패/로컬처리로 새지 않도록, 최대 4초까지
+  // 기다렸다가(키가 그 사이 도착하면 즉시) 실제 생성 로직을 진행한다.
+  _ensureFalKeyThen(function(){
+    _runToolWithPromptActual(translatedPrompt);
+  });
+}
+function _runToolWithPromptActual(translatedPrompt){
   var tab=getTab(G.wf);
 
   var task={
@@ -11500,6 +11547,7 @@ function onSupaLogin(user){
       //  Supabase SQL Editor에서 아래 함수를 먼저 만들어둬야 함 — get_platform_fal_key())
       if(!FAL_KEY && dbRole!=='admin'){
         console.log('[fal_key] 내 계정에 키 없음 → 공용(플랫폼) 키 요청 중...');
+        _falKeyFetchPending = true;
         _supa.rpc('get_platform_fal_key').then(function(pr){
           if(pr&&pr.data){
             FAL_KEY = pr.data;
@@ -11508,8 +11556,10 @@ function onSupaLogin(user){
           } else {
             console.warn('[fal_key] ❌ 공용 키를 못 받아왔습니다. get_platform_fal_key() 함수가 Supabase에 없거나 관리자 계정에 fal_key가 비어있을 수 있어요.', pr&&pr.error);
           }
+          _falKeyFetchPending = false;
         }).catch(function(e){
           console.warn('[fal_key] ❌ 공용 키 요청 실패:', e);
+          _falKeyFetchPending = false;
         });
       }
       // 관리자가 개별 회원에게 따로 풀어준 레퍼런스 슬롯 개수 (없으면 null = 플랜 기준)
