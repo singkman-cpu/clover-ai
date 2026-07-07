@@ -3423,6 +3423,21 @@ function sbWorld3d(p){
   panoWrap.appendChild(panoHint);
   p.appendChild(panoWrap);
 
+  var multiWrap=dv('ss');
+  var multiLabel=document.createElement('label');
+  multiLabel.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);cursor:pointer;padding:8px 10px;background:var(--c2);border-radius:8px;margin-top:6px';
+  var multiCk=document.createElement('input');
+  multiCk.type='checkbox';multiCk.id='w3d-multiangle-ck';
+  multiCk.checked=!!G.tabs.world3d.multiAngle;
+  multiCk.style.cssText='width:16px;height:16px;accent-color:var(--ac);cursor:pointer';
+  multiCk.onchange=function(){ G.tabs.world3d.multiAngle=multiCk.checked; };
+  multiLabel.appendChild(multiCk);
+  var multiText=document.createElement('span');
+  multiText.innerHTML='<strong style="color:var(--ac)">여러 각도로 정확도 향상 (베타)</strong> — 좌/우 각도를 자동 생성해서 함께 보내요, 시간이 조금 더 걸려요';
+  multiLabel.appendChild(multiText);
+  multiWrap.appendChild(multiLabel);
+  p.appendChild(multiWrap);
+
   var timeHint=dv('');timeHint.style.cssText='font-size:11px;color:var(--ac);margin-bottom:8px;padding:8px 10px;background:var(--acg);border-radius:8px;line-height:1.5';
   timeHint.innerHTML='⏱ 생성에 보통 <strong>7분</strong> 정도 걸려요 (서버가 혼잡하면 10분 이상 걸릴 수 있어요).<br>⚠️ 완료되기 전까지 <strong>새로고침하지 마세요</strong> — 크레딧이 차감된 작업을 잃어버릴 수 있어요.';
   p.appendChild(timeHint);
@@ -5843,6 +5858,10 @@ function loadF(f,key){
       _infoImg.src=v;
       var crl=gE('cr-l');if(crl&&FAL_KEY)crl.textContent='fal.ai ✓';
       renderMain(G.wf);
+      // VR 투어 탭에 직접 업로드한 경우에도, 갤러리에서 보낼 때와 동일하게 저해상도 사진은 자동 업스케일
+      // (이 처리가 빠져있으면 대부분의 사용자(직접 업로드)에게는 화질 보정이 전혀 적용되지 않아,
+      //  World Labs 3D 복원 결과가 뭉개지고 노이즈가 심해지는 원인이 됨)
+      if(G.wf==='world3d') _w3dMaybeUpscaleSrc(v);
     } else if(key==='end'){
       G.tabs.video.endImg=v;
     } else if(key==='ref'){
@@ -6660,7 +6679,10 @@ function _w3dMaybeUpscaleSrc(src){
     var tab=getTab('world3d');
     if(tab.inputImg!==src) return; // 그 사이에 사용자가 다른 이미지를 새로 올렸으면 건너뜀
     var noteEl=gE('w3d-upscale-note');
-    if(noteEl) noteEl.textContent='🔍 사진이 작아서 화질 보정 중...';
+    // 참고: 1K 렌더링을 여기서 2배로 업스케일해도 픽셀 사이즈는 2K와 비슷해지지만, 이건 AI가 "그럴듯하게 추정한"
+    // 디테일이라 처음부터 2K로 렌더링한 것보다 3D 복원 결과가 덜 정교할 수 있음 — 그래서 안내 문구를 남겨둠.
+    var recoNote='(참고: 다음엔 렌더링/디자인 단계에서 처음부터 2K 해상도로 만들면 VR 화질이 더 좋아져요)';
+    if(noteEl) noteEl.textContent='🔍 사진이 작아서 화질 보정 중... '+recoNote;
     _w3dEnsurePublicUrl(src).then(function(publicUrl){
       falRun('fal-ai/topaz/upscale/image', {image_url:publicUrl, upscale_factor:2, model:'CGI'},
         function(d){
@@ -6669,13 +6691,15 @@ function _w3dMaybeUpscaleSrc(src){
           if(url && tab2.inputImg===src){
             tab2.inputImg=url;
             if(G.wf==='world3d') renderSB();
-          } else if(noteEl){ noteEl.textContent=''; }
+            var noteEl2=gE('w3d-upscale-note');
+            if(noteEl2) noteEl2.textContent='✅ 화질 보정 완료. '+recoNote;
+          } else if(noteEl){ noteEl.textContent=recoNote; }
         },
         function(err){
           console.warn('[VR 투어] 자동 업스케일 실패, 원본 사진으로 계속 진행:', err);
-          if(noteEl) noteEl.textContent='';
+          if(noteEl) noteEl.textContent=recoNote;
         });
-    }).catch(function(){ if(noteEl) noteEl.textContent=''; });
+    }).catch(function(){ if(noteEl) noteEl.textContent=recoNote; });
   };
   img.onerror=function(){};
   img.src=src;
@@ -7091,6 +7115,25 @@ function _w3dGeneratePanorama(imageUrl, onDone, onErr){
     onDone(url);
   }, function(e){ onErr(e); });
 }
+function _w3dGenerateSideAngle(imageUrl, direction, onDone, onErr){
+  // direction: 'left' | 'right' — 기존 "AI 편집 > 뷰·구도 변환" 탭의 view_left/view_right 프리셋과
+  // 완전히 같은 프롬프트를 재사용해서, 같은 디자인의 좌/우 각도 이미지를 만듦 (World Labs 멀티이미지용)
+  var prompts = {
+    left: 'Take this photo and regenerate it as if the camera had been physically rotated approximately 30-45 degrees to the LEFT around its current position, panning the view leftward. This is a mandatory, large, unmistakable viewpoint change — not a subtle crop, zoom, or minor reframing. Self-check before finishing: compare your result to the original photo — if more than roughly 30% of the framing/composition still overlaps with the original (same walls in the same position, same furniture in the same position on screen), you have FAILED this task and must regenerate with a more dramatic leftward rotation. Reveal walls, furniture and areas of the room that were not visible (or barely visible) in the original photo, intelligently and consistently extending the same interior design, materials, color palette and lighting mood into the newly revealed area. Keep it the exact same real room, same style, same quality — just seen from a substantially different, further-left camera position. Photorealistic architectural photography.',
+    right: 'Take this photo and regenerate it as if the camera had been physically rotated approximately 30-45 degrees to the RIGHT around its current position, panning the view rightward. This is a mandatory, large, unmistakable viewpoint change — not a subtle crop, zoom, or minor reframing. Self-check before finishing: compare your result to the original photo — if more than roughly 30% of the framing/composition still overlaps with the original (same walls in the same position, same furniture in the same position on screen), you have FAILED this task and must regenerate with a more dramatic rightward rotation. Reveal walls, furniture and areas of the room that were not visible (or barely visible) in the original photo, intelligently and consistently extending the same interior design, materials, color palette and lighting mood into the newly revealed area. Keep it the exact same real room, same style, same quality — just seen from a substantially different, further-right camera position. Photorealistic architectural photography.'
+  };
+  falRun('fal-ai/nano-banana-pro/edit', {
+    prompt: prompts[direction],
+    image_urls: [imageUrl],
+    num_images: 1,
+    resolution: '2K',
+    output_format: 'jpeg'
+  }, function(d){
+    var url = falExtractImageUrl(d);
+    if(!url){ onErr(new Error(direction+' 각도 생성 결과를 찾지 못했습니다')); return; }
+    onDone(url);
+  }, function(e){ onErr(e); });
+}
 function _w3dTabStart(){
   var tab=getTab('world3d');
   if(!tab.inputImg){ alert('먼저 이미지를 업로드해주세요.'); return; }
@@ -7107,9 +7150,28 @@ function _w3dTabStart(){
 
   var srcImg=tab.inputImg;
   // 일반 사진(파노라마 체크 안 함)이면 항상 자동으로 360도 보정을 시도한다 — 고객에게는 따로 묻지 않음(내부 처리)
-  var _needsAutoPano = W3D_AUTOPANO_ENABLED && !tab.isPano;
+  // 단, "여러 각도로 정확도 향상" 모드를 켰으면 파노라마 변환과는 서로 다른 접근이라 자동 파노라마는 건너뜀
+  var _multiAngleOn = !!tab.multiAngle && !tab.isPano;
+  var _needsAutoPano = W3D_AUTOPANO_ENABLED && !tab.isPano && !_multiAngleOn;
 
   _w3dEnsurePublicUrl(srcImg).then(function(publicUrl){
+    if(_multiAngleOn){
+      if(statusEl) statusEl.textContent='좌측 각도 생성 중...';
+      return new Promise(function(resolve){
+        _w3dGenerateSideAngle(publicUrl, 'left', function(leftUrl){
+          if(statusEl) statusEl.textContent='우측 각도 생성 중...';
+          _w3dGenerateSideAngle(publicUrl, 'right', function(rightUrl){
+            resolve({multi:true, front:publicUrl, left:leftUrl, right:rightUrl});
+          }, function(err){
+            console.warn('[VR 투어] 우측 각도 생성 실패, 좌측만 사용:', err);
+            resolve({multi:true, front:publicUrl, left:leftUrl, right:null});
+          });
+        }, function(err){
+          console.warn('[VR 투어] 각도 생성 실패, 일반 단일 이미지 방식으로 진행:', err);
+          resolve({url: publicUrl, isPano: !!tab.isPano});
+        });
+      });
+    }
     if(!_needsAutoPano){
       return {url: publicUrl, isPano: !!tab.isPano};
     }
@@ -7124,15 +7186,24 @@ function _w3dTabStart(){
     });
   }).then(function(imgResult){
     if(statusEl) statusEl.textContent='VR 투어 생성 요청 중...';
+    var reqBody = imgResult.multi ? {
+      action:'submit',
+      imageUrls: [
+        {url: imgResult.front, azimuth: 0}
+      ].concat(imgResult.left ? [{url: imgResult.left, azimuth: -35}] : [])
+        .concat(imgResult.right ? [{url: imgResult.right, azimuth: 35}] : []),
+      model:'marble-1.1',
+      displayName:'CloverAI 3D Tour'
+    } : {
+      action:'submit', imageUrl:imgResult.url,
+      model:'marble-1.1', // 화질 최우선 요청 — draft보다 느리지만 훨씬 고품질
+      isPano: imgResult.isPano,
+      displayName:'CloverAI 3D Tour'
+    };
     return fetch(SUPA_URL+'/functions/v1/world-generate',{
       method:'POST',
       headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({
-        action:'submit', imageUrl:imgResult.url,
-        model:'marble-1.1', // 화질 최우선 요청 — draft보다 느리지만 훨씬 고품질
-        isPano: imgResult.isPano,
-        displayName:'CloverAI 3D Tour'
-      })
+      body:JSON.stringify(reqBody)
     });
   }).then(function(r){return r.json();}).then(function(d){
     if(d.error){ throw new Error((d.error&&d.error.message)?d.error.message:String(d.error)); }
@@ -12215,6 +12286,9 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
     var stopped = false;
     var clock = new THREE.Clock();
     var forward = new THREE.Vector3(), right = new THREE.Vector3(), moveDir = new THREE.Vector3();
+    // 촬영 원점에서 너무 멀리 벗어나면, World Labs가 실제로 본 적 없는 영역(추측/할루시네이션된 부분)에
+    // 들어가게 되어 형태가 뭉개지고 노이즈가 심해짐 — 화질이 검증된 범위 안에서만 걸어다니도록 부드럽게 제한
+    var maxWalkRadius = 5.5 * metricScale;
     function animate(){
       if(stopped) return;
       requestAnimationFrame(animate);
@@ -12240,7 +12314,15 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
       if(moveDir.lengthSq()>0){
         moveDir.normalize();
         var speed = moveSpeed * ((!isTouch && keys['shift']) ? 2.2 : 1);
-        camera.position.addScaledVector(moveDir, speed*dt);
+        var nx = camera.position.x + moveDir.x*speed*dt;
+        var nz = camera.position.z + moveDir.z*speed*dt;
+        var distFromOrigin = Math.hypot(nx, nz);
+        if(distFromOrigin > maxWalkRadius){
+          var pull = maxWalkRadius / distFromOrigin;
+          nx *= pull; nz *= pull;
+        }
+        camera.position.x = nx;
+        camera.position.z = nz;
         camera.position.y = 0; // 사람 눈높이로 고정 — 위아래 이동 없음
       }
 
