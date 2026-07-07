@@ -7263,7 +7263,7 @@ function _addRoomFiles(fileList){
     if(tab.rooms.length>=8) return; // World Labs 멀티이미지 최대 8장
     var r=new FileReader();
     r.onload=function(ev){
-      tab.rooms.push({url:ev.target.result, label:'공간 '+(tab.rooms.length+1)});
+      tab.rooms.push({url:ev.target.result, label:'공간 '+(tab.rooms.length+1), azimuth:null});
       _renderRoomList();
     };
     r.readAsDataURL(f);
@@ -7292,6 +7292,16 @@ function _w3dRefreshButtonStates(){
     roomBtn.style.opacity=hasRooms?'1':'0.45';
   }
 }
+var W3D_CLOCK_POSITIONS=[
+  {v:0,   l:'12시 (정면)'},
+  {v:45,  l:'1~2시'},
+  {v:90,  l:'3시 (오른쪽)'},
+  {v:135, l:'4~5시'},
+  {v:180, l:'6시 (뒤쪽)'},
+  {v:225, l:'7~8시'},
+  {v:270, l:'9시 (왼쪽)'},
+  {v:315, l:'10~11시'}
+];
 function _renderRoomList(){
   var el=gE('w3d-room-list');
   if(!el) return;
@@ -7299,21 +7309,37 @@ function _renderRoomList(){
   var rooms=tab.rooms||[];
   el.innerHTML='';
   rooms.forEach(function(room, idx){
-    var row=dv('');row.style.cssText='display:flex;align-items:center;gap:8px;background:var(--c3,rgba(255,255,255,.04));border-radius:8px;padding:6px 8px';
+    var row=dv('');row.style.cssText='display:flex;align-items:center;gap:6px;background:var(--c3,rgba(255,255,255,.04));border-radius:8px;padding:6px 8px;flex-wrap:wrap';
     var thumb=document.createElement('img');thumb.src=room.url;
     thumb.style.cssText='width:36px;height:36px;object-fit:cover;border-radius:6px;flex-shrink:0';
     row.appendChild(thumb);
     var labelInput=document.createElement('input');labelInput.type='text';labelInput.value=room.label;
     labelInput.placeholder='예: 거실, 침실, 주방';
-    labelInput.style.cssText='flex:1;min-width:0;background:transparent;border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 8px;border-radius:6px;font-size:12px;font-family:inherit';
+    labelInput.style.cssText='flex:1 1 90px;min-width:0;background:transparent;border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 8px;border-radius:6px;font-size:12px;font-family:inherit';
     labelInput.oninput=function(){ room.label=labelInput.value; };
     row.appendChild(labelInput);
+    var dirSel=document.createElement('select');
+    dirSel.style.cssText='flex:0 0 auto;background:var(--c2,#171e20);border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 6px;border-radius:6px;font-size:11.5px;font-family:inherit';
+    var autoOpt=document.createElement('option');autoOpt.value='';autoOpt.textContent='자동배치';
+    dirSel.appendChild(autoOpt);
+    W3D_CLOCK_POSITIONS.forEach(function(pos){
+      var o=document.createElement('option');o.value=String(pos.v);o.textContent=pos.l;
+      if(room.azimuth===pos.v) o.selected=true;
+      dirSel.appendChild(o);
+    });
+    dirSel.onchange=function(){ room.azimuth = dirSel.value==='' ? null : Number(dirSel.value); };
+    row.appendChild(dirSel);
     var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='×';
     delBtn.style.cssText='background:none;border:none;color:#f87171;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0';
     delBtn.onclick=function(){ _removeRoom(idx); };
     row.appendChild(delBtn);
     el.appendChild(row);
   });
+  if(rooms.length){
+    var hint=dv('');hint.style.cssText='font-size:10.5px;color:var(--t3,var(--m2));line-height:1.5;padding:2px 2px 0';
+    hint.textContent='각 공간이 첫 번째 공간(보통 거실) 기준으로 대략 몇 시 방향에 있는지 골라주세요. 안 고르면 순서대로 자동 배치돼요 — 방향을 아는 만큼 결과가 더 정확해져요.';
+    el.appendChild(hint);
+  }
   _w3dRefreshButtonStates();
 }
 function _w3dRoomStart(){
@@ -7329,15 +7355,21 @@ function _w3dRoomStart(){
   G.HIST.world3d.unshift({id:loadingId, loading:true, wf:'world3d'});
   renderMain('world3d');
 
-  // 방 사진들을 360도 위에 순서대로 균등하게 배치 (azimuth) — World Labs가 그 사이사이를
-  // 자연스럽게(복도, 전이 공간 등) 창의적으로 이어붙여줌
+  // 방향을 직접 고른 공간은 그 각도를 그대로 쓰고, "자동배치"로 둔 공간만 남은 각도 구간에 순서대로 채워넣음
   var n=rooms.length;
-  var step=360/n;
+  var autoStep=360/n;
+  var autoIdx=0;
+  var azimuths=rooms.map(function(room){
+    if(room.azimuth!=null) return room.azimuth;
+    var a=Math.round(autoIdx*autoStep);
+    autoIdx++;
+    return a;
+  });
 
   Promise.all(rooms.map(function(room){ return _w3dEnsurePublicUrl(room.url); }))
     .then(function(publicUrls){
       if(statusEl) statusEl.textContent='VR 투어 생성 요청 중...';
-      var imageUrls=publicUrls.map(function(url,i){ return {url:url, azimuth: Math.round(i*step)}; });
+      var imageUrls=publicUrls.map(function(url,i){ return {url:url, azimuth: azimuths[i]}; });
       return fetch(SUPA_URL+'/functions/v1/world-generate',{
         method:'POST',
         headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
