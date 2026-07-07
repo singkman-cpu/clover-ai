@@ -7307,6 +7307,7 @@ function _renderRoomList(){
   if(!el) return;
   var tab=getTab('world3d');
   var rooms=tab.rooms||[];
+  var showDir=!!tab.roomShowDirections;
   el.innerHTML='';
   rooms.forEach(function(room, idx){
     var row=dv('');row.style.cssText='display:flex;align-items:center;gap:6px;background:var(--c3,rgba(255,255,255,.04));border-radius:8px;padding:6px 8px;flex-wrap:wrap';
@@ -7318,17 +7319,19 @@ function _renderRoomList(){
     labelInput.style.cssText='flex:1 1 90px;min-width:0;background:transparent;border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 8px;border-radius:6px;font-size:12px;font-family:inherit';
     labelInput.oninput=function(){ room.label=labelInput.value; };
     row.appendChild(labelInput);
-    var dirSel=document.createElement('select');
-    dirSel.style.cssText='flex:0 0 auto;background:var(--c2,#171e20);border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 6px;border-radius:6px;font-size:11.5px;font-family:inherit';
-    var autoOpt=document.createElement('option');autoOpt.value='';autoOpt.textContent='자동배치';
-    dirSel.appendChild(autoOpt);
-    W3D_CLOCK_POSITIONS.forEach(function(pos){
-      var o=document.createElement('option');o.value=String(pos.v);o.textContent=pos.l;
-      if(room.azimuth===pos.v) o.selected=true;
-      dirSel.appendChild(o);
-    });
-    dirSel.onchange=function(){ room.azimuth = dirSel.value==='' ? null : Number(dirSel.value); };
-    row.appendChild(dirSel);
+    if(showDir){
+      var dirSel=document.createElement('select');
+      dirSel.style.cssText='flex:0 0 auto;background:var(--c2,#171e20);border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 6px;border-radius:6px;font-size:11.5px;font-family:inherit';
+      var autoOpt=document.createElement('option');autoOpt.value='';autoOpt.textContent='자동배치';
+      dirSel.appendChild(autoOpt);
+      W3D_CLOCK_POSITIONS.forEach(function(pos){
+        var o=document.createElement('option');o.value=String(pos.v);o.textContent=pos.l;
+        if(room.azimuth===pos.v) o.selected=true;
+        dirSel.appendChild(o);
+      });
+      dirSel.onchange=function(){ room.azimuth = dirSel.value==='' ? null : Number(dirSel.value); };
+      row.appendChild(dirSel);
+    }
     var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='×';
     delBtn.style.cssText='background:none;border:none;color:#f87171;font-size:16px;cursor:pointer;padding:0 4px;flex-shrink:0';
     delBtn.onclick=function(){ _removeRoom(idx); };
@@ -7336,8 +7339,17 @@ function _renderRoomList(){
     el.appendChild(row);
   });
   if(rooms.length){
-    var hint=dv('');hint.style.cssText='font-size:10.5px;color:var(--t3,var(--m2));line-height:1.5;padding:2px 2px 0';
-    hint.textContent='각 공간이 첫 번째 공간(보통 거실) 기준으로 대략 몇 시 방향에 있는지 골라주세요. 안 고르면 순서대로 자동 배치돼요 — 방향을 아는 만큼 결과가 더 정확해져요.';
+    var toggleWrap=dv('');toggleWrap.style.cssText='margin-top:4px';
+    var toggleLink=mk('button','');toggleLink.type='button';
+    toggleLink.textContent=showDir?'▲ 방향 지정 닫기':'🎯 방향 직접 지정하기 (선택, 정확도↑)';
+    toggleLink.style.cssText='background:none;border:none;color:var(--ac);font-size:11px;cursor:pointer;padding:2px 2px;text-decoration:underline;font-family:inherit';
+    toggleLink.onclick=function(){ tab.roomShowDirections=!showDir; _renderRoomList(); };
+    toggleWrap.appendChild(toggleLink);
+    el.appendChild(toggleWrap);
+    var hint=dv('');hint.style.cssText='font-size:10.5px;color:var(--t3,var(--m2));line-height:1.5;padding:4px 2px 0';
+    hint.textContent=showDir
+      ? '각 공간이 첫 번째 공간(보통 거실) 기준으로 대략 몇 시 방향에 있는지 골라주세요. 안 고르면 그 공간만 자동 배치돼요.'
+      : '그냥 사진만 넣고 바로 만들어도 돼요 — AI가 자연스러운 집 구조로 알아서 이어붙여봐요. 결과가 이상하면 그때 방향을 지정해서 다시 만들어보세요.';
     el.appendChild(hint);
   }
   _w3dRefreshButtonStates();
@@ -7377,6 +7389,7 @@ function _w3dRoomStart(){
           action:'submit',
           imageUrls: imageUrls,
           reconstructImages: false, // 서로 다른 실제 공간을 창의적으로 연결하는 모드 (같은 공간 복원 모드 아님)
+          textPrompt: '이 사진들은 같은 집(또는 같은 건물)의 서로 다른 공간들입니다. 자연스럽게 걸어서 이동 가능한 하나의 집처럼, 각 공간 사이를 현실적인 복도·문·전이 공간으로 이어붙여서 하나의 통일된 3D 공간으로 만들어주세요. 방향이 지정되지 않은 공간은 전체적인 동선이 자연스럽도록 알아서 적절한 위치에 배치해주세요.',
           model:'marble-1.1',
           displayName:'CloverAI 3D Tour (여러 공간)'
         })
