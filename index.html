@@ -7306,6 +7306,7 @@ var W3D_CLOCK_POSITIONS=[
   {v:270, l:'9시 (왼쪽)'},
   {v:315, l:'10~11시'}
 ];
+var W3D_ROOM_TYPES=['거실','주방','안방','작은방','욕실','복도','현관','드레스룸','베란다'];
 function _renderRoomList(){
   var el=gE('w3d-room-list');
   if(!el) return;
@@ -7314,12 +7315,28 @@ function _renderRoomList(){
   var showDir=!!tab.roomShowDirections;
   el.innerHTML='';
   rooms.forEach(function(room, idx){
-    var row=dv('');row.style.cssText='display:flex;align-items:center;gap:6px;background:var(--c3,rgba(255,255,255,.04));border-radius:8px;padding:6px 8px;flex-wrap:wrap';
+    var row=dv('w3d-room-row');row.style.cssText='display:flex;align-items:center;gap:6px;background:var(--c3,rgba(255,255,255,.04));border-radius:8px;padding:6px 8px;flex-wrap:wrap';
+    var dragHandle=dv('');dragHandle.textContent='⠿';
+    dragHandle.style.cssText='cursor:grab;color:var(--m2);font-size:15px;padding:0 1px;flex-shrink:0;user-select:none;touch-action:none;line-height:1';
+    row.appendChild(dragHandle);
     var thumb=document.createElement('img');thumb.src=room.url;
     thumb.style.cssText='width:36px;height:36px;object-fit:cover;border-radius:6px;flex-shrink:0';
     row.appendChild(thumb);
+    var typeSel=document.createElement('select');
+    typeSel.style.cssText='flex:0 0 auto;background:var(--c2,#171e20);border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 4px;border-radius:6px;font-size:11.5px;font-family:inherit;max-width:78px';
+    var pickOpt=document.createElement('option');pickOpt.value='';pickOpt.textContent='빠른선택';
+    typeSel.appendChild(pickOpt);
+    W3D_ROOM_TYPES.forEach(function(t){
+      var o=document.createElement('option');o.value=t;o.textContent=t;
+      typeSel.appendChild(o);
+    });
+    typeSel.onchange=function(){
+      if(typeSel.value){ room.label=typeSel.value; labelInput.value=typeSel.value; }
+      typeSel.value='';
+    };
+    row.appendChild(typeSel);
     var labelInput=document.createElement('input');labelInput.type='text';labelInput.value=room.label;
-    labelInput.placeholder='예: 거실, 침실, 주방';
+    labelInput.placeholder='예: 거실, 침실, 주방 (직접 입력 가능)';
     labelInput.style.cssText='flex:1 1 90px;min-width:0;background:transparent;border:1px solid var(--bd2,rgba(255,255,255,.12));color:var(--t);padding:6px 8px;border-radius:6px;font-size:12px;font-family:inherit';
     labelInput.oninput=function(){ room.label=labelInput.value; };
     row.appendChild(labelInput);
@@ -7341,6 +7358,62 @@ function _renderRoomList(){
     delBtn.onclick=function(){ _removeRoom(idx); };
     row.appendChild(delBtn);
     el.appendChild(row);
+
+    // ── 드래그로 순서 변경 (쇼츠 이미지 목록과 동일한 방식) — 핸들을 누른 채 위/아래로 끌면 순서가 바뀜
+    (function(item, rowEl, handleEl){
+      var dragging=false, order=null, pointerId=null;
+      function computeTargetIdx(clientY){
+        var count=0;
+        order.forEach(function(o){ if(o.i!==order.myIdx && clientY>o.centerY) count++; });
+        return count;
+      }
+      function onMove(e){
+        if(!dragging)return;
+        e.preventDefault();
+        var dy=e.clientY-order.startY;
+        rowEl.style.transform='translateY('+dy+'px)';
+      }
+      function onUp(e){
+        if(!dragging)return;
+        dragging=false;
+        rowEl.style.transform='';
+        rowEl.style.zIndex='';
+        rowEl.style.boxShadow='';
+        rowEl.style.opacity='';
+        try{handleEl.releasePointerCapture(pointerId);}catch(ex){}
+        document.removeEventListener('pointermove',onMove);
+        document.removeEventListener('pointerup',onUp);
+        var arr=getTab('world3d').rooms||[];
+        var fromIdx=arr.indexOf(item);
+        var toIdx=computeTargetIdx(e.clientY);
+        toIdx=Math.max(0,Math.min(arr.length-1,toIdx));
+        if(fromIdx!==-1 && toIdx!==fromIdx){
+          arr.splice(fromIdx,1);
+          arr.splice(toIdx,0,item);
+        }
+        _renderRoomList();
+      }
+      handleEl.addEventListener('pointerdown', function(e){
+        e.preventDefault();
+        dragging=true;
+        pointerId=e.pointerId;
+        try{handleEl.setPointerCapture(pointerId);}catch(ex){}
+        var rows=Array.prototype.slice.call(el.querySelectorAll('.w3d-room-row'));
+        var myIdx=rows.indexOf(rowEl);
+        order={startY:e.clientY, myIdx:myIdx, forEach:function(fn){
+          rows.forEach(function(r,i){
+            var rect=r.getBoundingClientRect();
+            fn({i:i, centerY:rect.top+rect.height/2});
+          });
+        }};
+        rowEl.style.position='relative';
+        rowEl.style.zIndex='50';
+        rowEl.style.boxShadow='0 8px 24px rgba(0,0,0,.45)';
+        rowEl.style.opacity='0.92';
+        document.addEventListener('pointermove',onMove);
+        document.addEventListener('pointerup',onUp);
+      });
+    })(room, row, dragHandle);
   });
   if(rooms.length){
     var toggleWrap=dv('');toggleWrap.style.cssText='margin-top:4px';
