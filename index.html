@@ -7157,7 +7157,11 @@ function _w3dStart(){
 function _w3dEnsurePublicUrl(dataUrlOrHttp){
   if(/^https?:\/\//.test(dataUrlOrHttp)) return Promise.resolve(dataUrlOrHttp);
   return fetch(dataUrlOrHttp).then(function(r){return r.blob();}).then(function(blob){
-    var path=(_supaUser?_supaUser.id:'anon')+'/world3d/'+Date.now()+'.jpg';
+    // Date.now()만 쓰면, 여러 공간 사진을 Promise.all로 동시에 업로드할 때 같은 밀리초에
+    // 두 개 이상의 요청이 겹쳐서 완전히 같은 경로가 생길 수 있음 — 그러면 두 번째 업로드가
+    // 같은 파일을 upsert(덮어쓰기)하려다가 RLS 정책에 걸려 "new row violates row-level security
+    // policy" 에러가 남. 랜덤 문자열을 더해서 항상 고유한 경로가 되도록 함.
+    var path=(_supaUser?_supaUser.id:'anon')+'/world3d/'+Date.now()+'-'+Math.random().toString(36).slice(2,8)+'.jpg';
     return _supa.storage.from('gallery').upload(path, blob, {contentType:'image/jpeg', upsert:true}).then(function(res){
       if(res.error) throw new Error('업로드 실패: '+res.error.message);
       return _supa.storage.from('gallery').getPublicUrl(path).data.publicUrl;
