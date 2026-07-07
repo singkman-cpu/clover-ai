@@ -3439,7 +3439,7 @@ function sbWorld3d(p){
   multiCk.onchange=function(){ G.tabs.world3d.multiAngle=multiCk.checked; };
   multiLabel.appendChild(multiCk);
   var multiText=document.createElement('span');
-  multiText.innerHTML='<strong style="color:var(--ac)">여러 각도로 정확도 향상 (베타)</strong> — 좌/우 각도를 자동 생성해서 함께 보내요, 시간이 조금 더 걸려요';
+  multiText.innerHTML='<strong style="color:var(--ac)">여러 각도 + 뒤쪽 공간 예측 (베타)</strong> — 좌/우 각도를 정확히 만들고, 뒤돌아봤을 때 같은 방이 반복되지 않도록 AI가 이어질 법한 다른 공간을 예측해서 채워요. 시간이 좀 더 걸려요';
   multiLabel.appendChild(multiText);
   multiWrap.appendChild(multiLabel);
   p.appendChild(multiWrap);
@@ -7206,6 +7206,28 @@ function _w3dGenerateSideAngle(imageUrl, direction, onDone, onErr){
     onDone(url);
   }, function(e){ onErr(e); });
 }
+function _w3dGenerateBackSide(imageUrl, onDone, onErr){
+  // 좌/우 각도(_w3dGenerateSideAngle)는 "같은 공간을 더 넓게" 보여주는 거라면,
+  // 이건 완전히 다른 문제를 풂: 카메라 정반대편(azimuth 180)은 원본 사진에 전혀 정보가 없는 영역이라,
+  // World Labs가 그냥 "알고 있는 같은 방을 복붙"해버리는 현상이 생김 (거실 뒤로 돌아봤는데 또 거실이 나오는 등).
+  // 그래서 "같은 방을 회전"이 아니라 "이 공간과 자연스럽게 이어질 법한 *다른* 공간을 상상해서 만들어라"는
+  // 완전히 다른 프롬프트를 씀 — 어디까지나 예측/상상이라 결과 편차가 클 수 있음.
+  var backPrompt = 'Look carefully at this photo and identify what KIND of space it shows (e.g. living room, bedroom, kitchen, cafe interior, building exterior/facade, etc.), then imagine and generate a photorealistic image of a DIFFERENT space that would plausibly and naturally exist directly behind the camera, on the opposite side from what this photo shows (as if the camera had turned 180 degrees around). '+
+    'This must be a genuinely different space, not the same room duplicated, mirrored, or repeated — for example: if this photo shows a living room, generate a natural continuation such as an open kitchen, dining area, entryway, or hallway that would realistically connect to a home like this one; if this photo shows a bedroom, generate a plausible closet, dressing area, or bathroom doorway; if this photo shows a cafe or commercial interior, generate a plausible continuation such as a counter/bar area, another seating zone, or a doorway to a back area; if this photo shows a building exterior/facade, generate a DIFFERENT neighboring building or street/property across from it, in a consistent architectural and neighborhood style — never the same building repeated or mirrored. '+
+    'Match the same overall design style, material palette, color scheme and lighting mood as the original photo, so it reads as genuinely part of the same project or neighborhood — but the content, layout and function of this new space must be clearly different from the original photo, not a copy of it. '+
+    'Photorealistic architectural photography, consistent camera height and lighting with the original.';
+  falRun('fal-ai/nano-banana-pro/edit', {
+    prompt: backPrompt,
+    image_urls: [imageUrl],
+    num_images: 1,
+    resolution: '2K',
+    output_format: 'jpeg'
+  }, function(d){
+    var url = falExtractImageUrl(d);
+    if(!url){ onErr(new Error('뒤쪽 공간 생성 결과를 찾지 못했습니다')); return; }
+    onDone(url);
+  }, function(e){ onErr(e); });
+}
 function _w3dTabStart(){
   var tab=getTab('world3d');
   if(!tab.inputImg){ alert('먼저 이미지를 업로드해주세요.'); return; }
@@ -7233,10 +7255,16 @@ function _w3dTabStart(){
         _w3dGenerateSideAngle(publicUrl, 'left', function(leftUrl){
           if(statusEl) statusEl.textContent='우측 각도 생성 중...';
           _w3dGenerateSideAngle(publicUrl, 'right', function(rightUrl){
-            resolve({multi:true, front:publicUrl, left:leftUrl, right:rightUrl});
+            if(statusEl) statusEl.textContent='뒤쪽 공간 예측 생성 중...';
+            _w3dGenerateBackSide(publicUrl, function(backUrl){
+              resolve({multi:true, front:publicUrl, left:leftUrl, right:rightUrl, back:backUrl});
+            }, function(err){
+              console.warn('[VR 투어] 뒤쪽 공간 생성 실패, 좌우만 사용:', err);
+              resolve({multi:true, front:publicUrl, left:leftUrl, right:rightUrl, back:null});
+            });
           }, function(err){
             console.warn('[VR 투어] 우측 각도 생성 실패, 좌측만 사용:', err);
-            resolve({multi:true, front:publicUrl, left:leftUrl, right:null});
+            resolve({multi:true, front:publicUrl, left:leftUrl, right:null, back:null});
           });
         }, function(err){
           console.warn('[VR 투어] 각도 생성 실패, 일반 단일 이미지 방식으로 진행:', err);
@@ -7263,7 +7291,8 @@ function _w3dTabStart(){
       imageUrls: [
         {url: imgResult.front, azimuth: 0}
       ].concat(imgResult.left ? [{url: imgResult.left, azimuth: -35}] : [])
-        .concat(imgResult.right ? [{url: imgResult.right, azimuth: 35}] : []),
+        .concat(imgResult.right ? [{url: imgResult.right, azimuth: 35}] : [])
+        .concat(imgResult.back ? [{url: imgResult.back, azimuth: 180}] : []),
       model:'marble-1.1',
       displayName:'CloverAI 3D Tour'
     } : {
