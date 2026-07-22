@@ -2591,6 +2591,17 @@ function selectWF(wf){
         } else {
           _draftClear(_shortsDraftKey);
         }
+      } else if(typeof _shortsCloudLoadDraft==='function'){
+        // 로컬엔 없지만 다른 브라우저/기기에서 작업하던 게 클라우드에 있을 수 있으니 확인
+        _shortsCloudLoadDraft(function(cloudDraft){
+          if(!cloudDraft || !cloudDraft.data || !cloudDraft.data.images || !cloudDraft.data.images.length) return;
+          if(G_SHORTS.images.length) return; // 그 사이에 이미 새로 작업 시작했으면 덮어쓰지 않음
+          if(confirm('다른 브라우저/기기에서 작업하던 쇼츠 내용이 있어요 (사진 '+cloudDraft.data.images.length+'장). 불러올까요?')){
+            G_SHORTS.images=cloudDraft.data.images;
+            Object.assign(G_SHORTS.opts, cloudDraft.data.opts||{});
+            renderSB(); renderMain('shorts');
+          }
+        });
       }
     }
   }
@@ -8691,12 +8702,42 @@ function _blobUrlToDataUrl(blobUrl){
     });
   }).catch(function(){return null;});
 }
+// ── 쇼츠 작업중 내용을 클라우드에도 백업 (로컬저장소만으로는 다른 브라우저/기기·캐시 삭제 시
+// 통째로 사라지는 문제가 있어서 추가함) — 'gallery' 스토리지 버킷 안에 JSON 파일로 올려둠.
+// 너무 자주 올리면 낭비라 45초에 한 번만 실제로 업로드함.
+var _shortsLastCloudSave=0;
+function _shortsCloudSaveDraft(snapshot){
+  if(!_supa || !_supaUser) return;
+  var now=Date.now();
+  if(now-_shortsLastCloudSave < 45000) return;
+  _shortsLastCloudSave=now;
+  try{
+    var path=_supaUser.id+'/drafts/shorts-draft.json';
+    var blob=new Blob([JSON.stringify({t:now, data:snapshot})], {type:'application/json'});
+    _supa.storage.from('gallery').upload(path, blob, {contentType:'application/json', upsert:true})
+      .then(function(res){ if(res&&res.error) console.error('[쇼츠 임시저장] 클라우드 백업 실패:', res.error); })
+      .catch(function(e){ console.error('[쇼츠 임시저장] 클라우드 백업 실패(예외):', e); });
+  }catch(e){ console.error('[쇼츠 임시저장] 클라우드 백업 시도 자체 실패:', e); }
+}
+// 클라우드에 백업된 쇼츠 임시저장이 있으면 불러옴 (로컬에 없을 때만 확인 — 다른 브라우저/기기에서
+// 이어서 작업하거나, 캐시가 지워진 경우를 위한 것)
+function _shortsCloudLoadDraft(cb){
+  if(!_supa || !_supaUser){ cb(null); return; }
+  try{
+    var path=_supaUser.id+'/drafts/shorts-draft.json';
+    var publicUrl=_supa.storage.from('gallery').getPublicUrl(path).data.publicUrl;
+    fetch(publicUrl+'?t='+Date.now()) // 캐시 방지
+      .then(function(r){ if(!r.ok) throw new Error('no cloud draft'); return r.json(); })
+      .then(function(parsed){ cb(parsed && parsed.data ? parsed : null); })
+      .catch(function(){ cb(null); });
+  }catch(e){ cb(null); }
+}
 function _shortsSaveDraftAsync(){
   if(!G_SHORTS.images.length) return;
   // 이미 3번 이상 변환에 실패한(죽은) blob은 더 이상 재시도하지 않음 — 무한 재시도로 콘솔에
   // net::ERR_FILE_NOT_FOUND가 계속 쌓이던 문제 방지. 대신 화면에서 "깨짐" 표시로 보여줌.
   var blobImgs=G_SHORTS.images.filter(function(im){return im.img && im.img.indexOf('blob:')===0 && !im._blobDead;});
-  if(!blobImgs.length){ _draftSave(_shortsDraftKey, G_SHORTS); return; } // 변환할 게 없으면 그냥 바로 저장
+  if(!blobImgs.length){ _draftSave(_shortsDraftKey, G_SHORTS); _shortsCloudSaveDraft(G_SHORTS); return; } // 변환할 게 없으면 그냥 바로 저장
   Promise.all(blobImgs.map(function(im){
     return _blobUrlToDataUrl(im.img).then(function(dataUrl){
       if(!dataUrl){
@@ -8717,6 +8758,7 @@ function _shortsSaveDraftAsync(){
     // 복구 불가로 확정된 이미지는 백업에서 아예 빼서, 다음 새로고침 때 깨진 채로 복원되지 않게 함
     snapshot.images=snapshot.images.filter(function(im){return !im._blobDead;});
     try{ localStorage.setItem(_shortsDraftKey, JSON.stringify({t:Date.now(), data:snapshot})); }catch(e){}
+    _shortsCloudSaveDraft(snapshot);
   });
 }
 setInterval(function(){
@@ -15052,8 +15094,9 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
           _supa.from('gallery').insert({
             user_id:_supaUser.id, wf:'world3d', orig_url:thumbUrl||srcImg||null, public_url:thumbUrl||url,
             engine:'world3d', resolution:'', style_key:JSON.stringify({spzUrl:spzUrl||null, metricScale:metricScale||1})
-          }).then(function(){}).catch(function(){});
-        }catch(e){}
+          }).then(function(res){ if(res&&res.error) console.error('[VR 투어] 클라우드 저장 실패:', res.error); })
+            .catch(function(e){ console.error('[VR 투어] 클라우드 저장 실패(예외):', e); });
+        }catch(e){ console.error('[VR 투어] 클라우드 저장 시도 자체 실패:', e); }
       }
     } else {
       var elapsedMin = Math.floor((Date.now()-startTime)/60000);
@@ -21187,7 +21230,11 @@ function loadCloudGallery(){
   // 많이 쓰는 워크플로우가 그 200개를 다 차지해버려서 렌더 실사화·업스케일처럼 상대적으로
   // 적게 쓴 워크플로우는 아예 로드가 안 되는 문제가 있었음(쇼츠 이미지 추가에서도 안 보였음).
   // → 워크플로우별로 각각 최근 120개씩 따로 가져와서 골고루 다 보이게 함.
-  var WF_KEYS=['space','render','edit','video','upscale','shorts'];
+  // ⚠️ 2026-07-22: 'world3d'(VR투어)와 'proposal'(제안서)이 이 목록에서 빠져있었음 — 그동안
+  // 클라우드에 저장은 계속 잘 되고 있었는데(저장 코드는 정상), 새로고침/재접속 시 "불러오는" 이
+  // 목록 자체에 두 워크플로우가 없어서 영영 다시 안 보였던 것. VR투어가 계속 "사라진다"고 느껴졌던
+  // 진짜 원인이 바로 이거였음.
+  var WF_KEYS=['space','render','edit','video','upscale','shorts','world3d','proposal'];
   Promise.all(WF_KEYS.map(function(wf){
     return _supa.from('gallery')
       .select('*')
@@ -21238,7 +21285,7 @@ function loadCloudGallery(){
           }
           return;
         }
-        var tags=[row.engine||'AI', row.resolution||'1K'];
+        var tags = wf==='world3d' ? ['VR 투어'] : [row.engine||'AI', row.resolution||'1K'];
         // style_key에는 사용한 프리셋의 key가 저장되어 있다(world3d는 JSON 메타라서 제외) —
         // 이걸 프리셋 이름으로 되살려서 태그에 넣어야, 새로고침 후에도 우측 상단에 어떤 프리셋으로
         // 만들었는지가 계속 보인다 (예전엔 engine/resolution만 복원해서 새로고침하면 사라졌음).
