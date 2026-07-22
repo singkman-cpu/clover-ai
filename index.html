@@ -21906,6 +21906,11 @@ window._w3dCaptureSpinVideo = function(spzUrl, metricScale, opts, onProgress, on
     function cleanup(){
       stopped=true;
       if(rafId) cancelAnimationFrame(rafId);
+      try{
+        var gl2 = renderer.getContext();
+        var ext2 = gl2 && gl2.getExtension('WEBGL_lose_context');
+        if(ext2) ext2.loseContext();
+      }catch(e){}
       try{ renderer.dispose(); }catch(e){}
     }
 
@@ -22368,9 +22373,11 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb){
     var stopped = false;
     var clock = new THREE.Clock();
     var forward = new THREE.Vector3(), right = new THREE.Vector3(), moveDir = new THREE.Vector3();
-    // 촬영 원점에서 너무 멀리 벗어나면, World Labs가 실제로 본 적 없는 영역(추측/할루시네이션된 부분)에
-    // 들어가게 되어 형태가 뭉개지고 노이즈가 심해짐 — 화질이 검증된 범위 안에서만 걸어다니도록 부드럽게 제한
-    var maxWalkRadius = 4.5 * metricScale; // 5.5→4.5: 벽 충돌 감지가 없는 대신, 반경 자체를 살짝 보수적으로 좁혀서 임시방편으로 보완
+    // ⚠️ 2026-07-22: 예전엔 "촬영 원점에서 너무 멀리 벗어나면 안 됨"이라는 이유로 이동 반경/높이를
+    // 좁게 제한해뒀는데, 항공뷰·조감도로 찍은 사진은 원점 자체가 이미 하늘 높이 있어서 이 제한
+    // 때문에 아예 아래로 못 내려가고 하늘에서만 봐야 하는 상황이 생김 — "바닥"이 실제로 어디인지도
+    // 사진마다 다 달라서 정확히 알 방법이 없음. 그래서 이동 반경·높이 제한을 전부 없애고 완전히
+    // 자유롭게 이동 가능하게 함 (멀리 가는 것도, 하늘 위로 가는 것도, 바닥 아래로 내려가는 것도 전부 허용).
     function animate(){
       if(stopped) return;
       requestAnimationFrame(animate);
@@ -22396,26 +22403,15 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb){
       var speed = moveSpeed * ((!isTouch && keys['shift']) ? 2.2 : 1);
       if(moveDir.lengthSq()>0){
         moveDir.normalize();
-        var nx = camera.position.x + moveDir.x*speed*dt;
-        var nz = camera.position.z + moveDir.z*speed*dt;
-        var distFromOrigin = Math.hypot(nx, nz);
-        if(distFromOrigin > maxWalkRadius){
-          var pull = maxWalkRadius / distFromOrigin;
-          nx *= pull; nz *= pull;
-        }
-        camera.position.x = nx;
-        camera.position.z = nz;
+        camera.position.x += moveDir.x*speed*dt;
+        camera.position.z += moveDir.z*speed*dt;
       }
       // ── Marble과 동일하게 E/Space(위)·Q(아래) 수직 이동, [ ] 확대/축소(FOV) 추가 ──
+      // 위아래 이동 범위도 제한 없이 자유롭게 (하늘 위/바닥 아래 다 허용)
       if(!isTouch){
         var vy = (keys['e']||keys[' ']) ? 1 : (keys['q'] ? -1 : 0);
         if(vy!==0){
-          // ⚠️ 2026-07-22: 위아래 이동을 대칭으로 허용했더니 아래로 계속 내려가면 땅을 뚫고
-          // 지하(원본 사진엔 없던, 완전히 상상된 영역)로 들어가버리는 문제가 있었음.
-          // 위쪽은 좀 더 자유롭게(내려다보기 용도) 허용하되, 아래쪽은 살짝 웅크리는 정도로만
-          // 좁게 제한해서 바닥을 뚫고 들어가지 않게 함.
-          var maxUp = 2.2 * metricScale, maxDown = 0.35 * metricScale;
-          camera.position.y = Math.max(-maxDown, Math.min(maxUp, camera.position.y + vy*speed*dt));
+          camera.position.y += vy*speed*dt;
         }
         if(keys['[']||keys[']']){
           var fovDelta = (keys[']']) ? 1 : -1;
@@ -22430,7 +22426,19 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb){
 
     // 카드가 화면에서 사라지면(다른 탭 이동 등) 메모리 정리
     var key = 'v'+Date.now()+Math.random();
-    window._w3dViewers[key] = function(){ stopped = true; ro.disconnect(); renderer.dispose(); };
+    window._w3dViewers[key] = function(){
+      stopped = true; ro.disconnect();
+      // ⚠️ 2026-07-22: renderer.dispose()만으로는 실제 WebGL 컨텍스트가 브라우저에 바로
+      // 반납되지 않아서, 카드를 여러 번 오가면 컨텍스트가 계속 쌓이다가 브라우저 한도(보통
+      // 8~16개)를 넘기면 "Too many active WebGL contexts" 경고와 함께 오래된 뷰어부터
+      // 화면이 까맣게 사라지는 문제가 있었음 — WEBGL_lose_context로 확실하게 반납함.
+      try{
+        var gl = renderer.getContext();
+        var ext = gl && gl.getExtension('WEBGL_lose_context');
+        if(ext) ext.loseContext();
+      }catch(e){}
+      renderer.dispose();
+    };
     containerEl.dataset.viewerKey = key;
   }catch(e){
     console.warn('[VR 투어 뷰어] 초기화 실패:', e);
