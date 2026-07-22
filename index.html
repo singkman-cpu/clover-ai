@@ -7831,6 +7831,35 @@ function mkBudgetTier(p){
       realismWarn.style.display='none';
     }
     tab.budgetTier=tier;
+    // ⚠️ 2026-07-22 추가: 스타일 프리셋 이름/설명 자체가 "프리미엄·하이엔드·시그니처·럭셔리"처럼
+    // 특정 등급을 암시하는데, 예산으로 계산된 등급(tier)이 그보다 낮으면 경고를 띄움.
+    // (계기: "프리미엄 타운하우스형" 스타일을 골랐는데 예산이 기본형으로 계산돼도 아무 경고 없이
+    // 그대로 진행되던 문제 — 이름과 실제 계산된 예산 등급이 모순되는데 티가 안 났음)
+    var _tierOrder = {basic:0, standard:1, upper:2, premium:3};
+    var _presetImpliedMinTier = null;
+    if(_curPreset){
+      var _presetText = (_curPreset.k||'')+' '+(_curPreset.l||'')+' '+(PRESET_KO_DESC[_curPreset.k]||'');
+      // 이름에 "프리미엄" 단어가 없어도 구조적으로 복잡/고비용인 스타일(곡선 형태, 파라메트릭,
+      // 아트리움·스카이브릿지, 킨네틱 파사드, 3D프린팅, 대형 통유리 등)은 시공비가 기본형보다
+      // 훨씬 많이 들 수 있어서 같이 잡아줌. (계기: "곡선 발코니" 스타일이 이름엔 '프리미엄'이 없어서
+      // 안 걸렸던 문제)
+      var _structComplexPattern = /곡선|curved|organic|파라메트릭|parametric|아트리움|atrium|스카이브릿지|skybridge|킨네틱|kinetic|3d\s*프린팅|3d[\s-]?printed|통유리|curtain\s*wall|floor-to-ceiling glass|중목구조|heavy timber|철골구조|steel frame|내진|seismic|조형|sculptural/i;
+      if(/시그니처|signature|하이엔드|highend|high-end|럭셔리|luxury/i.test(_presetText)) _presetImpliedMinTier='premium';
+      else if(/프리미엄|premium/i.test(_presetText)) _presetImpliedMinTier='upper';
+      else if(_structComplexPattern.test(_presetText)) _presetImpliedMinTier='upper';
+    }
+    // ⚠️ 2026-07-22: 원래 건축 외관(isExt)에만 걸리던 조건이었는데, 주거공간·상업공간
+    // 인테리어 프리셋에도 '프리미엄/럭셔리/하이엔드' 같은 이름이 많이 쓰여서(한남 럭셔리 하우스,
+    // 청담 하이엔드 쇼룸, 프리미엄 한우고깃집, 콰이엇 럭셔리 호텔 등) 같은 문제가 똑같이
+    // 생길 수 있음 — 건축/주거/상업 구분 없이 전체 적용으로 확장.
+    if(_presetImpliedMinTier && _tierOrder[tier] < _tierOrder[_presetImpliedMinTier]){
+      tab.budgetPresetTierMismatch = {styleLabel:(_curPreset.l||_curPreset.k), impliedTier:_presetImpliedMinTier};
+      var _presetTierMsg='⚠️ "'+(_curPreset.l||_curPreset.k)+'" 스타일은 보통 <strong>'+DESIGN_SPEC_BY_TIER[_presetImpliedMinTier].label+'</strong> 이상 예산이 필요한 스타일이에요. 지금 입력하신 예산은 <strong>'+DESIGN_SPEC_BY_TIER[tier].label+'</strong> 수준으로 계산돼서, 실제로는 이 스타일 특유의 디테일(고급 자재·마감)을 이 예산으로 그대로 구현하기 어려울 수 있어요. 예산을 올리거나, 스타일을 좀 더 절제된 쪽으로 바꿔보시는 걸 추천드려요.';
+      if(realismWarn.style.display==='block'){ realismWarn.innerHTML += '<br><br>'+_presetTierMsg; }
+      else { realismWarn.style.display='block'; realismWarn.innerHTML=_presetTierMsg; }
+    } else {
+      tab.budgetPresetTierMismatch = null;
+    }
     feedback.style.color=color;
     feedback.textContent=label;
 
@@ -8296,6 +8325,27 @@ function sbWorld3d(p){
   var timeHint=dv('');timeHint.style.cssText='font-size:11px;color:var(--ac);margin-bottom:8px;padding:8px 10px;background:var(--acg);border-radius:8px;line-height:1.5;margin-top:14px';
   timeHint.innerHTML='⏱ 생성에 보통 <strong>7분</strong> 정도 걸려요 (서버가 혼잡하면 10분 이상 걸릴 수 있어요).<br>⚠️ 완료되기 전까지 <strong>새로고침하지 마세요</strong> — 크레딧이 차감된 작업을 잃어버릴 수 있어요.';
   p.appendChild(timeHint);
+
+  var qualWrap=dv('ss');qualWrap.style.cssText='margin-bottom:10px';
+  var qualLabel=dv('');qualLabel.style.cssText='font-size:12px;color:var(--t2);margin-bottom:6px';
+  qualLabel.textContent='품질';
+  qualWrap.appendChild(qualLabel);
+  var qualRow=dv('');qualRow.style.cssText='display:flex;gap:8px';
+  var qualBtnMini=mk('button','');qualBtnMini.type='button';
+  var qualBtnPlus=mk('button','');qualBtnPlus.type='button';
+  function _paintQualBtns(){
+    var miniOn=_w3dQuality!=='plus';
+    qualBtnMini.style.cssText='flex:1;padding:10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;border:1.5px solid '+(miniOn?'var(--acb)':'var(--bd2)')+';background:'+(miniOn?'var(--acg)':'var(--c2)')+';color:'+(miniOn?'var(--ac)':'var(--t2)')+'';
+    qualBtnPlus.style.cssText='flex:1;padding:10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;border:1.5px solid '+(!miniOn?'var(--acb)':'var(--bd2)')+';background:'+(!miniOn?'var(--acg)':'var(--c2)')+';color:'+(!miniOn?'var(--ac)':'var(--t2)')+'';
+  }
+  qualBtnMini.innerHTML='⚡ 빠른 미리보기<br><span style="font-size:10px;color:var(--m2);font-weight:400">30~45초 · '+W3D_COST_MINI+'cr</span>';
+  qualBtnPlus.innerHTML='✨ 고품질<br><span style="font-size:10px;color:var(--m2);font-weight:400">~5분 · '+W3D_COST_PLUS+'cr</span>';
+  qualBtnMini.onclick=function(){ _w3dQuality='mini'; _paintQualBtns(); updW3DPriceLabel(); };
+  qualBtnPlus.onclick=function(){ _w3dQuality='plus'; _paintQualBtns(); updW3DPriceLabel(); };
+  _paintQualBtns();
+  qualRow.appendChild(qualBtnMini); qualRow.appendChild(qualBtnPlus);
+  qualWrap.appendChild(qualRow);
+  p.appendChild(qualWrap);
 
   var goWrap=dv('ss');
   var goBtn=mk('button','');goBtn.id='w3d-go-tab';
@@ -19830,6 +19880,9 @@ document.addEventListener('DOMContentLoaded',function(){try{
           }
         }
         _finalPrompt = _finalPrompt ? (_finalPrompt+' '+_budgetPhrases[tab.budgetTier]+_budgetAnchor) : (_budgetPhrases[tab.budgetTier]+_budgetAnchor);
+        if(tab.budgetPresetTierMismatch){
+          _finalPrompt += ' IMPORTANT: even though this style is called "'+tab.budgetPresetTierMismatch.styleLabel+'" (which normally implies a higher-end look), the stated budget above is lower than that style typically requires — you MUST still follow the BUDGET LEVEL instructions above exactly (use the cheaper/simpler materials specified there), rather than the premium materials the style name might suggest. Do not let the style name push you toward more expensive-looking materials than the stated budget allows.';
+        }
         // ── 예산-이미지 일치 강제 ──────────────────────────────────────────
         // 예산 항목(예: "TV·거실장" 442만원)이 있는데 실제 이미지엔 TV가 없는 것처럼, 예산에서
         // 돈이 배정된 물건이 결과 이미지에 실제로 안 보이는 문제가 있었음 — 이러면 나중에 예산
