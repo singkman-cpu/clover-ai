@@ -13236,22 +13236,74 @@ function addHistEl(item, scroll, targetHs, atBottom){
           w3btnRow.appendChild(w3shareBtn);
 
           // 🎬 쇼츠용 회전 영상 만들기 (실험적) — 녹화 끝나면 바로 G_SHORTS.images에 추가됨
+          // 건물외관/실내공간에 따라 카메라 동선이 달라서, 먼저 어느 쪽인지 고르게 함
+          var w3spinWrap=dv('');w3spinWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:6px;width:100%';
+          var w3spinTypeRow=dv('');w3spinTypeRow.style.cssText='display:flex;gap:6px';
+          var w3spinType = item._spinSceneType || 'exterior';
+          var w3spinExtBtn=mk('button','');w3spinExtBtn.type='button';
+          var w3spinIntBtn=mk('button','');w3spinIntBtn.type='button';
+          function _w3paintSpinTypeBtns(){
+            var extOn=w3spinType==='exterior';
+            w3spinExtBtn.style.cssText='padding:6px 12px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(extOn?'var(--ac)':'var(--bd2)')+';background:'+(extOn?'var(--acg)':'transparent')+';color:'+(extOn?'var(--ac)':'var(--t2)');
+            w3spinIntBtn.style.cssText='padding:6px 12px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(!extOn?'var(--ac)':'var(--bd2)')+';background:'+(!extOn?'var(--acg)':'transparent')+';color:'+(!extOn?'var(--ac)':'var(--t2)');
+          }
+          w3spinExtBtn.textContent='🏢 건물외관';
+          w3spinIntBtn.textContent='🛋 실내공간';
+          w3spinExtBtn.onclick=function(){ w3spinType='exterior'; item._spinSceneType='exterior'; _w3paintSpinTypeBtns(); };
+          w3spinIntBtn.onclick=function(){ w3spinType='interior'; item._spinSceneType='interior'; _w3paintSpinTypeBtns(); };
+          _w3paintSpinTypeBtns();
+          w3spinTypeRow.appendChild(w3spinExtBtn); w3spinTypeRow.appendChild(w3spinIntBtn);
+          w3spinWrap.appendChild(w3spinTypeRow);
+
           var w3spinBtn=mk('button','');
           w3spinBtn.style.cssText='padding:8px 16px;border-radius:8px;background:transparent;color:var(--ac);font-weight:700;font-size:12px;border:1.5px solid var(--ac);cursor:pointer;font-family:inherit';
           w3spinBtn.textContent='🎬 회전 영상 만들기 (쇼츠용)';
           w3spinBtn.onclick=function(){
             w3spinBtn.disabled=true; w3spinBtn.textContent='녹화 준비 중...';
-            _w3dCaptureSpinVideo(item.spzUrl, item.metricScale, {seconds:8},
+            _w3dCaptureSpinVideo(item.spzUrl, item.metricScale, {seconds:8, sceneType:w3spinType},
               function(progress){ w3spinBtn.textContent='녹화 중... '+Math.round(progress*100)+'%'; },
               function(blob){
                 var videoUrl=URL.createObjectURL(blob);
-                if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
-                  G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.orig||null, isVideo:true,
-                    videoUrl:videoUrl, duration:8, role:'video_clip', autoRole:'video_clip',
-                    customLabel:'VR 회전', source:'clover'});
+                w3spinBtn.disabled=false;
+                w3spinBtn.textContent='🎬 회전 영상 만들기 (쇼츠용)';
+                // ── 바로 쇼츠에 넣지 않고, 먼저 재생해서 확인할 수 있는 미리보기를 보여줌 ──
+                var oldPreview=w3spinWrap.querySelector('.w3spin-preview');
+                if(oldPreview){
+                  var oldVid=oldPreview.querySelector('video');
+                  if(oldVid && oldVid.src){ try{ URL.revokeObjectURL(oldVid.src); }catch(e){} }
+                  oldPreview.remove();
                 }
-                w3spinBtn.textContent='✓ 쇼츠에 추가됐어요 — 쇼츠 탭에서 확인하세요';
-                setTimeout(function(){ w3spinBtn.disabled=false; w3spinBtn.textContent='🎬 회전 영상 다시 만들기'; }, 2500);
+                var previewWrap=dv('w3spin-preview');
+                previewWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:8px;width:100%;padding-top:8px;border-top:1px solid var(--bd2)';
+                var previewLabel=dv('');previewLabel.style.cssText='font-size:11px;color:var(--m2)';
+                previewLabel.textContent='🎬 미리보기 — 마음에 들면 추가, 아니면 다시 녹화하세요';
+                previewWrap.appendChild(previewLabel);
+                var videoEl=document.createElement('video');
+                videoEl.src=videoUrl; videoEl.controls=true; videoEl.autoplay=true; videoEl.loop=true; videoEl.muted=true; videoEl.playsInline=true;
+                videoEl.style.cssText='width:100%;max-width:220px;aspect-ratio:9/16;border-radius:10px;background:#000;object-fit:cover';
+                previewWrap.appendChild(videoEl);
+                var previewBtnRow=dv('');previewBtnRow.style.cssText='display:flex;gap:8px';
+                var addBtn=mk('button','');addBtn.type='button';addBtn.textContent='✓ 쇼츠에 추가';
+                addBtn.style.cssText='padding:7px 14px;border-radius:7px;border:none;background:var(--ac);color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit';
+                var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='↺ 다시 녹화';
+                retryBtn.style.cssText='padding:7px 14px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit';
+                addBtn.onclick=function(){
+                  if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
+                    G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.orig||null, isVideo:true,
+                      videoUrl:videoUrl, duration:8, role:'video_clip', autoRole:'video_clip',
+                      customLabel:'VR 회전', source:'clover'});
+                  }
+                  previewWrap.remove();
+                  w3spinBtn.textContent='✓ 쇼츠에 추가됐어요 — 쇼츠 탭에서 확인하세요';
+                  setTimeout(function(){ w3spinBtn.textContent='🎬 회전 영상 다시 만들기'; }, 2500);
+                };
+                retryBtn.onclick=function(){
+                  try{ URL.revokeObjectURL(videoUrl); }catch(e){}
+                  previewWrap.remove();
+                };
+                previewBtnRow.appendChild(addBtn); previewBtnRow.appendChild(retryBtn);
+                previewWrap.appendChild(previewBtnRow);
+                w3spinWrap.appendChild(previewWrap);
               },
               function(err){
                 console.error('[VR 회전영상] 실패:', err);
@@ -13259,7 +13311,111 @@ function addHistEl(item, scroll, targetHs, atBottom){
               }
             );
           };
-          w3btnRow.appendChild(w3spinBtn);
+          w3spinWrap.appendChild(w3spinBtn);
+          w3btnRow.appendChild(w3spinWrap);
+
+          // ── 🎮 직접 조작하면서 녹화 (자동회전과 별개 옵션) ──────────────────
+          // 위에 이미 떠 있는 인터랙티브 뷰어(마우스드래그+WASD)의 화면을 그대로 녹화함 —
+          // 새 렌더러를 안 만들고 이미 보이는 캔버스의 captureStream을 그대로 씀.
+          // ⚠️ 그 캔버스는 가로형(카드 비율)이라 세로(9:16) 쇼츠에 넣으면 좌우가 잘려서 들어감 —
+          // 다른 가로 사진/영상이 쇼츠에 들어갈 때와 동일한 방식(가운데 기준 크롭)임.
+          var w3manualWrap=dv('');
+          w3manualWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;margin-top:10px;padding-top:10px;border-top:1px solid var(--bd2)';
+          var w3manualHint=dv('');w3manualHint.style.cssText='font-size:11px;color:var(--m2);text-align:center;line-height:1.6';
+          w3manualHint.innerHTML='🎮 <strong style="color:var(--t2)">직접 조작하면서 녹화</strong> — 시작 누른 뒤 위 화면을 마우스로 드래그(모바일은 터치)해서 시점을 돌리고, PC는 WASD로 이동하며 원하는 장면을 찍으세요. 최소 5초, 최대 20초.';
+          w3manualWrap.appendChild(w3manualHint);
+          var w3manualStartBtn=mk('button','');w3manualStartBtn.type='button';w3manualStartBtn.textContent='⏺ 녹화 시작';
+          w3manualStartBtn.style.cssText='padding:8px 16px;border-radius:8px;background:#ef4444;color:#fff;font-weight:700;font-size:12px;border:none;cursor:pointer;font-family:inherit';
+          w3manualStartBtn.onclick=function(){
+            if(typeof MediaRecorder==='undefined'){ alert('이 브라우저는 화면 녹화를 지원하지 않아요.'); return; }
+            var canvasEl=w3frameWrap.querySelector('canvas');
+            if(!canvasEl){ alert('아직 3D 화면이 준비되지 않았어요. 화면이 보이는 상태에서 잠시 후 다시 눌러주세요.'); return; }
+            var MIN_SEC=5, MAX_SEC=20;
+            var stream, recorder, chunks=[], startTime=Date.now();
+            try{ stream=canvasEl.captureStream(30); }catch(e){ alert('녹화 시작 실패: '+e.message); return; }
+            var mime=(MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported('video/webm;codecs=vp9'))?'video/webm;codecs=vp9'
+                    :(MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported('video/webm;codecs=vp8'))?'video/webm;codecs=vp8':'video/webm';
+            try{ recorder=new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:4000000}); }
+            catch(e){ alert('녹화 시작 실패: '+e.message); return; }
+            recorder.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
+            // 녹화 중에는 화면 밖으로 스크롤돼도 뷰어가 사라지지(dispose) 않게 감시를 잠깐 멈춤
+            if(typeof _w3dIO!=='undefined' && _w3dIO){ try{ _w3dIO.unobserve(w3frameWrap); }catch(e){} }
+
+            w3manualStartBtn.style.display='none';
+            var timerEl=dv('');timerEl.style.cssText='font-size:13px;font-weight:800;color:#ef4444';
+            timerEl.textContent='🔴 0.0s';
+            w3manualWrap.appendChild(timerEl);
+            var stopBtn=mk('button','');stopBtn.type='button';
+            stopBtn.disabled=true;
+            stopBtn.textContent='⏹ 녹화 종료 (최소 '+MIN_SEC+'초부터)';
+            stopBtn.style.cssText='padding:8px 16px;border-radius:8px;background:var(--c2);color:var(--t2);font-weight:700;font-size:12px;border:1px solid var(--bd2);cursor:not-allowed;font-family:inherit';
+            w3manualWrap.appendChild(stopBtn);
+
+            var finished=false;
+            function finishRecording(){
+              if(finished) return; finished=true;
+              clearInterval(tickId);
+              try{ recorder.stop(); }catch(e){}
+            }
+            var tickId=setInterval(function(){
+              var el=(Date.now()-startTime)/1000;
+              timerEl.textContent='🔴 '+el.toFixed(1)+'s';
+              if(el>=MIN_SEC && stopBtn.disabled){
+                stopBtn.disabled=false; stopBtn.textContent='⏹ 녹화 종료';
+                stopBtn.style.cssText='padding:8px 16px;border-radius:8px;background:#ef4444;color:#fff;font-weight:700;font-size:12px;border:none;cursor:pointer;font-family:inherit';
+              }
+              if(el>=MAX_SEC) finishRecording();
+            }, 100);
+            stopBtn.onclick=function(){ if(!stopBtn.disabled) finishRecording(); };
+
+            recorder.onstop=function(){
+              if(typeof _w3dIO!=='undefined' && _w3dIO){ try{ _w3dIO.observe(w3frameWrap); }catch(e){} }
+              timerEl.remove(); stopBtn.remove();
+              w3manualStartBtn.style.display=''; w3manualStartBtn.textContent='⏺ 녹화 시작';
+              if(!chunks.length){ alert('녹화된 내용이 없어요. 다시 시도해주세요.'); return; }
+              var actualDur=(Date.now()-startTime)/1000;
+              var blob=new Blob(chunks, {type:'video/webm'});
+              var videoUrl=URL.createObjectURL(blob);
+              var oldPreview=w3manualWrap.querySelector('.w3manual-preview');
+              if(oldPreview){
+                var oldVid=oldPreview.querySelector('video');
+                if(oldVid && oldVid.src){ try{ URL.revokeObjectURL(oldVid.src); }catch(e){} }
+                oldPreview.remove();
+              }
+              var previewWrap=dv('w3manual-preview');
+              previewWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:4px;width:100%';
+              var previewLabel=dv('');previewLabel.style.cssText='font-size:11px;color:var(--m2)';
+              previewLabel.textContent='🎬 미리보기 — 마음에 들면 추가, 아니면 다시 녹화하세요';
+              previewWrap.appendChild(previewLabel);
+              var videoEl=document.createElement('video');
+              videoEl.src=videoUrl; videoEl.controls=true; videoEl.autoplay=true; videoEl.loop=true; videoEl.muted=true; videoEl.playsInline=true;
+              videoEl.style.cssText='width:100%;max-width:260px;border-radius:10px;background:#000';
+              previewWrap.appendChild(videoEl);
+              var previewBtnRow=dv('');previewBtnRow.style.cssText='display:flex;gap:8px';
+              var addBtn=mk('button','');addBtn.type='button';addBtn.textContent='✓ 쇼츠에 추가';
+              addBtn.style.cssText='padding:7px 14px;border-radius:7px;border:none;background:var(--ac);color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit';
+              var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='↺ 버리기';
+              retryBtn.style.cssText='padding:7px 14px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit';
+              addBtn.onclick=function(){
+                if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
+                  G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.orig||null, isVideo:true,
+                    videoUrl:videoUrl, duration:actualDur, role:'video_clip', autoRole:'video_clip',
+                    customLabel:'VR 직접녹화', source:'clover'});
+                }
+                previewWrap.remove();
+              };
+              retryBtn.onclick=function(){
+                try{ URL.revokeObjectURL(videoUrl); }catch(e){}
+                previewWrap.remove();
+              };
+              previewBtnRow.appendChild(addBtn); previewBtnRow.appendChild(retryBtn);
+              previewWrap.appendChild(previewBtnRow);
+              w3manualWrap.appendChild(previewWrap);
+            };
+            recorder.start();
+          };
+          w3manualWrap.appendChild(w3manualStartBtn);
+          w3btnRow.appendChild(w3manualWrap);
         }
         var w3openA=document.createElement('a');
         w3openA.href=item.result;w3openA.target='_blank';w3openA.rel='noopener';
@@ -14993,9 +15149,12 @@ function _w3dRoomStart(){
 }
 // ⚠️ 2026-07-22 신규: 텍스트 설명만으로 VR 월드 생성 요청 — 실제 특정 장소가 아니라
 // 그럴듯한 가상 장소를 만드는 용도. 사진 기반(_w3dTabStart)과 같은 서버 엔드포인트(world-generate)를
-// 쓰지만, imageUrl 대신 prompt 필드로 요청함. ★ 서버(Supabase Edge Function 'world-generate')가
-// prompt 필드를 받아서 World Labs에 텍스트 기반 생성으로 넘기도록 되어 있어야 실제로 동작함 —
-// 이 파일(클라이언트)만으로는 서버 쪽 구현 여부를 확인/보장할 수 없음.
+// 쓰지만, imageUrl 대신 textPrompt 필드로 요청함.
+// ★★★ 2026-07-22 서버 코드 실제 확인 결과: 지금 서버는 textPrompt만 단독으로 보내면 무조건
+// "imageUrl 또는 imageUrls가 필요합니다" 400 에러를 냄 — textPrompt는 지금 multi-image 모드에
+// '보조 필드'로만 쓰이고, 순수 텍스트 단독 생성 분기가 서버에 아직 없음. 이 기능이 실제로
+// 동작하려면 서버(world-generate Edge Function)에도 텍스트 전용 분기를 추가해야 함 —
+// 별도로 전달한 world-generate-updated.ts 참고.
 function _w3dTabStartText(){
   if(!_supaUser){ openMd('account'); alert('로그인이 필요합니다 (또는 세션이 만료됐어요). 다시 로그인 후 시도해주세요.'); return; }
   var tab=getTab('world3d');
@@ -15011,7 +15170,7 @@ function _w3dTabStartText(){
   renderMain('world3d');
   var reqBody={
     action:'submit',
-    prompt: promptText,
+    textPrompt: promptText,
     model: _w3dQuality==='plus' ? 'marble-1.1-plus' : 'marble-1.1',
     displayName:'CloverAI 3D Tour'
   };
@@ -21886,30 +22045,57 @@ window._w3dCaptureSpinVideo = function(spzUrl, metricScale, opts, onProgress, on
       };
       recorder.start();
       var recStart=null;
-      // ── 카메라 동선: 단순 등속 360도 회전이 기계적이고 어색하다는 피드백을 반영해서
-      // 3단계로 재구성함 — ①메인 건물 정면을 좌우로 살짝 훑어보기(이징 적용) →
-      // ②360도로 주변 배경 회전(등속, 회전감 자체는 자연스럽게 유지) →
-      // ③다시 정면으로 돌아오면서 살짝 줌인(FOV 축소)하며 마무리.
-      // 이렇게 하면 시작/끝이 뚝뚝 끊기지 않고 부드럽게 감속·가속되면서 "버벅"거리는 느낌이 줄어듦.
+      // ── 카메라 동선: 건물외관(exterior)과 실내공간(interior)은 카메라가 봐야 할 게 완전히
+      // 달라서 분리함.
+      // - 건물외관: 사진 앞쪽뿐 아니라 주변 거리/이웃 건물까지도 Marble이 비교적 잘 복원하는
+      //   편이라, 360도로 다 돌아도 볼만함 → ①정면 훑기 → ②360도 회전 → ③정면 복귀+줌인
+      // - 실내공간: 카메라 정반대편(180도 근처)은 원본 사진에 전혀 없던 영역이라 Marble이
+      //   완전히 상상해서 채운 부분임 — 실내는 외부보다 참고할 단서(창밖 풍경 등)가 적어서
+      //   그 상상이 특히 뭉개지기 쉬움 → 360도로 다 안 돌고, 원본 시야 근처(좌우 45도)만
+      //   자연스럽게 훑고 정면으로 복귀+줌인
+      var sceneType = opts.sceneType==='interior' ? 'interior' : 'exterior';
       var baseFov = camera.fov;
-      var introDeg = 16; // 정면 훑기 각도(도)
       var zoomFov = 46;  // 마무리 줌인 시 FOV(작을수록 더 확대되어 보임)
-      var pFront = 0.22, pSpin = 0.75; // 전체 진행률(0~1) 기준 구간 경계
       function _easeInOutQuad(x){ return x<0.5 ? 2*x*x : 1-Math.pow(-2*x+2,2)/2; }
-      function _spinCameraState(progress){
-        var yawDeg, fov=baseFov;
-        if(progress < pFront){
-          var lt=_easeInOutQuad(progress/pFront);
-          yawDeg = introDeg*lt;
-        } else if(progress < pSpin){
-          var lt2=(progress-pFront)/(pSpin-pFront);
-          yawDeg = introDeg + 360*lt2; // 이 구간은 회전감이 자연스럽도록 등속 유지
-        } else {
-          var lt3=_easeInOutQuad((progress-pSpin)/(1-pSpin));
-          yawDeg = (introDeg+360) - introDeg*lt3; // 360도(=정면)로 부드럽게 복귀
-          fov = baseFov - (baseFov-zoomFov)*lt3;   // 동시에 서서히 줌인
-        }
-        return {yaw: yawDeg*Math.PI/180, fov: fov};
+      var _spinCameraState;
+      if(sceneType==='interior'){
+        // 실내: ①왼쪽으로 훑기 → ②오른쪽으로 훑기(중앙 통과) → ③중앙 복귀+줌인. 전부 ±45도 안쪽.
+        var swingDeg=45;
+        var pLeft=0.35, pRight=0.75;
+        _spinCameraState=function(progress){
+          var yawDeg, fov=baseFov;
+          if(progress < pLeft){
+            var lt=_easeInOutQuad(progress/pLeft);
+            yawDeg = -swingDeg*lt;
+          } else if(progress < pRight){
+            var lt2=_easeInOutQuad((progress-pLeft)/(pRight-pLeft));
+            yawDeg = -swingDeg + swingDeg*2*lt2; // -45도 → +45도
+          } else {
+            var lt3=_easeInOutQuad((progress-pRight)/(1-pRight));
+            yawDeg = swingDeg - swingDeg*lt3; // +45도 → 0도(정면)
+            fov = baseFov - (baseFov-zoomFov)*lt3;
+          }
+          return {yaw: yawDeg*Math.PI/180, fov: fov};
+        };
+      } else {
+        // 건물외관: ①정면 훑기 → ②360도 회전 → ③정면 복귀+줌인
+        var introDeg=16;
+        var pFront=0.22, pSpin=0.75;
+        _spinCameraState=function(progress){
+          var yawDeg, fov=baseFov;
+          if(progress < pFront){
+            var lt=_easeInOutQuad(progress/pFront);
+            yawDeg = introDeg*lt;
+          } else if(progress < pSpin){
+            var lt2=(progress-pFront)/(pSpin-pFront);
+            yawDeg = introDeg + 360*lt2; // 이 구간은 회전감이 자연스럽도록 등속 유지
+          } else {
+            var lt3=_easeInOutQuad((progress-pSpin)/(1-pSpin));
+            yawDeg = (introDeg+360) - introDeg*lt3; // 360도(=정면)로 부드럽게 복귀
+            fov = baseFov - (baseFov-zoomFov)*lt3;
+          }
+          return {yaw: yawDeg*Math.PI/180, fov: fov};
+        };
       }
       function spinLoop(t){
         if(stopped) return;
