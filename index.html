@@ -13418,7 +13418,11 @@ function addHistEl(item, scroll, targetHs, atBottom){
           w3btnRow.appendChild(w3manualWrap);
         }
         var w3openA=document.createElement('a');
-        w3openA.href=item.result;w3openA.target='_blank';w3openA.rel='noopener';
+        // ⚠️ 2026-07-22: item.result(마블 공유 링크)로 바로 열면 마블 홈페이지로 넘어가버려서,
+        // 우리 사이트를 벗어나는 게 어색하다는 피드백을 반영함. spzUrl이 있으면 우리 자체
+        // 뷰어 페이지(?vr=)로 열고, 없을 때만(예전 결과 등) 마블 링크로 폴백함.
+        w3openA.href = item.spzUrl ? (location.origin+location.pathname+'?vr='+encodeURIComponent(item.spzUrl)) : item.result;
+        w3openA.target='_blank';w3openA.rel='noopener';
         w3openA.style.cssText='display:inline-flex;align-items:center;font-size:11px;color:var(--m2);text-decoration:underline;padding:8px 4px';
         w3openA.textContent='새 탭으로 열기';
         w3btnRow.appendChild(w3openA);
@@ -22124,12 +22128,22 @@ window._w3dCaptureSpinVideo = function(spzUrl, metricScale, opts, onProgress, on
 }
 window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
   if(!containerEl || !spzUrl) return;
+  // ⚠️ 2026-07-22: VR 히스토리 카드가 여러 개 동시에 "화면에 보이는" 상태가 되면(스크롤 위치에
+  // 따라 카드 2개가 걸쳐 보일 때 등) 무거운 3D 뷰어가 여러 개 동시에 렌더링되면서 화면 전체가
+  // 버벅거리는 원인이 됨 — 새 뷰어를 켤 때 기존에 떠 있던 다른 뷰어는 전부 정리해서 항상
+  // 최대 1개만 활성화되게 함.
+  if(window._w3dViewers){
+    Object.keys(window._w3dViewers).forEach(function(k){
+      try{ window._w3dViewers[k](); }catch(e){}
+      delete window._w3dViewers[k];
+    });
+  }
   metricScale = metricScale && metricScale > 0 ? metricScale : 1;
   try{
     var w = containerEl.clientWidth || 480, h = containerEl.clientHeight || 300;
     var renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(w, h);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); // 3→2: 고해상도(레티나) 기기에서 부담을 줄여 버벅거림 완화
     containerEl.innerHTML = '';
     containerEl.style.position = containerEl.style.position || 'relative';
     containerEl.appendChild(renderer.domElement);
@@ -22222,16 +22236,41 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
         keys[e.key.toLowerCase()]=true;
         var tag=(document.activeElement&&document.activeElement.tagName)||'';
         if(tag==='INPUT'||tag==='TEXTAREA') return;
-        // 방향키로 VR을 조작하는 동안 배경 페이지가 스크롤되는 것 방지
-        if(['arrowup','arrowdown','arrowleft','arrowright'].indexOf(e.key.toLowerCase())>=0) e.preventDefault();
+        // 방향키/스페이스로 VR을 조작하는 동안 배경 페이지가 스크롤되는 것 방지
+        if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase())>=0) e.preventDefault();
+        // Marble과 동일하게 '0'키로 원점(촬영 시점)으로 즉시 복귀
+        if(e.key==='0'){ camera.position.set(0,0,0); yaw=0; pitch=0; camera.fov=70; camera.updateProjectionMatrix(); applyRotation(); }
       });
       window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()]=false; });
 
       // PC용 조작법 안내 (처음 몇 초만 보여줌)
       var pcHint=document.createElement('div');
-      pcHint.style.cssText='position:absolute;top:14px;left:14px;color:#fff;font-size:14px;font-weight:600;line-height:1.7;background:rgba(0,0,0,.65);padding:12px 18px;border-radius:12px;pointer-events:none;z-index:3;white-space:nowrap';
-      pcHint.innerHTML='🖱 드래그: 시점 회전 &nbsp;·&nbsp; ⌨ W/A/S/D 또는 방향키: 이동 &nbsp;·&nbsp; Shift: 빠르게 이동';
+      pcHint.style.cssText='position:absolute;top:14px;left:14px;color:#fff;font-size:13px;font-weight:600;line-height:1.7;background:rgba(0,0,0,.65);padding:12px 18px;border-radius:12px;pointer-events:none;z-index:3;max-width:78%';
+      pcHint.innerHTML='🖱 드래그: 시점 회전 &nbsp;·&nbsp; ⌨ WASD: 이동 &nbsp;·&nbsp; Shift: 빠르게<br>E/Space: 위 · Q: 아래 &nbsp;·&nbsp; [ ]: 확대·축소 &nbsp;·&nbsp; 0: 원점 복귀';
       containerEl.appendChild(pcHint);
+
+      // ── 전체 조작법 설명(Marble의 Controls 팝업과 동일한 내용) — '?' 버튼으로 열고 닫음 ──
+      var helpBtn=document.createElement('button');
+      helpBtn.type='button'; helpBtn.title='조작법 보기';
+      helpBtn.textContent='?';
+      helpBtn.style.cssText='position:absolute;top:10px;right:54px;width:34px;height:34px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.55);color:#fff;font-size:15px;font-weight:700;cursor:pointer;z-index:4;display:flex;align-items:center;justify-content:center;line-height:1';
+      var helpPanel=document.createElement('div');
+      helpPanel.style.cssText='display:none;position:absolute;bottom:14px;right:14px;background:rgba(15,15,20,.95);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:16px 20px;z-index:5;color:#fff;font-size:12.5px;line-height:2;min-width:220px;box-shadow:0 8px 24px rgba(0,0,0,.5)';
+      helpPanel.innerHTML =
+        '<div style="font-weight:800;margin-bottom:8px;font-size:13px">조작법</div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>앞으로</span><b>W / ↑</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>뒤로</span><b>S / ↓</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>왼쪽</span><b>A / ←</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>오른쪽</span><b>D / →</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>위로</span><b>E / Space</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>아래로</span><b>Q</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>빠르게 이동</span><b>Shift</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>확대/축소(FOV)</span><b>[ / ]</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>원점으로 복귀</span><b>0</b></div>'+
+        '<div style="display:flex;justify-content:space-between;gap:16px"><span>시점 회전</span><b>마우스 드래그</b></div>';
+      helpBtn.onclick=function(e){ e.stopPropagation(); helpPanel.style.display = helpPanel.style.display==='none' ? 'block' : 'none'; };
+      containerEl.appendChild(helpBtn);
+      containerEl.appendChild(helpPanel);
     }
 
     // ── 모바일: 화면 드래그로 시점, 좌하단 가상 조이스틱으로 이동 ──
@@ -22324,7 +22363,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
     var forward = new THREE.Vector3(), right = new THREE.Vector3(), moveDir = new THREE.Vector3();
     // 촬영 원점에서 너무 멀리 벗어나면, World Labs가 실제로 본 적 없는 영역(추측/할루시네이션된 부분)에
     // 들어가게 되어 형태가 뭉개지고 노이즈가 심해짐 — 화질이 검증된 범위 안에서만 걸어다니도록 부드럽게 제한
-    var maxWalkRadius = 5.5 * metricScale;
+    var maxWalkRadius = 4.5 * metricScale; // 5.5→4.5: 벽 충돌 감지가 없는 대신, 반경 자체를 살짝 보수적으로 좁혀서 임시방편으로 보완
     function animate(){
       if(stopped) return;
       requestAnimationFrame(animate);
@@ -22347,9 +22386,9 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
         if(keys['a']||keys['arrowleft'])  moveDir.addScaledVector(right, -1);
         if(keys['d']||keys['arrowright']) moveDir.addScaledVector(right, 1);
       }
+      var speed = moveSpeed * ((!isTouch && keys['shift']) ? 2.2 : 1);
       if(moveDir.lengthSq()>0){
         moveDir.normalize();
-        var speed = moveSpeed * ((!isTouch && keys['shift']) ? 2.2 : 1);
         var nx = camera.position.x + moveDir.x*speed*dt;
         var nz = camera.position.z + moveDir.z*speed*dt;
         var distFromOrigin = Math.hypot(nx, nz);
@@ -22359,7 +22398,23 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
         }
         camera.position.x = nx;
         camera.position.z = nz;
-        camera.position.y = 0; // 사람 눈높이로 고정 — 위아래 이동 없음
+      }
+      // ── Marble과 동일하게 E/Space(위)·Q(아래) 수직 이동, [ ] 확대/축소(FOV) 추가 ──
+      if(!isTouch){
+        var vy = (keys['e']||keys[' ']) ? 1 : (keys['q'] ? -1 : 0);
+        if(vy!==0){
+          // ⚠️ 2026-07-22: 위아래 이동을 대칭으로 허용했더니 아래로 계속 내려가면 땅을 뚫고
+          // 지하(원본 사진엔 없던, 완전히 상상된 영역)로 들어가버리는 문제가 있었음.
+          // 위쪽은 좀 더 자유롭게(내려다보기 용도) 허용하되, 아래쪽은 살짝 웅크리는 정도로만
+          // 좁게 제한해서 바닥을 뚫고 들어가지 않게 함.
+          var maxUp = 2.2 * metricScale, maxDown = 0.35 * metricScale;
+          camera.position.y = Math.max(-maxDown, Math.min(maxUp, camera.position.y + vy*speed*dt));
+        }
+        if(keys['[']||keys[']']){
+          var fovDelta = (keys[']') ? 1 : -1;
+          camera.fov = Math.max(20, Math.min(100, camera.fov + fovDelta*40*dt));
+          camera.updateProjectionMatrix();
+        }
       }
 
       renderer.render(scene, camera);
