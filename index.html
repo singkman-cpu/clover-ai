@@ -1545,13 +1545,16 @@ function _proposalDrawBudgetPage(data, pageIndex, totalPages){
   scenes.forEach(function(sc){
     var snap=sc.budgetSnapshot;
     var lbl=sc.label&&sc.label.trim()?sc.label.trim():snap.roomLabel;
-    grandTotal+=snap.roomAmt||0;
+    // 사용자가 제안서에서 직접 가격을 수정했으면(priceOverride) 그 값을 우선 사용 —
+    // AI가 계산한 견적은 참고용이고, 실제 계약 단계에선 협의된 금액으로 바꿔야 할 때가 많음
+    var displayAmt = (sc.priceOverride!=null && sc.priceOverride!=='') ? Number(sc.priceOverride) : (snap.roomAmt||0);
+    grandTotal+=displayAmt;
     ctx.textAlign='left';
     ctx.fillStyle=INK;ctx.font='700 19px '+PROPOSAL_FONT;
     ctx.fillText(lbl, pad, y);
     ctx.textAlign='right';
     ctx.fillStyle=GOLD;ctx.font='700 19px '+PROPOSAL_FONT;
-    ctx.fillText((snap.roomAmt||0).toLocaleString()+'만원', W-pad, y);
+    ctx.fillText(displayAmt.toLocaleString()+'만원', W-pad, y);
     y+=32;
     // 항목별 세부내역 — 재사용(kept)/해당없음(notApplicable)도 그대로 보여줘서 견적의 근거를 투명하게 전달
     (snap.items||[]).forEach(function(it){
@@ -10028,7 +10031,11 @@ function sendToProposal(item){
   if(!item||!item.result)return;
   var exists=G_PROPOSAL.scenes.some(function(s){return s.id===item.id;});
   if(!exists){
-    G_PROPOSAL.scenes.push({id:item.id, orig:item.orig||item.origThumb||null, result:item.result, label:''});
+    // ⚠️ 2026-07-22: 예전엔 budgetSnapshot(평수/지역/등급/항목별 견적)을 안 가져와서
+    // 렌더링할 때 분명히 예산을 넣었는데도 제안서에서는 가격을 처음부터 다시 입력해야 했음.
+    // 이제 렌더링 결과에 예산 정보가 있으면 그대로 같이 들어가서 "견적 요약" 페이지에
+    // 자동으로 반영되고, priceOverride로 필요하면 제안서 안에서 직접 수정도 가능하게 함.
+    G_PROPOSAL.scenes.push({id:item.id, orig:item.orig||item.origThumb||null, result:item.result, label:'', budgetSnapshot:item.budgetSnapshot||null, priceOverride:null});
   }
   selectWF('proposal');
   if(window.innerWidth<=768){ setTimeout(function(){ mobTab('proposal'); }, 200); }
@@ -10096,6 +10103,35 @@ function sbProposal(p){
       descTa.style.cssText='width:100%;min-height:52px;padding:6px 7px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t2);font-size:11px;line-height:1.5;font-family:inherit;resize:vertical;box-sizing:border-box';
       descTa.oninput=function(){ sc.desc=descTa.value; sc._descEdited=true; };
       rowWrap.appendChild(descTa);
+
+      // 렌더링/디자인 단계에서 계산된 예산정보가 이 장면에 붙어있으면, 견적 요약 페이지에
+      // 자동으로 반영됨 — 다만 실제 계약 단계에선 협의된 금액으로 바꿔야 할 수 있어서
+      // AI 계산값을 그대로 보여주면서 직접 수정도 가능하게 함.
+      if(sc.budgetSnapshot){
+        var priceRow=dv('');priceRow.style.cssText='display:flex;align-items:center;gap:6px;margin-top:6px';
+        var priceLabel=dv('');priceLabel.textContent='💰 견적';
+        priceLabel.style.cssText='font-size:11px;color:var(--t2);flex-shrink:0';
+        priceRow.appendChild(priceLabel);
+        var priceIn=document.createElement('input');priceIn.type='number';priceIn.min='0';priceIn.step='1';
+        priceIn.value = (sc.priceOverride!=null && sc.priceOverride!=='') ? sc.priceOverride : (sc.budgetSnapshot.roomAmt||0);
+        priceIn.style.cssText='width:90px;padding:5px 7px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--ac);font-size:12px;font-weight:700;font-family:inherit';
+        priceIn.oninput=function(){ sc.priceOverride = priceIn.value; renderMain('proposal'); };
+        priceRow.appendChild(priceIn);
+        var priceUnit=dv('');priceUnit.textContent='만원';
+        priceUnit.style.cssText='font-size:11px;color:var(--t2)';
+        priceRow.appendChild(priceUnit);
+        if(sc.priceOverride!=null && sc.priceOverride!=='' && Number(sc.priceOverride)!==(sc.budgetSnapshot.roomAmt||0)){
+          var priceResetBtn=mk('button','');priceResetBtn.type='button';priceResetBtn.textContent='AI 계산값으로';
+          priceResetBtn.style.cssText='font-size:10.5px;color:var(--m2);background:transparent;border:1px solid var(--bd2);border-radius:6px;padding:4px 8px;cursor:pointer;font-family:inherit';
+          priceResetBtn.onclick=function(){ sc.priceOverride=null; renderSB(); renderMain('proposal'); };
+          priceRow.appendChild(priceResetBtn);
+        } else {
+          var priceHint=dv('');priceHint.textContent='(AI 계산값, 수정 가능)';
+          priceHint.style.cssText='font-size:10.5px;color:var(--m2)';
+          priceRow.appendChild(priceHint);
+        }
+        rowWrap.appendChild(priceRow);
+      }
 
       sceneListEl.appendChild(rowWrap);
 
@@ -21435,6 +21471,7 @@ function _w3dCaptureSpinVideo(spzUrl, metricScale, opts, onProgress, onDone, onE
     onError&&onError(e);
   }
 }
+window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
   if(!containerEl || !spzUrl) return;
   metricScale = metricScale && metricScale > 0 ? metricScale : 1;
   try{
