@@ -14509,7 +14509,16 @@ function _w3dTabStart(){
   // 일반 사진(파노라마 체크 안 함)이면 항상 자동으로 360도 보정을 시도한다 — 고객에게는 따로 묻지 않음(내부 처리)
   // 단, "여러 각도로 정확도 향상" 모드를 켰으면 파노라마 변환과는 서로 다른 접근이라 자동 파노라마는 건너뜀
   // "여러 각도 + 뒤쪽 공간 예측"은 이제 기본 동작 — 파노라마 사진일 때만 건너뜀 (이미 정확한 360도 정보가 있어서)
-  var _multiAngleOn = !tab.isPano;
+  // ⚠️ 2026-07-22 변경: 좌/우 각도를 AI(nano-banana)로 미리 상상해서 그린 뒤 Marble에 "같은 공간의 여러 각도"라고
+  // 넘기던 방식(_multiAngleOn=true)을 기본 OFF로 전환함.
+  // 이유: Marble은 애초에 사진 한 장만 받아도 프레임 밖 영역을 스스로 추론하도록 학습된 모델이고,
+  // "여러 이미지 입력"은 실제로 서로 다른 각도에서 찍은 진짜 사진들을 정밀하게 정렬시키기 위한 기능임.
+  // 저희가 각도별로 따로따로 생성한 가짜 이미지들은 서로 기하학적으로 안 맞기 때문에, Marble이 이걸 하나의
+  // 일관된 3D로 억지로 짜맞추려다 그 경계면(특히 건물 외관 좌우측)이 뭉개지는 현상이 발생했음.
+  // → 이제 사진을 가공 없이(또는 파노라마 필요시에만 변환해서) Marble에 그대로 넘기고, 미가시영역 추론은
+  //   Marble 자신에게 맡긴다. 사용자가 실제로 여러 각도의 진짜 사진을 갖고 있는 경우엔 기존 "여러 공간 업로드"
+  //   기능(_addRoomFiles, reconstructImages:true)을 쓰면 됨 — 그건 진짜 사진이라 문제없음.
+  var _multiAngleOn = false;
   var _needsAutoPano = W3D_AUTOPANO_ENABLED && !tab.isPano && !_multiAngleOn;
 
   _w3dEnsurePublicUrl(srcImg).then(function(publicUrl){
