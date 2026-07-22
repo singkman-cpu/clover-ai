@@ -8304,6 +8304,79 @@ function sbUpscale(p){
 }
 function sbWorld3d(p){
   mkNote(p,'<strong style="color:var(--ac)">&#127760; 3D 투어 생성 (베타)</strong><br>렌더링된 이미지를 실제로 걸어다닐 수 있는 VR 공간으로 변환합니다.');
+
+  // ── 생성 방식: 사진으로 정확하게 vs 텍스트로 컨셉만 설명 ──────────────────
+  var tab0=getTab('world3d');
+  if(tab0.genMode==null) tab0.genMode='photo';
+  var modeWrap=dv('ss');
+  modeWrap.innerHTML='<div class="lbl">생성 방식</div>';
+  var modeRow=dv('');modeRow.style.cssText='display:flex;gap:8px';
+  [['photo','📷 사진으로 정확하게'],['text','✏️ 텍스트로 컨셉만']].forEach(function(pair){
+    var mk_=pair[0], lbl_=pair[1];
+    var isActive=tab0.genMode===mk_;
+    var btn=mk('button','');btn.type='button';
+    btn.style.cssText='flex:1;padding:10px 6px;border-radius:9px;border:1px solid '+(isActive?'var(--ac)':'var(--bd2)')+';background:'+(isActive?'var(--acg)':'var(--c2)')+';color:'+(isActive?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    btn.textContent=lbl_;
+    btn.onclick=function(){ tab0.genMode=mk_; renderSB(); _w3dRefreshButtonStates(); };
+    modeRow.appendChild(btn);
+  });
+  modeWrap.appendChild(modeRow);
+  var modeHint=dv('');modeHint.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.6';
+  modeHint.innerHTML = tab0.genMode==='text'
+    ? '⚠️ 실제 특정 장소가 아니라, 설명에 맞는 <strong style="color:var(--t2)">그럴듯한 가상의 장소</strong>를 AI가 새로 만들어요. "강남역"이라고 써도 진짜 강남역이 나오는 게 아니라 "강남역 느낌"의 장소가 나와요.'
+    : '실제 그 장소를 정확하게 만들려면 사진이 필요해요 — 그 장소를 직접 찍은 사진을 올려주세요.';
+  modeWrap.appendChild(modeHint);
+  p.appendChild(modeWrap);
+
+  if(tab0.genMode==='text'){
+    var textWrap=dv('ss');
+    textWrap.innerHTML='<div class="lbl">어떤 장소·분위기를 만들까요?</div>';
+    var promptTa=document.createElement('textarea');
+    promptTa.value=tab0.textPrompt||'';
+    promptTa.placeholder='예: 서울 강남역 느낌의 번화한 도심 교차로, 고층빌딩과 대형 전광판, 저녁 시간대 조명';
+    promptTa.style.cssText='width:100%;min-height:90px;padding:9px 10px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:12.5px;line-height:1.6;font-family:inherit;resize:vertical;box-sizing:border-box';
+    promptTa.oninput=function(){ tab0.textPrompt=promptTa.value; _w3dRefreshButtonStates(); };
+    textWrap.appendChild(promptTa);
+    p.appendChild(textWrap);
+
+    var qualWrapText=dv('ss');qualWrapText.style.cssText='margin-bottom:10px';
+    var qualLabelText=dv('');qualLabelText.style.cssText='font-size:12px;color:var(--t2);margin-bottom:6px';
+    qualLabelText.textContent='품질';
+    qualWrapText.appendChild(qualLabelText);
+    var qualRowText=dv('');qualRowText.style.cssText='display:flex;gap:8px';
+    var qualBtnMiniText=mk('button','');qualBtnMiniText.type='button';
+    var qualBtnPlusText=mk('button','');qualBtnPlusText.type='button';
+    function _paintQualBtnsText(){
+      var miniOn=_w3dQuality!=='plus';
+      qualBtnMiniText.style.cssText='flex:1;padding:10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;border:1.5px solid '+(miniOn?'var(--acb)':'var(--bd2)')+';background:'+(miniOn?'var(--acg)':'var(--c2)')+';color:'+(miniOn?'var(--ac)':'var(--t2)')+'';
+      qualBtnPlusText.style.cssText='flex:1;padding:10px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:700;border:1.5px solid '+(!miniOn?'var(--acb)':'var(--bd2)')+';background:'+(!miniOn?'var(--acg)':'var(--c2)')+';color:'+(!miniOn?'var(--ac)':'var(--t2)')+'';
+    }
+    qualBtnMiniText.innerHTML='⚡ 빠른 미리보기<br><span style="font-size:10px;color:var(--m2);font-weight:400">약 5~10분 · '+W3D_COST_MINI+'cr</span>';
+    qualBtnPlusText.innerHTML='✨ 고품질<br><span style="font-size:10px;color:var(--m2);font-weight:400">약 10분 이상 · '+W3D_COST_PLUS+'cr</span>';
+    qualBtnMiniText.onclick=function(){ _w3dQuality='mini'; _paintQualBtnsText(); goBtnTextUpdatePrice(); };
+    qualBtnPlusText.onclick=function(){ _w3dQuality='plus'; _paintQualBtnsText(); goBtnTextUpdatePrice(); };
+    _paintQualBtnsText();
+    qualRowText.appendChild(qualBtnMiniText); qualRowText.appendChild(qualBtnPlusText);
+    qualWrapText.appendChild(qualRowText);
+    p.appendChild(qualWrapText);
+
+    _w3dRefreshButtonStates();
+    var goWrapText=dv('ss');
+    var goBtnText=mk('button','');goBtnText.id='w3d-go-tab';
+    goBtnText.style.cssText='width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit';
+    function goBtnTextUpdatePrice(){
+      goBtnText.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';
+    }
+    goBtnTextUpdatePrice();
+    goBtnText.onclick=_w3dTabStartText;
+    goWrapText.appendChild(goBtnText);
+    var statusElText=dv('');statusElText.id='w3d-tab-status';statusElText.style.cssText='margin-top:10px;font-size:12px;color:var(--t2);text-align:center;display:none';
+    goWrapText.appendChild(statusElText);
+    p.appendChild(goWrapText);
+    _w3dRefreshButtonStates();
+    return;
+  }
+
   mkUB(p,'VR로 변환할 이미지','main');
   var upscaleNote=dv('');upscaleNote.id='w3d-upscale-note';upscaleNote.style.cssText='font-size:11px;color:var(--ac);margin:-4px 0 8px 2px';
   p.appendChild(upscaleNote);
@@ -13168,13 +13241,13 @@ function addHistEl(item, scroll, targetHs, atBottom){
           w3spinBtn.textContent='🎬 회전 영상 만들기 (쇼츠용)';
           w3spinBtn.onclick=function(){
             w3spinBtn.disabled=true; w3spinBtn.textContent='녹화 준비 중...';
-            _w3dCaptureSpinVideo(item.spzUrl, item.metricScale, {seconds:4},
+            _w3dCaptureSpinVideo(item.spzUrl, item.metricScale, {seconds:8},
               function(progress){ w3spinBtn.textContent='녹화 중... '+Math.round(progress*100)+'%'; },
               function(blob){
                 var videoUrl=URL.createObjectURL(blob);
                 if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
                   G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.orig||null, isVideo:true,
-                    videoUrl:videoUrl, duration:4, role:'video_clip', autoRole:'video_clip',
+                    videoUrl:videoUrl, duration:8, role:'video_clip', autoRole:'video_clip',
                     customLabel:'VR 회전', source:'clover'});
                 }
                 w3spinBtn.textContent='✓ 쇼츠에 추가됐어요 — 쇼츠 탭에서 확인하세요';
@@ -14443,7 +14516,7 @@ function _w3dRefreshButtonStates(){
   var tab=getTab('world3d');
   var mainBtn=gE('w3d-go-tab');
   if(mainBtn){
-    var hasMain=!!tab.inputImg;
+    var hasMain = tab.genMode==='text' ? !!(tab.textPrompt&&tab.textPrompt.trim()) : !!tab.inputImg;
     mainBtn.disabled=!hasMain;
     mainBtn.style.opacity=hasMain?'1':'0.45';
     mainBtn.style.cursor=hasMain?'pointer':'not-allowed';
@@ -14917,6 +14990,51 @@ function _w3dRoomStart(){
       if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🏠 여러 공간으로 VR 만들기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_MULTIROOM_COST+'cr</span>';}
       if(statusEl) statusEl.style.display='none';
     });
+}
+// ⚠️ 2026-07-22 신규: 텍스트 설명만으로 VR 월드 생성 요청 — 실제 특정 장소가 아니라
+// 그럴듯한 가상 장소를 만드는 용도. 사진 기반(_w3dTabStart)과 같은 서버 엔드포인트(world-generate)를
+// 쓰지만, imageUrl 대신 prompt 필드로 요청함. ★ 서버(Supabase Edge Function 'world-generate')가
+// prompt 필드를 받아서 World Labs에 텍스트 기반 생성으로 넘기도록 되어 있어야 실제로 동작함 —
+// 이 파일(클라이언트)만으로는 서버 쪽 구현 여부를 확인/보장할 수 없음.
+function _w3dTabStartText(){
+  if(!_supaUser){ openMd('account'); alert('로그인이 필요합니다 (또는 세션이 만료됐어요). 다시 로그인 후 시도해주세요.'); return; }
+  var tab=getTab('world3d');
+  var promptText=(tab.textPrompt||'').trim();
+  if(!promptText){ alert('만들고 싶은 장소나 분위기를 먼저 설명해주세요.'); return; }
+  var _thisCost=_w3dTotalCost();
+  if(G.supaRole!=='admin' && G.cr<_thisCost){ alert('크레딧이 부족합니다. ('+_thisCost+'cr 필요)'); openMd('credits'); return; }
+  var goBtn=gE('w3d-go-tab'), statusEl=gE('w3d-tab-status');
+  if(goBtn){goBtn.disabled=true;goBtn.textContent='요청 중...';}
+  if(statusEl){statusEl.style.display='block';statusEl.textContent='VR 투어 생성 요청 중...';}
+  var loadingId=Date.now();
+  G.HIST.world3d.unshift({id:loadingId, loading:true, wf:'world3d'});
+  renderMain('world3d');
+  var reqBody={
+    action:'submit',
+    prompt: promptText,
+    model: _w3dQuality==='plus' ? 'marble-1.1-plus' : 'marble-1.1',
+    displayName:'CloverAI 3D Tour'
+  };
+  fetch(SUPA_URL+'/functions/v1/world-generate',{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify(reqBody)
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ throw new Error((d.error&&d.error.message)?d.error.message:String(d.error)); }
+    try{
+      localStorage.setItem('clover_w3d_pending', JSON.stringify({
+        operationId: d.operation_id, loadingId: loadingId, srcImg: null, startTime: Date.now()
+      }));
+    }catch(e){}
+    if(statusEl) statusEl.textContent='생성 중입니다 (보통 5~10분, 서버 상황에 따라 더 걸릴 수 있어요)...';
+    _w3dTabPoll(d.operation_id, loadingId, null, 0, Date.now());
+  }).catch(function(e){
+    console.warn('[VR 투어-텍스트] 실패:', e);
+    G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
+    renderMain('world3d');
+    if(statusEl){statusEl.textContent='⚠️ 실패: '+String(e.message||e).slice(0,150)+' (서버가 텍스트 생성을 아직 지원하지 않을 수 있어요)';}
+    if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';}
+  });
 }
 function _w3dTabStart(){
   if(!_supaUser){ openMd('account'); alert('로그인이 필요합니다 (또는 세션이 만료됐어요). 다시 로그인 후 시도해주세요.'); return; }
@@ -21707,7 +21825,7 @@ window._disposeW3DViewersIn = function(root){
 // _w3dInitViewer와 동일한 방식으로 전역에서 호출 가능하게 함.
 window._w3dCaptureSpinVideo = function(spzUrl, metricScale, opts, onProgress, onDone, onError){
   opts = opts || {};
-  var seconds = opts.seconds || 4;
+  var seconds = opts.seconds || 8;
   var warmupMs = opts.warmupMs != null ? opts.warmupMs : 1800;
   var w = opts.width || 720, h = opts.height || 1280; // 9:16 세로(쇼츠 규격)
   try{
@@ -21768,13 +21886,40 @@ window._w3dCaptureSpinVideo = function(spzUrl, metricScale, opts, onProgress, on
       };
       recorder.start();
       var recStart=null;
+      // ── 카메라 동선: 단순 등속 360도 회전이 기계적이고 어색하다는 피드백을 반영해서
+      // 3단계로 재구성함 — ①메인 건물 정면을 좌우로 살짝 훑어보기(이징 적용) →
+      // ②360도로 주변 배경 회전(등속, 회전감 자체는 자연스럽게 유지) →
+      // ③다시 정면으로 돌아오면서 살짝 줌인(FOV 축소)하며 마무리.
+      // 이렇게 하면 시작/끝이 뚝뚝 끊기지 않고 부드럽게 감속·가속되면서 "버벅"거리는 느낌이 줄어듦.
+      var baseFov = camera.fov;
+      var introDeg = 16; // 정면 훑기 각도(도)
+      var zoomFov = 46;  // 마무리 줌인 시 FOV(작을수록 더 확대되어 보임)
+      var pFront = 0.22, pSpin = 0.75; // 전체 진행률(0~1) 기준 구간 경계
+      function _easeInOutQuad(x){ return x<0.5 ? 2*x*x : 1-Math.pow(-2*x+2,2)/2; }
+      function _spinCameraState(progress){
+        var yawDeg, fov=baseFov;
+        if(progress < pFront){
+          var lt=_easeInOutQuad(progress/pFront);
+          yawDeg = introDeg*lt;
+        } else if(progress < pSpin){
+          var lt2=(progress-pFront)/(pSpin-pFront);
+          yawDeg = introDeg + 360*lt2; // 이 구간은 회전감이 자연스럽도록 등속 유지
+        } else {
+          var lt3=_easeInOutQuad((progress-pSpin)/(1-pSpin));
+          yawDeg = (introDeg+360) - introDeg*lt3; // 360도(=정면)로 부드럽게 복귀
+          fov = baseFov - (baseFov-zoomFov)*lt3;   // 동시에 서서히 줌인
+        }
+        return {yaw: yawDeg*Math.PI/180, fov: fov};
+      }
       function spinLoop(t){
         if(stopped) return;
         try{
           if(recStart===null) recStart=t;
           var elapsed=(t-recStart)/1000;
           var progress=Math.min(elapsed/seconds, 1);
-          camera.quaternion.setFromEuler(new THREE.Euler(0, progress*Math.PI*2, 0, 'YXZ'));
+          var st=_spinCameraState(progress);
+          camera.quaternion.setFromEuler(new THREE.Euler(0, st.yaw, 0, 'YXZ'));
+          if(camera.fov!==st.fov){ camera.fov=st.fov; camera.updateProjectionMatrix(); }
           renderer.render(scene, camera);
           onProgress&&onProgress(progress);
         }catch(e){
