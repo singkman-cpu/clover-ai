@@ -10964,9 +10964,15 @@ function _shortsAddImageFlow(){
     var total=(G.HIST[wf]||[]).length;
     var included=0;
     (G.HIST[wf]||[]).forEach(function(item){
-      // 영상제작(video) 결과물(.mp4/.webm)도 이제 쇼츠에 영상 클립으로 바로 추가할 수 있음 —
-      // 예전엔 "쇼츠는 이미지만 가능"했을 때 만든 필터라 영상을 통째로 걸러냈었음(지금은 구식).
-      if(item.result){allItems.push(item);included++;}
+      // ⚠️ 2026-07-22: VR투어(world3d) 아이템의 result는 이미지가 아니라 marble.worldlabs.ai
+      // "웹페이지 링크"라서, 그대로 <img src=item.result>에 넣으면 깨진 이미지로 보임.
+      // 실제 미리보기 이미지는 item.orig(썸네일 or 원본 사진)에 있으므로, 쇼츠 피커/슬라이드용으로는
+      // result를 orig로 바꿔치기한 복사본을 사용 (원본 G.HIST 아이템은 안 건드림 — 카카오톡 공유 등
+      // 다른 버튼들은 여전히 진짜 marble 링크를 써야 하므로).
+      if(wf==='world3d' && item.result && item.orig){
+        var displayItem=Object.assign({}, item, {result:item.orig});
+        allItems.push(displayItem); included++;
+      } else if(item.result){allItems.push(item);included++;}
     });
     _diagCounts[wf]=total+'개 중 '+included+'개 포함';
   });
@@ -12830,6 +12836,32 @@ function addHistEl(item, scroll, targetHs, atBottom){
           w3shareBtn.textContent='↗ 카카오톡 등으로 공유';
           w3shareBtn.onclick=function(){ cloverShareVR(item.spzUrl, item.result); };
           w3btnRow.appendChild(w3shareBtn);
+
+          // 🎬 쇼츠용 회전 영상 만들기 (실험적) — 녹화 끝나면 바로 G_SHORTS.images에 추가됨
+          var w3spinBtn=mk('button','');
+          w3spinBtn.style.cssText='padding:8px 16px;border-radius:8px;background:transparent;color:var(--ac);font-weight:700;font-size:12px;border:1.5px solid var(--ac);cursor:pointer;font-family:inherit';
+          w3spinBtn.textContent='🎬 회전 영상 만들기 (쇼츠용)';
+          w3spinBtn.onclick=function(){
+            w3spinBtn.disabled=true; w3spinBtn.textContent='녹화 준비 중...';
+            _w3dCaptureSpinVideo(item.spzUrl, item.metricScale, {seconds:4},
+              function(progress){ w3spinBtn.textContent='녹화 중... '+Math.round(progress*100)+'%'; },
+              function(blob){
+                var videoUrl=URL.createObjectURL(blob);
+                if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
+                  G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.orig||null, isVideo:true,
+                    videoUrl:videoUrl, duration:4, role:'video_clip', autoRole:'video_clip',
+                    customLabel:'VR 회전', source:'clover'});
+                }
+                w3spinBtn.textContent='✓ 쇼츠에 추가됐어요 — 쇼츠 탭에서 확인하세요';
+                setTimeout(function(){ w3spinBtn.disabled=false; w3spinBtn.textContent='🎬 회전 영상 다시 만들기'; }, 2500);
+              },
+              function(err){
+                console.error('[VR 회전영상] 실패:', err);
+                w3spinBtn.disabled=false; w3spinBtn.textContent='⚠️ 실패 — 다시 시도';
+              }
+            );
+          };
+          w3btnRow.appendChild(w3spinBtn);
         }
         var w3openA=document.createElement('a');
         w3openA.href=item.result;w3openA.target='_blank';w3openA.rel='noopener';
@@ -21323,7 +21355,86 @@ window._disposeW3DViewersIn = function(root){
   }
 };
 
-window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
+// ── VR 투어 씬을 짧게 회전시키며 녹화해서 쇼츠용 영상으로 만들기 (실험적 기능) ──────
+// 주의: 화면에 보이는 인터랙티브 뷰어(_w3dInitViewer)는 WASD로 자유롭게 걸어다니는 방식이라
+// "회전"이라는 개념이 없음 — 그래서 녹화 전용으로 별도 오프스크린 렌더러를 하나 더 만들어서
+// 카메라 시점(yaw)만 0→360도로 서서히 돌리며 캔버스를 MediaRecorder로 녹화한다.
+// 스플랫 데이터가 로딩되는 데 시간이 좀 걸릴 수 있어서, 녹화 시작 전에 warmup 시간을 둔다.
+function _w3dCaptureSpinVideo(spzUrl, metricScale, opts, onProgress, onDone, onError){
+  opts = opts || {};
+  var seconds = opts.seconds || 4;
+  var warmupMs = opts.warmupMs != null ? opts.warmupMs : 1800;
+  var w = opts.width || 720, h = opts.height || 1280; // 9:16 세로(쇼츠 규격)
+  try{
+    if(typeof MediaRecorder==='undefined'){ onError&&onError(new Error('이 브라우저는 화면 녹화(MediaRecorder)를 지원하지 않아요.')); return; }
+    var renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
+    renderer.setSize(w,h);
+    renderer.setPixelRatio(1);
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(70, w/h, 0.01, 1000);
+    camera.position.set(0,0,0);
+    var spark = new SparkRenderer({renderer:renderer});
+    scene.add(spark);
+    var splat = new SplatMesh({url:spzUrl});
+    splat.rotation.x = Math.PI; // world3d 뷰어와 동일한 좌표계 보정
+    scene.add(splat);
+
+    var stopped=false, recorder=null, rafId=null;
+    function cleanup(){
+      stopped=true;
+      if(rafId) cancelAnimationFrame(rafId);
+      try{ renderer.dispose(); }catch(e){}
+    }
+
+    // warmup 동안은 녹화 없이 렌더만 계속 돌려서 스플랫 데이터가 어느 정도 로드될 시간을 줌
+    var warmupStart=null;
+    function warmupLoop(t){
+      if(stopped) return;
+      if(warmupStart===null) warmupStart=t;
+      camera.quaternion.identity();
+      renderer.render(scene, camera);
+      if(t-warmupStart < warmupMs){ rafId=requestAnimationFrame(warmupLoop); }
+      else { startRecording(); }
+    }
+
+    function startRecording(){
+      if(stopped) return;
+      var stream;
+      try{ stream = renderer.domElement.captureStream(30); }
+      catch(e){ onError&&onError(e); cleanup(); return; }
+      var mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) ? 'video/webm;codecs=vp9'
+               : (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) ? 'video/webm;codecs=vp8' : 'video/webm';
+      try{ recorder = new MediaRecorder(stream, {mimeType:mime, videoBitsPerSecond:4000000}); }
+      catch(e){ onError&&onError(e); cleanup(); return; }
+      var chunks=[];
+      recorder.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); };
+      recorder.onerror=function(e){ onError&&onError(e); cleanup(); };
+      recorder.onstop=function(){
+        cleanup();
+        if(!chunks.length){ onError&&onError(new Error('녹화된 프레임이 없어요.')); return; }
+        onDone(new Blob(chunks, {type:'video/webm'}));
+      };
+      recorder.start();
+      var recStart=null;
+      function spinLoop(t){
+        if(stopped) return;
+        if(recStart===null) recStart=t;
+        var elapsed=(t-recStart)/1000;
+        var progress=Math.min(elapsed/seconds, 1);
+        camera.quaternion.setFromEuler(new THREE.Euler(0, progress*Math.PI*2, 0, 'YXZ'));
+        renderer.render(scene, camera);
+        onProgress&&onProgress(progress);
+        if(progress<1){ rafId=requestAnimationFrame(spinLoop); }
+        else { try{ recorder.stop(); }catch(e){ cleanup(); } }
+      }
+      rafId=requestAnimationFrame(spinLoop);
+    }
+
+    rafId=requestAnimationFrame(warmupLoop);
+  }catch(e){
+    onError&&onError(e);
+  }
+}
   if(!containerEl || !spzUrl) return;
   metricScale = metricScale && metricScale > 0 ? metricScale : 1;
   try{
