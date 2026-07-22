@@ -656,6 +656,13 @@ select option{background:var(--c2)}
     <input id="login-pw" type="password" placeholder="비밀번호" style="width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:10px 12px;font-size:13px;border-radius:8px;outline:none;box-sizing:border-box;font-family:inherit">
   </div>
   <div id="login-msg" style="font-size:11px;color:#fca5a5;text-align:center;min-height:16px;margin-bottom:8px"></div>
+
+  <!-- 약관 동의 — 예전엔 이메일/비밀번호만 입력하면 바로 가입이 완료돼서, 이용약관·개인정보처리방침에
+       대한 명시적 동의 절차가 아예 없었음. 회원가입 시 필수 동의를 받도록 체크박스 추가함. -->
+  <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;cursor:pointer;font-size:11.5px;color:var(--t2);line-height:1.5">
+    <input type="checkbox" id="login-terms-agree" style="margin-top:2px;flex-shrink:0;width:15px;height:15px;cursor:pointer">
+    <span>(필수) <span onclick="event.preventDefault();showTermsModal();" style="color:var(--ac);text-decoration:underline;cursor:pointer">이용약관</span> 및 <span onclick="event.preventDefault();showPrivacyModal();" style="color:var(--ac);text-decoration:underline;cursor:pointer">개인정보처리방침</span>에 동의합니다</span>
+  </label>
   <div style="display:flex;gap:8px;margin-bottom:14px">
     <button onclick="supaEmailLogin()" style="flex:1;padding:11px;border-radius:8px;background:var(--ac);border:none;color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">로그인</button>
     <button onclick="supaEmailSignup()" style="flex:1;padding:11px;border-radius:8px;background:var(--acg);border:1px solid var(--acb);color:var(--ac);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">회원가입</button>
@@ -1167,6 +1174,13 @@ function _proposalOpenAddScenePicker(){
     reader.readAsDataURL(f);
   });
   quickSec.appendChild(quickBox);
+  var quickGalBtn=mk('button','');quickGalBtn.type='button';quickGalBtn.textContent='🖼 또는, 내 갤러리에서 바로 선택';
+  quickGalBtn.style.cssText='width:100%;margin-top:8px;padding:9px;border-radius:8px;border:1px solid rgba(110,231,183,.4);background:transparent;color:var(--ac);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
+  quickGalBtn.onclick=function(){
+    var galSecEl=galSec;
+    if(galSecEl && galSecEl.scrollIntoView) galSecEl.scrollIntoView({behavior:'smooth', block:'center'});
+  };
+  quickSec.appendChild(quickGalBtn);
   pickCard.appendChild(quickSec);
 
   var advDivider=dv('');advDivider.style.cssText='text-align:center;font-size:11px;color:var(--m2);margin:4px 0 14px';
@@ -1194,21 +1208,56 @@ function _proposalOpenAddScenePicker(){
     box.appendChild(input);
     slot.appendChild(box);
     var dataUrl=null;
+    function setPreview(url){
+      dataUrl=url;
+      box.innerHTML='';
+      var prevImg=document.createElement('img');prevImg.src=dataUrl;
+      prevImg.style.cssText='width:100%;height:100%;object-fit:cover';
+      box.appendChild(prevImg);
+      box.appendChild(input);
+      input.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%';
+      checkUploadReady();
+    }
     input.onchange=function(){
       var f=input.files[0];if(!f)return;
       var reader=new FileReader();
-      reader.onload=function(){
-        dataUrl=reader.result;
-        box.innerHTML='';
-        var prevImg=document.createElement('img');prevImg.src=dataUrl;
-        prevImg.style.cssText='width:100%;height:100%;object-fit:cover';
-        box.appendChild(prevImg);
-        box.appendChild(input);
-        input.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%';
-        checkUploadReady();
-      };
+      reader.onload=function(){ setPreview(reader.result); };
       reader.readAsDataURL(f);
     };
+    // 이 슬롯 전용 "내 갤러리에서 선택" 버튼 — 예전엔 BEFORE/AFTER 슬롯이 파일 업로드만 가능해서,
+    // 이미 사이트에서 만든 결과물을 비교샷으로 쓰려면 일부러 다운로드했다가 다시 업로드해야 했음.
+    var galBtn=mk('button','');galBtn.type='button';galBtn.textContent='🖼 내 갤러리에서';
+    galBtn.style.cssText='width:100%;margin-top:5px;padding:5px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:10px;cursor:pointer;font-family:inherit';
+    galBtn.onclick=function(){
+      var miniOv=dv('');
+      miniOv.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px';
+      miniOv.onclick=function(e){ if(e.target===miniOv) document.body.removeChild(miniOv); };
+      var miniCard=dv('');
+      miniCard.style.cssText='background:var(--card);border-radius:14px;padding:16px;max-width:480px;width:100%;max-height:75vh;overflow-y:auto';
+      miniCard.onclick=function(e){e.stopPropagation();};
+      var miniTitle=dv('');miniTitle.style.cssText='font-size:13px;font-weight:800;color:var(--t);margin-bottom:10px';
+      miniTitle.textContent=labelText+'로 쓸 사진 선택';
+      miniCard.appendChild(miniTitle);
+      if(!candidates.length){
+        var noGal2=dv('');noGal2.style.cssText='font-size:12px;color:var(--m2);text-align:center;padding:16px';
+        noGal2.textContent='아직 만든 결과물이 없어요.';
+        miniCard.appendChild(noGal2);
+      } else {
+        var miniGrid=dv('');miniGrid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:6px';
+        candidates.slice(0,90).forEach(function(cand){
+          var mcell=dv('');mcell.style.cssText='cursor:pointer;border-radius:7px;overflow:hidden;border:1px solid var(--bd2);aspect-ratio:1';
+          var mimg=document.createElement('img');mimg.src=cand.result;mimg.loading='lazy';
+          mimg.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
+          mcell.appendChild(mimg);
+          mcell.onclick=function(){ setPreview(cand.result); document.body.removeChild(miniOv); };
+          miniGrid.appendChild(mcell);
+        });
+        miniCard.appendChild(miniGrid);
+      }
+      miniOv.appendChild(miniCard);
+      document.body.appendChild(miniOv);
+    };
+    slot.appendChild(galBtn);
     slot.getDataUrl=function(){return dataUrl;};
     return slot;
   }
@@ -17312,7 +17361,12 @@ function openMd(id){
   if(id==='account')buildAccount();
   if(id==='credits')buildCredits();
   if(id==='world3d')_initWorld3dModal();
-  if(id==='login'){/* static */}
+  if(id==='login'){
+    try{
+      var termsCb=gE('login-terms-agree');
+      if(termsCb) termsCb.checked = localStorage.getItem('clover_terms_agreed')==='1';
+    }catch(e){}
+  }
   if(id==='bizinfo'){/* static */}
   if(id==='admin'){
     if(G.supaRole!=='admin'){alert('관리자 전용입니다.');return;}
@@ -20581,6 +20635,14 @@ function supaSignIn(){
     alert('Supabase 설정이 필요합니다.\n계정 설정에서 URL과 Key를 입력하세요.');
     return;
   }
+  var termsChecked=gE('login-terms-agree');
+  if(termsChecked && !termsChecked.checked){
+    var msg=gE('login-msg');
+    if(msg){msg.style.color='#fca5a5';msg.textContent='이용약관 및 개인정보처리방침에 동의해주세요.';}
+    termsChecked.focus();
+    return;
+  }
+  try{ localStorage.setItem('clover_terms_agreed','1'); }catch(e){} // 한 번 동의하면 재로그인 시 매번 다시 체크 안 해도 되게 기억해둠
   // 네이버/카카오 등 인앱 브라우저 감지 → Chrome으로 강제 오픈
   var ua=navigator.userAgent.toLowerCase();
   var isInApp=/naver|kakaotalk|line|instagram|fban|fbios/.test(ua);
@@ -20647,7 +20709,14 @@ function supaEmailSignup(){
   var msg=gE('login-msg');
   if(!email||!pw){if(msg){msg.textContent='이메일과 비밀번호를 입력하세요.';}return;}
   if(pw.length<6){if(msg){msg.style.color='#fca5a5';msg.textContent='비밀번호는 6자 이상이어야 합니다.';}return;}
+  var termsChecked=gE('login-terms-agree');
+  if(termsChecked && !termsChecked.checked){
+    if(msg){msg.style.color='#fca5a5';msg.textContent='이용약관 및 개인정보처리방침에 동의해주세요.';}
+    termsChecked.focus();
+    return;
+  }
   if(msg){msg.style.color='var(--m2)';msg.textContent='가입 처리 중...';}
+  try{ localStorage.setItem('clover_terms_agreed','1'); }catch(e){}
   _supa.auth.signUp({email:email,password:pw})
   .then(function(res){
     if(res.error){
