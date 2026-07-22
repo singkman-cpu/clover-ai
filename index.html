@@ -3337,6 +3337,11 @@ var RESIDENTIAL_PRESET_KEYS = (function(){
   // 아직 전수조사가 안 됐음 — 나머지는 대부분 상업(카페/식당/쇼룸)이라 지금은 상업공간 경로로
   // 처리되는 게 맞지만, 그중 주거용도 일부 섞여있을 수 있어 추후 개별 검토 필요.
   ['ohou_livingroom','ohou_bedroom','ohou_kidsroom','ohou_bathroom','ohou_kitchen','ohou_dressroom','ohou_entrance','ohou_hallway','ohou_terrace'].forEach(function(k){ s[k]=true; });
+  // ⚠️ 2026-07-22: PS_RENDER(렌더 실사화 탭의 실사화/고급 실사화/카드→아이디어)는 "공간 스타일"이
+  // 아니라 순수 "렌더링 품질/방식" 선택이라 원래 주거/상업/외관 분류와 무관해야 하는데, 이 목록에
+  // 없어서 예산 계산기가 자동으로 "상업공간"으로 오분류하던 버그가 있었음(예산 안 쓸 때도 상업공간
+  // 업종 프리셋이 튀어나옴). 이 3개는 "프리셋 미선택"과 똑같이 취급되도록 주거 쪽에 포함시켜둠.
+  ['realism','hq_real','cad_isometric'].forEach(function(k){ s[k]=true; });
   // [전수조사 완료] 나머지 혼합 카테고리(인기트렌드/2026트렌드/2026-27키워드/2026공간별트렌드,
   // 총 249개) 하나하나 확인해서 주거용인 것만 추가함. 카페·식당·미용실·클리닉·공방·상점 등
   // 명백한 상업용은 제외하고, 일반 인테리어 스타일 트렌드(특정 업종을 지칭하지 않는 것)와
@@ -7918,6 +7923,28 @@ function mkBudgetTier(p){
   disclaimer.style.cssText='font-size:10.5px;color:var(--m2);margin-top:8px;padding-top:8px;border-top:1px solid var(--bd2);line-height:1.6';
   disclaimer.textContent='※ 본 예산은 공간의 전체 완성도를 기준으로 AI가 추정한 금액입니다. 시공비뿐 아니라 가구, 조명, 소품, 패브릭, 가전 등이 포함될 수 있으며, 실제 공사비와 견적은 현장 상태, 시공 범위, 자재 및 시공사에 따라 달라질 수 있습니다.';
   w.appendChild(disclaimer);
+  // ── 2026-07-22 추가: 예산 섹션 전체 접기/펼치기 ──────────────────────────
+  // 예산을 안 쓰는 사람들을 위해, 제목 줄은 그대로 두고 그 아래 모든 내용(모드토글/
+  // 안내문/입력창/항목별breakdown 등 이 함수에서 만든 전부)을 한 번에 접을 수 있게 함.
+  // 방식: 제목 div는 innerHTML로 제일 먼저 만들어져서 항상 w의 첫 번째 자식이므로,
+  // 그 뒤에 쌓인 나머지 전부를 별도 wrap으로 옮기고 그 wrap만 숨김/표시 전환.
+  var _budgetTitleEl = w.firstElementChild;
+  var _budgetBodyChildren = Array.prototype.slice.call(w.children).slice(1);
+  var _budgetBodyWrap = dv('');
+  _budgetBodyChildren.forEach(function(ch){ _budgetBodyWrap.appendChild(ch); });
+  w.appendChild(_budgetBodyWrap);
+  if(tab.budgetSectionCollapsed==null) tab.budgetSectionCollapsed=false; // 기본은 펼침(기존 동작 유지)
+  var _budgetToggleBtn=mk('button','');_budgetToggleBtn.type='button';
+  _budgetToggleBtn.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:7px;padding:4px 10px;font-size:11px;font-weight:700;color:var(--ac);cursor:pointer;font-family:inherit;flex-shrink:0';
+  function _paintBudgetToggle(){
+    _budgetBodyWrap.style.display = tab.budgetSectionCollapsed ? 'none' : '';
+    _budgetToggleBtn.textContent = tab.budgetSectionCollapsed ? '▸ 펼치기' : '▾ 접기';
+  }
+  _budgetToggleBtn.onclick=function(e){ e.stopPropagation(); tab.budgetSectionCollapsed=!tab.budgetSectionCollapsed; _paintBudgetToggle(); };
+  _budgetTitleEl.style.cssText+=';display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer';
+  _budgetTitleEl.appendChild(_budgetToggleBtn);
+  _budgetTitleEl.onclick=function(){ _budgetToggleBtn.onclick.call(_budgetToggleBtn, {stopPropagation:function(){}}); };
+  _paintBudgetToggle();
   p.appendChild(w);
 }
 function sbSpace(p){
