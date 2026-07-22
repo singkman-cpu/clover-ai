@@ -17303,10 +17303,12 @@ function admDashboard(c){
   Promise.all([
     _supa.from('profiles').select('id,created_at,plan',{count:'exact'}),
     _supa.from('credit_logs').select('amount').then(function(r){return r;}).catch(function(){return {data:[]};}),
-    _supa.from('gallery').select('created_at,wf,style_key').order('created_at',{ascending:false}).limit(3000).then(function(r){return r;}).catch(function(){return {data:[]};})
+    _supa.from('gallery').select('created_at,wf,style_key').order('created_at',{ascending:false}).limit(3000).then(function(r){return r;}).catch(function(){return {data:[]};}),
+    _supa.from('error_logs').select('message,url,created_at').order('created_at',{ascending:false}).limit(20).then(function(r){return r;}).catch(function(){return {data:[]};})
   ]).then(function(results){
     var profilesRes=results[0],logsRes=(results[1]&&!results[1].error)?results[1]:{data:[]};
     var galleryRes=(results[2]&&!results[2].error)?results[2]:{data:[]};
+    var errorLogsRes=(results[3]&&!results[3].error)?results[3]:{data:[]};
     var total=profilesRes.count||0;
     var todayStr=_toKstDateStr(new Date().toISOString()); // "오늘"도 한국시간 기준으로 계산해야 새벽 시간대에 어긋나지 않음
     var todayJoins=(profilesRes.data||[]).filter(function(p){return _toKstDateStr(p.created_at)===todayStr;}).length;
@@ -17376,6 +17378,17 @@ function admDashboard(c){
       '</div>'+
       '<div style="background:var(--c2);border:1px solid var(--bd);border-radius:9px;padding:12px;margin-bottom:12px">'+
         '<div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:6px">🔥 인기 프리셋 TOP 10 (최근 3000건 기준)</div>'+presetRows+
+      '</div>'+
+      '<div style="background:var(--c2);border:1px solid var(--bd);border-radius:9px;padding:12px;margin-bottom:12px">'+
+        '<div style="font-size:11px;font-weight:700;color:#fca5a5;margin-bottom:8px">🚨 최근 에러 로그 (최신 20건)</div>'+
+        ((errorLogsRes.data||[]).length
+          ? errorLogsRes.data.map(function(e){
+              var t=new Date(e.created_at).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+              return '<div style="padding:6px 0;border-bottom:1px solid var(--bd);font-size:10.5px">'+
+                '<div style="color:#fca5a5;word-break:break-all">'+(e.message||'').replace(/</g,'&lt;')+'</div>'+
+                '<div style="color:var(--m2);margin-top:2px">'+t+' · '+(e.url||'').replace(/</g,'&lt;').slice(0,60)+'</div></div>';
+            }).join('')
+          : '<div style="color:var(--m2);font-size:11px;text-align:center;padding:10px">아직 로그가 없어요(정상! 에러가 없었다는 뜻이거나, error_logs 테이블이 아직 없을 수 있어요 — 관리자에게 SQL 생성 문의)</div>')+
       '</div>'+
       '<div style="font-size:11px;color:var(--m2);text-align:center">'+new Date().toLocaleString('ko-KR')+'</div>'+
       '<div style="display:flex;gap:8px;justify-content:center;margin-top:8px">'+
@@ -20765,6 +20778,52 @@ function deductCredits(amount){
 // ── AI 상담 챗봇 (플랫폼 사용법 + 디자인 상담 + 편집/렌더링 트러블슈팅) ──────────
 // 우측 하단 플로팅 버튼으로 항상 접근 가능. 대화 내용은 세션 동안만 유지(새로고침하면 초기화).
 var _chatHist=[]; // {role:'user'|'assistant', content:string}
+// ── 전역 에러 모니터링 ──────────────────────────────────────────
+// 예전엔 실제 사용자가 겪는 JS 에러를 우리가 전혀 알 방법이 없었음(콘솔에만 찍히고 끝).
+// 이제 처리되지 않은 에러/거부된 프로미스를 잡아서 Supabase에 로그로 남김.
+// ⚠️ 이 기능이 작동하려면 Supabase에 error_logs 테이블이 있어야 함 — 아래 SQL로 생성:
+//   create table public.error_logs (
+//     id bigint generated always as identity primary key,
+//     user_id uuid references auth.users(id),
+//     message text, stack text, url text, user_agent text,
+//     created_at timestamptz default now()
+//   );
+//   alter table public.error_logs enable row level security;
+//   create policy "누구나 삽입 가능" on public.error_logs for insert with check (true);
+//   create policy "관리자만 조회 가능" on public.error_logs for select using (
+//     exists(select 1 from public.profiles where id=auth.uid() and role='admin')
+//   );
+var _errorLogSentCount=0;
+var _errorLogSeen={}; // 같은 메시지 반복되면 스팸 방지
+function _logErrorToServer(message, stack, source){
+  try{
+    if(!_supa) return; // Supabase 초기화 전이면(페이지 로드 극초반) 조용히 무시
+    if(_errorLogSentCount>=20) return; // 세션당 최대 20건 — 무한루프성 에러가 테이블을 도배하는 것 방지
+    var dedupKey=(message||'')+'|'+(source||'');
+    if(_errorLogSeen[dedupKey]) return; // 완전히 같은 에러는 세션당 1번만
+    _errorLogSeen[dedupKey]=true;
+    _errorLogSentCount++;
+    _supa.from('error_logs').insert({
+      user_id: (typeof _supaUser!=='undefined' && _supaUser) ? _supaUser.id : null,
+      message: String(message||'').slice(0,500),
+      stack: String(stack||'').slice(0,2000),
+      url: location.href,
+      user_agent: navigator.userAgent
+    }).then(function(){}).catch(function(){}); // 로깅 자체가 실패해도 사용자 경험엔 영향 없게 조용히 무시
+  }catch(e){/* 에러 로거 자체가 에러나면 그냥 포기 — 무한루프 방지 */}
+}
+window.addEventListener('error', function(e){
+  _logErrorToServer(e.message, e.error&&e.error.stack, e.filename+':'+e.lineno);
+});
+window.addEventListener('unhandledrejection', function(e){
+  var reason=e.reason;
+  _logErrorToServer(
+    (reason&&reason.message)||String(reason),
+    reason&&reason.stack,
+    'unhandled-promise'
+  );
+});
+
 function _initChatWidget(){
   if(gE('chat-fab')) return; // 중복 초기화 방지
 
