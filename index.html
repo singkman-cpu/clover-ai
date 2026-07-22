@@ -13203,7 +13203,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
           if(iw<=0){ setTimeout(_w3dInitOnce, 80); return; }
           var inner=dv('');inner.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%';
           w3frameWrap.innerHTML='';w3frameWrap.appendChild(inner);
-          if(window._w3dInitViewer) window._w3dInitViewer(inner, item.spzUrl, item.metricScale);
+          if(window._w3dInitViewer) window._w3dInitViewer(inner, item.spzUrl, item.metricScale, item.orig||null);
           _w3dActive=true;
         };
         var _w3dDisposeOnce=function(){
@@ -13313,109 +13313,6 @@ function addHistEl(item, scroll, targetHs, atBottom){
           };
           w3spinWrap.appendChild(w3spinBtn);
           w3btnRow.appendChild(w3spinWrap);
-
-          // ── 🎮 직접 조작하면서 녹화 (자동회전과 별개 옵션) ──────────────────
-          // 위에 이미 떠 있는 인터랙티브 뷰어(마우스드래그+WASD)의 화면을 그대로 녹화함 —
-          // 새 렌더러를 안 만들고 이미 보이는 캔버스의 captureStream을 그대로 씀.
-          // ⚠️ 그 캔버스는 가로형(카드 비율)이라 세로(9:16) 쇼츠에 넣으면 좌우가 잘려서 들어감 —
-          // 다른 가로 사진/영상이 쇼츠에 들어갈 때와 동일한 방식(가운데 기준 크롭)임.
-          var w3manualWrap=dv('');
-          w3manualWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;margin-top:10px;padding-top:10px;border-top:1px solid var(--bd2)';
-          var w3manualHint=dv('');w3manualHint.style.cssText='font-size:11px;color:var(--m2);text-align:center;line-height:1.6';
-          w3manualHint.innerHTML='🎮 <strong style="color:var(--t2)">직접 조작하면서 녹화</strong> — 시작 누른 뒤 위 화면을 마우스로 드래그(모바일은 터치)해서 시점을 돌리고, PC는 WASD로 이동하며 원하는 장면을 찍으세요. 최소 5초, 최대 20초.';
-          w3manualWrap.appendChild(w3manualHint);
-          var w3manualStartBtn=mk('button','');w3manualStartBtn.type='button';w3manualStartBtn.textContent='⏺ 녹화 시작';
-          w3manualStartBtn.style.cssText='padding:8px 16px;border-radius:8px;background:#ef4444;color:#fff;font-weight:700;font-size:12px;border:none;cursor:pointer;font-family:inherit';
-          w3manualStartBtn.onclick=function(){
-            if(typeof MediaRecorder==='undefined'){ alert('이 브라우저는 화면 녹화를 지원하지 않아요.'); return; }
-            var canvasEl=w3frameWrap.querySelector('canvas');
-            if(!canvasEl){ alert('아직 3D 화면이 준비되지 않았어요. 화면이 보이는 상태에서 잠시 후 다시 눌러주세요.'); return; }
-            var MIN_SEC=5, MAX_SEC=20;
-            var stream, recorder, chunks=[], startTime=Date.now();
-            try{ stream=canvasEl.captureStream(30); }catch(e){ alert('녹화 시작 실패: '+e.message); return; }
-            var mime=(MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported('video/webm;codecs=vp9'))?'video/webm;codecs=vp9'
-                    :(MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported('video/webm;codecs=vp8'))?'video/webm;codecs=vp8':'video/webm';
-            try{ recorder=new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:4000000}); }
-            catch(e){ alert('녹화 시작 실패: '+e.message); return; }
-            recorder.ondataavailable=function(e){ if(e.data&&e.data.size) chunks.push(e.data); };
-            // 녹화 중에는 화면 밖으로 스크롤돼도 뷰어가 사라지지(dispose) 않게 감시를 잠깐 멈춤
-            if(typeof _w3dIO!=='undefined' && _w3dIO){ try{ _w3dIO.unobserve(w3frameWrap); }catch(e){} }
-
-            w3manualStartBtn.style.display='none';
-            var timerEl=dv('');timerEl.style.cssText='font-size:13px;font-weight:800;color:#ef4444';
-            timerEl.textContent='🔴 0.0s';
-            w3manualWrap.appendChild(timerEl);
-            var stopBtn=mk('button','');stopBtn.type='button';
-            stopBtn.disabled=true;
-            stopBtn.textContent='⏹ 녹화 종료 (최소 '+MIN_SEC+'초부터)';
-            stopBtn.style.cssText='padding:8px 16px;border-radius:8px;background:var(--c2);color:var(--t2);font-weight:700;font-size:12px;border:1px solid var(--bd2);cursor:not-allowed;font-family:inherit';
-            w3manualWrap.appendChild(stopBtn);
-
-            var finished=false;
-            function finishRecording(){
-              if(finished) return; finished=true;
-              clearInterval(tickId);
-              try{ recorder.stop(); }catch(e){}
-            }
-            var tickId=setInterval(function(){
-              var el=(Date.now()-startTime)/1000;
-              timerEl.textContent='🔴 '+el.toFixed(1)+'s';
-              if(el>=MIN_SEC && stopBtn.disabled){
-                stopBtn.disabled=false; stopBtn.textContent='⏹ 녹화 종료';
-                stopBtn.style.cssText='padding:8px 16px;border-radius:8px;background:#ef4444;color:#fff;font-weight:700;font-size:12px;border:none;cursor:pointer;font-family:inherit';
-              }
-              if(el>=MAX_SEC) finishRecording();
-            }, 100);
-            stopBtn.onclick=function(){ if(!stopBtn.disabled) finishRecording(); };
-
-            recorder.onstop=function(){
-              if(typeof _w3dIO!=='undefined' && _w3dIO){ try{ _w3dIO.observe(w3frameWrap); }catch(e){} }
-              timerEl.remove(); stopBtn.remove();
-              w3manualStartBtn.style.display=''; w3manualStartBtn.textContent='⏺ 녹화 시작';
-              if(!chunks.length){ alert('녹화된 내용이 없어요. 다시 시도해주세요.'); return; }
-              var actualDur=(Date.now()-startTime)/1000;
-              var blob=new Blob(chunks, {type:'video/webm'});
-              var videoUrl=URL.createObjectURL(blob);
-              var oldPreview=w3manualWrap.querySelector('.w3manual-preview');
-              if(oldPreview){
-                var oldVid=oldPreview.querySelector('video');
-                if(oldVid && oldVid.src){ try{ URL.revokeObjectURL(oldVid.src); }catch(e){} }
-                oldPreview.remove();
-              }
-              var previewWrap=dv('w3manual-preview');
-              previewWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:4px;width:100%';
-              var previewLabel=dv('');previewLabel.style.cssText='font-size:11px;color:var(--m2)';
-              previewLabel.textContent='🎬 미리보기 — 마음에 들면 추가, 아니면 다시 녹화하세요';
-              previewWrap.appendChild(previewLabel);
-              var videoEl=document.createElement('video');
-              videoEl.src=videoUrl; videoEl.controls=true; videoEl.autoplay=true; videoEl.loop=true; videoEl.muted=true; videoEl.playsInline=true;
-              videoEl.style.cssText='width:100%;max-width:260px;border-radius:10px;background:#000';
-              previewWrap.appendChild(videoEl);
-              var previewBtnRow=dv('');previewBtnRow.style.cssText='display:flex;gap:8px';
-              var addBtn=mk('button','');addBtn.type='button';addBtn.textContent='✓ 쇼츠에 추가';
-              addBtn.style.cssText='padding:7px 14px;border-radius:7px;border:none;background:var(--ac);color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit';
-              var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='↺ 버리기';
-              retryBtn.style.cssText='padding:7px 14px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit';
-              addBtn.onclick=function(){
-                if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
-                  G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.orig||null, isVideo:true,
-                    videoUrl:videoUrl, duration:actualDur, role:'video_clip', autoRole:'video_clip',
-                    customLabel:'VR 직접녹화', source:'clover'});
-                }
-                previewWrap.remove();
-              };
-              retryBtn.onclick=function(){
-                try{ URL.revokeObjectURL(videoUrl); }catch(e){}
-                previewWrap.remove();
-              };
-              previewBtnRow.appendChild(addBtn); previewBtnRow.appendChild(retryBtn);
-              previewWrap.appendChild(previewBtnRow);
-              w3manualWrap.appendChild(previewWrap);
-            };
-            recorder.start();
-          };
-          w3manualWrap.appendChild(w3manualStartBtn);
-          w3btnRow.appendChild(w3manualWrap);
         }
         var w3openA=document.createElement('a');
         // ⚠️ 2026-07-22: item.result(마블 공유 링크)로 바로 열면 마블 홈페이지로 넘어가버려서,
@@ -22126,7 +22023,7 @@ window._w3dCaptureSpinVideo = function(spzUrl, metricScale, opts, onProgress, on
     onError&&onError(e);
   }
 }
-window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
+window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb){
   if(!containerEl || !spzUrl) return;
   // ⚠️ 2026-07-22: VR 히스토리 카드가 여러 개 동시에 "화면에 보이는" 상태가 되면(스크롤 위치에
   // 따라 카드 2개가 걸쳐 보일 때 등) 무거운 3D 뷰어가 여러 개 동시에 렌더링되면서 화면 전체가
@@ -22186,7 +22083,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
     renderer.domElement.addEventListener('webglcontextrestored', function(){
       console.warn('[VR 투어 뷰어] WebGL 컨텍스트 복구됨 → 뷰어 재초기화');
       try{ stopped = true; ro.disconnect(); }catch(e){}
-      window._w3dInitViewer(containerEl, spzUrl, metricScale);
+      window._w3dInitViewer(containerEl, spzUrl, metricScale, origThumb);
     }, false);
 
     var scene = new THREE.Scene();
@@ -22243,10 +22140,120 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
       });
       window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()]=false; });
 
-      // PC용 조작법 안내 (처음 몇 초만 보여줌)
+      // PC용 조작법 안내 (계속 보여줌) + 오른쪽에 녹화/미리보기 버튼
       var pcHint=document.createElement('div');
-      pcHint.style.cssText='position:absolute;top:14px;left:14px;color:#fff;font-size:13px;font-weight:600;line-height:1.7;background:rgba(0,0,0,.65);padding:12px 18px;border-radius:12px;pointer-events:none;z-index:3;max-width:78%';
-      pcHint.innerHTML='🖱 드래그: 시점 회전 &nbsp;·&nbsp; ⌨ WASD: 이동 &nbsp;·&nbsp; Shift: 빠르게<br>E/Space: 위 · Q: 아래 &nbsp;·&nbsp; [ ]: 확대·축소 &nbsp;·&nbsp; 0: 원점 복귀';
+      pcHint.style.cssText='position:absolute;top:14px;left:14px;right:14px;color:#fff;font-size:13px;font-weight:600;line-height:1.7;background:rgba(0,0,0,.65);padding:10px 16px;border-radius:12px;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap';
+      var pcHintText=document.createElement('div');
+      pcHintText.style.cssText='pointer-events:none';
+      pcHintText.innerHTML='🖱 드래그: 시점 회전 &nbsp;·&nbsp; ⌨ WASD: 이동 &nbsp;·&nbsp; Shift: 빠르게<br>E/Space: 위 · Q: 아래 &nbsp;·&nbsp; [ ]: 확대·축소 &nbsp;·&nbsp; 0: 원점 복귀';
+      pcHint.appendChild(pcHintText);
+
+      // ── 녹화 + 미리보기 버튼 (좌측 조작법 안내 바로 오른쪽) ──────────────────
+      // 이미 떠 있는 이 뷰어 화면(renderer.domElement)을 그대로 녹화함 — 새 렌더러를 안 만들고
+      // 지금 보고 있는 캔버스의 captureStream을 그대로 씀. 전체화면 상태에서도 containerEl의
+      // 자식이라 그대로 보이고 그대로 동작함.
+      var recBtnGroup=document.createElement('div');
+      recBtnGroup.style.cssText='display:flex;gap:8px;flex-shrink:0';
+      var recBtn=document.createElement('button');
+      recBtn.type='button'; recBtn.textContent='⏺ 녹화';
+      recBtn.style.cssText='padding:7px 14px;border-radius:7px;background:#ef4444;color:#fff;font-weight:700;font-size:12px;border:none;cursor:pointer;font-family:inherit;white-space:nowrap';
+      var previewBtn=document.createElement('button');
+      previewBtn.type='button'; previewBtn.textContent='🎬 미리보기';
+      previewBtn.disabled=true;
+      previewBtn.style.cssText='padding:7px 14px;border-radius:7px;background:var(--c2,#222);color:var(--t2,#888);font-weight:700;font-size:12px;border:1px solid rgba(255,255,255,.25);cursor:not-allowed;font-family:inherit;white-space:nowrap';
+      recBtnGroup.appendChild(recBtn);
+      recBtnGroup.appendChild(previewBtn);
+      pcHint.appendChild(recBtnGroup);
+
+      var _lastClipUrl=null, _lastClipDur=0;
+      var _recStream=null, _recorder=null, _recChunks=[], _recStart=0, _recTick=null;
+      function _setPreviewEnabled(on){
+        previewBtn.disabled=!on;
+        previewBtn.style.cssText='padding:7px 14px;border-radius:7px;font-weight:700;font-size:12px;border:1px solid '+(on?'rgba(255,255,255,.4)':'rgba(255,255,255,.25)')+';cursor:'+(on?'pointer':'not-allowed')+';font-family:inherit;white-space:nowrap;background:'+(on?'var(--ac,#12E6E6)':'var(--c2,#222)')+';color:'+(on?'#000':'var(--t2,#888)');
+      }
+      recBtn.onclick=function(){
+        if(_recorder && _recorder.state==='recording'){
+          // 녹화 중이면 눌렀을 때 종료
+          clearInterval(_recTick);
+          try{ _recorder.stop(); }catch(e){}
+          return;
+        }
+        if(typeof MediaRecorder==='undefined'){ alert('이 브라우저는 화면 녹화를 지원하지 않아요.'); return; }
+        var MAX_SEC=30;
+        try{ _recStream=renderer.domElement.captureStream(30); }catch(e){ alert('녹화 시작 실패: '+e.message); return; }
+        var mime=(MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported('video/webm;codecs=vp9'))?'video/webm;codecs=vp9'
+                :(MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported('video/webm;codecs=vp8'))?'video/webm;codecs=vp8':'video/webm';
+        try{ _recorder=new MediaRecorder(_recStream,{mimeType:mime, videoBitsPerSecond:4000000}); }
+        catch(e){ alert('녹화 시작 실패: '+e.message); return; }
+        _recChunks=[];
+        _recorder.ondataavailable=function(e){ if(e.data&&e.data.size) _recChunks.push(e.data); };
+        _recStart=Date.now();
+        recBtn.textContent='⏹ 0.0s (종료)';
+        recBtn.style.background='#7f1d1d';
+        _recTick=setInterval(function(){
+          var el=(Date.now()-_recStart)/1000;
+          recBtn.textContent='⏹ '+el.toFixed(1)+'s (종료)';
+          if(el>=MAX_SEC){ clearInterval(_recTick); try{ _recorder.stop(); }catch(e){} }
+        }, 100);
+        _recorder.onstop=function(){
+          clearInterval(_recTick);
+          recBtn.textContent='⏺ 녹화'; recBtn.style.background='#ef4444';
+          if(!_recChunks.length){ alert('녹화된 내용이 없어요. 다시 시도해주세요.'); return; }
+          if(_lastClipUrl){ try{ URL.revokeObjectURL(_lastClipUrl); }catch(e){} }
+          _lastClipDur=(Date.now()-_recStart)/1000;
+          var blob=new Blob(_recChunks, {type:'video/webm'});
+          _lastClipUrl=URL.createObjectURL(blob);
+          _setPreviewEnabled(true);
+          _showCenterPreview(); // 녹화 끝나면 바로 한 번 보여줌
+        };
+        _recorder.start();
+      };
+
+      // ── 미리보기: 누르면 화면 정중앙에 뜨고, 다시 누르면(또는 닫기) 사라짐 ──
+      var centerPreviewEl=null;
+      function _showCenterPreview(){
+        if(centerPreviewEl) return;
+        centerPreviewEl=document.createElement('div');
+        centerPreviewEl.style.cssText='position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.75);z-index:6;padding:20px';
+        var box=document.createElement('div');
+        box.style.cssText='display:flex;flex-direction:column;align-items:center;gap:10px;max-width:90%;';
+        var videoEl=document.createElement('video');
+        videoEl.src=_lastClipUrl; videoEl.controls=true; videoEl.autoplay=true; videoEl.loop=true; videoEl.playsInline=true;
+        videoEl.style.cssText='max-width:100%;max-height:60vh;border-radius:10px;background:#000';
+        box.appendChild(videoEl);
+        var btnRow=document.createElement('div');
+        btnRow.style.cssText='display:flex;gap:10px';
+        var addBtn=document.createElement('button');
+        addBtn.type='button';addBtn.textContent='✓ 쇼츠에 추가';
+        addBtn.style.cssText='padding:9px 18px;border-radius:8px;border:none;background:var(--ac,#12E6E6);color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit';
+        addBtn.onclick=function(){
+          if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
+            G_SHORTS.images.push({id:Date.now()+Math.random(), img:origThumb||null, isVideo:true,
+              videoUrl:_lastClipUrl, duration:_lastClipDur, role:'video_clip', autoRole:'video_clip',
+              customLabel:'VR 직접녹화', source:'clover'});
+          }
+          addBtn.textContent='✓ 추가됨'; addBtn.disabled=true;
+        };
+        var closeBtn=document.createElement('button');
+        closeBtn.type='button';closeBtn.textContent='✕ 닫기';
+        closeBtn.style.cssText='padding:9px 18px;border-radius:8px;border:1px solid rgba(255,255,255,.3);background:transparent;color:#fff;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit';
+        closeBtn.onclick=_hideCenterPreview;
+        btnRow.appendChild(addBtn); btnRow.appendChild(closeBtn);
+        box.appendChild(btnRow);
+        centerPreviewEl.appendChild(box);
+        centerPreviewEl.onclick=function(e){ if(e.target===centerPreviewEl) _hideCenterPreview(); };
+        containerEl.appendChild(centerPreviewEl);
+      }
+      function _hideCenterPreview(){
+        if(!centerPreviewEl) return;
+        centerPreviewEl.remove();
+        centerPreviewEl=null;
+      }
+      previewBtn.onclick=function(){
+        if(!_lastClipUrl) return;
+        if(centerPreviewEl) _hideCenterPreview(); else _showCenterPreview();
+      };
+
       containerEl.appendChild(pcHint);
 
       // ── 전체 조작법 설명(Marble의 Controls 팝업과 동일한 내용) — '?' 버튼으로 열고 닫음 ──
@@ -22411,7 +22418,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale){
           camera.position.y = Math.max(-maxDown, Math.min(maxUp, camera.position.y + vy*speed*dt));
         }
         if(keys['[']||keys[']']){
-          var fovDelta = (keys[']') ? 1 : -1;
+          var fovDelta = (keys[']']) ? 1 : -1;
           camera.fov = Math.max(20, Math.min(100, camera.fov + fovDelta*40*dt));
           camera.updateProjectionMatrix();
         }
