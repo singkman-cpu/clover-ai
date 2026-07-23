@@ -922,7 +922,7 @@ function _proposalSummaryText(spaceKey){
 // ── 자유 서술형 설명 → 프리미엄 제안서 문구 자동 생성 ──────────────────
 // "25년된 구축아파트 거실,주방,안방을 크림톤으로, 2500만원 정도" 같은 문장에서
 // 연식/공간/톤/예산을 뽑아내서 실제 상담 제안서에서 쓰는 톤으로 요약을 만든다.
-var PROPOSAL_ROOM_BANK=['거실','주방','안방','침실','드레스룸','드레스실','파우더룸','욕실','화장실','현관','베란다','발코니','서재','아이방','아기방','다용도실','복도','부엌','다이닝룸'];
+var PROPOSAL_ROOM_BANK=['거실','주방','안방','침실','드레스룸','드레스실','파우더룸','욕실','화장실','현관','베란다','발코니','서재','아이방','아기방','다용도실','복도','부엌','다이닝룸','객실','로비','카운터'];
 var PROPOSAL_TONE_BANK=['크림톤','웜톤','화이트톤','우드톤','그레이톤','베이지톤','내추럴톤','모던톤','다크톤','블랙톤','파스텔톤','그린톤','블루톤','미니멀톤','클래식톤'];
 
 function _proposalParseDescription(text){
@@ -8847,8 +8847,10 @@ function _blobUrlToDataUrl(blobUrl){
 // 통째로 사라지는 문제가 있어서 추가함) — 'gallery' 스토리지 버킷 안에 JSON 파일로 올려둠.
 // 너무 자주 올리면 낭비라 45초에 한 번만 실제로 업로드함.
 var _shortsLastCloudSave=0;
+var _shortsCloudDraftDisabled = false; // ⚠️ 아래 참고 — gallery 버킷 보안정책 때문에 계속 실패하면 재시도를 멈춤
 function _shortsCloudSaveDraft(snapshot){
   if(!_supa || !_supaUser) return;
+  if(_shortsCloudDraftDisabled) return; // 이미 실패 확인됨 — 서버 정책 문제라 재시도해도 똑같이 실패함
   var now=Date.now();
   if(now-_shortsLastCloudSave < 45000) return;
   _shortsLastCloudSave=now;
@@ -8856,14 +8858,24 @@ function _shortsCloudSaveDraft(snapshot){
     var path=_supaUser.id+'/drafts/shorts-draft.json';
     var blob=new Blob([JSON.stringify({t:now, data:snapshot})], {type:'application/json'});
     _supa.storage.from('gallery').upload(path, blob, {contentType:'application/json', upsert:true})
-      .then(function(res){ if(res&&res.error) console.error('[쇼츠 임시저장] 클라우드 백업 실패:', res.error); })
-      .catch(function(e){ console.error('[쇼츠 임시저장] 클라우드 백업 실패(예외):', e); });
-  }catch(e){ console.error('[쇼츠 임시저장] 클라우드 백업 시도 자체 실패:', e); }
+      .then(function(res){
+        if(res&&res.error){
+          // ⚠️ 2026-07-22: 'gallery' 스토리지 버킷은 사진/영상 전용으로 보안정책(RLS)이 걸려있어서
+          // .json 파일 업로드가 "new row violates row-level security policy"로 계속 거부됨 —
+          // 이건 클라이언트 코드로 재시도해서 해결될 문제가 아니라 서버(Supabase) 쪽 정책을
+          // 바꿔야 하는 문제라, 한 번 실패하면 더 이상 재시도하지 않고 조용히 끔(로컬 저장은
+          // 그대로 정상 동작하므로 기능 자체가 완전히 망가지는 건 아님).
+          _shortsCloudDraftDisabled = true;
+          console.warn('[쇼츠 임시저장] 클라우드 백업이 서버 보안정책(RLS)에 막혀서 꺼졌어요 — 로컬 저장은 계속 정상 작동해요. (서버 관리자가 gallery 버킷에 .json 업로드를 허용하도록 정책을 바꿔야 다시 켤 수 있어요)', res.error);
+        }
+      })
+      .catch(function(e){ _shortsCloudDraftDisabled = true; console.warn('[쇼츠 임시저장] 클라우드 백업 실패, 재시도 중단:', e); });
+  }catch(e){ _shortsCloudDraftDisabled = true; }
 }
 // 클라우드에 백업된 쇼츠 임시저장이 있으면 불러옴 (로컬에 없을 때만 확인 — 다른 브라우저/기기에서
 // 이어서 작업하거나, 캐시가 지워진 경우를 위한 것)
 function _shortsCloudLoadDraft(cb){
-  if(!_supa || !_supaUser){ cb(null); return; }
+  if(!_supa || !_supaUser || _shortsCloudDraftDisabled){ cb(null); return; }
   try{
     var path=_supaUser.id+'/drafts/shorts-draft.json';
     var publicUrl=_supa.storage.from('gallery').getPublicUrl(path).data.publicUrl;
@@ -8974,8 +8986,10 @@ function _shortsBuildSlides(){
     var custom=_shortsHasCustomLabel(im);
     if(!r && !custom)return;
     var lbl=custom?im.customLabel.trim():_shortsRoleLabel(r);
+    var vidDuration = im.isVideo ? ((im.trimEnd!=null && im.trimStart!=null) ? Math.max(0.2, im.trimEnd-im.trimStart) : im.duration) : im.duration;
     slides.push({type:'slide', img:im.img, label:lbl, role:r, zoom:im.coverZoom||1, offX:im.coverOffX||0, offY:im.coverOffY||0,
-      isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:im.duration, skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
+      isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.trimStart||0):0,
+      skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
       noSlider:!!im.noSlider});
   });
   if(opts.ending){
@@ -9407,6 +9421,58 @@ function sbShorts(p){
       lbToggleRow.appendChild(_makeLbToggle('전환에 슬라이더 쓰기', !item.noSlider, function(checked){ item.noSlider=!checked; renderMain('shorts'); }));
     })(im);
     info.appendChild(lbToggleRow);
+    if(im.isVideo){
+      // ── 영상 클립 길이 조절(트림): 전체 길이 중 시작~끝 구간만 잘라 쓸 수 있게 함 ──
+      var fullDur = im._fullDuration || im.duration || 0;
+      if(im.trimStart==null) im.trimStart = 0;
+      if(im.trimEnd==null) im.trimEnd = fullDur;
+      var trimWrap = dv(''); trimWrap.style.cssText='margin-top:6px;padding:8px;background:var(--card);border:1px solid var(--bd2);border-radius:8px';
+      var trimHead = dv(''); trimHead.style.cssText='font-size:10.5px;color:var(--m2);margin-bottom:6px;display:flex;justify-content:space-between';
+      var trimUsedLabel = dv(''); trimUsedLabel.style.fontWeight='700'; trimUsedLabel.style.color='var(--ac)';
+      function _fmtT(s){ return (Math.round(s*10)/10)+'s'; }
+      function _refreshTrimLabel(){ trimUsedLabel.textContent='사용 구간: '+_fmtT(im.trimStart)+' ~ '+_fmtT(im.trimEnd)+' (총 '+_fmtT(im.trimEnd-im.trimStart)+')'; }
+      trimHead.innerHTML='🎬 영상 길이 (전체 '+_fmtT(fullDur)+')';
+      trimWrap.appendChild(trimHead);
+      trimWrap.appendChild(trimUsedLabel);
+      var trimRow = dv(''); trimRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:6px';
+      var startLabel = dv(''); startLabel.style.cssText='font-size:10px;color:var(--m2);flex-shrink:0'; startLabel.textContent='시작';
+      var startInput = document.createElement('input'); startInput.type='range'; startInput.min='0'; startInput.max=String(fullDur); startInput.step='0.1'; startInput.value=String(im.trimStart);
+      startInput.style.cssText='flex:1';
+      var endLabel = dv(''); endLabel.style.cssText='font-size:10px;color:var(--m2);flex-shrink:0'; endLabel.textContent='끝';
+      var endInput = document.createElement('input'); endInput.type='range'; endInput.min='0'; endInput.max=String(fullDur); endInput.step='0.1'; endInput.value=String(im.trimEnd);
+      endInput.style.cssText='flex:1';
+      (function(item){
+        startInput.oninput=function(){
+          var v=parseFloat(startInput.value);
+          if(v >= item.trimEnd - 0.2) v = Math.max(0, item.trimEnd - 0.2); // 최소 0.2초는 남겨둠
+          item.trimStart=v; startInput.value=String(v);
+          _refreshTrimLabel(); renderMain('shorts');
+        };
+        endInput.oninput=function(){
+          var v=parseFloat(endInput.value);
+          if(v <= item.trimStart + 0.2) v = Math.min(fullDur, item.trimStart + 0.2);
+          item.trimEnd=v; endInput.value=String(v);
+          _refreshTrimLabel(); renderMain('shorts');
+        };
+      })(im);
+      trimRow.appendChild(startLabel); trimRow.appendChild(startInput);
+      trimWrap.appendChild(trimRow);
+      var trimRow2 = dv(''); trimRow2.style.cssText='display:flex;align-items:center;gap:8px;margin-top:4px';
+      trimRow2.appendChild(endLabel); trimRow2.appendChild(endInput);
+      trimWrap.appendChild(trimRow2);
+      var trimResetBtn = mk('button',''); trimResetBtn.type='button'; trimResetBtn.textContent='전체 구간으로 되돌리기';
+      trimResetBtn.style.cssText='margin-top:6px;font-size:10px;color:var(--m2);background:transparent;border:1px solid var(--bd2);border-radius:6px;padding:4px 8px;cursor:pointer;font-family:inherit';
+      (function(item){
+        trimResetBtn.onclick=function(){
+          item.trimStart=0; item.trimEnd=fullDur;
+          startInput.value='0'; endInput.value=String(fullDur);
+          _refreshTrimLabel(); renderMain('shorts');
+        };
+      })(im);
+      trimWrap.appendChild(trimResetBtn);
+      _refreshTrimLabel();
+      info.appendChild(trimWrap);
+    }
     if(im.source==='clover'){
       var srcTag=dv('');srcTag.style.cssText='font-size:9.5px;color:var(--m2)';
       srcTag.textContent='CLOVER AI 결과물';
@@ -10967,7 +11033,7 @@ function _shortsRenderCanvas(ub){
     var badgeTxt = im.type==='blank' ? '📄 빈 페이지' : (im.customLabel&&im.customLabel.trim() ? im.customLabel.trim() : (resolved?_shortsRoleLabel(resolved):'역할 미지정'));
     var videoLost = im.isVideo && !im.videoUrl; // 새로고침 등으로 실제 영상 소스(blob)를 잃어버린 경우
     tile.innerHTML='<img src="'+im.img+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none" onerror="this.style.display=\'none\';this.nextElementSibling.nextElementSibling.nextElementSibling.style.display=\'flex\'">'+
-      (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+(im.duration||0).toFixed(1)+'s</div>':'')+
+      (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+((im.trimEnd!=null&&im.trimStart!=null)?(im.trimEnd-im.trimStart):(im.duration||0)).toFixed(1)+'s</div>':'')+
       '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+(usable?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">'+(idx+1)+'</div>'+
       '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(usable?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px;pointer-events:none">'+badgeTxt+'</div>'+
       '<div style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:#2a1a0a;color:#f59e0b;font-size:11px;font-weight:700;text-align:center;padding:8px;pointer-events:none">⚠️ 이미지 깨짐<span style="font-size:9px;color:#ccc;font-weight:500">다시 업로드해주세요</span></div>'+
@@ -11895,7 +11961,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache){
   if(slide.isVideo){
     var vEl=videoCache&&videoCache[slide.videoUrl];
     if(vEl){
-      if(vEl.paused){ vEl.play().catch(function(){}); } // 이 장면 구간에 처음 들어온 순간 재생 시작(실시간 렌더 루프라 그대로 싱크가 맞음)
+      if(vEl.paused){ try{ vEl.currentTime = slide.trimStart||0; }catch(e){} vEl.play().catch(function(){}); } // 이 장면 구간에 처음 들어온 순간 트림 시작지점부터 재생 시작(실시간 렌더 루프라 그대로 싱크가 맞음)
       _shortsDrawCoverImage(ctx,W,H,vEl);
     } else {
       // 아직 준비 안 됐거나(프리로드 중) 영상을 못 살렸을 때(새로고침 후 등) — 포스터 썸네일로 대체
@@ -22023,6 +22089,21 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     containerEl.appendChild(renderer.domElement);
     renderer.domElement.style.cursor = 'grab';
     renderer.domElement.style.touchAction = 'none';
+
+    // ── 로딩 스피너: 스플랫(3D) 데이터를 불러오는 동안 화면이 그냥 멈춘 것처럼 보이지 않게 함 ──
+    // ⚠️ 라이브러리에서 "완전히 로드됨" 이벤트를 확실히 못 찾아서, 최소 노출시간(1.2초) 기준으로
+    // 대략적으로 가리고 있음 — 실제 스플랫은 이후에도 계속 디테일이 채워질 수 있음.
+    if(!document.getElementById('_w3spin-style')){
+      var _w3spinStyle=document.createElement('style');
+      _w3spinStyle.id='_w3spin-style';
+      _w3spinStyle.textContent='@keyframes _w3spin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(_w3spinStyle);
+    }
+    var loadingOverlay=document.createElement('div');
+    loadingOverlay.style.cssText='position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#05050a;z-index:8;color:#fff;font-size:12.5px;gap:12px';
+    loadingOverlay.innerHTML='<div style="width:32px;height:32px;border:3px solid rgba(255,255,255,.2);border-top-color:#12E6E6;border-radius:50%;animation:_w3spin .8s linear infinite"></div><div>3D 화면 불러오는 중...</div>';
+    containerEl.appendChild(loadingOverlay);
+    setTimeout(function(){ if(loadingOverlay && loadingOverlay.parentNode) loadingOverlay.remove(); }, 1200);
 
     // 전체화면 버튼 (우상단, PC/모바일 공통) — containerEl을 그대로 전체화면으로 키우면
     // 이미 있는 ResizeObserver가 크기 변화를 감지해서 렌더러 사이즈도 자동으로 맞춰준다.
