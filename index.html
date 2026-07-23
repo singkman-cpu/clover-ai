@@ -22102,30 +22102,43 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
 
     // ── 데스크탑: 클릭 후 드래그(또는 포인터락)로 시점, WASD로 이동 ──
     var dragging=false, lastX=0, lastY=0, hasPointerLock=false;
+    // ⚠️ 2026-07-22: 아래 mouseup/mousemove/keydown/keyup 리스너들은 전부 window에 등록되는데,
+    // 예전엔 뷰어가 재초기화될 때(컨텍스트 복구 등) 정리 없이 계속 새로 추가되기만 해서 리스너가
+    // 쌓이는 문제가 있었음(메모리 누수 + 반복되는 컨텍스트 손실의 원인일 가능성). 이름 붙은 함수로
+    // 바꿔서 정리 시점(window._w3dViewers[key])에 확실히 제거할 수 있게 함.
+    var _onMouseDown, _onMouseUp, _onMouseMove, _onKeyDown, _onKeyUp;
     if(!isTouch){
-      renderer.domElement.addEventListener('mousedown', function(e){
+      _onMouseDown = function(e){
         dragging=true; lastX=e.clientX; lastY=e.clientY;
         renderer.domElement.style.cursor='grabbing';
-      });
-      window.addEventListener('mouseup', function(){ dragging=false; renderer.domElement.style.cursor='grab'; });
-      window.addEventListener('mousemove', function(e){
+      };
+      renderer.domElement.addEventListener('mousedown', _onMouseDown);
+      _onMouseUp = function(){ dragging=false; renderer.domElement.style.cursor='grab'; };
+      window.addEventListener('mouseup', _onMouseUp);
+      _onMouseMove = function(e){
         if(!dragging) return;
         var dx=e.clientX-lastX, dy=e.clientY-lastY;
         lastX=e.clientX; lastY=e.clientY;
         yaw -= dx*lookSpeed*2.2;
         pitch = clampPitch(pitch - dy*lookSpeed*2.2);
         applyRotation();
-      });
-      window.addEventListener('keydown', function(e){
-        keys[e.key.toLowerCase()]=true;
+      };
+      window.addEventListener('mousemove', _onMouseMove);
+      _onKeyDown = function(e){
+        // ⚠️ e.key가 undefined로 들어오는 드문 케이스(일부 IME/합성 이벤트 등)에서
+        // .toLowerCase() 호출로 전체 스크립트가 에러 나던 버그 — 안전하게 방어함.
+        var k = (e.key||'').toLowerCase();
+        keys[k]=true;
         var tag=(document.activeElement&&document.activeElement.tagName)||'';
         if(tag==='INPUT'||tag==='TEXTAREA') return;
         // 방향키/스페이스로 VR을 조작하는 동안 배경 페이지가 스크롤되는 것 방지
-        if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(e.key.toLowerCase())>=0) e.preventDefault();
+        if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k)>=0) e.preventDefault();
         // Marble과 동일하게 '0'키로 원점(촬영 시점)으로 즉시 복귀
         if(e.key==='0'){ camera.position.set(0,0,0); yaw=0; pitch=0; camera.fov=70; camera.updateProjectionMatrix(); applyRotation(); }
-      });
-      window.addEventListener('keyup', function(e){ keys[e.key.toLowerCase()]=false; });
+      };
+      window.addEventListener('keydown', _onKeyDown);
+      _onKeyUp = function(e){ keys[(e.key||'').toLowerCase()]=false; };
+      window.addEventListener('keyup', _onKeyUp);
 
       // PC용 조작법 안내 (계속 보여줌) + 오른쪽에 녹화/미리보기 버튼
       var pcHint=document.createElement('div');
@@ -22426,6 +22439,15 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     var key = 'v'+Date.now()+Math.random();
     window._w3dViewers[key] = function(){
       stopped = true; ro.disconnect();
+      // ⚠️ 2026-07-22: window에 등록했던 mouseup/mousemove/keydown/keyup 리스너를 정리 안 하고
+      // 있었음 — 뷰어가 재초기화될 때마다(특히 컨텍스트 손실→복구 반복시) 계속 쌓여서 메모리 누수와
+      // 불안정성의 원인이 됐을 가능성이 높음. 확실하게 제거함.
+      try{
+        if(_onMouseUp) window.removeEventListener('mouseup', _onMouseUp);
+        if(_onMouseMove) window.removeEventListener('mousemove', _onMouseMove);
+        if(_onKeyDown) window.removeEventListener('keydown', _onKeyDown);
+        if(_onKeyUp) window.removeEventListener('keyup', _onKeyUp);
+      }catch(e){}
       // ⚠️ 2026-07-22: renderer.dispose()만으로는 실제 WebGL 컨텍스트가 브라우저에 바로
       // 반납되지 않아서, 카드를 여러 번 오가면 컨텍스트가 계속 쌓이다가 브라우저 한도(보통
       // 8~16개)를 넘기면 "Too many active WebGL contexts" 경고와 함께 오래된 뷰어부터
