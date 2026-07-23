@@ -5709,6 +5709,8 @@ function makePi(q, g){
     {g:'🍽 외식·쇼핑',cats:['외식/F&B','백화점/쇼핑몰','리테일']},
     {g:'🐾 반려동물',cats:['반려동물']},
     {g:'🏨 숙박·헬스케어',cats:['숙박/리조트','의료/뷰티']},
+    {g:'🏨 호텔 디자인',cats:['🏨 호텔 디자인 (로비·객실·외관)']},
+    {g:'🛏 모텔 디자인',cats:['🛏 모텔 디자인 (카운터·객실·외관)']},
     {g:'🎓 교육·웨딩',cats:['교육/종교/문화','웨딩']},
     {g:'⚡ 스포츠·오락',cats:['스포츠/레저','오락/놀거리','스포츠/도장']},
     {g:'🏪 세탁소·부동산·포토스튜디오 등',cats:['생활서비스','기타공간']},
@@ -8851,7 +8853,10 @@ function _blobUrlToDataUrl(blobUrl){
 // 통째로 사라지는 문제가 있어서 추가함) — 'gallery' 스토리지 버킷 안에 JSON 파일로 올려둠.
 // 너무 자주 올리면 낭비라 45초에 한 번만 실제로 업로드함.
 var _shortsLastCloudSave=0;
-var _shortsCloudDraftDisabled = false; // ⚠️ 아래 참고 — gallery 버킷 보안정책 때문에 계속 실패하면 재시도를 멈춤
+var _shortsCloudDraftDisabled = true; // ⚠️ 2026-07-23: 매 세션마다 한 번씩 시도했다가 실패하며 콘솔에
+// 에러를 남기던 게 계속 거슬린다는 피드백 반영 — 서버(gallery 버킷) 보안정책이 안 바뀌는 한 100%
+// 실패가 확정이라, 아예 시도 자체를 하지 않도록 기본값을 true로 바꿈. 서버 정책을 고치신 뒤에
+// 이 기능을 다시 켜고 싶으시면 이 줄만 false로 바꾸면 됨.
 function _shortsCloudSaveDraft(snapshot){
   if(!_supa || !_supaUser) return;
   if(_shortsCloudDraftDisabled) return; // 이미 실패 확인됨 — 서버 정책 문제라 재시도해도 똑같이 실패함
@@ -13430,6 +13435,11 @@ function addHistEl(item, scroll, targetHs, atBottom){
       // → 화면에 실제로 보이는 카드만 켜두고, 스크롤로 화면 밖으로 나가면 자동으로 꺼지도록(dispose) 처리.
       if(item.spzUrl){
         var _w3dActive=false;
+        // ⚠️ 2026-07-23: VR 결과가 여러 개 쌓여있으면, 탭을 열자마자 화면에 보이는 카드들이
+        // 전부 동시에 IntersectionObserver로 자동 로드를 시도해서 — 무거운 3D 뷰어 여러 개가
+        // 한꺼번에 네트워크/GPU를 다투면서 VR 탭 진입 자체가 느려지고 버벅였음.
+        // → 가장 최근 결과 1개만 자동으로 켜고, 나머지는 클릭해야만 로드되게 함.
+        var _isNewestW3D = !!(G.HIST.world3d && G.HIST.world3d[0] && G.HIST.world3d[0].id===item.id);
         var _w3dInitOnce=function(){
           if(_w3dActive) return;
           var iw=w3frameWrap.offsetWidth;
@@ -13445,16 +13455,26 @@ function addHistEl(item, scroll, targetHs, atBottom){
           w3frameWrap.innerHTML='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#777;font-size:11px">화면에 보이면 다시 로드됩니다</div>';
           _w3dActive=false;
         };
-        if('IntersectionObserver' in window){
-          var _w3dIO=new IntersectionObserver(function(entries){
-            entries.forEach(function(en){ en.isIntersecting ? _w3dInitOnce() : _w3dDisposeOnce(); });
-          },{threshold:0});
-          _w3dIO.observe(w3frameWrap);
-          // 안전장치: 일부 모바일 브라우저에서 중첩 스크롤 컨테이너 안에서는 IntersectionObserver가
-          // 제대로 안 잡히는 경우가 있어서, 2초 뒤에도 아직 안 켜졌으면 그냥 강제로 켠다.
-          setTimeout(function(){ if(!_w3dActive) _w3dInitOnce(); }, 2000);
+        if(_isNewestW3D){
+          if('IntersectionObserver' in window){
+            var _w3dIO=new IntersectionObserver(function(entries){
+              entries.forEach(function(en){ en.isIntersecting ? _w3dInitOnce() : _w3dDisposeOnce(); });
+            },{threshold:0});
+            _w3dIO.observe(w3frameWrap);
+            // 안전장치: 일부 모바일 브라우저에서 중첩 스크롤 컨테이너 안에서는 IntersectionObserver가
+            // 제대로 안 잡히는 경우가 있어서, 2초 뒤에도 아직 안 켜졌으면 그냥 강제로 켠다.
+            setTimeout(function(){ if(!_w3dActive) _w3dInitOnce(); }, 2000);
+          } else {
+            setTimeout(_w3dInitOnce, 50); // IntersectionObserver 미지원 브라우저는 그냥 항상 켜둠
+          }
         } else {
-          setTimeout(_w3dInitOnce, 50); // IntersectionObserver 미지원 브라우저는 그냥 항상 켜둠
+          // 최신이 아닌 결과는 자동 로드 안 하고, 눌러야 로드되는 플레이스홀더로 표시
+          var _w3dLoadBtn=document.createElement('button');
+          _w3dLoadBtn.type='button';
+          _w3dLoadBtn.style.cssText='position:absolute;inset:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#0e0e12;border:none;color:#fff;cursor:pointer;font-family:inherit';
+          _w3dLoadBtn.innerHTML='<div style="width:44px;height:44px;border-radius:50%;background:var(--ac,#12E6E6);color:#000;display:flex;align-items:center;justify-content:center;font-size:18px">▶</div><div style="font-size:12px;color:var(--m2,#999)">눌러서 3D 불러오기</div>';
+          _w3dLoadBtn.onclick=function(){ _w3dLoadBtn.remove(); _w3dInitOnce(); };
+          w3frameWrap.appendChild(_w3dLoadBtn);
         }
       } else {
         w3frameWrap.innerHTML='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;text-align:center;padding:20px">미리보기를 지원하지 않는 이전 결과입니다.<br>아래 링크로 확인해주세요.</div>';
