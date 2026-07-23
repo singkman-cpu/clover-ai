@@ -9446,6 +9446,19 @@ function sbShorts(p){
       function _refreshTrimLabel(){ trimUsedLabel.textContent='사용 구간: '+_fmtT(im.trimStart)+' ~ '+_fmtT(im.trimEnd)+' (총 '+_fmtT(im.trimEnd-im.trimStart)+')'; }
       trimHead.innerHTML='🎬 영상 길이 (전체 '+_fmtT(fullDur)+')';
       trimWrap.appendChild(trimHead);
+      // ── 실제 영상 미리보기: 슬라이더를 움직이면 그 지점으로 미리보기가 이동해서, 몇 초 지점이
+      // 실제로 어떤 장면인지 보면서 자를 수 있게 함 ──
+      if(im.videoUrl){
+        var trimPreviewVideo = document.createElement('video');
+        trimPreviewVideo.src = im.videoUrl; trimPreviewVideo.controls = true; trimPreviewVideo.muted = true; trimPreviewVideo.playsInline = true;
+        trimPreviewVideo.style.cssText = 'width:100%;max-height:160px;border-radius:6px;background:#000;margin-bottom:6px;display:block';
+        trimPreviewVideo.currentTime = im.trimStart || 0;
+        trimWrap.appendChild(trimPreviewVideo);
+      } else {
+        var trimNoPreview = dv(''); trimNoPreview.style.cssText='padding:16px;text-align:center;background:#1a1a1a;border-radius:6px;margin-bottom:6px;color:#f59e0b;font-size:11px';
+        trimNoPreview.textContent='⚠️ 영상 소스가 사라졌어요 — 다시 녹화하거나 업로드해주세요';
+        trimWrap.appendChild(trimNoPreview);
+      }
       trimWrap.appendChild(trimUsedLabel);
       var trimRow = dv(''); trimRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:6px';
       var startLabel = dv(''); startLabel.style.cssText='font-size:10px;color:var(--m2);flex-shrink:0'; startLabel.textContent='시작';
@@ -9459,12 +9472,14 @@ function sbShorts(p){
           var v=parseFloat(startInput.value);
           if(v >= item.trimEnd - 0.2) v = Math.max(0, item.trimEnd - 0.2); // 최소 0.2초는 남겨둠
           item.trimStart=v; startInput.value=String(v);
+          if(typeof trimPreviewVideo!=='undefined' && trimPreviewVideo){ try{ trimPreviewVideo.currentTime=v; }catch(e){} }
           _refreshTrimLabel(); renderMain('shorts');
         };
         endInput.oninput=function(){
           var v=parseFloat(endInput.value);
           if(v <= item.trimStart + 0.2) v = Math.min(fullDur, item.trimStart + 0.2);
           item.trimEnd=v; endInput.value=String(v);
+          if(typeof trimPreviewVideo!=='undefined' && trimPreviewVideo){ try{ trimPreviewVideo.currentTime=v; }catch(e){} }
           _refreshTrimLabel(); renderMain('shorts');
         };
       })(im);
@@ -11764,6 +11779,15 @@ function _shortsGenerate(){
   var slides=_shortsBuildSlides();
   var sceneCount=slides.filter(function(s){return s.type==='slide';}).length;
   if(sceneCount<2){alert('역할이 정해진 이미지를 최소 2개 이상 추가해주세요.');return;}
+  // ⚠️ 2026-07-23: 영상 소스가 유실된(새로고침 등으로 blob이 사라진) 클립이 있으면, 예전엔 그냥
+  // 조용히 그 장면만 빠진 채로 만들어졌음 — 사용자가 왜 짧게 나왔는지도 모르고 넘어가는 문제가
+  // 있었음. 이제 생성 자체를 막고 어떤 클립이 문제인지 알려줘서, 먼저 해결(삭제 또는 재녹화)하고
+  // 진행하게 함.
+  var lostVideoSlides=slides.filter(function(s){ return s.isVideo && !s.videoUrl; });
+  if(lostVideoSlides.length){
+    alert('⚠️ 영상 소스가 사라진 클립이 '+lostVideoSlides.length+'개 있어요 (새로고침 등으로 유실됨).\n\n이대로 만들면 그 장면만 빠진 채로 생성돼요. 먼저 그 클립을 삭제하거나 다시 녹화/업로드해주세요.');
+    return;
+  }
 
   var progWrap=gE('shorts-prog-wrap');
   var progFill=gE('shorts-prog-fill');
@@ -19826,6 +19850,11 @@ function buildCredits(){
         '<span>· 구매 후 7일 내 미사용분 환불 가능</span>'+
       '</div>'+
     '</div>'+
+    // ── 자동충전(빌링) — 아직 준비 중, 안내만 ──
+    '<div style="margin-top:10px;padding:10px;background:var(--c2);border:1px dashed var(--bd2);border-radius:8px">'+
+      '<div style="font-size:11px;color:var(--t2);font-weight:700;margin-bottom:4px">🔄 자동충전 (준비 중)</div>'+
+      '<div style="font-size:10px;color:var(--m2);line-height:1.6">잔액이 부족해지면 카드에서 자동으로 충전되는 기능이에요. 토스페이먼츠 자동결제 계약 완료 후 순차적으로 열릴 예정입니다.</div>'+
+    '</div>'+
     '<div style="display:flex;gap:8px">'+
       '<button onclick="closeMd(\'credits\');openMd(\'pricing\')" style="flex:1;padding:10px;border-radius:7px;border:none;background:var(--ac);color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">&#43; 크레딧 충전 페이지</button>'+
     '</div>'+
@@ -19839,26 +19868,66 @@ function buildCredits(){
     '<div id="cr-charge-res" style="margin-top:8px;font-size:12px;color:var(--m2);text-align:center;min-height:16px"></div>'+
     '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd);font-size:10px;color:var(--m2);text-align:center">결제 연동 준비 중 · 문의: <a href="mailto:cloverai.design@gmail.com" style="color:var(--ac);text-decoration:none">cloverai.design@gmail.com</a></div>';
 }
+// ⚠️ 2026-07-23: 결제 시스템(토스페이먼츠) 연동. TOSS_CLIENT_KEY가 아직 실제 값으로
+// 설정 안 되어 있으면(테스트/대기 상태) 예전처럼 "선택 표시만" 하는 안내로 동작함.
+var TOSS_CLIENT_KEY = ''; // ⚠️ 토스페이먼츠 승인 완료 후, 개발자센터에서 발급받은
+                          // "결제위젯 연동 키 > 클라이언트 키"를 여기 넣으세요 (test_ck_... 또는 live_ck_...)
 function chargeCr(amount){
   var res=gE('cr-charge-res');
   if(!amount||amount<100){if(res)res.textContent='100cr 이상 입력해 주세요.';return;}
-  // 결제 연동 전: 선택 표시만 (누적 합산 안 함)
-  if(res){
-    res.style.color='var(--ac)';
-    res.textContent='✓ '+amount.toLocaleString()+'cr 패키지 선택됨 — 결제 시스템 연동 후 이용 가능합니다.';
+  if(!TOSS_CLIENT_KEY){
+    // 결제 연동 전(키 미설정): 기존처럼 선택 표시만
+    if(res){ res.style.color='var(--ac)'; res.textContent='✓ '+amount.toLocaleString()+'cr 패키지 선택됨 — 결제 시스템 연동 후 이용 가능합니다.'; }
+    var cards=document.querySelectorAll('[onclick^="chargeCr"]');
+    cards.forEach(function(c){ c.style.borderColor='var(--bd)'; c.style.background='var(--c2)'; });
+    var sel=document.querySelector('[onclick="chargeCr('+amount+')"]');
+    if(sel){ sel.style.borderColor='var(--ac)'; sel.style.background='rgba(0,229,204,.08)'; }
+    return;
   }
-  // 선택된 패키지 카드 하이라이트
-  var cards=document.querySelectorAll('[onclick^="chargeCr"]');
-  cards.forEach(function(c){
-    c.style.borderColor='var(--bd)';
-    c.style.background='var(--c2)';
-  });
-  var sel=document.querySelector('[onclick="chargeCr('+amount+')"]');
-  if(sel){
-    sel.style.borderColor='var(--ac)';
-    sel.style.background='rgba(0,229,204,.08)';
-  }
+  if(!_supaUser){ alert('로그인 후 이용해주세요.'); openMd('account'); return; }
+  if(res){ res.style.color='var(--t2)'; res.textContent='결제 준비 중...'; }
+  // 1) 서버에 먼저 주문 생성 요청 — 서버가 "진짜 판매가"를 기준으로 orderId를 만들어줌
+  //    (여기서 클라이언트가 금액을 조작해도 서버가 CREDIT_PACKAGES 목록과 대조해서 걸러냄)
+  fetch(SUPA_URL+'/functions/v1/toss-payment',{
+    method:'POST', headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({action:'create-order', credits:amount})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.error){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ '+d.error;} return; }
+    try{ sessionStorage.setItem('clover_pending_order', JSON.stringify(d)); }catch(e){}
+    var payment = TossPayments(TOSS_CLIENT_KEY).payment({ customerKey: _supaUser.id });
+    payment.requestPayment({
+      method:'CARD',
+      amount:{ currency:'KRW', value:d.amount },
+      orderId:d.orderId,
+      orderName:d.orderName,
+      successUrl: location.origin+location.pathname+'?tossSuccess=1',
+      failUrl: location.origin+location.pathname+'?tossFail=1',
+      customerEmail: _supaUser.email||undefined,
+    }).catch(function(e){
+      if(res){res.style.color='#f59e0b';res.textContent='⚠️ 결제 취소 또는 실패: '+(e&&e.message||'');}
+    });
+  }).catch(function(){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ 결제 준비 중 오류가 발생했어요.';} });
 }
+// 결제 성공/실패 후 successUrl·failUrl로 돌아왔을 때 처리 (페이지 로드 시 한 번 확인)
+(function(){
+  var params=new URLSearchParams(location.search);
+  if(params.get('tossSuccess')==='1'){
+    var paymentKey=params.get('paymentKey'), orderId=params.get('orderId'), amount=params.get('amount');
+    if(paymentKey && orderId && amount){
+      fetch(SUPA_URL+'/functions/v1/toss-payment',{
+        method:'POST', headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify({action:'confirm', paymentKey:paymentKey, orderId:orderId, amount:parseInt(amount,10)})
+      }).then(function(r){return r.json();}).then(function(d){
+        if(d.error){ alert('⚠️ 결제 확인 중 문제가 발생했어요: '+d.error); }
+        else { alert('✓ '+(d.credits||0).toLocaleString()+'cr이 충전됐어요! 화면을 새로고침할게요.'); history.replaceState({}, '', location.pathname); location.reload(); return; }
+        history.replaceState({}, '', location.pathname);
+      }).catch(function(){ alert('⚠️ 결제 확인 중 네트워크 오류가 발생했어요. 고객센터로 문의해주세요.'); history.replaceState({}, '', location.pathname); });
+    }
+  } else if(params.get('tossFail')==='1'){
+    alert('결제가 취소되었거나 실패했어요.');
+    history.replaceState({}, '', location.pathname);
+  }
+})();
 function buildFaq(){
   var b=gE('faq-b');if(!b)return;b.innerHTML='';
   var cats=[
@@ -21230,6 +21299,7 @@ document.addEventListener('click',function(e){
   }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://js.tosspayments.com/v2/standard"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 // ── Supabase 설정 ─────────────────────────────────────────────────
