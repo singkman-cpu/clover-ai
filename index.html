@@ -1338,6 +1338,23 @@ function _proposalEffectiveTheme(data){
   return merged;
 }
 
+// 모서리 브라켓(카메라 뷰파인더 스타일 L자 마크) — 컨설팅/IR 제안서 디자인에서 가장 흔히 쓰이는
+// "고급 문서" 신호 중 하나. 네 귀퉁이에 얇은 L자 선만 넣어도 페이지 전체가 정돈되고 격식있어 보임.
+function _proposalDrawCornerBrackets(ctx, color, W, H, opts){
+  opts = opts || {};
+  var inset = opts.inset!=null ? opts.inset : 34;
+  var len = opts.len!=null ? opts.len : 26;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = opts.lw || 2;
+  ctx.globalAlpha = opts.alpha!=null ? opts.alpha : 0.85;
+  ctx.beginPath(); ctx.moveTo(inset, inset+len); ctx.lineTo(inset, inset); ctx.lineTo(inset+len, inset); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W-inset-len, inset); ctx.lineTo(W-inset, inset); ctx.lineTo(W-inset, inset+len); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(inset, H-inset-len); ctx.lineTo(inset, H-inset); ctx.lineTo(inset+len, H-inset); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W-inset-len, H-inset); ctx.lineTo(W-inset, H-inset); ctx.lineTo(W-inset, H-inset-len); ctx.stroke();
+  ctx.restore();
+}
+
 // 스타일별 장식 요소를 실제로 그려서 "색만 다른 게 아니라 진짜 다르게 보이게" 함.
 // area: {x,y,w,h} — 이 요소를 배치할 페이지 안쪽 여백 영역
 function _proposalDrawDeco(ctx, theme, W, H, area){
@@ -1411,6 +1428,7 @@ function _proposalDrawTOCPage(data, totalPages){
   var theme=_proposalEffectiveTheme(data);
   var GOLD=theme.accent, INK=theme.ink, MUTED=theme.muted, BG=theme.bg, DIVIDER=theme.divider, DESC=theme.desc;
   ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
+  _proposalDrawCornerBrackets(ctx, GOLD, W, H, {inset:30, len:22, lw:1.5, alpha:0.45});
   _proposalDrawDeco(ctx, theme, W, H, {x:100, y:70, w:W-200, h:40});
 
   var pad=100;
@@ -1480,6 +1498,7 @@ function _proposalDrawBudgetPage(data, pageIndex, totalPages){
   var theme=_proposalEffectiveTheme(data);
   var GOLD=theme.accent, INK=theme.ink, MUTED=theme.muted, BG=theme.bg, DIVIDER=theme.divider, DESC=theme.desc;
   ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
+  _proposalDrawCornerBrackets(ctx, GOLD, W, H, {inset:30, len:22, lw:1.5, alpha:0.45});
 
   var pad=92;
   _proposalDrawDeco(ctx, theme, W, H, {x:pad, y:56, w:W-pad*2, h:40});
@@ -1521,10 +1540,13 @@ function _proposalDrawBudgetPage(data, pageIndex, totalPages){
       var bx=pad+i*(bw+16);
       ctx.fillStyle=theme.dark?'rgba(255,255,255,.05)':'rgba(0,0,0,.03)';
       if(ctx.roundRect){ctx.beginPath();ctx.roundRect(bx,y,bw,64,10);ctx.fill();}
+      // 카드 상단에 얇은 컬러 액센트 바 — 참고한 실제 제안서들의 통계 카드에서 공통으로 보이던 디테일
+      ctx.fillStyle=GOLD;
+      if(ctx.roundRect){ctx.beginPath();ctx.roundRect(bx,y,bw,4,[10,10,0,0]);ctx.fill();}
       ctx.fillStyle=MUTED;ctx.font='600 13px '+PROPOSAL_FONT;ctx.textBaseline='top';
-      ctx.fillText(b.l, bx+16, y+12);
+      ctx.fillText(b.l, bx+16, y+16);
       ctx.fillStyle=INK;ctx.font='700 20px '+PROPOSAL_FONT;
-      ctx.fillText(b.v, bx+16, y+32);
+      ctx.fillText(b.v, bx+16, y+36);
     });
     y+=64+36;
   }
@@ -1678,13 +1700,18 @@ function _proposalDrawCoverPage(data, heroImg){
   // 예전엔 테마와 상관없이 항상 똑같은 어두운 그라디언트+금색 글씨만 썼는데, 그러면 10개 넘는
   // 테마를 골라도 표지는 다 비슷해 보이는 문제가 있었음 — 이제 테마별 고유 오버레이 색(coverOverlay)과
   // 글자색(coverText)을 실제로 반영해서, 테마를 바꾸면 표지도 눈에 띄게 다르게 보이도록 함.
-  var grad=ctx.createLinearGradient(0,H*0.28,0,H);
+  // 참고한 실제 제안서 디자인들을 보면 표지 사진 하단이 부드러운 그라디언트로 흐릿하게 끝나는 게
+  // 아니라, 제목 글자가 들어가는 구간부터는 거의 불투명한 어두운 띠로 확실하게 떨어져서 글자
+  // 가독성과 무게감을 동시에 잡고 있었음 — 그 느낌을 반영해 하단 구간의 불투명도를 더 올림.
+  var grad=ctx.createLinearGradient(0,H*0.24,0,H);
   grad.addColorStop(0,'rgba('+ov[0]+',0)');
+  grad.addColorStop(0.42,'rgba('+ov[0]+',0.5)');
   if(ov.length>1){
-    grad.addColorStop(0.6,'rgba('+ov[0]+',0.55)');
-    grad.addColorStop(1,'rgba('+ov[1]+',0.96)');
+    grad.addColorStop(0.7,'rgba('+ov[0]+',0.86)');
+    grad.addColorStop(1,'rgba('+ov[1]+',0.99)');
   } else {
-    grad.addColorStop(1,'rgba('+ov[0]+',0.95)');
+    grad.addColorStop(0.72,'rgba('+ov[0]+',0.88)');
+    grad.addColorStop(1,'rgba('+ov[0]+',0.99)');
   }
   ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
 
@@ -1718,6 +1745,20 @@ function _proposalDrawCoverPage(data, heroImg){
     ctx.beginPath(); ctx.moveTo(W-280,40); ctx.bezierCurveTo(W-200,90,W-220,140,W-100,170); ctx.stroke();
   }
   ctx.restore();
+
+  // 모서리 브라켓 — 표지는 사진 배경이라 대비가 잘 되는 coverText 색으로, 살짝 은은하게
+  _proposalDrawCornerBrackets(ctx, TXT, W, H, {inset:36, len:28, lw:2, alpha:0.55});
+
+  // 프로젝트 번호 태그 — "PROPOSAL NO. 20260724" 식으로, 이 문서가 개별 관리되는 정식
+  // 제안서라는 느낌을 줌(컨설팅펌 제안서에서 흔히 쓰는 관례)
+  ctx.textAlign='right';ctx.textBaseline='top';
+  ctx.fillStyle=_proposalHexToRgba(TXT,.7);
+  ctx.font='500 15px '+PROPOSAL_FONT;
+  try{ctx.letterSpacing='1.5px';}catch(e){}
+  var _pnDate=new Date();
+  var _pn='PROPOSAL NO. '+_pnDate.getFullYear()+String(_pnDate.getMonth()+1).padStart(2,'0')+String(_pnDate.getDate()).padStart(2,'0');
+  ctx.fillText(_pn, W-70, 70);
+  try{ctx.letterSpacing='0px';}catch(e){}
 
   var pad=100;
   ctx.textAlign='left';ctx.textBaseline='bottom';
@@ -1780,6 +1821,7 @@ function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages){
   var theme=_proposalEffectiveTheme(data); // 커스텀 색상이 있으면 그걸 우선 반영
   var GOLD=theme.accent, INK=theme.ink, MUTED=theme.muted, BG=theme.bg, DIVIDER=theme.divider, DESC=theme.desc;
   ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
+  _proposalDrawCornerBrackets(ctx, GOLD, W, H, {inset:30, len:22, lw:1.5, alpha:0.45});
 
   var pad=92;
   _proposalDrawDeco(ctx, theme, W, H, {x:pad, y:56, w:W-pad*2, h:40});
@@ -1804,16 +1846,39 @@ function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages){
   chunk.forEach(function(entry, ci){
     var sc=entry.scene, i=entry.idx;
     ctx.textAlign='left';
+
+    // 컬러 태그 필(pill) 배지 — "SPACE 01" 식의 작은 알약 모양 캡션. 참고 이미지들에서 거의
+    // 모든 섹션 헤더 위에 공통으로 보이던 요소라 추가함.
+    var pillTxt='SPACE '+(i+1<10?'0':'')+(i+1);
+    ctx.font='700 12px '+PROPOSAL_FONT;
+    try{ctx.letterSpacing='1.5px';}catch(e){}
+    var pillTxtW=ctx.measureText(pillTxt).width;
+    var pillPadX=12, pillH=24;
     ctx.fillStyle=GOLD;
-    ctx.font='700 17px '+PROPOSAL_FONT;
-    ctx.textBaseline='top';
-    try{ctx.letterSpacing='2px';}catch(e){}
-    ctx.fillText((i+1<10?'0':'')+(i+1), pad, y);
+    if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(pad, y, pillTxtW+pillPadX*2, pillH, pillH/2); ctx.fill(); }
+    else { ctx.fillRect(pad, y, pillTxtW+pillPadX*2, pillH); }
+    ctx.fillStyle= theme.dark ? '#000000' : '#ffffff';
+    ctx.textBaseline='middle';
+    ctx.fillText(pillTxt, pad+pillPadX, y+pillH/2+1);
     try{ctx.letterSpacing='0px';}catch(e){}
+    y += pillH+14;
+
+    // 번호 — 예전엔 그냥 색글자였는데, 참고 디자인들처럼 채워진 원 배지 안에 흰 숫자로 바꿔서
+    // 훨씬 눈에 띄고 정돈된 느낌을 줌.
+    var badgeR=18;
+    ctx.beginPath(); ctx.arc(pad+badgeR, y+badgeR, badgeR, 0, Math.PI*2);
+    ctx.fillStyle=GOLD; ctx.fill();
+    ctx.fillStyle= theme.dark ? '#000000' : '#ffffff';
+    ctx.font='800 16px '+PROPOSAL_FONT;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(String(i+1), pad+badgeR, y+badgeR+1);
+    ctx.textAlign='left';
+
     ctx.fillStyle=INK;
     ctx.font='700 27px '+PROPOSAL_FONT;
-    ctx.fillText(sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), pad+40, y-4);
-    y+=48;
+    ctx.textBaseline='top';
+    ctx.fillText(sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), pad+badgeR*2+14, y+9);
+    y+=badgeR*2+18;
 
     var beforeImg=loaded['b'+i], afterImg=loaded['a'+i];
     var halfW=(innerW-14)/2;
@@ -1894,6 +1959,7 @@ function _proposalDrawClosingPage(data, totalPages){
   var theme=_proposalEffectiveTheme(data); // 커스텀 색상이 있으면 그걸 우선 반영
   var GOLD=theme.accent, INK=theme.ink, MUTED=theme.muted, BG=theme.bg, DIVIDER=theme.divider, DESC=theme.desc;
   ctx.fillStyle=BG;ctx.fillRect(0,0,W,H);
+  _proposalDrawCornerBrackets(ctx, GOLD, W, H, {inset:30, len:22, lw:1.5, alpha:0.45});
   _proposalDrawDeco(ctx, theme, W, H, {x:100, y:80, w:W-200, h:40});
 
   // 골드 이중 테두리 프레임 — 표지/헤더에 쓰인 골드 톤을 마지막 장까지 이어가는 마무리 장식
@@ -16473,7 +16539,8 @@ function runVideoUpscale(file, durationSec, upscaleFactor, statusEl, onDone, onE
     }, function(d){
       var url = falExtractVideoUrl(d);
       if(!url){ onErr('업스케일 결과 URL을 찾지 못했습니다.'); return; }
-      if(G.supaRole!=='admin' && G.plan!=='admin') deductCredits(cost);
+      // 크레딧 차감은 이제 서버(fal-proxy의 submit 액션, computeCost)가 처리함 — 여기서 다시
+      // deductCredits()를 부르면 이중 차감이 됨. G.cr 표시값은 다음 프로필 새로고침 때 서버 값으로 갱신됨.
       onDone(url);
     }, function(err){
       onErr('영상 업스케일 오류: '+err);
