@@ -1078,6 +1078,9 @@ function _proposalOpenAddScenePicker(){
   // 제일 눈에 띄게 맨 위로 올림 — 이미 만든 결과물을 재사용하는 게 제일 흔한 시나리오라서.
   var excludeIds=G_PROPOSAL.scenes.map(function(s){return s.id;});
   var candidates=_proposalGatherCandidates(excludeIds);
+  // "이미지 한 장으로 바로 추가" 섹션의 갤러리 바로가기 버튼을 거쳐서 왔을 때만 true로 바뀌며,
+  // 그 경우 갤러리 사진을 클릭해도 전/후 세트가 아니라 결과 사진 한 장만 추가되게 함.
+  var _galSingleOnlyMode = false;
   var galSec=dv('');
   galSec.style.cssText='margin-bottom:16px;padding:16px;background:var(--c2);border-radius:12px;border:1.5px solid var(--acb)';
   var galTitle=dv('');galTitle.style.cssText='font-size:14px;font-weight:800;color:var(--ac);margin-bottom:4px';
@@ -1096,6 +1099,10 @@ function _proposalOpenAddScenePicker(){
       cell.addEventListener('mouseenter',function(){cell.style.borderColor='var(--ac)';});
       cell.addEventListener('mouseleave',function(){cell.style.borderColor='var(--bd2)';});
       cell.onclick=function(){
+        if(_galSingleOnlyMode){
+          addSceneAndClose({id:cand.id, orig:null, result:cand.result, label:''}, pickOverlay);
+          return;
+        }
         var beforeSrc=cand.orig||cand.origThumb||null;
         addSceneAndClose({id:cand.id, orig:beforeSrc, result:cand.result, label:''}, pickOverlay);
       };
@@ -1157,6 +1164,13 @@ function _proposalOpenAddScenePicker(){
   quickGalBtn.style.cssText='width:100%;margin-top:8px;padding:9px;border-radius:8px;border:1px solid rgba(110,231,183,.4);background:transparent;color:var(--ac);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
   quickGalBtn.onclick=function(){
     if(!galSec || !galSec.isConnected){ return; } // 방어: 혹시라도 DOM에서 떨어져 나간 상태면 스크롤 시도 자체를 안 함
+    // ⚠️ 버그 수정: 이 버튼은 "완성된 사진 한 장만" 섹션 안에 있는데, 눌러서 이동한 갤러리를
+    // 클릭하면 (그 갤러리 칸의 기본 동작대로) 전/후 사진이 세트로 같이 들어가고 있었음 —
+    // "한 장만 추가" 하려고 여기 왔는데 결과가 다르니 헷갈릴 수밖에 없었음. 이 버튼으로 갤러리에
+    // 진입했을 때만 "결과 사진 한 장만" 추가되도록 모드를 전환해줌(전/후 세트로 이미 있던
+    // 기본 동작은 갤러리 섹션에서 직접 시작했을 땐 그대로 유지됨).
+    _galSingleOnlyMode = true;
+    galTitle.innerHTML = '🖼 내 갤러리에서 선택 (' + candidates.length + '개) <span style="font-size:10px;color:#6ee7b7;font-weight:700">— 한 장만 추가돼요</span>';
     galSec.scrollIntoView({behavior:'smooth', block:'start'});
     // ⚠️ 갤러리 섹션이 이미 화면에 보이는 위치면(모달 맨 위쪽이라 대부분 이미 보임) 스크롤이
     // 거의 안 움직여서 "버튼이 안 먹는다"고 느껴지는 문제가 있었음 — 눌렀다는 게 확실히 보이게
@@ -2639,6 +2653,11 @@ function selectWF(wf){
   }
   // 1. home-s 숨김
   gE('home-s').style.display='none';
+  // ⚠️ AI편집 탭에서 브러시/화살표/영역선택 오버레이를 켠 채로 다른 탭(업스케일 등)으로 넘어가면,
+  // togDraw(false)를 부르는 곳이 "일반 프롬프트로 되돌아갈 때"랑 "선택 영역 수정 실행 후"
+  // 딱 2군데뿐이라 탭 자체를 벗어날 때는 아무도 안 꺼줘서, 그 오버레이(안내 문구 포함)가
+  // 다른 탭 화면 위에 계속 떠 있는 채로 남아있던 버그가 있었음. 탭을 벗어나는 순간 확실히 정리함.
+  if(G.wf==='edit' && wf!=='edit'){ togDraw(false); }
   // 2. 탭 전환
   G.wf=wf;
   // ⚠️ 2026-07-22: AI 엔진 선택(G.eng)이 탭마다 따로가 아니라 앱 전체에서 공유되다 보니,
@@ -8493,6 +8512,11 @@ function sbUpscale(p){
     var srcImg=getTab('upscale').inputImg;
     if(!srcImg){ cropCanvasWrap.style.display='none'; cropHint.style.display='none'; cropRunBtn.style.display='none'; cropClearBtn.style.display='none'; return; }
     var im=new Image();
+    // ⚠️ 원격 URL(예: 이전 생성 결과 — fal.media CDN)을 crossOrigin 설정 없이 캔버스에 그리면
+    // 캔버스가 "오염(tainted)"되어서, 이후 cropRunBtn에서 toDataURL()을 부르는 순간
+    // "Tainted canvases may not be exported" SecurityError로 무조건 실패하던 버그가 있었음 —
+    // data: URL(로컬 업로드)엔 영향 없고 원격 URL일 때만 해당되는 문제라 원인 찾기 어려웠음.
+    im.crossOrigin='anonymous';
     im.onload=function(){
       cropImgNatural.w=im.naturalWidth; cropImgNatural.h=im.naturalHeight;
       cropCanvas.width=im.naturalWidth; cropCanvas.height=im.naturalHeight;
@@ -8561,7 +8585,16 @@ function sbUpscale(p){
     cropOutCanvas.width=Math.round(cropSel.w); cropOutCanvas.height=Math.round(cropSel.h);
     var octx=cropOutCanvas.getContext('2d');
     octx.drawImage(cropCanvas,cropSel.x,cropSel.y,cropSel.w,cropSel.h,0,0,cropSel.w,cropSel.h);
-    var croppedDataUrl=cropOutCanvas.toDataURL('image/jpeg',0.95);
+    var croppedDataUrl;
+    try{
+      croppedDataUrl=cropOutCanvas.toDataURL('image/jpeg',0.95);
+    }catch(e){
+      // crossOrigin 설정에도 불구하고 CDN이 CORS 헤더를 안 보내는 등의 이유로 캔버스가 오염된
+      // 경우 — 조용히 죽는 대신 원인을 알려주고 새로고침을 안내함(원격 이미지를 다시 불러오면
+      // 보통 해결됨).
+      cropResultArea.innerHTML='<div style="font-size:11px;color:#f87171">⚠️ 이 이미지는 브라우저 보안 정책 때문에 부분 영역 업스케일을 할 수 없어요. 페이지를 새로고침한 뒤 다시 시도해보세요.</div>';
+      return;
+    }
     cropRunBtn.disabled=true; cropRunBtn.textContent='업스케일 중...';
     cropResultArea.innerHTML='';
     runClarityUpscale(croppedDataUrl, 2, function(resultUrl){
@@ -9733,6 +9766,69 @@ function sbShorts(p){
   var images = G_SHORTS.images;
   var opts = G_SHORTS.opts;
 
+  // ⚠️ 버그 수정(2026-07-24): 이 블록(색상 팔레트/이모지 목록/이모지 삽입 함수)이 원래 함수 훨씬
+  // 아래쪽(레터박스 문구 에디터 근처)에 있었는데, 그보다 위쪽인 "빈 페이지" 이미지 목록 렌더링에서
+  // 이미 _shortsEmojiRow()를 호출하고 있었음 — var 호이스팅 때문에 변수 선언 자체는 있어도 값 할당은
+  // 아직 실행 전이라 SHORTS_EMOJI_GROUPS가 undefined인 채로 참조되어 "Cannot read properties of
+  // undefined (reading '0')" 에러가 났음. 실제 사용 시점보다 먼저 선언되도록 함수 맨 앞으로 옮김.
+  var SHORTS_TEXT_COLORS=[['#ffffff','흰색'],['#ffe600','노랑'],['#ff3b30','빨강'],['#00e5cc','민트']];
+  // 자주 쓰는 이모티콘 — 문구 입력창에 커서 위치에 바로 삽입할 수 있게 함
+  var SHORTS_EMOJIS=['🔥','❤️','✨','👍','😍','🎉','💯','👀','📍','✅','⭐','💡','🏠','🛋️','🎨','📸','👇','➡️','💬','😱','🤩','🙌','🚨','💰'];
+  // 카테고리별로 훨씬 다양하게 확장 — 반응/강조, 인테리어·공간, 럭셔리 포인트, 화살표·안내로 나눠서
+  // 필요한 걸 빨리 찾을 수 있게 함. 기존 SHORTS_EMOJIS(위)는 하위호환용으로 남겨두고 실제로는
+  // 아래 카테고리 목록을 씀.
+  var SHORTS_EMOJI_GROUPS=[
+    {l:'반응·강조', items:['🔥','✨','💯','🤩','😍','😱','🥰','👏','😮','💥','🙌','👍','❤️','💕','🖤','🤍']},
+    {l:'럭셔리·포인트', items:['💎','👑','🥂','🏆','🌟','💫','⭐','🕯️','🔑','🏷️']},
+    {l:'인테리어·공간', items:['🏠','🏢','🏙️','🛋️','🛁','🚪','🪟','🪴','🌿','🧱','📐','💡','🎨']},
+    {l:'화살표·안내', items:['➡️','⬇️','👇','👉','🔁','▶️','⏱️','🆕','🎯']},
+    {l:'정보·기타', items:['📍','✅','💬','📸','📈','🔔','🚨','💰']}
+  ];
+  function _shortsEmojiRow(taEl){
+    var outer=dv('');outer.style.cssText='margin-bottom:8px';
+    function insertEmoji(em){
+      var start=taEl.selectionStart!=null?taEl.selectionStart:taEl.value.length;
+      var end=taEl.selectionEnd!=null?taEl.selectionEnd:taEl.value.length;
+      var v=taEl.value;
+      taEl.value=v.slice(0,start)+em+v.slice(end);
+      var newPos=start+em.length;
+      taEl.focus();
+      try{ taEl.setSelectionRange(newPos,newPos); }catch(e){}
+      // 기존 oninput 핸들러들을 그대로 재사용 — 텍스트/상태 업데이트 로직 중복 없이 그대로 실행됨
+      taEl.dispatchEvent(new Event('input',{bubbles:true}));
+    }
+    function emojiBtn(em){
+      var b=mk('button','');b.type='button';b.textContent=em;
+      b.style.cssText='width:27px;height:27px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex-shrink:0';
+      b.onclick=function(){ insertEmoji(em); };
+      return b;
+    }
+    // 기본은 첫 카테고리(반응·강조)만 한 줄로 보여주고, "더보기"를 누르면 나머지 카테고리까지
+    // 라벨과 함께 펼쳐서 보여줌 — 사이드바가 이모지로 너무 길어지지 않게 함.
+    var mainRow=dv('');mainRow.style.cssText='display:flex;flex-wrap:wrap;gap:4px;align-items:center';
+    SHORTS_EMOJI_GROUPS[0].items.forEach(function(em){ mainRow.appendChild(emojiBtn(em)); });
+    var moreBtn=mk('button','');moreBtn.type='button';moreBtn.textContent='더보기 ▾';
+    moreBtn.style.cssText='height:27px;padding:0 8px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);cursor:pointer;font-size:10.5px;font-family:inherit;flex-shrink:0';
+    mainRow.appendChild(moreBtn);
+    outer.appendChild(mainRow);
+    var extraWrap=dv('');extraWrap.style.cssText='display:none;margin-top:6px';
+    SHORTS_EMOJI_GROUPS.slice(1).forEach(function(grp){
+      var grpLbl=dv('');grpLbl.style.cssText='font-size:9.5px;color:var(--m2);margin:5px 0 3px';grpLbl.textContent=grp.l;
+      extraWrap.appendChild(grpLbl);
+      var grpRow=dv('');grpRow.style.cssText='display:flex;flex-wrap:wrap;gap:4px';
+      grp.items.forEach(function(em){ grpRow.appendChild(emojiBtn(em)); });
+      extraWrap.appendChild(grpRow);
+    });
+    outer.appendChild(extraWrap);
+    var expanded=false;
+    moreBtn.onclick=function(){
+      expanded=!expanded;
+      extraWrap.style.display=expanded?'block':'none';
+      moreBtn.textContent=expanded?'접기 ▴':'더보기 ▾';
+    };
+    return outer;
+  }
+
   // 안내
   var note=dv('');
   note.style.cssText='font-size:12px;color:var(--t2);line-height:1.6;padding:10px;background:var(--acg);border-radius:9px;margin-bottom:4px;border:1px solid var(--acb)';
@@ -10228,63 +10324,6 @@ function sbShorts(p){
 
   // 레터박스일 때만: 위/아래 검은 여백에 직접 들어가는 문구 — 상단은 후킹용 헤드라인,
   // 하단은 이름·출처 같은 작은 캡션. 둘 다 항상 중앙정렬로 그려짐(참고 이미지 스타일 그대로).
-  var SHORTS_TEXT_COLORS=[['#ffffff','흰색'],['#ffe600','노랑'],['#ff3b30','빨강'],['#00e5cc','민트']];
-  // 자주 쓰는 이모티콘 — 문구 입력창에 커서 위치에 바로 삽입할 수 있게 함
-  var SHORTS_EMOJIS=['🔥','❤️','✨','👍','😍','🎉','💯','👀','📍','✅','⭐','💡','🏠','🛋️','🎨','📸','👇','➡️','💬','😱','🤩','🙌','🚨','💰'];
-  // 카테고리별로 훨씬 다양하게 확장 — 반응/강조, 인테리어·공간, 럭셔리 포인트, 화살표·안내로 나눠서
-  // 필요한 걸 빨리 찾을 수 있게 함. 기존 SHORTS_EMOJIS(위)는 하위호환용으로 남겨두고 실제로는
-  // 아래 카테고리 목록을 씀.
-  var SHORTS_EMOJI_GROUPS=[
-    {l:'반응·강조', items:['🔥','✨','💯','🤩','😍','😱','🥰','👏','😮','💥','🙌','👍','❤️','💕','🖤','🤍']},
-    {l:'럭셔리·포인트', items:['💎','👑','🥂','🏆','🌟','💫','⭐','🕯️','🔑','🏷️']},
-    {l:'인테리어·공간', items:['🏠','🏢','🏙️','🛋️','🛁','🚪','🪟','🪴','🌿','🧱','📐','💡','🎨']},
-    {l:'화살표·안내', items:['➡️','⬇️','👇','👉','🔁','▶️','⏱️','🆕','🎯']},
-    {l:'정보·기타', items:['📍','✅','💬','📸','📈','🔔','🚨','💰']}
-  ];
-  function _shortsEmojiRow(taEl){
-    var outer=dv('');outer.style.cssText='margin-bottom:8px';
-    function insertEmoji(em){
-      var start=taEl.selectionStart!=null?taEl.selectionStart:taEl.value.length;
-      var end=taEl.selectionEnd!=null?taEl.selectionEnd:taEl.value.length;
-      var v=taEl.value;
-      taEl.value=v.slice(0,start)+em+v.slice(end);
-      var newPos=start+em.length;
-      taEl.focus();
-      try{ taEl.setSelectionRange(newPos,newPos); }catch(e){}
-      // 기존 oninput 핸들러들을 그대로 재사용 — 텍스트/상태 업데이트 로직 중복 없이 그대로 실행됨
-      taEl.dispatchEvent(new Event('input',{bubbles:true}));
-    }
-    function emojiBtn(em){
-      var b=mk('button','');b.type='button';b.textContent=em;
-      b.style.cssText='width:27px;height:27px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;flex-shrink:0';
-      b.onclick=function(){ insertEmoji(em); };
-      return b;
-    }
-    // 기본은 첫 카테고리(반응·강조)만 한 줄로 보여주고, "더보기"를 누르면 나머지 카테고리까지
-    // 라벨과 함께 펼쳐서 보여줌 — 사이드바가 이모지로 너무 길어지지 않게 함.
-    var mainRow=dv('');mainRow.style.cssText='display:flex;flex-wrap:wrap;gap:4px;align-items:center';
-    SHORTS_EMOJI_GROUPS[0].items.forEach(function(em){ mainRow.appendChild(emojiBtn(em)); });
-    var moreBtn=mk('button','');moreBtn.type='button';moreBtn.textContent='더보기 ▾';
-    moreBtn.style.cssText='height:27px;padding:0 8px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);cursor:pointer;font-size:10.5px;font-family:inherit;flex-shrink:0';
-    mainRow.appendChild(moreBtn);
-    outer.appendChild(mainRow);
-    var extraWrap=dv('');extraWrap.style.cssText='display:none;margin-top:6px';
-    SHORTS_EMOJI_GROUPS.slice(1).forEach(function(grp){
-      var grpLbl=dv('');grpLbl.style.cssText='font-size:9.5px;color:var(--m2);margin:5px 0 3px';grpLbl.textContent=grp.l;
-      extraWrap.appendChild(grpLbl);
-      var grpRow=dv('');grpRow.style.cssText='display:flex;flex-wrap:wrap;gap:4px';
-      grp.items.forEach(function(em){ grpRow.appendChild(emojiBtn(em)); });
-      extraWrap.appendChild(grpRow);
-    });
-    outer.appendChild(extraWrap);
-    var expanded=false;
-    moreBtn.onclick=function(){
-      expanded=!expanded;
-      extraWrap.style.display=expanded?'block':'none';
-      moreBtn.textContent=expanded?'접기 ▴':'더보기 ▾';
-    };
-    return outer;
-  }
   function _shortsColorSwatchRow(curColor, onPick){
     var row=dv('');row.style.cssText='display:flex;gap:6px';
     SHORTS_TEXT_COLORS.forEach(function(c){
@@ -13195,33 +13234,62 @@ function mkChatEdit(p){
   }
   p.appendChild(curWrap);
 
-  // 대화 로그 — 오래된 턴이 위, 최근 턴이 아래(채팅 앱과 같은 순서)
-  if(tab.chatHistory.length){
+  // 대화 로그 — 실제 채팅처럼 "내가 보낸 지시"(우측 정렬)와 "AI가 완료한 결과"(좌측 정렬)를
+  // 구분해서 보여줌. 예전엔 지시+썸네일이 한 줄에 뭉쳐 있어서 "그냥 나 혼자 떠드는 목록"처럼
+  // 보인다는 피드백이 있었음.
+  if(tab.chatHistory.length || tab.chatRunning){
     var logWrap=dv('ss');logWrap.innerHTML='<div class="lbl">대화 기록</div>';
-    var logList=dv('');logList.style.cssText='display:flex;flex-direction:column;gap:8px;max-height:260px;overflow-y:auto';
+    var logList=dv('');logList.style.cssText='display:flex;flex-direction:column;gap:10px;max-height:320px;overflow-y:auto;padding:2px';
     tab.chatHistory.forEach(function(turn,i){
-      var row=dv('');row.style.cssText='display:flex;gap:8px;align-items:flex-start;background:var(--c2);border-radius:9px;padding:8px';
+      // 내가 보낸 지시 — 우측 정렬 말풍선
+      var meRow=dv('');meRow.style.cssText='display:flex;justify-content:flex-end';
+      var meBubble=dv('');meBubble.style.cssText='max-width:80%;background:var(--ac);color:#000;border-radius:12px 12px 2px 12px;padding:7px 11px;font-size:11.5px;line-height:1.4;word-break:break-word;font-weight:600';
+      meBubble.textContent=turn.prompt;
+      meRow.appendChild(meBubble);
+      logList.appendChild(meRow);
+      // AI 결과 — 좌측 정렬, 썸네일+완료 표시
+      var aiRow=dv('');aiRow.style.cssText='display:flex;justify-content:flex-start;gap:6px;align-items:flex-end';
       var thumb=document.createElement('img');thumb.src=turn.resultUrl;
-      thumb.style.cssText='width:52px;height:52px;object-fit:cover;border-radius:6px;flex-shrink:0';
-      row.appendChild(thumb);
-      var info=dv('');info.style.cssText='flex:1;min-width:0';
-      var idxLbl=dv('');idxLbl.style.cssText='font-size:9.5px;color:var(--m2);font-weight:700';idxLbl.textContent='턴 '+(i+1);
-      var txt=dv('');txt.style.cssText='font-size:11.5px;color:var(--t);margin-top:2px;line-height:1.4;word-break:break-word';txt.textContent=turn.prompt;
-      info.appendChild(idxLbl);info.appendChild(txt);
-      row.appendChild(info);
-      // 이 턴이 마지막 턴일 때만: 되돌리기(이 턴만 취소하고 그 이전 상태로) 가능
-      if(i===tab.chatHistory.length-1){
-        var undoBtn=mk('button','');undoBtn.type='button';undoBtn.textContent='✕';undoBtn.title='이 턴 되돌리기';
-        undoBtn.style.cssText='width:22px;height:22px;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:#f87171;cursor:pointer;font-size:11px';
+      thumb.style.cssText='width:64px;height:64px;object-fit:cover;border-radius:10px 10px 10px 2px;border:1px solid var(--bd2);cursor:pointer';
+      thumb.title='클릭하면 크게 보기';
+      thumb.onclick=function(){ window.open(turn.resultUrl,'_blank'); };
+      aiRow.appendChild(thumb);
+      var aiMeta=dv('');aiMeta.style.cssText='font-size:9.5px;color:var(--ac);font-weight:700;align-self:center';
+      aiMeta.textContent='✓ 턴 '+(i+1)+' 완료';
+      aiRow.appendChild(aiMeta);
+      if(i===tab.chatHistory.length-1 && !tab.chatRunning){
+        var undoBtn=mk('button','');undoBtn.type='button';undoBtn.textContent='↺ 되돌리기';undoBtn.title='이 턴만 취소하고 이전 상태로';
+        undoBtn.style.cssText='margin-left:auto;align-self:center;padding:4px 8px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:#f87171;cursor:pointer;font-size:10px;font-family:inherit';
         undoBtn.onclick=function(){
           tab.chatHistory.pop();
           tab.chatCurrentImg = tab.chatHistory.length ? tab.chatHistory[tab.chatHistory.length-1].resultUrl : tab.inputImg;
           renderSB();
         };
-        row.appendChild(undoBtn);
+        aiRow.appendChild(undoBtn);
       }
-      logList.appendChild(row);
+      logList.appendChild(aiRow);
     });
+    // 지금 처리 중인 지시가 있으면, 채팅 맨 아래에 "처리 중..." 버블을 실시간으로 보여줘서
+    // 멈춘 건지 진행 중인 건지 헷갈리지 않게 함.
+    if(tab.chatRunning && tab.chatPendingPrompt){
+      var pendMeRow=dv('');pendMeRow.style.cssText='display:flex;justify-content:flex-end';
+      var pendMeBubble=dv('');pendMeBubble.style.cssText='max-width:80%;background:var(--ac);color:#000;border-radius:12px 12px 2px 12px;padding:7px 11px;font-size:11.5px;line-height:1.4;word-break:break-word;font-weight:600;opacity:.85';
+      pendMeBubble.textContent=tab.chatPendingPrompt;
+      pendMeRow.appendChild(pendMeBubble);
+      logList.appendChild(pendMeRow);
+      var pendAiRow=dv('');pendAiRow.style.cssText='display:flex;justify-content:flex-start;gap:7px;align-items:center';
+      var spin=dv('');spin.style.cssText='width:16px;height:16px;border:2.5px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:chatEditSpin .8s linear infinite;flex-shrink:0';
+      var pendTxt=dv('');pendTxt.style.cssText='font-size:11px;color:var(--t2)';pendTxt.textContent='AI가 수정 중이에요... (보통 10~30초)';
+      pendAiRow.appendChild(spin);pendAiRow.appendChild(pendTxt);
+      logList.appendChild(pendAiRow);
+      if(!document.getElementById('chat-edit-spin-style')){
+        var spinStyle=document.createElement('style');spinStyle.id='chat-edit-spin-style';
+        spinStyle.textContent='@keyframes chatEditSpin{to{transform:rotate(360deg)}}';
+        document.head.appendChild(spinStyle);
+      }
+      // 방금 추가된 "처리 중" 버블이 항상 보이도록 로그를 맨 아래로 스크롤
+      setTimeout(function(){ logList.scrollTop=logList.scrollHeight; },0);
+    }
     logWrap.appendChild(logList);
     p.appendChild(logWrap);
   }
@@ -13240,9 +13308,9 @@ function mkChatEdit(p){
   sendBtn.disabled=isRunning;
   var turnCost=getBaseCost('edit');
   sendBtn.innerHTML=isRunning?'전송 중...':'💬 전송 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+turnCost+'cr</span>';
-  sendBtn.onclick=function(){ _chatEditSend(chatTa.value); };
+  sendBtn.onclick=function(){ var v=chatTa.value; chatTa.value=''; _chatEditSend(v); };
   chatTa.onkeydown=function(e){
-    if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); _chatEditSend(chatTa.value); }
+    if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); var v2=chatTa.value; chatTa.value=''; _chatEditSend(v2); }
   };
   inputWrap.appendChild(sendBtn);
   if(tab.chatError){
@@ -13265,26 +13333,45 @@ function _chatEditSend(promptText){
   }
   var baseImg=tab.chatCurrentImg||tab.inputImg;
   if(!baseImg){ alert('먼저 이미지를 업로드해주세요.'); return; }
-  tab.chatRunning=true; tab.chatError=null;
+  tab.chatRunning=true; tab.chatError=null; tab.chatPendingPrompt=promptText;
   renderSB();
+  // ⚠️ 버그 수정: 예전엔 procImgWithTask()만 호출하고 끝이라, 결과가 사이드바의 작은 채팅
+  // 로그 썸네일에만 나타나고 메인 화면(가운데 큰 Before/After 비교 화면)엔 전혀 반영이 안 됐음.
+  // "일반 프롬프트"로 수정할 때는 executeSingleRender()가 G.HIST에 카드를 추가해서 메인 화면에
+  // 자동으로 보여주는데, 대화형 수정은 그 경로를 안 타서 메인 화면은 계속 예전 상태 그대로였던
+  // 것 — 그래서 "수정한 게 사라진다"고 느껴졌음(실제로는 애초에 메인 화면에 반영된 적이 없었음).
+  // 이제 일반 편집과 똑같이 G.HIST['edit']에 로딩→완료 카드를 추가해서 메인 화면에도 확실히 보이게 함.
+  if(!G.HIST.edit) G.HIST.edit=[];
+  var loadingId=Date.now()+Math.random();
+  G.HIST.edit.unshift({ id:loadingId, orig:baseImg, result:null, origThumb:null, tags:['대화형 수정 처리 중...'], ai:'', cx:50, fav:false, wf:'edit', preview:false, loading:true });
+  if(G.wf==='edit') renderMain('edit');
   var task={id:Date.now(), img:baseImg, wf:'edit', prompt:promptText, selK:null, resolution:tab.resolution||'1K'};
   procImgWithTask(task, function(resultUrl){
     tab.chatHistory.push({prompt:promptText, resultUrl:resultUrl});
     tab.chatCurrentImg=resultUrl;
-    tab.chatRunning=false;
+    tab.chatRunning=false; tab.chatPendingPrompt=null;
+    G.HIST.edit=G.HIST.edit.filter(function(x){return x.id!==loadingId;});
+    G.HIST.edit.unshift({ id:Date.now()+Math.random(), orig:baseImg, result:resultUrl, origThumb:null, tags:['대화형 수정 턴 '+tab.chatHistory.length, turnCost+'cr'], ai:'', cx:50, fav:false, wf:'edit', preview:false });
+    tab.resultImg=resultUrl;
+    if(G.wf==='edit') renderMain('edit');
     renderSB();
   }, function(err){
     tab.chatError='수정 실패: '+String(err).slice(0,150);
-    tab.chatRunning=false;
+    tab.chatRunning=false; tab.chatPendingPrompt=null;
+    G.HIST.edit=G.HIST.edit.filter(function(x){return x.id!==loadingId;});
+    if(G.wf==='edit') renderMain('edit');
     renderSB();
   });
 }
 
+// 마스크 색상 팔레트 — 브러시로 서로 다른 오브젝트를 구분해서 칠할 때 씀. mkMask()와
+// _mkMaskExecute()/_mkMaskClearAll() 양쪽에서 다 써서 전역으로 뺌.
+var MASK_COLORS=[['#00e5cc','기본(민트)'],['#ef4444','빨강'],['#3b82f6','파랑']];
 function mkMask(p){
   var s=dv('ss');
   s.innerHTML='<div class="lbl" style="color:var(--ac)">AI 마스크 편집 <span class="lbl-en" style="color:var(--ac2)">Mask Edit</span></div>';
   var info=dv('note');
-  info.innerHTML='수정할 오브젝트 위에 브러시로 터치하거나 드래그하세요 · 각진 영역은 "영역 선택"으로 점 찍어서 더 정확하게 지정할 수 있어요(더블클릭으로 확정)<br>'
+  info.innerHTML='도구를 고르면 그 도구에 맞는 입력창만 아래에 나와요 — 브러시는 색상 팔레트, 화살표·영역선택은 각각의 목록이요.<br>'
     +'<span style="color:var(--ac);font-size:10px">AI가 오브젝트를 자동으로 인식합니다 · Ctrl+Z: 실행취소</span>';
   s.appendChild(info);
 
@@ -13307,23 +13394,53 @@ function mkMask(p){
       bt.style.background='var(--acg)';bt.style.borderColor='var(--acb)';bt.style.color='var(--ac)';
       if(a[0]==='arrow'){ togDraw(true,'arrow'); initArrowMode(gE('draw-canvas')); }
       else togDraw(true,a[0]);
+      renderSB(); // ⚠️ 도구별로 아래 표시되는 입력 UI가 달라지므로(브러시 팔레트/화살표 목록/영역 목록
+      // 중 지금 고른 도구에 맞는 것만), 도구를 바꿀 때마다 사이드바를 다시 그려서 즉시 반영되게 함.
     };
     tr.appendChild(bt);
   });
   s.appendChild(tr);
 
+  // ⚠️ 도구별로 서로 다른 입력 UI(브러시=색상 팔레트, 화살표=화살표 목록, 영역선택=영역 목록)가
+  // 전부 한 화면에 같이 보여서 "지금 뭘 쓰고 있고 어디에 내용을 적어야 하는지" 헷갈린다는 문제가
+  // 있었음 — 이제 지금 고른 도구에 해당하는 UI만 보이게 함.
+  var isBrushTool = (G.dm==='brush' || G.dm==='erase');
+  var isArrowTool = (G.dm==='arrow');
+  var isPolyTool  = (G.dm==='polygon');
+
   // 화살표로 지목한 오브젝트 목록 — 각각 라벨(무슨 수정을 할지)과 참고이미지를 넣을 수 있음
   if(!G.arrows) G.arrows=[];
   var arrowListWrap=dv('');arrowListWrap.id='arrow-list-wrap';
-  arrowListWrap.style.cssText=G.dm==='arrow'||G.arrows.length?'margin-bottom:10px':'display:none;margin-bottom:10px';
-  s.appendChild(arrowListWrap);
-  renderArrowList(arrowListWrap);
+  arrowListWrap.style.cssText=(isArrowTool||G.arrows.length)?'margin-bottom:10px':'display:none;margin-bottom:10px';
+  if(isArrowTool || G.arrows.length){ s.appendChild(arrowListWrap); renderArrowList(arrowListWrap); }
 
+  // 영역 선택(폴리곤)으로 지정한 영역 목록 — 화살표와 똑같은 형식
+  if(!G.polyAreas) G.polyAreas=[];
+  if(isPolyTool){
+    var polyHint=dv('note');polyHint.style.cssText='font-size:10.5px;margin-bottom:8px';
+    polyHint.innerHTML='💡 사진 위에서 점을 찍어 다각형을 그리고 더블클릭으로 확정하세요. 몇 개든 계속 그릴 수 있고, 확정할 때마다 아래 목록에 번호가 추가돼요 — 그 번호 옆 칸에 뭘 바꿀지 적으세요.';
+    s.appendChild(polyHint);
+  }
+  var polyAreaListWrap=dv('');polyAreaListWrap.id='poly-area-list-wrap';
+  polyAreaListWrap.style.cssText=(isPolyTool||G.polyAreas.length)?'margin-bottom:10px':'display:none;margin-bottom:10px';
+  if(isPolyTool || G.polyAreas.length){ s.appendChild(polyAreaListWrap); renderPolyAreaList(polyAreaListWrap); }
+
+  if(!isBrushTool){
+    // 브러시 팔레트/텍스트칸은 브러시·지우개 도구일 때만 보이게 아래에서 건너뜀
+    var mbrSkip=dv('');mbrSkip.style.cssText='display:flex;gap:6px;margin-top:6px';
+    var mapBtnSkip=mk('button','actbtn ok');mapBtnSkip.style.cssText='flex:1;font-size:12px;padding:9px';mapBtnSkip.textContent='선택 영역 수정';
+    mapBtnSkip.onclick=function(){ _mkMaskExecute(); };
+    var mclrSkip=mk('button','');mclrSkip.style.cssText='padding:9px 11px;border-radius:7px;background:none;border:1px solid var(--bd2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
+    mclrSkip.textContent='선택 지우기';
+    mclrSkip.onclick=function(){ _mkMaskClearAll(); };
+    mbrSkip.appendChild(mapBtnSkip);mbrSkip.appendChild(mclrSkip);s.appendChild(mbrSkip);
+    p.appendChild(s);
+    return;
+  }
 
   // 색깔 3개 — 서로 다른 오브젝트를 한 번에 구분해서 칠할 수 있게. 예: 의자가 3개 보이면
   // 빨강으로 1번 의자, 파랑으로 2번 의자를 칠하고, 아래에 각각 다른 수정 내용을 적으면
   // "빨간색으로 칠한 영역은 이렇게, 파란색으로 칠한 영역은 이렇게"라는 프롬프트로 합쳐서 보냄.
-  var MASK_COLORS=[['#00e5cc','기본(민트)'],['#ef4444','빨강'],['#3b82f6','파랑']];
   if(!G.maskColor) G.maskColor=MASK_COLORS[0][0];
   var colorWrap=dv('');colorWrap.style.cssText='margin-bottom:8px';
   var colorLbl=dv('');colorLbl.style.cssText='font-size:10.5px;color:var(--t2);margin-bottom:5px';
@@ -13424,76 +13541,109 @@ function mkMask(p){
 
   var mbr=dv('');mbr.style.cssText='display:flex;gap:6px;margin-top:6px';
   var mapBtn=mk('button','actbtn ok');mapBtn.style.cssText='flex:1;font-size:12px;padding:9px';mapBtn.textContent='선택 영역 수정';
-  mapBtn.onclick=function(){
-    // 사용된 색깔(텍스트가 있거나 이미지가 업로드된 것)을 모아서 순서대로 레퍼런스 이미지에 넣고,
-    // "N번 레퍼런스 이미지는 빨간색으로 칠한 영역에 적용" 식으로 프롬프트에 명확히 연결해줌.
-    var usedColors=MASK_COLORS.filter(function(c){
-      return (G.maskColorPrompts[c[0]]||'').trim() || G.maskColorRefImg[c[0]];
-    });
-    var refImgs=[];
-    var combined;
-    if(usedColors.length<=1){
-      var c0=usedColors[0];
-      combined = c0 ? (G.maskColorPrompts[c0[0]]||'').trim() : '';
-      if(c0 && G.maskColorRefImg[c0[0]]){
-        refImgs.push(G.maskColorRefImg[c0[0]]);
-        combined += (combined?' ':'')+'첨부한 레퍼런스 이미지처럼 이 영역을 바꿔줘.';
-      }
-    } else {
-      var parts=[];
-      usedColors.forEach(function(c){
-        var txt=(G.maskColorPrompts[c[0]]||'').trim();
-        var seg=c[1]+'색으로 칠한 영역: ';
-        if(G.maskColorRefImg[c[0]]){
-          refImgs.push(G.maskColorRefImg[c[0]]);
-          seg += '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
-        } else {
-          seg += txt;
-        }
-        parts.push(seg);
-      });
-      combined = parts.join('. ') + '. (각 색으로 칠한 영역은 서로 다른 오브젝트를 가리킴 — 색 표시 자체는 결과물에 남기지 말고, 지정된 대로 각각 다르게 수정할 것. 레퍼런스 이미지가 있으면 그 이미지 속 디자인·형태·소재를 그대로 반영할 것.)';
-    }
-    // 화살표로 지목한 오브젝트들도 색깔 마스크와 똑같이 최종 프롬프트에 합침 — 화살표 머리(끝점)가
-    // 가리키는 위치를 "이미지의 어느 구역"인지로 설명해서 AI가 어떤 오브젝트를 말하는지 유추하게 함.
-    if(G.arrows && G.arrows.length){
-      var arrCv=gE('draw-canvas');
-      var arrParts=G.arrows.filter(function(a){return (a.label||'').trim() || a.refImg;}).map(function(a,i){
-        var zone='';
-        if(arrCv && arrCv.width>0 && arrCv.height>0){
-          var px=a.x2/arrCv.width, py=a.y2/arrCv.height;
-          var h = px<0.33?'좌측':px<0.66?'가운데':'우측';
-          var v = py<0.33?'상단':py<0.66?'중앙':'하단';
-          zone = '(이미지 '+v+' '+h+' 부근을 가리킴) ';
-        }
-        var txt=(a.label||'').trim();
-        if(a.refImg){
-          refImgs.push(a.refImg);
-          txt = '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
-        }
-        return '화살표 '+(i+1)+'번 '+zone+'— '+txt;
-      });
-      if(arrParts.length){
-        var arrowInstr = arrParts.join('. ') + '. (화살표로 표시한 오브젝트들에 대한 개별 지시사항이며, 화살표 자체는 결과 이미지에 나타나면 안 됨.)';
-        combined = combined ? (combined+' '+arrowInstr) : arrowInstr;
-      }
-    }
-    getTab(G.wf).prompt=combined;
-    if(refImgs.length){ getTab(G.wf).refs=refImgs; }
-    G.arrows=[]; // 실행 후 화살표는 초기화 (다음 편집에 남아있지 않도록)
-    togDraw(false);if(canRun())runTool();
-  };
+  mapBtn.onclick=function(){ _mkMaskExecute(); };
   var mclr=mk('button','');mclr.style.cssText='padding:9px 11px;border-radius:7px;background:none;border:1px solid var(--bd2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
   mclr.textContent='선택 지우기';
-  mclr.onclick=function(){
-    var cv=gE('draw-canvas');if(cv){var ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);}
-    G.drawHist=[];G.polyPts=[];G.strokePoints=[];G.maskColorPrompts={};G.maskColorRefImg={};G.arrows=[];G.arrowsHist=[];
-    var polyOv=gE('poly-overlay');if(polyOv)polyOv.innerHTML='';
-    var arrOv=gE('arrow-overlay');if(arrOv)arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:'';
-    renderSB();
-  };
+  mclr.onclick=function(){ _mkMaskClearAll(); };
   mbr.appendChild(mapBtn);mbr.appendChild(mclr);s.appendChild(mbr);
   p.appendChild(s);
+}
+// ── "선택 영역 수정" 실행 — 브러시 색상별 지시 + 화살표 지시 + 영역선택(폴리곤) 지시를
+// 전부 합쳐서 하나의 최종 프롬프트로 만듦. 도구 버튼 3종 어디서 눌러도 항상 이 함수 하나로
+// 실행되므로, 여러 도구를 섞어 써도(예: 브러시로 칠하고 + 화살표도 몇 개 찍고) 전부 같이 반영됨.
+function _mkMaskExecute(){
+  var usedColors=MASK_COLORS.filter(function(c){
+    return (G.maskColorPrompts&&(G.maskColorPrompts[c[0]]||'').trim()) || (G.maskColorRefImg&&G.maskColorRefImg[c[0]]);
+  });
+  var refImgs=[];
+  var combined='';
+  if(!G.maskColorPrompts) G.maskColorPrompts={};
+  if(!G.maskColorRefImg) G.maskColorRefImg={};
+  if(usedColors.length===1){
+    var c0=usedColors[0];
+    combined = (G.maskColorPrompts[c0[0]]||'').trim();
+    if(G.maskColorRefImg[c0[0]]){
+      refImgs.push(G.maskColorRefImg[c0[0]]);
+      combined += (combined?' ':'')+'첨부한 레퍼런스 이미지처럼 이 영역을 바꿔줘.';
+    }
+  } else if(usedColors.length>1){
+    var parts=[];
+    usedColors.forEach(function(c){
+      var txt=(G.maskColorPrompts[c[0]]||'').trim();
+      var seg=c[1]+'색으로 칠한 영역: ';
+      if(G.maskColorRefImg[c[0]]){
+        refImgs.push(G.maskColorRefImg[c[0]]);
+        seg += '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
+      } else {
+        seg += txt;
+      }
+      parts.push(seg);
+    });
+    combined = parts.join('. ') + '. (각 색으로 칠한 영역은 서로 다른 오브젝트를 가리킴 — 색 표시 자체는 결과물에 남기지 말고, 지정된 대로 각각 다르게 수정할 것. 레퍼런스 이미지가 있으면 그 이미지 속 디자인·형태·소재를 그대로 반영할 것.)';
+  }
+  // 화살표로 지목한 오브젝트들도 색깔 마스크와 똑같이 최종 프롬프트에 합침 — 화살표 머리(끝점)가
+  // 가리키는 위치를 "이미지의 어느 구역"인지로 설명해서 AI가 어떤 오브젝트를 말하는지 유추하게 함.
+  if(G.arrows && G.arrows.length){
+    var arrCv=gE('draw-canvas');
+    var arrParts=G.arrows.filter(function(a){return (a.label||'').trim() || a.refImg;}).map(function(a,i){
+      var zone='';
+      if(arrCv && arrCv.width>0 && arrCv.height>0){
+        var px=a.x2/arrCv.width, py=a.y2/arrCv.height;
+        var h = px<0.33?'좌측':px<0.66?'가운데':'우측';
+        var v = py<0.33?'상단':py<0.66?'중앙':'하단';
+        zone = '(이미지 '+v+' '+h+' 부근을 가리킴) ';
+      }
+      var txt=(a.label||'').trim();
+      if(a.refImg){
+        refImgs.push(a.refImg);
+        txt = '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
+      }
+      return '화살표 '+(i+1)+'번 '+zone+'— '+txt;
+    });
+    if(arrParts.length){
+      var arrowInstr = arrParts.join('. ') + '. (화살표로 표시한 오브젝트들에 대한 개별 지시사항이며, 화살표 자체는 결과 이미지에 나타나면 안 됨.)';
+      combined = combined ? (combined+' '+arrowInstr) : arrowInstr;
+    }
+  }
+  // 영역 선택(폴리곤)으로 지정한 구역들도 똑같이 합침 — 화살표와 달리 정확한 다각형 범위를
+  // 가리키므로, 무게중심 위치로 "이미지 어느 구역"인지 같이 알려줘서 AI가 헷갈리지 않게 함.
+  if(G.polyAreas && G.polyAreas.length){
+    var polyCv=gE('draw-canvas');
+    var polyParts=G.polyAreas.filter(function(a){return (a.label||'').trim() || a.refImg;}).map(function(a,i){
+      var zone='';
+      if(polyCv && polyCv.width>0 && polyCv.height>0 && a.points && a.points.length){
+        var cx=a.points.reduce(function(s,pt){return s+pt[0];},0)/a.points.length;
+        var cy=a.points.reduce(function(s,pt){return s+pt[1];},0)/a.points.length;
+        var px=cx/polyCv.width, py=cy/polyCv.height;
+        var h = px<0.33?'좌측':px<0.66?'가운데':'우측';
+        var v = py<0.33?'상단':py<0.66?'중앙':'하단';
+        zone = '(이미지 '+v+' '+h+' 부근의 지정한 범위) ';
+      }
+      var txt=(a.label||'').trim();
+      if(a.refImg){
+        refImgs.push(a.refImg);
+        txt = '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
+      }
+      return '영역 '+(i+1)+'번 '+zone+'— '+txt;
+    });
+    if(polyParts.length){
+      var polyInstr = polyParts.join('. ') + '. (점으로 표시한 정확한 다각형 범위 안쪽만 지정된 대로 수정할 것 — 범위 밖은 건드리지 말 것. 다각형 테두리 자체는 결과 이미지에 나타나면 안 됨.)';
+      combined = combined ? (combined+' '+polyInstr) : polyInstr;
+    }
+  }
+  if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
+  getTab(G.wf).prompt=combined;
+  if(refImgs.length){ getTab(G.wf).refs=refImgs; }
+  G.arrows=[]; G.polyAreas=[]; // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
+  togDraw(false);if(canRun())runTool();
+}
+function _mkMaskClearAll(){
+  var cv=gE('draw-canvas');if(cv){var ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);}
+  G.drawHist=[];G.polyPts=[];G.strokePoints=[];G.maskColorPrompts={};G.maskColorRefImg={};
+  G.arrows=[];G.arrowsHist=[];G.polyAreas=[];G.polyAreasHist=[];
+  var polyOv=gE('poly-overlay');if(polyOv)polyOv.innerHTML='';
+  var arrOv=gE('arrow-overlay');if(arrOv)arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:'';
+  renderSB();
 }
 function togDraw(on, mode){
   var cv=gE('draw-canvas');if(!cv)return;
@@ -13516,6 +13666,7 @@ function togDraw(on, mode){
         if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
         else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';}
         if(mode!=='arrow'){ var _aOv=gE('arrow-overlay'); if(_aOv) _aOv.style.display='none'; }
+        if(mode!=='polygon'){ var _pOv=gE('poly-overlay'); if(_pOv){ _pOv.style.display='none'; _pOv.style.pointerEvents='none'; } }
         var bh=gE('brush-hint');if(bh)bh.style.display=(mode==='brush'?'block':'none');
         console.log('[togDraw] 캔버스 크기(원본):', cv.width+'x'+cv.height, '화면:', ce.offsetWidth+'x'+ce.offsetHeight);
       };
@@ -13530,6 +13681,7 @@ function togDraw(on, mode){
       if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
       else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';}
       if(mode!=='arrow'){ var _aOv2=gE('arrow-overlay'); if(_aOv2) _aOv2.style.display='none'; }
+      if(mode!=='polygon'){ var _pOv2=gE('poly-overlay'); if(_pOv2){ _pOv2.style.display='none'; _pOv2.style.pointerEvents='none'; } }
     }
   }else{
     cv.classList.remove('active','brush-mode','eyedrop-mode','polygon-mode');
@@ -13740,9 +13892,20 @@ function renderArrowList(wrap){
 }
 window.initArrowMode=initArrowMode;
 window.renderArrowList=renderArrowList;
+// ── 영역 선택(폴리곤) — 화살표와 똑같은 구조로 재설계함 ──────────────────────
+// 예전엔 폴리곤을 확정하면 캔버스에 고정 민트색으로 "칠해서" 브러시 마스크에 합쳐버리는 방식이라
+// 문제가 3가지 있었음: ① 지우개로 지우면 브러시용 raster 캔버스가 지워지면서 그 위에 그려졌던
+// 영역도 같이 사라지고, 지우개 자체는 "영역 선택 모드를 다시 켤 수 있는 상태"로 안 돌아와서
+// 다시 선택이 안 되는 것처럼 보였음 ② 여러 번 그리면 전부 같은 민트색으로 뭉개져서 서로 다른
+// 영역이라는 게 구분이 안 되고 개별로 지시할 수도 없었음(색 3개로 제한) ③ 영역을 지정한 다음
+// "어디에 내용을 쓰는지"가 화면 아래 색상 팔레트 텍스트칸과 안 이어져 보여서 헷갈렸음.
+// → 화살표처럼 G.polyAreas 배열에 각 영역을 독립된 객체(포인트+라벨+참고이미지)로 저장하고,
+// 화면엔 번호가 매겨진 반투명 다각형으로 항상 보이게 하고, 바로 아래에 그 번호와 매칭되는
+// 입력칸이 나오게 해서 몇 개를 그리든 전부 따로 지시할 수 있게 함.
 function initPolygonMode(cv){
   G.polyPts=G.polyPts||[];
-  // 폴리곤 오버레이 SVG 생성/재활용
+  if(!G.polyAreas) G.polyAreas=[];
+  // 폴리곤 오버레이 SVG 생성/재활용 — 화살표 오버레이와 동일한 자리(같은 부모)에 별도 레이어로 둠
   var polyOv=gE('poly-overlay');
   if(!polyOv){
     polyOv=document.createElementNS('http://www.w3.org/2000/svg','svg');
@@ -13751,35 +13914,43 @@ function initPolygonMode(cv){
     cv.parentNode.appendChild(polyOv);
   }
   polyOv.style.display='block';
-  polyOv.innerHTML='';
+  polyOv.style.pointerEvents='all';
   G.polyPts=[];
+  _redrawPolyAreas(polyOv);
+
+  // 진행 중인(아직 확정 안 한) 다각형 전용 그룹 — 이 함수가 다시 호출돼도(같은 도구 버튼 재클릭 등)
+  // 이전에 그리던 점선/점이 중복으로 쌓이지 않도록, 매번 지우고 새로 만듦(확정된 영역들이 담긴
+  // #poly-areas-group은 안 건드림).
+  var oldDraft=polyOv.querySelector('#poly-draft-group'); if(oldDraft) oldDraft.remove();
+  var draftGroup=document.createElementNS('http://www.w3.org/2000/svg','g'); draftGroup.id='poly-draft-group';
+  polyOv.appendChild(draftGroup);
 
   var path=document.createElementNS('http://www.w3.org/2000/svg','polyline');
   path.setAttribute('fill','rgba(0,229,204,0.2)');
   path.setAttribute('stroke','#00e5cc');
   path.setAttribute('stroke-width','2');
   path.setAttribute('stroke-dasharray','6,3');
-  polyOv.appendChild(path);
+  draftGroup.appendChild(path);
+  var dotsGroup=document.createElementNS('http://www.w3.org/2000/svg','g');
+  draftGroup.appendChild(dotsGroup);
+  var previewLine=document.createElementNS('http://www.w3.org/2000/svg','line');
+  previewLine.setAttribute('stroke','rgba(0,229,204,0.5)');
+  previewLine.setAttribute('stroke-width','1');
+  previewLine.setAttribute('stroke-dasharray','4,2');
+  draftGroup.appendChild(previewLine);
 
-  // 클릭으로 점 추가
+  // 클릭으로 점 추가 — 진행 중인 다각형(점선 미리보기)만 초기화하고, 이미 확정된 영역들은 안 건드림
   polyOv.onclick=function(e){
     if(e.detail===2){finishPolygon(cv,polyOv);return;}
     var rect=polyOv.getBoundingClientRect();
     var px=e.clientX-rect.left, py=e.clientY-rect.top;
     G.polyPts.push([px,py]);
     updatePolyline(path,G.polyPts);
-    // 점 표시
     var dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
     dot.setAttribute('cx',px);dot.setAttribute('cy',py);dot.setAttribute('r','4');
     dot.setAttribute('fill','#00e5cc');dot.setAttribute('stroke','#fff');dot.setAttribute('stroke-width','1');
-    polyOv.appendChild(dot);
+    dotsGroup.appendChild(dot);
   };
-  // 마우스 이동 - 미리보기 선
-  var previewLine=document.createElementNS('http://www.w3.org/2000/svg','line');
-  previewLine.setAttribute('stroke','rgba(0,229,204,0.5)');
-  previewLine.setAttribute('stroke-width','1');
-  previewLine.setAttribute('stroke-dasharray','4,2');
-  polyOv.appendChild(previewLine);
   polyOv.onmousemove=function(e){
     if(!G.polyPts.length)return;
     var rect=polyOv.getBoundingClientRect();
@@ -13787,10 +13958,8 @@ function initPolygonMode(cv){
     previewLine.setAttribute('x1',last[0]);previewLine.setAttribute('y1',last[1]);
     previewLine.setAttribute('x2',e.clientX-rect.left);previewLine.setAttribute('y2',e.clientY-rect.top);
   };
-  // 더블클릭 완료
   polyOv.ondblclick=function(e){finishPolygon(cv,polyOv);};
-  // 상태 힌트
-  var hint=gE('stl');if(hint)hint.textContent='폴리곤: 클릭으로 점 추가 | 더블클릭 or 완료버튼으로 확정';
+  var hint=gE('stl');if(hint)hint.textContent='영역 선택: 클릭으로 점 추가 | 더블클릭으로 확정 | 몇 개든 계속 그릴 수 있어요';
 }
 
 function updatePolyline(el,pts){
@@ -13798,39 +13967,139 @@ function updatePolyline(el,pts){
   el.setAttribute('points',pts.map(function(p){return p.join(',');}).join(' '));
 }
 
+// 지정한 색 팔레트를 순서대로 돌려써서, 영역이 몇 개든 서로 다른 색으로 시각적으로 구분되게 함
+// (색 자체가 의미를 갖는 게 아니라 "1번 영역, 2번 영역"처럼 구분용 — 실제 지시는 번호와 매칭된
+// 아래 텍스트칸에 따로 적음).
+var POLY_AREA_COLORS=['#00e5cc','#ff5757','#fbbf24','#a78bfa','#4ade80','#f472b6','#38bdf8'];
+
 function finishPolygon(cv,polyOv){
   if(!G.polyPts||G.polyPts.length<3){alert('3개 이상의 점을 선택하세요.');return;}
-  // ⚠️ 버그 수정: G.polyPts는 화면에 "보이는" CSS 픽셀 좌표(SVG 오버레이 기준)로 저장되는데,
-  // draw-canvas의 실제 내부 해상도는 원본 이미지 크기라서(화면 표시 크기와 다름 — 브러시/화살표
-  // 모드는 이미 이 스케일 보정을 하고 있었음) 그 좌표를 그대로 캔버스에 그리면 확대/축소 비율만큼
-  // 엉뚱한 위치에 영역이 그려지던 문제가 있었음. 브러시(drawMv/drawDn)와 똑같은 방식으로
-  // scaleX/scaleY를 곱해서 캔버스 내부 좌표로 정확히 변환함.
   var rect=polyOv.getBoundingClientRect();
   var scaleX=cv.width/rect.width, scaleY=cv.height/rect.height;
+  // ⚠️ 캔버스 내부 해상도(원본 이미지 크기) 기준으로 정확히 변환해서 저장 — 화면 표시 크기 그대로
+  // 저장하면 확대/축소 비율만큼 엉뚱한 위치를 가리키게 되던 버그가 있었음(브러시/화살표와 동일한
+  // 스케일 보정 방식을 그대로 적용).
   var scaledPts=G.polyPts.map(function(pt){ return [pt[0]*scaleX, pt[1]*scaleY]; });
-  // 캔버스에 폴리곤 마스크 그리기
-  var ctx=cv.getContext('2d');
-  // ── 실행취소(Ctrl+Z)용 스냅샷 — 브러시 모드와 똑같이, 그리기 전 상태를 G.drawHist에 저장해둠.
-  // 예전엔 이게 없어서 폴리곤 영역만 Ctrl+Z가 전혀 안 먹히던 버그였음.
-  if(!G.drawHist) G.drawHist=[];
-  G.drawHist.push(cv.toDataURL());
-  if(G.drawHist.length>20) G.drawHist.shift();
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(scaledPts[0][0],scaledPts[0][1]);
-  for(var i=1;i<scaledPts.length;i++)ctx.lineTo(scaledPts[i][0],scaledPts[i][1]);
-  ctx.closePath();
-  ctx.fillStyle='rgba(0,229,204,0.55)';
-  ctx.fill();
-  ctx.strokeStyle='#00e5cc';ctx.lineWidth=2*((scaleX+scaleY)/2);
-  ctx.stroke();
-  ctx.restore();
-  // 오버레이 숨김
-  polyOv.style.pointerEvents='none';
-  polyOv.innerHTML='';
+  if(!G.polyAreasHist) G.polyAreasHist=[];
+  G.polyAreasHist.push(JSON.parse(JSON.stringify(G.polyAreas||[])));
+  if(G.polyAreasHist.length>20) G.polyAreasHist.shift();
+  if(!G.polyAreas) G.polyAreas=[];
+  G.polyAreas.push({ id:Date.now()+Math.random(), points:scaledPts, label:'', refImg:null });
+  _redrawPolyAreas(polyOv);
+  var wrap=gE('poly-area-list-wrap');
+  if(wrap){ wrap.style.display='block'; renderPolyAreaList(wrap); }
+  // 진행 중이던 점선/점 그래픽 정리 (확정된 영역들은 _redrawPolyAreas가 다시 그려줌) — draft 그룹
+  // 안의 점(dotsGroup)과 미리보기 선/폴리라인만 비우고, draft 그룹 자체(다음 다각형이 계속 쓸
+  // path/previewLine 엘리먼트)는 살려둠.
   G.polyPts=[];
-  var hint=gE('stl');if(hint)hint.textContent='영역 선택 완료 - 프롬프트 입력 후 실행하세요';
+  var draftGroup=polyOv.querySelector('#poly-draft-group');
+  if(draftGroup){
+    var draftPath=draftGroup.querySelector('polyline'); if(draftPath) draftPath.removeAttribute('points');
+    var draftPreview=draftGroup.querySelector('line'); if(draftPreview){ ['x1','y1','x2','y2'].forEach(function(k){draftPreview.removeAttribute(k);}); }
+    var draftDots=draftGroup.querySelector('g'); if(draftDots) draftDots.innerHTML='';
+  }
+  var hint=gE('stl');if(hint)hint.textContent='영역 '+G.polyAreas.length+'개 지정됨 — 아래에서 각 영역에 뭘 할지 적어주세요. 계속 그릴 수 있어요.';
 }
+// 확정된 모든 영역을 오버레이에 다시 그림 — 번호+반투명 채우기로, 화살표처럼 항상 화면에 남아있음
+function _redrawPolyAreas(polyOv){
+  if(!polyOv) return;
+  var old=polyOv.querySelector('#poly-areas-group'); if(old) old.remove();
+  var g=document.createElementNS('http://www.w3.org/2000/svg','g'); g.id='poly-areas-group';
+  polyOv.insertBefore(g, polyOv.firstChild);
+  if(!G.polyAreas || !G.polyAreas.length) return;
+  var cv=gE('draw-canvas'); if(!cv) return;
+  var rect=cv.getBoundingClientRect();
+  var sx=rect.width/cv.width, sy=rect.height/cv.height; // 캔버스 내부좌표 → 화면표시좌표
+  G.polyAreas.forEach(function(area,i){
+    var color=POLY_AREA_COLORS[i%POLY_AREA_COLORS.length];
+    var dispPts=area.points.map(function(pt){ return [pt[0]*sx, pt[1]*sy]; });
+    var poly=document.createElementNS('http://www.w3.org/2000/svg','polygon');
+    poly.setAttribute('points', dispPts.map(function(p){return p.join(',');}).join(' '));
+    poly.setAttribute('fill', color+'55');
+    poly.setAttribute('stroke', color);
+    poly.setAttribute('stroke-width','2');
+    g.appendChild(poly);
+    // 중심점(무게중심) 계산해서 번호 배지 표시
+    var cx=dispPts.reduce(function(s,p){return s+p[0];},0)/dispPts.length;
+    var cy=dispPts.reduce(function(s,p){return s+p[1];},0)/dispPts.length;
+    var numBg=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    numBg.setAttribute('cx',cx);numBg.setAttribute('cy',cy);numBg.setAttribute('r','12');
+    numBg.setAttribute('fill',color);g.appendChild(numBg);
+    var numTxt=document.createElementNS('http://www.w3.org/2000/svg','text');
+    numTxt.setAttribute('x',cx);numTxt.setAttribute('y',cy);
+    numTxt.setAttribute('text-anchor','middle');numTxt.setAttribute('dominant-baseline','central');
+    numTxt.setAttribute('fill','#fff');numTxt.setAttribute('font-size','12');numTxt.setAttribute('font-weight','700');
+    numTxt.textContent=(i+1);g.appendChild(numTxt);
+  });
+}
+// 영역별 목록 — 화살표 목록(renderArrowList)과 똑같은 형식: 번호, 텍스트칸, 참고이미지, 삭제버튼
+function renderPolyAreaList(wrap){
+  wrap.innerHTML='';
+  if(!G.polyAreas || !G.polyAreas.length) return;
+  var title=dv('');title.style.cssText='font-size:11px;font-weight:700;color:var(--t2);margin-bottom:6px';
+  title.textContent='⬠ 지정한 영역 ('+G.polyAreas.length+'개) — 각각 어떻게 바꿀지 적어주세요';
+  wrap.appendChild(title);
+  G.polyAreas.forEach(function(area,idx){
+    var color=POLY_AREA_COLORS[idx%POLY_AREA_COLORS.length];
+    var row=dv('');row.style.cssText='display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;background:var(--c2);border-radius:8px;padding:8px';
+    var numBadge=dv('');numBadge.style.cssText='width:22px;height:22px;border-radius:50%;background:'+color+';color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px';
+    numBadge.textContent=idx+1;
+    var ta=mk('textarea','ta');ta.rows=2;ta.style.cssText='flex:1;min-height:40px;font-size:12px';
+    ta.placeholder='이 영역을 어떻게? (예: 이 벽을 화이트로, 이 바닥을 원목으로)';
+    ta.value=area.label||'';
+    ta.oninput=function(){ area.label=ta.value; };
+    var ralBtn=mk('button','');ralBtn.type='button';ralBtn.textContent='🎨';ralBtn.title='RAL 컬러';
+    ralBtn.style.cssText='width:24px;height:24px;flex-shrink:0;margin-top:2px;border-radius:6px;border:1px solid var(--bd2);background:var(--sb,#111);cursor:pointer;font-size:11px';
+    ralBtn.onclick=function(){ _openRalPicker(ta); };
+
+    var imgSlot=dv('');
+    imgSlot.style.cssText='width:24px;height:24px;border-radius:6px;border:1.5px dashed var(--bd2);flex-shrink:0;margin-top:2px;cursor:pointer;overflow:hidden;position:relative;background:var(--sb,#111)';
+    var fiArea=document.createElement('input');fiArea.type='file';fiArea.accept='image/*';fiArea.style.display='none';
+    function renderAreaImgSlot(){
+      if(area.refImg){
+        imgSlot.innerHTML='<img src="'+area.refImg+'" style="width:100%;height:100%;object-fit:cover">'+
+          '<button type="button" style="position:absolute;top:-3px;right:-3px;width:13px;height:13px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;font-size:8px;cursor:pointer;line-height:1;padding:0">✕</button>';
+        imgSlot.querySelector('button').onclick=function(e){ e.stopPropagation(); area.refImg=null; renderAreaImgSlot(); };
+        imgSlot.onclick=null;
+      } else {
+        imgSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--t2)">🖼️</div>';
+        imgSlot.title='이 영역을 이 사진처럼 바꿔줘';
+        imgSlot.onclick=function(){ fiArea.click(); };
+      }
+    }
+    fiArea.onchange=function(){
+      var f=fiArea.files&&fiArea.files[0]; if(!f) return;
+      var reader=new FileReader();
+      reader.onload=function(){ area.refImg=reader.result; renderAreaImgSlot(); };
+      reader.readAsDataURL(f);
+    };
+    renderAreaImgSlot();
+
+    var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='✕';delBtn.title='이 영역 삭제';
+    delBtn.style.cssText='width:24px;height:24px;flex-shrink:0;margin-top:2px;border-radius:6px;border:1px solid var(--bd2);background:var(--sb,#111);color:#f87171;cursor:pointer;font-size:12px';
+    delBtn.onclick=function(){
+      if(!G.polyAreasHist) G.polyAreasHist=[];
+      G.polyAreasHist.push(JSON.parse(JSON.stringify(G.polyAreas||[])));
+      if(G.polyAreasHist.length>20) G.polyAreasHist.shift();
+      G.polyAreas=G.polyAreas.filter(function(x){return x.id!==area.id;});
+      renderPolyAreaList(wrap);
+      var polyOv=gE('poly-overlay'); if(polyOv) _redrawPolyAreas(polyOv);
+    };
+    row.appendChild(numBadge);row.appendChild(ta);row.appendChild(ralBtn);row.appendChild(imgSlot);row.appendChild(fiArea);row.appendChild(delBtn);
+    wrap.appendChild(row);
+  });
+  var clearAllBtn=mk('button','');clearAllBtn.type='button';clearAllBtn.textContent='영역 전체 삭제';
+  clearAllBtn.style.cssText='width:100%;padding:6px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:10.5px;cursor:pointer;font-family:inherit';
+  clearAllBtn.onclick=function(){
+    G.polyAreas=[];
+    renderPolyAreaList(wrap);
+    var polyOv=gE('poly-overlay'); if(polyOv) _redrawPolyAreas(polyOv);
+  };
+  wrap.appendChild(clearAllBtn);
+}
+window.initPolygonMode=initPolygonMode;
+window.renderPolyAreaList=renderPolyAreaList;
+window._redrawPolyAreas=_redrawPolyAreas;
 // ── File loading ──────────────────────────────────────────────
 function loadF(f,key){
   if(!f||!f.type.startsWith('image/'))return;
@@ -21624,6 +21893,12 @@ document.addEventListener('DOMContentLoaded',function(){try{
         var arrOv=gE('arrow-overlay');
         if(arrOv){ arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:''; _redrawArrows(arrOv); }
         var awrap=gE('arrow-list-wrap'); if(awrap) renderArrowList(awrap);
+        e.preventDefault();
+      } else if(_drawActive && G.dm==='polygon' && G.polyAreasHist && G.polyAreasHist.length>0){
+        G.polyAreas=G.polyAreasHist.pop();
+        var polyOv=gE('poly-overlay');
+        if(polyOv) _redrawPolyAreas(polyOv);
+        var pwrap=gE('poly-area-list-wrap'); if(pwrap) renderPolyAreaList(pwrap);
         e.preventDefault();
       } else if(_drawActive && G.drawHist && G.drawHist.length>0){
         var cv=gE('draw-canvas');var prev=G.drawHist.pop();var img3=new Image();img3.onload=function(){var ctx3=cv.getContext('2d');ctx3.clearRect(0,0,cv.width,cv.height);ctx3.drawImage(img3,0,0);};img3.src=prev;e.preventDefault();
