@@ -8649,7 +8649,9 @@ function sbUpscale(p){
 function sbAgent(p){
   var tab=getTab('agent');
   if(!tab.vrTier) tab.vrTier='mini';
-  mkNote(p,'<strong style="color:var(--ac)">🤖 AI 에이전트 (베타)</strong><br>사진 올리고 원하는 결과를 한 문장으로 설명하면, <b style="color:var(--t)">디자인 생성 → 업스케일 → VR 투어</b>까지 AI가 순서대로 알아서 실행해요.');
+  if(!tab.upscaleScale) tab.upscaleScale='2x';
+  if(!tab.upscaleEngine) tab.upscaleEngine='clarity';
+  mkNote(p,'<strong style="color:var(--ac)">🤖 AI 에이전트 (베타)</strong><br>사진 올리고 원하는 결과를 한 문장으로 설명하면, <b style="color:var(--t)">디자인 시안 3개 생성 → 마음에 드는 것 선택 → (업스케일 여부/방식 확인) → (VR 등급 확인)</b> 순서로 진행해요. 각 단계마다 직접 확인하고, 원하는 지점에서 언제든 멈춰도 돼요.');
 
   mkUB(p,'현장사진 업로드','main');
 
@@ -8658,152 +8660,322 @@ function sbAgent(p){
   ta.value=tab.prompt||'';
   ta.placeholder='예: 34평 구축 아파트 거실을 미드센추리 스타일로 바꿔줘';
   ta.style.cssText='width:100%;min-height:80px;padding:10px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;line-height:1.6;font-family:inherit;resize:vertical;box-sizing:border-box';
-  ta.oninput=function(){ tab.prompt=ta.value; _agentRefreshGoBtn(); };
+  ta.oninput=function(){ tab.prompt=ta.value; };
   pw.appendChild(ta);
   p.appendChild(pw);
 
-  var vrWrap=dv('ss');vrWrap.innerHTML='<div class="lbl">VR 투어 품질 <span class="lbl-en">마지막 단계에서 사용</span></div>';
-  var vrRow=dv('');vrRow.style.cssText='display:flex;gap:6px';
-  [['mini','⚡ 미니',W3D_COST_DRAFT],['basic','✨ 기본',W3D_COST_BASIC],['plus','🏆 플러스',W3D_COST_PLUS]].forEach(function(pair){
-    var key=pair[0],lbl=pair[1],cost=pair[2];
-    var isOn=tab.vrTier===key;
-    var btn=mk('button','');btn.type='button';
-    btn.style.cssText='flex:1;padding:8px 4px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
-    btn.innerHTML=lbl+'<br><span style="font-size:9px;font-weight:400;color:var(--m2)">'+cost+'cr</span>';
-    btn.onclick=function(){ tab.vrTier=key; renderSB(); };
-    vrRow.appendChild(btn);
-  });
-  vrWrap.appendChild(vrRow);
-  p.appendChild(vrWrap);
+  var st=tab.agentState;
+  var showStartBtn = !st;
+  if(showStartBtn){
+    var goWrap=dv('ss');
+    var goBtn=mk('button','actbtn ok');goBtn.id='agent-go-btn';
+    goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
+    goBtn.innerHTML='🤖 시안 3개 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">60cr</span>';
+    goBtn.onclick=_agentRun;
+    goWrap.appendChild(goBtn);
+    var costNote=dv('');costNote.style.cssText='font-size:10px;color:var(--m2);text-align:center;margin-top:6px';
+    costNote.textContent='디자인 시안 3장(20cr×3)을 먼저 만들어서 보여드려요 — 업스케일·VR은 그중 마음에 드는 걸 고른 뒤 따로 확인받고 진행해요';
+    goWrap.appendChild(costNote);
+    p.appendChild(goWrap);
+  }
 
-  var goWrap=dv('ss');
-  var vrCost=tab.vrTier==='plus'?W3D_COST_PLUS:tab.vrTier==='basic'?W3D_COST_BASIC:W3D_COST_DRAFT;
-  var totalCost=20+20+vrCost;
-  var goBtn=mk('button','actbtn ok');goBtn.id='agent-go-btn';
-  goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
-  var isRunning=tab.agentState&&tab.agentState.running;
-  goBtn.disabled=!!isRunning;
-  goBtn.innerHTML=isRunning?'실행 중...':'🤖 자동 실행 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCost+'cr</span>';
-  goBtn.onclick=_agentRun;
-  goWrap.appendChild(goBtn);
-  p.appendChild(goWrap);
+  if(!st){
+    var styleTag0=document.getElementById('agent-spin-style');
+    if(!styleTag0){ styleTag0=document.createElement('style'); styleTag0.id='agent-spin-style'; styleTag0.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}'; document.head.appendChild(styleTag0); }
+    return;
+  }
 
-  // 진행 단계 표시 + 결과
-  if(tab.agentState){
-    var st=tab.agentState;
-    var progWrap=dv('ss');progWrap.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:14px';
-    var STEPS=[
-      {n:1,l:'AI 디자인 생성',key:'designUrl'},
-      {n:2,l:'업스케일',key:'upscaleUrl'},
-      {n:3,l:'VR 투어 생성',key:'vrUrl'}
-    ];
-    STEPS.forEach(function(s,i){
-      var row=dv('');row.style.cssText='display:flex;align-items:center;gap:10px;padding:7px 0'+(i<STEPS.length-1?';border-bottom:1px solid var(--bd2)':'');
-      var icon=dv('');icon.style.cssText='width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0';
-      var done=!!st[s.key];
-      var isCur=!done && st.step===s.n && st.running;
-      var failed=!!st.error && st.step===s.n && !st.running;
-      if(done){ icon.style.cssText+='background:var(--acg);color:var(--ac)'; icon.textContent='✓'; }
-      else if(failed){ icon.style.cssText+='background:rgba(248,113,113,.15);color:#f87171'; icon.textContent='✕'; }
-      else if(isCur){ icon.style.cssText+='background:rgba(255,255,255,.08);color:var(--t2)'; icon.innerHTML='<span class="agent-spin" style="display:inline-block;width:11px;height:11px;border:2px solid rgba(255,255,255,.25);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span>'; }
-      else { icon.style.cssText+='background:var(--card);color:var(--m2)'; icon.textContent=s.n; }
-      var lbl=dv('');lbl.style.cssText='font-size:12.5px;font-weight:600;color:'+(done?'var(--t)':failed?'#f87171':isCur?'var(--t)':'var(--m2)');
-      lbl.textContent=s.l+(failed?' — 실패':'');
-      row.appendChild(icon);row.appendChild(lbl);
-      progWrap.appendChild(row);
-    });
-    if(st.error){
-      var errBox=dv('');errBox.style.cssText='margin-top:10px;font-size:11.5px;color:#f87171;background:rgba(248,113,113,.08);border-radius:7px;padding:8px 10px';
-      errBox.textContent='⚠️ '+st.error;
-      progWrap.appendChild(errBox);
-      var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='다시 시도';
-      retryBtn.style.cssText='width:100%;margin-top:8px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
-      retryBtn.onclick=function(){ tab.agentState=null; renderSB(); };
-      progWrap.appendChild(retryBtn);
+  var progWrap=dv('ss');progWrap.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:14px';
+
+  if(st.error){
+    var errBox=dv('');errBox.style.cssText='font-size:11.5px;color:#f87171;background:rgba(248,113,113,.08);border-radius:7px;padding:8px 10px;margin-bottom:8px';
+    errBox.textContent='⚠️ '+st.error;
+    progWrap.appendChild(errBox);
+    var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='처음부터 다시 시도';
+    retryBtn.style.cssText='width:100%;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+    retryBtn.onclick=function(){ tab.agentState=null; renderSB(); };
+    progWrap.appendChild(retryBtn);
+  }
+
+  // ── 단계 1: 시안 3개 생성 중 / 선택 대기 ────────────────────────────
+  if(st.phase==='variants'){
+    var vTitle=dv('');vTitle.style.cssText='font-size:12.5px;font-weight:700;color:var(--t);margin-bottom:8px';
+    vTitle.textContent=st.running ? ('시안 생성 중... ('+st.variants.length+'/3 완료)') : '마음에 드는 시안을 골라주세요';
+    progWrap.appendChild(vTitle);
+    var vGrid=dv('');vGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px';
+    for(var vi=0; vi<3; vi++){
+      var vSlot=dv('');vSlot.style.cssText='position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1.5px solid var(--bd2);background:var(--card)';
+      var variant=st.variants[vi];
+      if(variant){
+        var vImg=document.createElement('img');vImg.src=variant.url;vImg.style.cssText='width:100%;height:100%;object-fit:cover;cursor:pointer';
+        (function(vUrl){ vImg.onclick=function(){ _agentSelectVariant(vUrl); }; })(variant.url);
+        vSlot.appendChild(vImg);
+        var vBadge=dv('');vBadge.style.cssText='position:absolute;bottom:3px;left:3px;right:3px;text-align:center;background:rgba(0,0,0,.6);color:#fff;font-size:9px;font-weight:700;border-radius:5px;padding:2px 0';
+        vBadge.textContent='선택';
+        vSlot.appendChild(vBadge);
+      } else if(st.running){
+        vSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span></div>';
+      } else {
+        vSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#f87171;font-size:10px">실패</div>';
+      }
+      vGrid.appendChild(vSlot);
     }
-    // 완료된 단계 썸네일들
-    var thumbRow=dv('');thumbRow.style.cssText='display:flex;gap:8px;margin-top:12px';
-    [['designUrl','디자인'],['upscaleUrl','업스케일']].forEach(function(pair){
-      if(!st[pair[0]]) return;
-      var tw=dv('');tw.style.cssText='flex:1';
-      var img=document.createElement('img');img.src=st[pair[0]];img.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:7px;border:1px solid var(--bd2)';
-      tw.appendChild(img);
-      var cap=dv('');cap.style.cssText='font-size:10px;color:var(--m2);text-align:center;margin-top:3px';cap.textContent=pair[1];
-      tw.appendChild(cap);
-      thumbRow.appendChild(tw);
+    progWrap.appendChild(vGrid);
+    if(!st.running && st.variants.length){
+      var retryVBtn=mk('button','');retryVBtn.type='button';retryVBtn.textContent='🔄 3개 다시 생성하기 (프롬프트 수정 후, 60cr)';
+      retryVBtn.style.cssText='width:100%;margin-top:8px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit';
+      retryVBtn.onclick=function(){ _agentRun(); };
+      progWrap.appendChild(retryVBtn);
+    }
+  }
+
+  // ── 단계 2: 업스케일 여부 + 방식 확인 ────────────────────────────────
+  if(st.phase==='upscaleChoice' && st.selectedUrl && !st.running){
+    var u1=dv('');u1.style.cssText='margin-top:12px';
+    var uImg=document.createElement('img');uImg.src=st.selectedUrl;
+    uImg.style.cssText='width:100%;border-radius:9px;border:1px solid var(--bd2);margin-bottom:8px;cursor:pointer';
+    uImg.onclick=function(){ window.open(st.selectedUrl,'_blank'); };
+    u1.appendChild(uImg);
+    var u1note=dv('');u1note.style.cssText='font-size:12px;font-weight:700;color:var(--t);text-align:center;margin-bottom:8px';
+    u1note.textContent='업스케일 하시겠어요?';
+    u1.appendChild(u1note);
+
+    var scaleRow=dv('');scaleRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+    [['2x',20],['4x',40]].forEach(function(pair){
+      var key=pair[0];
+      var isOn=tab.upscaleScale===key;
+      var b=mk('button','');b.type='button';
+      b.style.cssText='flex:1;padding:7px;border-radius:7px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--card)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
+      b.textContent=key.toUpperCase();
+      b.onclick=function(){ tab.upscaleScale=key; renderSB(); };
+      scaleRow.appendChild(b);
     });
-    if(thumbRow.children.length) progWrap.appendChild(thumbRow);
+    u1.appendChild(scaleRow);
+
+    var engRow=dv('');engRow.style.cssText='display:flex;gap:6px;margin-bottom:10px';
+    [['clarity','Clarity'],['creative','Creative'],['topaz','Topaz']].forEach(function(pair){
+      var key=pair[0];
+      var isOn=tab.upscaleEngine===key;
+      var cost=(SCR[tab.upscaleScale]&&SCR[tab.upscaleScale][key])||20;
+      var b=mk('button','');b.type='button';
+      b.style.cssText='flex:1;padding:7px 3px;border-radius:7px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--card)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+      b.innerHTML=pair[1]+'<br><span style="font-size:9px;font-weight:400;color:var(--m2)">'+cost+'cr</span>';
+      b.onclick=function(){ tab.upscaleEngine=key; renderSB(); };
+      engRow.appendChild(b);
+    });
+    u1.appendChild(engRow);
+
+    var u1btns=dv('');u1btns.style.cssText='display:flex;flex-direction:column;gap:6px';
+    var uCost=(SCR[tab.upscaleScale]&&SCR[tab.upscaleScale][tab.upscaleEngine])||20;
+    var yesBtn=mk('button','actbtn ok');yesBtn.style.cssText='width:100%;padding:10px;font-size:12.5px;font-weight:800';
+    yesBtn.innerHTML='✅ 업스케일 실행 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:1px 6px;margin-left:4px">'+uCost+'cr</span>';
+    yesBtn.onclick=_agentRunUpscale;
+    var noBtn=mk('button','');noBtn.type='button';noBtn.textContent='➡️ 업스케일 없이 다음 단계(VR)로';
+    noBtn.style.cssText='width:100%;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+    noBtn.onclick=function(){ st.phase='vrChoice'; renderSB(); };
+    var backBtn=mk('button','');backBtn.type='button';backBtn.textContent='✏️ AI편집 탭에서 직접 수정';
+    backBtn.style.cssText='width:100%;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+    backBtn.onclick=function(){ _agentSendToEdit(st.selectedUrl); };
+    u1btns.appendChild(yesBtn);u1btns.appendChild(noBtn);u1btns.appendChild(backBtn);
+    u1.appendChild(u1btns);
+    progWrap.appendChild(u1);
+  }
+
+  // ── 단계 3: VR 등급 확인 ─────────────────────────────────────────
+  if(st.phase==='vrChoice' && !st.running){
+    var vrBaseUrl = st.upscaleUrl || st.selectedUrl;
+    var v2=dv('');
+    var v2img=document.createElement('img');v2img.src=vrBaseUrl;
+    v2img.style.cssText='width:100%;border-radius:9px;border:1px solid var(--bd2);margin-bottom:8px;cursor:pointer';
+    v2img.onclick=function(){ window.open(vrBaseUrl,'_blank'); };
+    v2.appendChild(v2img);
+    var v2note=dv('');v2note.style.cssText='font-size:12px;font-weight:700;color:var(--t);text-align:center;margin-bottom:8px';
+    v2note.textContent=(st.upscaleUrl?'업스케일 완료. ':'')+'VR 투어를 만들까요? (가장 비싼 단계예요)';
+    v2.appendChild(v2note);
+    var vrTierRow=dv('');vrTierRow.style.cssText='display:flex;gap:6px;margin-bottom:8px';
+    [['mini','⚡ 미니',W3D_COST_DRAFT],['basic','✨ 기본',W3D_COST_BASIC],['plus','🏆 플러스',W3D_COST_PLUS]].forEach(function(pair){
+      var key=pair[0],lbl=pair[1],cost=pair[2];
+      var isOn=tab.vrTier===key;
+      var btn=mk('button','');btn.type='button';
+      btn.style.cssText='flex:1;padding:8px 4px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+      btn.innerHTML=lbl+'<br><span style="font-size:9px;font-weight:400;color:var(--m2)">'+cost+'cr</span>';
+      btn.onclick=function(){ tab.vrTier=key; renderSB(); };
+      vrTierRow.appendChild(btn);
+    });
+    v2.appendChild(vrTierRow);
+    var v2btns=dv('');v2btns.style.cssText='display:flex;flex-direction:column;gap:6px';
+    var vrCost2=tab.vrTier==='plus'?W3D_COST_PLUS:tab.vrTier==='basic'?W3D_COST_BASIC:W3D_COST_DRAFT;
+    var vrGoBtn=mk('button','actbtn ok');vrGoBtn.style.cssText='width:100%;padding:10px;font-size:12.5px;font-weight:800';
+    vrGoBtn.innerHTML='🌐 VR 투어 만들기 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:1px 6px;margin-left:4px">'+vrCost2+'cr</span>';
+    vrGoBtn.onclick=_agentContinueToVR;
+    var vrSkipBtn=mk('button','');vrSkipBtn.type='button';vrSkipBtn.textContent='여기서 완료 (VR 없이 종료)';
+    vrSkipBtn.style.cssText='width:100%;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+    vrSkipBtn.onclick=function(){ st.phase='done'; renderSB(); };
+    v2btns.appendChild(vrGoBtn);v2btns.appendChild(vrSkipBtn);
+    v2.appendChild(v2btns);
+    progWrap.appendChild(v2);
+  }
+
+  // 진행 중(업스케일/VR 실행 중) 스피너
+  if(st.running && (st.phase==='upscaleChoice'||st.phase==='vrChoice') && st.step==='running'){
+    var spinRow=dv('');spinRow.style.cssText='display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 0';
+    spinRow.innerHTML='<span style="display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span><span style="font-size:12px;color:var(--t2)">처리 중...</span>';
+    progWrap.appendChild(spinRow);
+  }
+
+  // ── 최종 완료 화면 ──────────────────────────────────────────────
+  if(st.phase==='done'){
+    var finalUrl = st.vrUrl || st.upscaleUrl || st.selectedUrl;
+    var doneTitle=dv('');doneTitle.style.cssText='text-align:center;font-size:13px;font-weight:800;color:var(--ac);margin-bottom:10px';
+    doneTitle.textContent='✅ 완료!';
+    progWrap.appendChild(doneTitle);
     if(st.vrUrl){
       var vrLink=document.createElement('a');vrLink.href=st.vrUrl;vrLink.target='_blank';vrLink.rel='noopener';
-      vrLink.style.cssText='display:block;text-align:center;margin-top:12px;padding:11px;border-radius:8px;background:var(--ac);color:#000;font-weight:800;text-decoration:none;font-size:13px';
+      vrLink.style.cssText='display:block;text-align:center;margin-bottom:10px;padding:11px;border-radius:8px;background:var(--ac);color:#000;font-weight:800;text-decoration:none;font-size:13px';
       vrLink.textContent='🌐 완성된 VR 투어 열기';
       progWrap.appendChild(vrLink);
-      var doneNote=dv('');doneNote.style.cssText='text-align:center;margin-top:8px;font-size:11px;color:var(--ac);font-weight:700';
-      doneNote.textContent='✅ 전체 완료!';
-      progWrap.appendChild(doneNote);
+    } else {
+      var finalImg=document.createElement('img');finalImg.src=finalUrl;
+      finalImg.style.cssText='width:100%;border-radius:9px;border:1px solid var(--bd2);margin-bottom:10px;cursor:pointer';
+      finalImg.onclick=function(){ window.open(finalUrl,'_blank'); };
+      progWrap.appendChild(finalImg);
     }
-    p.appendChild(progWrap);
+    var extraNote=dv('');extraNote.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-bottom:8px';
+    extraNote.textContent='필요하면 결과물을 쇼츠나 제안서에 바로 넣을 수 있어요 (선택사항)';
+    progWrap.appendChild(extraNote);
+    var extraBtns=dv('');extraBtns.style.cssText='display:flex;gap:6px';
+    var toShortsBtn=mk('button','');toShortsBtn.type='button';toShortsBtn.textContent='🎬 쇼츠로 보내기';
+    toShortsBtn.style.cssText='flex:1;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit';
+    toShortsBtn.onclick=function(){ _agentSendToShorts(finalUrl, tab.inputImg); };
+    var toProposalBtn=mk('button','');toProposalBtn.type='button';toProposalBtn.textContent='📄 제안서에 추가';
+    toProposalBtn.style.cssText='flex:1;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit';
+    toProposalBtn.onclick=function(){ _agentSendToProposal(finalUrl, tab.inputImg); };
+    extraBtns.appendChild(toShortsBtn);extraBtns.appendChild(toProposalBtn);
+    progWrap.appendChild(extraBtns);
+    var restartBtn=mk('button','');restartBtn.type='button';restartBtn.textContent='🔄 새로 시작하기';
+    restartBtn.style.cssText='width:100%;margin-top:8px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
+    restartBtn.onclick=function(){ tab.agentState=null; renderSB(); };
+    progWrap.appendChild(restartBtn);
   }
+
+  p.appendChild(progWrap);
   var styleTag=document.getElementById('agent-spin-style');
   if(!styleTag){ styleTag=document.createElement('style'); styleTag.id='agent-spin-style'; styleTag.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}'; document.head.appendChild(styleTag); }
-}
-function _agentRefreshGoBtn(){
-  var b=gE('agent-go-btn'); if(!b) return;
-  var tab=getTab('agent');
-  var vrCost=tab.vrTier==='plus'?W3D_COST_PLUS:tab.vrTier==='basic'?W3D_COST_BASIC:W3D_COST_DRAFT;
-  var totalCost=20+20+vrCost;
-  if(!(tab.agentState&&tab.agentState.running)){
-    b.innerHTML='🤖 자동 실행 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCost+'cr</span>';
-  }
 }
 function _agentRun(){
   var tab=getTab('agent');
   if(!tab.inputImg){ alert('먼저 현장사진을 업로드해주세요.'); return; }
   if(!tab.prompt || !tab.prompt.trim()){ alert('원하는 결과를 문장으로 설명해주세요.\n예: 34평 구축 아파트 거실을 미드센추리 스타일로 바꿔줘'); return; }
   if(!_supaUser){ openMd('account'); return; }
-  var vrCost=tab.vrTier==='plus'?W3D_COST_PLUS:tab.vrTier==='basic'?W3D_COST_BASIC:W3D_COST_DRAFT;
-  var totalCost=20+20+vrCost;
+  // ⚠️ 2026-07-24 재설계 2차: 3가지 시안을 만들어서 고르게 하고, 업스케일/VR 각각 "할지 말지"와
+  // "어떤 방식으로"까지 전부 사용자가 정하도록 함 — 완전 자동이 아니라 매 갈림길마다 확인받는
+  // 구조로 바꿈. 원하면 시안 선택 직후에 끝내도 되고, 업스케일까지만 하고 끝내도 됨(전부 선택사항).
+  var totalCost=20*3;
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCost){
     alert('크레딧이 부족합니다. 필요: '+totalCost+'cr, 현재: '+G.cr+'cr');
     openMd('credits');
     return;
   }
-  tab.agentState={step:1,designUrl:null,upscaleUrl:null,vrUrl:null,error:null,running:true};
+  tab.agentState={ phase:'variants', running:true, error:null, variants:[], selectedUrl:null, upscaleUrl:null, vrUrl:null };
   renderSB();
-
-  var task1={id:Date.now(),img:tab.inputImg,wf:'space',prompt:tab.prompt.trim(),selK:null,eng:'nano2',resolution:'1K'};
-  procImgWithTask(task1, function(designUrl){
-    tab.agentState.designUrl=designUrl;
-    tab.agentState.step=2;
-    renderSB();
-
-    var task2={id:Date.now()+1,img:designUrl,wf:'upscale',scale:'2x',upscaleEng:'clarity'};
-    procImgWithTask(task2, function(upscaledUrl){
-      tab.agentState.upscaleUrl=upscaledUrl;
-      tab.agentState.step=3;
-      renderSB();
-
-      _agentGenerateVR(upscaledUrl, tab.vrTier, function(vrUrl){
-        tab.agentState.vrUrl=vrUrl;
-        tab.agentState.step=4;
-        tab.agentState.running=false;
-        if(G.supaRole!=='admin' && G.plan!=='admin') deductCredits(vrCost);
+  var st=tab.agentState;
+  var doneCount=0, failCount=0;
+  for(var i=0;i<3;i++){
+    (function(idx){
+      var task={id:Date.now()+idx, img:tab.inputImg, wf:'space', prompt:tab.prompt.trim(), selK:null, eng:'nano2', resolution:'1K'};
+      procImgWithTask(task, function(url){
+        st.variants.push({id:idx, url:url});
+        doneCount++;
+        if(doneCount+failCount>=3){ st.running=false; }
         renderSB();
       }, function(err){
-        tab.agentState.error='VR 투어 생성 실패: '+String(err).slice(0,150);
-        tab.agentState.running=false;
+        failCount++;
+        console.warn('[AI에이전트] 시안 '+(idx+1)+' 생성 실패:', err);
+        if(doneCount+failCount>=3){
+          st.running=false;
+          if(doneCount===0){ st.error='시안 생성에 모두 실패했어요: '+String(err).slice(0,150); }
+        }
         renderSB();
       });
-    }, function(err){
-      tab.agentState.error='업스케일 실패: '+String(err).slice(0,150);
-      tab.agentState.running=false;
-      renderSB();
-    });
+    })(i);
+  }
+}
+function _agentSelectVariant(url){
+  var tab=getTab('agent');
+  var st=tab.agentState;
+  if(!st) return;
+  st.selectedUrl=url;
+  st.phase='upscaleChoice';
+  renderSB();
+}
+function _agentRunUpscale(){
+  var tab=getTab('agent');
+  var st=tab.agentState;
+  if(!st || !st.selectedUrl) return;
+  var uCost=(SCR[tab.upscaleScale]&&SCR[tab.upscaleScale][tab.upscaleEngine])||20;
+  if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<uCost){
+    alert('크레딧이 부족합니다. 필요: '+uCost+'cr, 현재: '+G.cr+'cr');
+    openMd('credits');
+    return;
+  }
+  st.running=true; st.step='running';
+  renderSB();
+  var task2={id:Date.now(), img:st.selectedUrl, wf:'upscale', scale:tab.upscaleScale, upscaleEng:tab.upscaleEngine};
+  procImgWithTask(task2, function(upscaledUrl){
+    st.upscaleUrl=upscaledUrl;
+    st.running=false; st.step=null;
+    st.phase='vrChoice';
+    renderSB();
   }, function(err){
-    tab.agentState.error='디자인 생성 실패: '+String(err).slice(0,150);
-    tab.agentState.running=false;
+    st.error='업스케일 실패: '+String(err).slice(0,150);
+    st.running=false; st.step=null;
     renderSB();
   });
+}
+function _agentContinueToVR(){
+  var tab=getTab('agent');
+  var st=tab.agentState;
+  if(!st) return;
+  var vrBaseUrl = st.upscaleUrl || st.selectedUrl;
+  if(!vrBaseUrl) return;
+  var vrCost=tab.vrTier==='plus'?W3D_COST_PLUS:tab.vrTier==='basic'?W3D_COST_BASIC:W3D_COST_DRAFT;
+  if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<vrCost){
+    alert('크레딧이 부족합니다. 필요: '+vrCost+'cr, 현재: '+G.cr+'cr');
+    openMd('credits');
+    return;
+  }
+  st.running=true; st.step='running';
+  renderSB();
+  _agentGenerateVR(vrBaseUrl, tab.vrTier, function(vrUrl){
+    st.vrUrl=vrUrl;
+    st.running=false; st.step=null;
+    st.phase='done';
+    if(G.supaRole!=='admin' && G.plan!=='admin') deductCredits(vrCost);
+    renderSB();
+  }, function(err){
+    st.error='VR 투어 생성 실패: '+String(err).slice(0,150);
+    st.running=false; st.step=null;
+    renderSB();
+  });
+}
+// 결과가 애매할 때 — 자동 파이프라인을 여기서 멈추고, AI편집 탭으로 보내서 직접 세밀하게 수정하게 함
+// (브러시/화살표/영역선택/대화형 수정 등 정밀 도구를 그대로 쓸 수 있음).
+function _agentSendToEdit(imgUrl){
+  var editTab=getTab('edit');
+  editTab.inputImg=imgUrl; editTab.inputImgName=''; editTab.selK=null; editTab.prompt=''; editTab.extraPrompt='';
+  selectWF('edit');
+}
+// 최종 결과를 쇼츠 제작 재료 목록에 바로 추가 — 쇼츠는 무료 기능이라 크레딧 없이 바로 이어서 쓸 수 있음
+function _agentSendToShorts(resultUrl, origUrl){
+  if(!G_SHORTS.images) G_SHORTS.images=[];
+  G_SHORTS.images.push({id:Date.now()+Math.random(), img:resultUrl, orig:origUrl||null, role:'auto', autoRole:null, source:'agent'});
+  selectWF('shorts');
+}
+// 최종 결과를 제안서의 한 장면으로 바로 추가
+function _agentSendToProposal(resultUrl, origUrl){
+  if(!G_PROPOSAL.scenes) G_PROPOSAL.scenes=[];
+  G_PROPOSAL.scenes.push({id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, label:''});
+  selectWF('proposal');
 }
 // 에이전트 파이프라인의 마지막 단계 — 탭/DOM 상태에 전혀 의존하지 않는 독립 VR 생성 함수.
 // 기존 _w3dTabStart/_w3dTabPoll은 화면의 특정 DOM 요소(w3d-go-tab 등)에 강하게 묶여있어서
@@ -13409,21 +13581,25 @@ function mkMask(p){
   var isPolyTool  = (G.dm==='polygon');
 
   // 화살표로 지목한 오브젝트 목록 — 각각 라벨(무슨 수정을 할지)과 참고이미지를 넣을 수 있음
+  // ⚠️ 예전엔 화살표/영역이 하나라도 있으면 다른 도구를 써도 목록이 계속 남아있었는데("영역 도구
+  // 쓰다가 화살표로 바꿨는데 영역 목록이 그대로 보인다"는 피드백) — 지금 고른 도구가 아니면
+  // 무조건 숨기도록 엄격하게 바꿈. 각 도구 목록은 그 도구를 다시 선택하면 그대로 다시 보임(데이터
+  // 자체는 안 지워짐).
   if(!G.arrows) G.arrows=[];
   var arrowListWrap=dv('');arrowListWrap.id='arrow-list-wrap';
-  arrowListWrap.style.cssText=(isArrowTool||G.arrows.length)?'margin-bottom:10px':'display:none;margin-bottom:10px';
-  if(isArrowTool || G.arrows.length){ s.appendChild(arrowListWrap); renderArrowList(arrowListWrap); }
+  arrowListWrap.style.cssText='margin-bottom:10px';
+  if(isArrowTool){ s.appendChild(arrowListWrap); renderArrowList(arrowListWrap); }
 
   // 영역 선택(폴리곤)으로 지정한 영역 목록 — 화살표와 똑같은 형식
   if(!G.polyAreas) G.polyAreas=[];
   if(isPolyTool){
     var polyHint=dv('note');polyHint.style.cssText='font-size:10.5px;margin-bottom:8px';
-    polyHint.innerHTML='💡 사진 위에서 점을 찍어 다각형을 그리고 더블클릭으로 확정하세요. 몇 개든 계속 그릴 수 있고, 확정할 때마다 아래 목록에 번호가 추가돼요 — 그 번호 옆 칸에 뭘 바꿀지 적으세요.';
+    polyHint.innerHTML='💡 점을 찍어 다각형을 그리세요. <b style="color:var(--t2)">닫기:</b> 시작점을 다시 클릭하거나 더블클릭 · <b style="color:var(--t2)">되돌리기:</b> 백스페이스로 마지막 점만 취소. 몇 개든 계속 그릴 수 있고, 확정할 때마다 아래 목록에 번호가 추가돼요.';
     s.appendChild(polyHint);
   }
   var polyAreaListWrap=dv('');polyAreaListWrap.id='poly-area-list-wrap';
-  polyAreaListWrap.style.cssText=(isPolyTool||G.polyAreas.length)?'margin-bottom:10px':'display:none;margin-bottom:10px';
-  if(isPolyTool || G.polyAreas.length){ s.appendChild(polyAreaListWrap); renderPolyAreaList(polyAreaListWrap); }
+  polyAreaListWrap.style.cssText='margin-bottom:10px';
+  if(isPolyTool){ s.appendChild(polyAreaListWrap); renderPolyAreaList(polyAreaListWrap); }
 
   if(!isBrushTool){
     // 브러시 팔레트/텍스트칸은 브러시·지우개 도구일 때만 보이게 아래에서 건너뜀
@@ -13940,15 +14116,24 @@ function initPolygonMode(cv){
   draftGroup.appendChild(previewLine);
 
   // 클릭으로 점 추가 — 진행 중인 다각형(점선 미리보기)만 초기화하고, 이미 확정된 영역들은 안 건드림
+  var CLOSE_CLICK_THRESHOLD=14; // 시작점 근처(화면 픽셀 기준)를 다시 클릭하면 영역을 닫는 것으로 처리
   polyOv.onclick=function(e){
     if(e.detail===2){finishPolygon(cv,polyOv);return;}
     var rect=polyOv.getBoundingClientRect();
     var px=e.clientX-rect.left, py=e.clientY-rect.top;
+    // 점이 3개 이상 찍힌 상태에서 시작점 근처를 다시 클릭하면, 더블클릭과 똑같이 영역을 닫음
+    // (대부분의 그림판/디자인 툴에서 익숙한 방식 — 더블클릭 몰라도 자연스럽게 닫을 수 있게 함)
+    if(G.polyPts.length>=3){
+      var first=G.polyPts[0];
+      var dist=Math.hypot(px-first[0], py-first[1]);
+      if(dist<=CLOSE_CLICK_THRESHOLD){ finishPolygon(cv,polyOv); return; }
+    }
     G.polyPts.push([px,py]);
     updatePolyline(path,G.polyPts);
     var dot=document.createElementNS('http://www.w3.org/2000/svg','circle');
     dot.setAttribute('cx',px);dot.setAttribute('cy',py);dot.setAttribute('r','4');
     dot.setAttribute('fill','#00e5cc');dot.setAttribute('stroke','#fff');dot.setAttribute('stroke-width','1');
+    dot.setAttribute('data-poly-dot','1');
     dotsGroup.appendChild(dot);
   };
   polyOv.onmousemove=function(e){
@@ -13965,6 +14150,20 @@ function initPolygonMode(cv){
 function updatePolyline(el,pts){
   if(!pts.length)return;
   el.setAttribute('points',pts.map(function(p){return p.join(',');}).join(' '));
+}
+
+// 그리고 있는 도중(아직 확정 안 한) 다각형의 마지막 점 하나만 제거 — 엉뚱한 방향으로 찍었을 때
+// 전체를 취소하지 않고 바로 직전 점만 지우고 이어서 계속 그릴 수 있게 함(백스페이스 키로 호출).
+function _polyUndoLastPoint(){
+  if(!G.polyPts || !G.polyPts.length) return;
+  G.polyPts.pop();
+  var polyOv=gE('poly-overlay'); if(!polyOv) return;
+  var draftGroup=polyOv.querySelector('#poly-draft-group'); if(!draftGroup) return;
+  var path=draftGroup.querySelector('polyline');
+  if(path) updatePolyline(path, G.polyPts);
+  var dotsGroup=draftGroup.querySelectorAll('[data-poly-dot]');
+  if(dotsGroup.length) dotsGroup[dotsGroup.length-1].remove();
+  var hint=gE('stl'); if(hint) hint.textContent='점 '+G.polyPts.length+'개 — 백스페이스로 마지막 점 되돌리기, 시작점 다시 클릭이나 더블클릭으로 확정';
 }
 
 // 지정한 색 팔레트를 순서대로 돌려써서, 영역이 몇 개든 서로 다른 색으로 시각적으로 구분되게 함
@@ -21882,6 +22081,19 @@ document.addEventListener('DOMContentLoaded',function(){try{
   // 키보드
   document.onkeydown=function(e){
     if(e.key==='Escape'){['faq','pricing','account','credits','bizinfo'].forEach(closeMd);gE('zbg').style.display='none';}
+    // 영역 선택(폴리곤) 도구로 그리는 도중, 백스페이스로 마지막 점만 되돌리기 — 엉뚱한 방향으로
+    // 찍었을 때 처음부터 다시 그릴 필요 없이 바로 직전 점만 지우고 이어서 그릴 수 있게 함.
+    if(e.key==='Backspace' && G.dm==='polygon' && G.polyPts && G.polyPts.length){
+      var _activeTagBs = document.activeElement ? document.activeElement.tagName : '';
+      if(_activeTagBs!=='TEXTAREA' && _activeTagBs!=='INPUT'){
+        var _drawCvBs=gE('draw-canvas');
+        if(_drawCvBs && _drawCvBs.style.display!=='none'){
+          _polyUndoLastPoint();
+          e.preventDefault();
+          return;
+        }
+      }
+    }
     if((e.ctrlKey||e.metaKey)&&(e.key==='z'||e.key==='Z')){
       // 활성 입력창(텍스트 입력 중)이면 브라우저 기본 undo에 맡기고 우리 로직은 개입 안 함
       var _activeTag = document.activeElement ? document.activeElement.tagName : '';
