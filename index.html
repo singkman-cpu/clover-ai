@@ -8229,10 +8229,28 @@ function sbSpace(p){
 // 먼저 생성하고 그 결과를 나머지 방들 생성할 때 참고이미지로 자동으로 같이 넣어서 마감재·
 // 색감·조명톤 등 스타일을 통일시켜줌.
 var MULTIROOM_LABELS=['거실','주방','욕실','침실','현관','기타'];
+var AUTOROOM_TYPES=['거실','주방','안방','욕실','복도','현관','드레스룸','발코니'];
 function mkMultiRoomSpace(p){
   var spTab=getTab('space');
   if(!spTab.multiRoomImages) spTab.multiRoomImages=[];
   if(spTab.multiRoomPrompt==null) spTab.multiRoomPrompt='';
+  if(!spTab.multiRoomSubMode) spTab.multiRoomSubMode='manual';
+
+  var subModeWrap=dv('ss');subModeWrap.style.cssText='margin-bottom:4px';
+  var subModeRow=dv('');subModeRow.style.cssText='display:flex;gap:8px';
+  [['manual','📷 직접 여러 장 올리기'],['auto','🎥 AI 카메라 자동 (사진 1장→8컷)']].forEach(function(pair){
+    var key=pair[0],lbl=pair[1];
+    var isOn=spTab.multiRoomSubMode===key;
+    var b=mk('button','');b.type='button';
+    b.style.cssText='flex:1;padding:8px 6px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+    b.textContent=lbl;
+    b.onclick=function(){ spTab.multiRoomSubMode=key; renderSB(); };
+    subModeRow.appendChild(b);
+  });
+  subModeWrap.appendChild(subModeRow);
+  p.appendChild(subModeWrap);
+
+  if(spTab.multiRoomSubMode==='auto'){ mkAutoRoomCamera(p); return; }
 
   mkNote(p,'<strong style="color:var(--ac)">🏠 여러 공간 세트로 디자인 (베타)</strong><br>같은 집의 거실·주방·욕실·침실 사진을 한꺼번에 넣으면, 첫 번째 공간(기준)의 결과를 나머지 공간들 만들 때 참고이미지로 자동으로 같이 넣어서 마감재·색감·조명톤 등 스타일을 통일시켜요.<br><span style="font-size:10px;color:#f59e0b">⚠️ 벽·창문 구조까지 완전히 똑같이 맞춰주는 건 아니에요 — 각 공간의 원래 구조는 그대로 유지하면서 "같은 집 느낌"의 스타일만 통일해요.</span>');
 
@@ -8425,6 +8443,221 @@ function _multiRoomRetryOne(idx){
     renderSB();
   }, function(err){
     getTab('space').refs=origRefs;
+    st.results[idx]={error:String(err).slice(0,120)};
+    st.running=false;
+    renderSB();
+  });
+}
+// ── AI 카메라 자동 — 사진 1장만 올리면, 그 공간의 스타일을 그대로 유지하면서 같은 집의
+// 나머지 공간들(주방/안방/욕실/복도/현관/드레스룸/발코니)을 AI가 상상해서 만들어줌.
+// "여러 공간 세트로"와 원리는 같지만 방향이 반대 — 사진을 다 올리는 대신 1장만 올리고
+// 나머지는 AI가 "같은 집이라면 이렇게 생겼을 것"으로 상상해서 채움. 기술적으로는 완성된
+// 기준 공간 이미지를 다음 공간의 "편집 대상 이미지"로 그대로 넣고, "이 스타일은 유지하되
+// 완전히 다른 종류의 공간(예: 주방)으로 다시 그려달라"는 강한 지시를 프롬프트에 담아서
+// nano-banana-2의 이미지 편집 능력을 "재해석" 용도로 활용함.
+function mkAutoRoomCamera(p){
+  var spTab=getTab('space');
+  if(!spTab.autoRoomAnchorImg) spTab.autoRoomAnchorImg=null;
+  if(!spTab.autoRoomAnchorType) spTab.autoRoomAnchorType=AUTOROOM_TYPES[0];
+  if(!spTab.autoRoomSelected) spTab.autoRoomSelected=AUTOROOM_TYPES.slice();
+  if(spTab.autoRoomPrompt==null) spTab.autoRoomPrompt='';
+
+  mkNote(p,'<strong style="color:var(--ac)">🎥 AI 카메라 자동 (베타)</strong><br>공간 사진 1장만 올리면, 그 스타일을 유지한 채로 <b style="color:var(--t)">같은 집의 나머지 공간들을 AI가 상상해서</b> 만들어드려요.<br><span style="font-size:10px;color:#f59e0b">⚠️ 실제로 존재하지 않는 공간을 새로 상상해서 만드는 거라, 실제 우리집 구조와 다를 수 있어요 — 홍보용 컨셉 이미지 용도로 적합해요.</span>');
+
+  var upWrap=dv('ss');upWrap.innerHTML='<div class="lbl">기준 공간 사진 1장</div>';
+  var upBox=dv('');upBox.style.cssText='border:1.5px dashed var(--bd2);border-radius:10px;min-height:100px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;background:var(--c2)';
+  var upInput=document.createElement('input');upInput.type='file';upInput.accept='image/*';upInput.style.display='none';
+  function renderAnchorBox(){
+    upBox.innerHTML='';
+    if(spTab.autoRoomAnchorImg){
+      var img=document.createElement('img');img.src=spTab.autoRoomAnchorImg;
+      img.style.cssText='width:100%;max-height:220px;object-fit:contain;display:block';
+      upBox.appendChild(img);
+      var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='✕';
+      delBtn.style.cssText='position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;cursor:pointer;font-size:12px';
+      delBtn.onclick=function(e){ e.stopPropagation(); spTab.autoRoomAnchorImg=null; renderSB(); };
+      upBox.appendChild(delBtn);
+    } else {
+      upBox.innerHTML='<div style="font-size:12px;color:var(--t2);padding:20px;text-align:center">탭해서 사진 선택</div>';
+    }
+  }
+  upBox.onclick=function(){ if(!spTab.autoRoomAnchorImg) upInput.click(); };
+  upInput.onchange=function(){
+    var f=upInput.files&&upInput.files[0]; if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){ spTab.autoRoomAnchorImg=reader.result; renderSB(); };
+    reader.readAsDataURL(f);
+  };
+  renderAnchorBox();
+  upWrap.appendChild(upBox);upWrap.appendChild(upInput);
+  p.appendChild(upWrap);
+
+  var typeWrap=dv('ss');typeWrap.innerHTML='<div class="lbl">이 사진은 어떤 공간이에요?</div>';
+  var typeSel=document.createElement('select');
+  typeSel.style.cssText='width:100%;padding:8px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:12.5px;font-family:inherit';
+  AUTOROOM_TYPES.forEach(function(t){ var o=document.createElement('option');o.value=t;o.textContent=t;typeSel.appendChild(o); });
+  typeSel.value=spTab.autoRoomAnchorType;
+  typeSel.onchange=function(){ spTab.autoRoomAnchorType=typeSel.value; renderSB(); };
+  typeWrap.appendChild(typeSel);
+  p.appendChild(typeWrap);
+
+  var selWrap=dv('ss');selWrap.innerHTML='<div class="lbl">AI가 만들어줄 나머지 공간 <span class="lbl-en">체크 해제하면 안 만들어요</span></div>';
+  var selGrid=dv('');selGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px';
+  AUTOROOM_TYPES.forEach(function(t){
+    if(t===spTab.autoRoomAnchorType) return; // 기준 공간과 같은 종류는 목록에서 제외
+    var row=dv('');row.style.cssText='display:flex;align-items:center;gap:6px;background:var(--c2);border-radius:7px;padding:7px 9px';
+    var cb=document.createElement('input');cb.type='checkbox';cb.checked=spTab.autoRoomSelected.indexOf(t)!==-1;
+    cb.style.cssText='width:14px;height:14px;cursor:pointer;accent-color:var(--ac)';
+    cb.onchange=function(){
+      if(cb.checked){ if(spTab.autoRoomSelected.indexOf(t)===-1) spTab.autoRoomSelected.push(t); }
+      else { spTab.autoRoomSelected=spTab.autoRoomSelected.filter(function(x){return x!==t;}); }
+      renderSB();
+    };
+    var lbl=dv('');lbl.style.cssText='font-size:12px;color:var(--t);cursor:pointer';lbl.textContent=t;
+    lbl.onclick=function(){ cb.checked=!cb.checked; cb.onchange(); };
+    row.appendChild(cb);row.appendChild(lbl);
+    selGrid.appendChild(row);
+  });
+  selWrap.appendChild(selGrid);
+  p.appendChild(selWrap);
+
+  var pw=dv('ss');pw.innerHTML='<div class="lbl">전체 공통 스타일</div>';
+  var ta=document.createElement('textarea');
+  ta.value=spTab.autoRoomPrompt;
+  ta.placeholder='예: 미드센추리 모던 스타일, 우드톤+베이지 배색';
+  ta.style.cssText='width:100%;min-height:70px;padding:10px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;line-height:1.6;font-family:inherit;resize:vertical;box-sizing:border-box';
+  ta.oninput=function(){ spTab.autoRoomPrompt=ta.value; };
+  pw.appendChild(ta);
+  p.appendChild(pw);
+
+  var st=spTab.autoRoomState;
+  var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
+  var totalCr=(1+selectedOthers.length)*20; // 기준 공간도 스타일 적용해서 다시 생성하므로 +1
+  var goWrap=dv('ss');
+  var goBtn=mk('button','actbtn ok');goBtn.id='autoroom-go-btn';
+  goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
+  var isRunning=st&&st.running;
+  goBtn.disabled=!!isRunning || !spTab.autoRoomAnchorImg || !selectedOthers.length;
+  goBtn.innerHTML=isRunning?'생성 중...':'🎥 '+(1+selectedOthers.length)+'컷 자동 생성 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCr+'cr</span>';
+  goBtn.onclick=_autoRoomRun;
+  goWrap.appendChild(goBtn);
+  if(!spTab.autoRoomAnchorImg){
+    var need1=dv('');need1.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';need1.textContent='기준 공간 사진을 먼저 올려주세요';
+    goWrap.appendChild(need1);
+  } else if(!selectedOthers.length){
+    var need2=dv('');need2.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';need2.textContent='만들어줄 공간을 최소 1개는 선택해주세요';
+    goWrap.appendChild(need2);
+  }
+  p.appendChild(goWrap);
+
+  if(st && (st.results.length || st.running)){
+    var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">결과</div>';
+    var resGrid=dv('');resGrid.style.cssText='display:flex;flex-direction:column;gap:10px';
+    var allTypes=[spTab.autoRoomAnchorType].concat(selectedOthers);
+    allTypes.forEach(function(typeName,i){
+      var result=st.results[i];
+      var rRow=dv('');rRow.style.cssText='background:var(--c2);border-radius:9px;padding:8px';
+      var rHead=dv('');rHead.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;font-weight:700;color:var(--t2)';
+      rHead.textContent=(i===0?'★ 기준: ':'')+typeName;
+      rRow.appendChild(rHead);
+      if(result && result.url){
+        var rImg=document.createElement('img');rImg.src=result.url;
+        rImg.style.cssText='width:100%;border-radius:7px;cursor:pointer';
+        rImg.onclick=function(u){ return function(){ window.open(u,'_blank'); }; }(result.url);
+        rRow.appendChild(rImg);
+        var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='🔄 이 공간만 다시 생성';
+        retryBtn.style.cssText='width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
+        retryBtn.onclick=function(idx2){ return function(){ _autoRoomRetryOne(idx2); }; }(i);
+        rRow.appendChild(retryBtn);
+      } else if(result && result.error){
+        var rErr=dv('');rErr.style.cssText='font-size:10.5px;color:#f87171';rErr.textContent='⚠️ 실패: '+result.error;
+        rRow.appendChild(rErr);
+      } else if(st.running && st.step===i){
+        rRow.innerHTML+='<div style="display:flex;align-items:center;gap:6px;padding:10px 0"><span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span><span style="font-size:11px;color:var(--t2)">생성 중...</span></div>';
+      } else {
+        var rWait=dv('');rWait.style.cssText='font-size:10.5px;color:var(--m2)';rWait.textContent='대기 중';
+        rRow.appendChild(rWait);
+      }
+      resGrid.appendChild(rRow);
+    });
+    resWrap.appendChild(resGrid);
+    p.appendChild(resWrap);
+  }
+  var styleTag=document.getElementById('agent-spin-style');
+  if(!styleTag){ styleTag=document.createElement('style'); styleTag.id='agent-spin-style'; styleTag.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}'; document.head.appendChild(styleTag); }
+}
+function _autoRoomRun(){
+  var spTab=getTab('space');
+  if(!spTab.autoRoomAnchorImg){ alert('먼저 기준 공간 사진을 올려주세요.'); return; }
+  var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
+  if(!selectedOthers.length){ alert('만들어줄 공간을 최소 1개는 선택해주세요.'); return; }
+  if(!spTab.autoRoomPrompt || !spTab.autoRoomPrompt.trim()){ alert('전체 공통 스타일을 설명해주세요.'); return; }
+  if(!_supaUser){ openMd('account'); return; }
+  var totalCr=(1+selectedOthers.length)*20;
+  if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCr){
+    alert('크레딧이 부족합니다. 필요: '+totalCr+'cr, 현재: '+G.cr+'cr');
+    openMd('credits');
+    return;
+  }
+  spTab.autoRoomState={running:true, step:0, results:[], error:null};
+  renderSB();
+  _autoRoomGenerateStep(0);
+}
+function _autoRoomGenerateStep(idx){
+  var spTab=getTab('space');
+  var st=spTab.autoRoomState;
+  var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
+  var allTypes=[spTab.autoRoomAnchorType].concat(selectedOthers);
+  if(idx>=allTypes.length){ st.running=false; renderSB(); return; }
+  st.step=idx; st.running=true;
+  renderSB();
+  var isAnchor=(idx===0);
+  var typeName=allTypes[idx];
+  var basePrompt=spTab.autoRoomPrompt.trim();
+  var task;
+  if(isAnchor){
+    task={id:Date.now(), img:spTab.autoRoomAnchorImg, wf:'space', prompt:basePrompt, selK:null, eng:'nano2', resolution:'1K'};
+  } else {
+    var anchorResultUrl = st.results[0] && st.results[0].url;
+    // ⚠️ 핵심 로직 — 실제로 이 공간의 사진은 없음. 완성된 기준 공간 이미지를 "편집 대상"으로
+    // 넣되, "그대로 편집하지 말고 완전히 다른 종류의 공간으로 다시 상상해서 그려달라"는
+    // 강한 지시를 줘서 nano-banana-2의 이미지 편집 능력을 재해석(reimagine) 용도로 씀.
+    var reimaginePrompt = basePrompt + ' — 첨부한 사진은 같은 집의 다른 공간(' + spTab.autoRoomAnchorType + ')이 이미 완성된 모습입니다. 이 사진을 그대로 편집하지 말고, 완전히 새로운 "' + typeName + '"을(를) 그 공간에 맞는 구조·배치·카메라 구도로 처음부터 다시 상상해서 그려주세요. 다만 마감재 종류, 컬러 팔레트, 조명 톤, 가구·소재의 디자인 언어는 첨부 사진과 동일하게 유지해서 같은 집처럼 느껴지게 해주세요.';
+    task={id:Date.now()+idx, img:anchorResultUrl, wf:'space', prompt:reimaginePrompt, selK:null, eng:'nano2', resolution:'1K'};
+  }
+  procImgWithTask(task, function(resultUrl){
+    st.results[idx]={url:resultUrl};
+    _autoRoomGenerateStep(idx+1);
+  }, function(err){
+    st.results[idx]={error:String(err).slice(0,120)};
+    _autoRoomGenerateStep(idx+1);
+  });
+}
+function _autoRoomRetryOne(idx){
+  var spTab=getTab('space');
+  var st=spTab.autoRoomState;
+  if(!st) return;
+  st.results[idx]=null;
+  st.running=true; st.step=idx;
+  renderSB();
+  var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
+  var allTypes=[spTab.autoRoomAnchorType].concat(selectedOthers);
+  var isAnchor=(idx===0);
+  var typeName=allTypes[idx];
+  var basePrompt=spTab.autoRoomPrompt.trim();
+  var task;
+  if(isAnchor){
+    task={id:Date.now(), img:spTab.autoRoomAnchorImg, wf:'space', prompt:basePrompt, selK:null, eng:'nano2', resolution:'1K'};
+  } else {
+    var anchorResultUrl = st.results[0] && st.results[0].url;
+    var reimaginePrompt = basePrompt + ' — 첨부한 사진은 같은 집의 다른 공간(' + spTab.autoRoomAnchorType + ')이 이미 완성된 모습입니다. 이 사진을 그대로 편집하지 말고, 완전히 새로운 "' + typeName + '"을(를) 그 공간에 맞는 구조·배치·카메라 구도로 처음부터 다시 상상해서 그려주세요. 다만 마감재 종류, 컬러 팔레트, 조명 톤, 가구·소재의 디자인 언어는 첨부 사진과 동일하게 유지해서 같은 집처럼 느껴지게 해주세요.';
+    task={id:Date.now()+idx, img:anchorResultUrl, wf:'space', prompt:reimaginePrompt, selK:null, eng:'nano2', resolution:'1K'};
+  }
+  procImgWithTask(task, function(resultUrl){
+    st.results[idx]={url:resultUrl};
+    st.running=false;
+    renderSB();
+  }, function(err){
     st.results[idx]={error:String(err).slice(0,120)};
     st.running=false;
     renderSB();
@@ -8904,8 +9137,8 @@ function sbAgent(p){
   var showStartBtn = !st;
   if(showStartBtn){
     var goWrap=dv('ss');
-    var goBtn=mk('button','actbtn ok');goBtn.id='agent-go-btn';
-    goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
+    var goBtn=mk('button','');goBtn.id='agent-go-btn';goBtn.type='button';
+    goBtn.style.cssText='border:none;border-radius:8px;cursor:pointer;font-family:inherit;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;font-size:14px;font-weight:800';
     goBtn.innerHTML='🤖 시안 3개 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">60cr</span>';
     goBtn.onclick=_agentRun;
     goWrap.appendChild(goBtn);
@@ -9005,7 +9238,7 @@ function sbAgent(p){
 
     var u1btns=dv('');u1btns.style.cssText='display:flex;flex-direction:column;gap:6px';
     var uCost=(SCR[tab.upscaleScale]&&SCR[tab.upscaleScale][tab.upscaleEngine])||20;
-    var yesBtn=mk('button','actbtn ok');yesBtn.style.cssText='width:100%;padding:10px;font-size:12.5px;font-weight:800';
+    var yesBtn=mk('button','');yesBtn.type='button';yesBtn.style.cssText='border:none;border-radius:8px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000;width:100%;padding:10px;font-size:12.5px;font-weight:800';
     yesBtn.innerHTML='✅ 업스케일 실행 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:1px 6px;margin-left:4px">'+uCost+'cr</span>';
     yesBtn.onclick=_agentRunUpscale;
     var noBtn=mk('button','');noBtn.type='button';noBtn.textContent='➡️ 업스케일 없이 다음 단계(VR)로';
@@ -9043,7 +9276,7 @@ function sbAgent(p){
     v2.appendChild(vrTierRow);
     var v2btns=dv('');v2btns.style.cssText='display:flex;flex-direction:column;gap:6px';
     var vrCost2=tab.vrTier==='plus'?W3D_COST_PLUS:tab.vrTier==='basic'?W3D_COST_BASIC:W3D_COST_DRAFT;
-    var vrGoBtn=mk('button','actbtn ok');vrGoBtn.style.cssText='width:100%;padding:10px;font-size:12.5px;font-weight:800';
+    var vrGoBtn=mk('button','');vrGoBtn.type='button';vrGoBtn.style.cssText='border:none;border-radius:8px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000;width:100%;padding:10px;font-size:12.5px;font-weight:800';
     vrGoBtn.innerHTML='🌐 VR 투어 만들기 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:1px 6px;margin-left:4px">'+vrCost2+'cr</span>';
     vrGoBtn.onclick=_agentContinueToVR;
     var vrSkipBtn=mk('button','');vrSkipBtn.type='button';vrSkipBtn.textContent='여기서 완료 (VR 없이 종료)';
@@ -13830,6 +14063,19 @@ function mkMask(p){
   });
   s.appendChild(tr);
 
+  // ⚠️ 버그 수정: 화살표/영역선택을 그려놓은 상태에서 다른 탭으로 갔다가 AI편집으로 돌아오면,
+  // 데이터(G.arrows/G.polyAreas) 자체는 안 지워지는데 화면의 캔버스 오버레이는 도구 버튼을
+  // 클릭해야만 다시 초기화되는 구조라서, 돌아왔을 때 아무것도 안 보이는 것처럼 느껴졌음 —
+  // 사이드바가 이 화면(마스크 편집)으로 렌더링될 때마다, 캔버스가 아직 활성화 안 된 상태면
+  // 지금 선택된 도구(G.dm) 기준으로 자동으로 다시 켜서 그려진 화살표/영역이 바로 보이게 함.
+  (function(){
+    var _cvCheck=gE('draw-canvas');
+    if(_cvCheck && !_cvCheck.classList.contains('active')){
+      if(G.dm==='arrow'){ togDraw(true,'arrow'); initArrowMode(_cvCheck); }
+      else if(G.dm){ togDraw(true,G.dm); }
+    }
+  })();
+
   // ⚠️ 도구별로 서로 다른 입력 UI(브러시=색상 팔레트, 화살표=화살표 목록, 영역선택=영역 목록)가
   // 전부 한 화면에 같이 보여서 "지금 뭘 쓰고 있고 어디에 내용을 적어야 하는지" 헷갈린다는 문제가
   // 있었음 — 이제 지금 고른 도구에 해당하는 UI만 보이게 함.
@@ -14067,13 +14313,13 @@ function _mkMaskExecute(){
   if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
   getTab(G.wf).prompt=combined;
   if(refImgs.length){ getTab(G.wf).refs=refImgs; }
-  G.arrows=[]; G.polyAreas=[]; // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
+  G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations(); // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
   togDraw(false);if(canRun())runTool();
 }
 function _mkMaskClearAll(){
   var cv=gE('draw-canvas');if(cv){var ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);}
   G.drawHist=[];G.polyPts=[];G.strokePoints=[];G.maskColorPrompts={};G.maskColorRefImg={};
-  G.arrows=[];G.arrowsHist=[];G.polyAreas=[];G.polyAreasHist=[];
+  G.arrows=[];G.arrowsHist=[];G.polyAreas=[];G.polyAreasHist=[];_saveMaskAnnotations();
   var polyOv=gE('poly-overlay');if(polyOv)polyOv.innerHTML='';
   var arrOv=gE('arrow-overlay');if(arrOv)arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:'';
   renderSB();
@@ -14188,6 +14434,7 @@ function initArrowMode(cv){
     var wrap=gE('arrow-list-wrap');
     if(wrap){ wrap.style.display='block'; renderArrowList(wrap); }
     _redrawArrows(arrOv);
+    _saveMaskAnnotations();
     var hint=gE('stl'); if(hint) hint.textContent='화살표 '+G.arrows.length+'개 지정됨 — 아래에서 각 화살표가 뭘 뜻하는지 적어주세요';
   };
 }
@@ -14272,7 +14519,7 @@ function renderArrowList(wrap){
     var ta=mk('textarea','ta');ta.rows=2;ta.style.cssText='flex:1;min-height:40px;font-size:12px';
     ta.placeholder='이 오브젝트를 어떻게? (예: 이 의자 없애줘, 이 소파는 벨벳으로)';
     ta.value=a.label||'';
-    ta.oninput=function(){ a.label=ta.value; };
+    ta.oninput=function(){ a.label=ta.value; _saveMaskAnnotations(); };
     var ralBtn=mk('button','');ralBtn.type='button';ralBtn.textContent='🎨';ralBtn.title='RAL 컬러';
     ralBtn.style.cssText='width:24px;height:24px;flex-shrink:0;margin-top:2px;border-radius:6px;border:1px solid var(--bd2);background:var(--sb,#111);cursor:pointer;font-size:11px';
     ralBtn.onclick=function(){ _openRalPicker(ta); };
@@ -14285,7 +14532,7 @@ function renderArrowList(wrap){
       if(a.refImg){
         imgSlot.innerHTML='<img src="'+a.refImg+'" style="width:100%;height:100%;object-fit:cover">'+
           '<button type="button" style="position:absolute;top:-3px;right:-3px;width:13px;height:13px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;font-size:8px;cursor:pointer;line-height:1;padding:0">✕</button>';
-        imgSlot.querySelector('button').onclick=function(e){ e.stopPropagation(); a.refImg=null; renderArrImgSlot(); };
+        imgSlot.querySelector('button').onclick=function(e){ e.stopPropagation(); a.refImg=null; renderArrImgSlot(); _saveMaskAnnotations(); };
         imgSlot.onclick=null;
       } else {
         imgSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--t2)">🖼️</div>';
@@ -14296,7 +14543,7 @@ function renderArrowList(wrap){
     fiArr.onchange=function(){
       var f=fiArr.files&&fiArr.files[0]; if(!f) return;
       var reader=new FileReader();
-      reader.onload=function(){ a.refImg=reader.result; renderArrImgSlot(); };
+      reader.onload=function(){ a.refImg=reader.result; renderArrImgSlot(); _saveMaskAnnotations(); };
       reader.readAsDataURL(f);
     };
     renderArrImgSlot();
@@ -14308,6 +14555,7 @@ function renderArrowList(wrap){
       G.arrowsHist.push(JSON.parse(JSON.stringify(G.arrows||[])));
       if(G.arrowsHist.length>20) G.arrowsHist.shift();
       G.arrows=G.arrows.filter(function(x){return x.id!==a.id;});
+      _saveMaskAnnotations();
       renderArrowList(wrap);
       var arrOv=gE('arrow-overlay'); if(arrOv){ arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:''; _redrawArrows(arrOv); }
     };
@@ -14318,6 +14566,7 @@ function renderArrowList(wrap){
   clearAllBtn.style.cssText='width:100%;padding:6px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:10.5px;cursor:pointer;font-family:inherit';
   clearAllBtn.onclick=function(){
     G.arrows=[];
+    _saveMaskAnnotations();
     renderArrowList(wrap);
     var arrOv=gE('arrow-overlay'); if(arrOv) arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:'';
   };
@@ -14441,6 +14690,7 @@ function finishPolygon(cv,polyOv){
   if(G.polyAreasHist.length>20) G.polyAreasHist.shift();
   if(!G.polyAreas) G.polyAreas=[];
   G.polyAreas.push({ id:Date.now()+Math.random(), points:scaledPts, label:'', refImg:null });
+  _saveMaskAnnotations();
   _redrawPolyAreas(polyOv);
   var wrap=gE('poly-area-list-wrap');
   if(wrap){ wrap.style.display='block'; renderPolyAreaList(wrap); }
@@ -14503,7 +14753,7 @@ function renderPolyAreaList(wrap){
     var ta=mk('textarea','ta');ta.rows=2;ta.style.cssText='flex:1;min-height:40px;font-size:12px';
     ta.placeholder='이 영역을 어떻게? (예: 이 벽을 화이트로, 이 바닥을 원목으로)';
     ta.value=area.label||'';
-    ta.oninput=function(){ area.label=ta.value; };
+    ta.oninput=function(){ area.label=ta.value; _saveMaskAnnotations(); };
     var ralBtn=mk('button','');ralBtn.type='button';ralBtn.textContent='🎨';ralBtn.title='RAL 컬러';
     ralBtn.style.cssText='width:24px;height:24px;flex-shrink:0;margin-top:2px;border-radius:6px;border:1px solid var(--bd2);background:var(--sb,#111);cursor:pointer;font-size:11px';
     ralBtn.onclick=function(){ _openRalPicker(ta); };
@@ -14515,7 +14765,7 @@ function renderPolyAreaList(wrap){
       if(area.refImg){
         imgSlot.innerHTML='<img src="'+area.refImg+'" style="width:100%;height:100%;object-fit:cover">'+
           '<button type="button" style="position:absolute;top:-3px;right:-3px;width:13px;height:13px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;font-size:8px;cursor:pointer;line-height:1;padding:0">✕</button>';
-        imgSlot.querySelector('button').onclick=function(e){ e.stopPropagation(); area.refImg=null; renderAreaImgSlot(); };
+        imgSlot.querySelector('button').onclick=function(e){ e.stopPropagation(); area.refImg=null; renderAreaImgSlot(); _saveMaskAnnotations(); };
         imgSlot.onclick=null;
       } else {
         imgSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--t2)">🖼️</div>';
@@ -14526,7 +14776,7 @@ function renderPolyAreaList(wrap){
     fiArea.onchange=function(){
       var f=fiArea.files&&fiArea.files[0]; if(!f) return;
       var reader=new FileReader();
-      reader.onload=function(){ area.refImg=reader.result; renderAreaImgSlot(); };
+      reader.onload=function(){ area.refImg=reader.result; renderAreaImgSlot(); _saveMaskAnnotations(); };
       reader.readAsDataURL(f);
     };
     renderAreaImgSlot();
@@ -14538,6 +14788,7 @@ function renderPolyAreaList(wrap){
       G.polyAreasHist.push(JSON.parse(JSON.stringify(G.polyAreas||[])));
       if(G.polyAreasHist.length>20) G.polyAreasHist.shift();
       G.polyAreas=G.polyAreas.filter(function(x){return x.id!==area.id;});
+      _saveMaskAnnotations();
       renderPolyAreaList(wrap);
       var polyOv=gE('poly-overlay'); if(polyOv) _redrawPolyAreas(polyOv);
     };
@@ -14548,6 +14799,7 @@ function renderPolyAreaList(wrap){
   clearAllBtn.style.cssText='width:100%;padding:6px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:10.5px;cursor:pointer;font-family:inherit';
   clearAllBtn.onclick=function(){
     G.polyAreas=[];
+    _saveMaskAnnotations();
     renderPolyAreaList(wrap);
     var polyOv=gE('poly-overlay'); if(polyOv) _redrawPolyAreas(polyOv);
   };
@@ -14675,6 +14927,25 @@ function addHist(orig,result,tags,ai,preview){
   // hist-s가 데스크탑/모바일 두 곳에 존재 → 둘 다에 추가
   document.querySelectorAll('.hist-s').forEach(function(hs){ addHistEl(item,true,hs); });
   if(!preview)saveHistToStorage();
+}
+// ── AI편집 탭의 화살표/영역선택 데이터를 localStorage에 저장/복원 ──────────────
+// ⚠️ 예전엔 G.arrows/G.polyAreas가 메모리(G 객체)에만 있어서, 새로고침하면 통째로 사라졌음.
+// 힘들게 화살표 여러 개, 영역 여러 개 찍어놓고 새로고침 한 번에 다 날아가면 안 되니까,
+// 바뀔 때마다(추가/삭제/실행취소) 저장해두고 페이지 로드 시 복원함. "전체 지우기"나 "선택
+// 지우기"를 직접 누르기 전까지는 계속 남아있음.
+function _saveMaskAnnotations(){
+  try{
+    localStorage.setItem('clover_edit_arrows', JSON.stringify(G.arrows||[]));
+    localStorage.setItem('clover_edit_polyareas', JSON.stringify(G.polyAreas||[]));
+  }catch(e){ console.warn('[화살표/영역 저장 실패]', e.message); }
+}
+function _loadMaskAnnotations(){
+  try{
+    var a=localStorage.getItem('clover_edit_arrows');
+    if(a){ var parsedA=JSON.parse(a); if(Array.isArray(parsedA)) G.arrows=parsedA; }
+    var pa=localStorage.getItem('clover_edit_polyareas');
+    if(pa){ var parsedPa=JSON.parse(pa); if(Array.isArray(parsedPa)) G.polyAreas=parsedPa; }
+  }catch(e){ console.warn('[화살표/영역 복원 실패]', e.message); }
 }
 function saveHistToStorage(){try{
     localStorage.setItem('clover_eng',    G.eng||'nano2');
@@ -21840,6 +22111,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
   renderSB();
   updBtn();
   loadHistFromStorage();
+  _loadMaskAnnotations();
   _shortsLoadGalleryMeta();
   _shortsRestoreVideosFromIDB();
 
@@ -22359,12 +22631,14 @@ document.addEventListener('DOMContentLoaded',function(){try{
       var _drawActive = _drawCv && _drawCv.style.display!=='none';
       if(_drawActive && G.dm==='arrow' && G.arrowsHist && G.arrowsHist.length>0){
         G.arrows=G.arrowsHist.pop();
+        _saveMaskAnnotations();
         var arrOv=gE('arrow-overlay');
         if(arrOv){ arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:''; _redrawArrows(arrOv); }
         var awrap=gE('arrow-list-wrap'); if(awrap) renderArrowList(awrap);
         e.preventDefault();
       } else if(_drawActive && G.dm==='polygon' && G.polyAreasHist && G.polyAreasHist.length>0){
         G.polyAreas=G.polyAreasHist.pop();
+        _saveMaskAnnotations();
         var polyOv=gE('poly-overlay');
         if(polyOv) _redrawPolyAreas(polyOv);
         var pwrap=gE('poly-area-list-wrap'); if(pwrap) renderPolyAreaList(pwrap);
