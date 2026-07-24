@@ -8176,6 +8176,26 @@ function sbVideo(p){
 function sbUpscaleVideo(p){
   mkNote(p,'<strong style="color:var(--ac)">&#127916; 영상 고해상도 업스케일</strong><br>Topaz Video AI(fal.ai)로 저해상도 영상을 선명하게 업스케일해요. (베타)');
 
+  // ── 목표 해상도 2K / 4K ──────────────────────────────────────────
+  // fal.ai 과금은 "출력 해상도"에 따라 3단계(~720p $0.01/초, 720~1080p $0.02/초, 1080p 초과 $0.08/초)인데
+  // 2K(2560px 기준)와 4K(3840px 기준) 모두 1080p를 넘기 때문에 두 옵션 모두 같은 최고 단가 구간에 걸림 →
+  // 크레딧은 두 해상도 동일하게 20cr/초로 책정(최악 단가 $0.08/초≈113원 대비 마진 ~1.9배).
+  if(!G.tabs.upscale.vidTargetRes) G.tabs.upscale.vidTargetRes='2k';
+  var VID_TARGET_LONG_SIDE={ '2k':2560, '4k':3840 };
+  var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">목표 해상도</div>';
+  var resRow=dv('');resRow.style.cssText='display:flex;gap:8px';
+  [['2k','2K (2560px)'],['4k','4K (3840px)']].forEach(function(pair){
+    var key=pair[0], lbl=pair[1];
+    var isOn=G.tabs.upscale.vidTargetRes===key;
+    var btn=mk('button','');btn.type='button';
+    btn.style.cssText='flex:1;padding:9px 6px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    btn.textContent=lbl;
+    btn.onclick=function(){ G.tabs.upscale.vidTargetRes=key; renderSB(); };
+    resRow.appendChild(btn);
+  });
+  resWrap.appendChild(resRow);
+  p.appendChild(resWrap);
+
   var wrap=dv('ss');
   wrap.innerHTML='<div class="lbl">업스케일할 영상 업로드</div>';
   var dropBox=dv('');
@@ -8202,8 +8222,15 @@ function sbUpscaleVideo(p){
   goWrap.appendChild(resultArea);
   p.appendChild(goWrap);
 
-  var curFile=null, curDuration=0;
+  var curFile=null, curDuration=0, curFactor=2;
   dropBox.onclick=function(){ fi.click(); };
+  function _refreshMeta(){
+    if(!curDuration) return;
+    var cost=calcVideoUpscaleCost(curDuration);
+    var resLbl=G.tabs.upscale.vidTargetRes==='4k'?'4K':'2K';
+    metaLine.textContent='길이 '+curDuration.toFixed(1)+'초 · 목표 '+resLbl+'(약 '+curFactor.toFixed(2)+'배 확대) · 예상 비용 '+cost+'cr';
+    goBtn.textContent='🎬 영상 업스케일 시작 ('+cost+'cr)';
+  }
   fi.onchange=function(){
     var f=fi.files&&fi.files[0]; if(!f) return;
     curFile=f;
@@ -8211,22 +8238,26 @@ function sbUpscaleVideo(p){
     previewVid.src=url;
     previewVid.onloadedmetadata=function(){
       curDuration=previewVid.duration||0;
-      var cost=calcVideoUpscaleCost(curDuration);
-      metaLine.textContent='길이 '+curDuration.toFixed(1)+'초 · 예상 비용 '+cost+'cr';
+      var srcLong=Math.max(previewVid.videoWidth||1920, previewVid.videoHeight||1080);
+      var targetLong=VID_TARGET_LONG_SIDE[G.tabs.upscale.vidTargetRes]||2560;
+      curFactor=Math.max(1, Math.min(8, targetLong/srcLong));
       goWrap.style.display='block';
-      goBtn.textContent='🎬 영상 업스케일 시작 ('+cost+'cr)';
+      _refreshMeta();
     };
     previewWrap.style.display='block';
     resultArea.innerHTML='';
     statusEl.style.display='none';
   };
+  // 해상도 버튼을 바꿨을 때도(재렌더 없이) 배율/예상비용 갱신 — 위 resRow 버튼 onclick에서 renderSB()로
+  // 전체를 다시 그리기 때문에 이 함수 자체는 다시 호출되지만, 그 전에 curFile 등 로컬 상태가 날아가지
+  // 않도록 탭 레벨(G.tabs.upscale)에 저장해둔 값들만 참조해서 재계산한다.
   goBtn.onclick=function(){
     if(!curFile){ return; }
     goBtn.disabled=true;
     statusEl.style.display='block';
     statusEl.textContent='준비 중...';
     resultArea.innerHTML='';
-    runVideoUpscale(curFile, curDuration, statusEl, function(resultUrl){
+    runVideoUpscale(curFile, curDuration, curFactor, statusEl, function(resultUrl){
       goBtn.disabled=false;
       statusEl.style.display='none';
       resultArea.innerHTML='<div style="font-size:11px;color:var(--ac);font-weight:700;margin-bottom:6px">✓ 완료</div>';
@@ -16384,7 +16415,7 @@ var VIDEO_UPSCALE_MIN_CR = 60;
 function calcVideoUpscaleCost(durationSec){
   return Math.max(VIDEO_UPSCALE_MIN_CR, Math.ceil((durationSec||0) * VIDEO_UPSCALE_CR_PER_SEC));
 }
-function runVideoUpscale(file, durationSec, statusEl, onDone, onErr){
+function runVideoUpscale(file, durationSec, upscaleFactor, statusEl, onDone, onErr){
   var cost = calcVideoUpscaleCost(durationSec);
   if(!_supaUser){ openMd('account'); onErr('로그인이 필요합니다.'); return; }
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<cost){
@@ -16397,7 +16428,8 @@ function runVideoUpscale(file, durationSec, statusEl, onDone, onErr){
   _doUploadFile(file, function(videoUrl){
     if(statusEl) statusEl.textContent='Topaz Video AI 업스케일 처리 중 (영상 길이에 따라 몇 분 걸릴 수 있어요)...';
     falRun('fal-ai/topaz/upscale/video', {
-      video_url: videoUrl
+      video_url: videoUrl,
+      upscale_factor: upscaleFactor || 2
     }, function(d){
       var url = falExtractVideoUrl(d);
       if(!url){ onErr('업스케일 결과 URL을 찾지 못했습니다.'); return; }
