@@ -8235,7 +8235,11 @@ var AUTOROOM_TYPES=['거실','주방','안방','아이방','욕실','복도','�
 // 나중에 다시 찾아볼 수 있음.
 function _showRoomResultInMain(origUrl, resultUrl){
   if(!G.HIST.space) G.HIST.space=[];
-  G.HIST.space.unshift({ id:Date.now()+Math.random(), orig:origUrl||resultUrl, result:resultUrl, origThumb:null, tags:['공간 세트'], ai:'', cx:50, fav:false, wf:'space', preview:false });
+  // ⚠️ 버그 수정: origUrl이 없는 경우(AI가 상상으로 만든 공간 — 실제 원본 사진이 없음) resultUrl로
+  // 대신 채워넣고 있었는데, 그러면 "원본"과 "결과"가 똑같은 이미지가 되어 비교할 게 없는데도
+  // Before/After 슬라이더가 뜨는 의미없는 상황이 됐었음. 진짜 원본이 있을 때만 슬라이더로,
+  // 없으면(순수 상상 생성) 그냥 단일 이미지로 보여줌.
+  G.HIST.space.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:['공간 세트'], ai:'', cx:50, fav:false, wf:'space', preview:false });
   getTab('space').resultImg=resultUrl;
   if(G.wf==='space') renderMain('space');
 }
@@ -8312,10 +8316,10 @@ function mkMultiRoomSpace(p){
   listWrap.appendChild(addBox);
   p.appendChild(listWrap);
 
-  var pw=dv('ss');pw.innerHTML='<div class="lbl">전체 공간에 공통으로 적용할 스타일</div>';
+  var pw=dv('ss');pw.innerHTML='<div class="lbl">전체 공간에 공통으로 적용할 스타일 <span class="lbl-en">선택사항</span></div>';
   var ta=document.createElement('textarea');
   ta.value=spTab.multiRoomPrompt;
-  ta.placeholder='예: 미드센추리 모던 스타일, 우드톤+베이지 배색, 전체적으로 따뜻한 조명';
+  ta.placeholder='선택사항 — 비워두면 업로드한 사진 스타일을 그대로 유지해요. 예: 미드센추리 모던 스타일, 우드톤+베이지 배색, 전체적으로 따뜻한 조명';
   ta.style.cssText='width:100%;min-height:70px;padding:10px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;line-height:1.6;font-family:inherit;resize:vertical;box-sizing:border-box';
   ta.oninput=function(){ spTab.multiRoomPrompt=ta.value; };
   pw.appendChild(ta);
@@ -8326,12 +8330,20 @@ function mkMultiRoomSpace(p){
   var goBtn=mk('button','actbtn ok');goBtn.id='multiroom-go-btn';
   goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
   var n=spTab.multiRoomImages.length;
-  var totalCost=n*20;
+  var hasCustomStyleUI2 = !!(spTab.multiRoomPrompt && spTab.multiRoomPrompt.trim());
+  var totalCost = n>0 ? ((hasCustomStyleUI2?1:0)+Math.max(0,n-1))*20 : 0;
   var isRunning=st&&st.running;
   goBtn.disabled=!!isRunning || n<2;
   goBtn.innerHTML=isRunning?'생성 중...':'🏠 세트로 생성 시작 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCost+'cr</span>';
   goBtn.onclick=_multiRoomRun;
   goWrap.appendChild(goBtn);
+  if(n>=2){
+    var costHint2=dv('');costHint2.style.cssText='font-size:10px;color:var(--m2);text-align:center;margin-top:6px';
+    costHint2.textContent = hasCustomStyleUI2
+      ? '기준 공간도 새 스타일로 다시 생성돼요'
+      : '스타일을 안 적으셔서 기준 공간(★)은 원본 사진 그대로 쓰여요 — 무료';
+    goWrap.appendChild(costHint2);
+  }
   if(n<2){
     var needMore=dv('');needMore.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';
     needMore.textContent='최소 2개 공간을 넣어야 스타일을 통일할 의미가 있어요';
@@ -8348,12 +8360,12 @@ function mkMultiRoomSpace(p){
       var result=st.results[i];
       var rRow=dv('');rRow.style.cssText='background:var(--c2);border-radius:9px;padding:8px';
       var rHead=dv('');rHead.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;font-weight:700;color:var(--t2)';
-      rHead.innerHTML=(i===0?'★ ':'')+(room2?room2.label:'')+' '+(i+1)+'/'+n;
+      rHead.innerHTML=(i===0?'★ ':'')+(room2?room2.label:'')+' '+(i+1)+'/'+n+((result&&result.freeAnchor)?' <span style="color:var(--ac);font-weight:400">(원본, 무료)</span>':'');
       rRow.appendChild(rHead);
       if(result && result.url){
         var rImg=document.createElement('img');rImg.src=result.url;
         rImg.style.cssText='width:100%;border-radius:7px;cursor:pointer';
-        rImg.onclick=function(origU,resU){ return function(){ _showRoomResultInMain(origU,resU); }; }(room2?room2.img:null, result.url);
+        rImg.onclick=function(origU,resU){ return function(){ _showRoomResultInMain(origU,resU); }; }(result.prevUrl||(room2?room2.img:null), result.url);
         rRow.appendChild(rImg);
         var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='🔄 이 공간만 다시 생성';
         retryBtn.style.cssText='width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
@@ -8380,9 +8392,11 @@ function _multiRoomRun(){
   var spTab=getTab('space');
   var n=spTab.multiRoomImages.length;
   if(n<2){ alert('최소 2개 공간을 넣어주세요.'); return; }
-  if(!spTab.multiRoomPrompt || !spTab.multiRoomPrompt.trim()){ alert('전체 공간에 적용할 스타일을 설명해주세요.'); return; }
+  // ⚠️ 예전엔 스타일을 안 적으면 막고 알림을 띄웠는데, 그럴 필요 없이 비어있으면 "지금 사진에
+  // 보이는 스타일을 그대로 유지"로 자동 처리하면 됨 — _multiRoomGenerateStep에서 기본값을 채움.
   if(!_supaUser){ openMd('account'); return; }
-  var totalCost=n*20;
+  var _hasStyleForCheck = !!(spTab.multiRoomPrompt && spTab.multiRoomPrompt.trim());
+  var totalCost = ((_hasStyleForCheck?1:0)+Math.max(0,n-1))*20;
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCost){
     alert('크레딧이 부족합니다. 필요: '+totalCost+'cr, 현재: '+G.cr+'cr');
     openMd('credits');
@@ -8401,12 +8415,18 @@ function _multiRoomGenerateStep(idx){
   renderSB();
   var room=rooms[idx];
   var isAnchor=(idx===0);
+  var hasCustomStyleMR = !!(spTab.multiRoomPrompt && spTab.multiRoomPrompt.trim());
+  if(isAnchor && !hasCustomStyleMR){
+    st.results[idx]={url:room.img, freeAnchor:true};
+    _multiRoomGenerateStep(idx+1);
+    return;
+  }
   var anchorUrl = st.results[0] && st.results[0].url;
   // ⚠️ 여기가 "참조 이미지 유지"의 핵심 — 기준 공간(0번)의 결과가 이미 나와있으면, 그 이미지를
   // 참고이미지로 넣고 "같은 집의 다른 공간이니 마감재·색감·조명톤을 통일해달라"는 지시를
   // 프롬프트에 명시적으로 추가함. procImgWithTask는 참고이미지를 task가 아니라 탭 상태
   // (getTab(wf).refs)에서 읽으므로, 호출 직전에 임시로 채워넣음(순차 실행이라 안전함).
-  var prompt = spTab.multiRoomPrompt.trim();
+  var prompt = spTab.multiRoomPrompt.trim() || '이 사진에 보이는 현재 인테리어 스타일(색감, 마감재, 조명 톤, 가구·소재의 디자인 언어)을 그대로 유지하면서 전체적인 완성도와 사실감을 높여줘.';
   var refs = [];
   if(!isAnchor && anchorUrl){
     refs.push(anchorUrl);
@@ -8429,14 +8449,24 @@ function _multiRoomRetryOne(idx){
   var spTab=getTab('space');
   var st=spTab.multiRoomState;
   if(!st) return;
+  // ⚠️ 직전 결과를 바로 지우지 않고 prevUrl로 보관해둠 — 재생성이 끝나면 "직전 버전 vs 새 버전"을
+  // Before/After 슬라이더로 비교해볼 수 있게 하기 위함(마음에 드는 쪽을 골라서 다운로드 가능).
+  var prevResult = st.results[idx];
   st.results[idx]=null;
   st.running=true; st.step=idx;
   renderSB();
   var rooms=spTab.multiRoomImages;
   var room=rooms[idx];
   var isAnchor=(idx===0);
+  var hasCustomStyleMR2 = !!(spTab.multiRoomPrompt && spTab.multiRoomPrompt.trim());
+  if(isAnchor && !hasCustomStyleMR2){
+    st.results[idx]={url:room.img, freeAnchor:true, prevUrl:prevResult&&prevResult.url};
+    st.running=false;
+    renderSB();
+    return;
+  }
   var anchorUrl = st.results[0] && st.results[0].url;
-  var prompt=spTab.multiRoomPrompt.trim();
+  var prompt=spTab.multiRoomPrompt.trim() || '이 사진에 보이는 현재 인테리어 스타일(색감, 마감재, 조명 톤, 가구·소재의 디자인 언어)을 그대로 유지하면서 전체적인 완성도와 사실감을 높여줘.';
   var refs=[];
   if(!isAnchor && anchorUrl){
     refs.push(anchorUrl);
@@ -8447,8 +8477,11 @@ function _multiRoomRetryOne(idx){
   var task={id:Date.now()+idx, img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:'1K'};
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs=origRefs;
-    st.results[idx]={url:resultUrl};
+    st.results[idx]={url:resultUrl, prevUrl:prevResult&&prevResult.url};
     st.running=false;
+    // 재생성 끝나면 바로 메인 화면에 "직전 버전 vs 새 버전" 비교로 보여줘서, 클릭 한 번 더
+    // 안 해도 바로 비교하며 마음에 드는 쪽을 고를 수 있게 함.
+    _showRoomResultInMain(prevResult&&prevResult.url, resultUrl);
     renderSB();
   }, function(err){
     getTab('space').refs=origRefs;
@@ -8511,6 +8544,9 @@ function mkAutoRoomCamera(p){
   p.appendChild(typeWrap);
 
   var selWrap=dv('ss');selWrap.innerHTML='<div class="lbl">AI가 만들어줄 나머지 공간 <span class="lbl-en">체크 해제하면 안 만들어요</span></div>';
+  var selNote=dv('');selNote.style.cssText='font-size:10px;color:var(--m2);margin-bottom:6px';
+  selNote.textContent='💡 아래에서 고른 개수 + 기준 공간(원본 그대로 안 쓰고 스타일 적용해서 다시 생성) = 총 컷수예요';
+  selWrap.appendChild(selNote);
   var selGrid=dv('');selGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px';
   AUTOROOM_TYPES.forEach(function(t){
     if(t===spTab.autoRoomAnchorType) return; // 기준 공간과 같은 종류는 목록에서 제외
@@ -8530,10 +8566,10 @@ function mkAutoRoomCamera(p){
   selWrap.appendChild(selGrid);
   p.appendChild(selWrap);
 
-  var pw=dv('ss');pw.innerHTML='<div class="lbl">전체 공통 스타일</div>';
+  var pw=dv('ss');pw.innerHTML='<div class="lbl">전체 공통 스타일 <span class="lbl-en">선택사항</span></div>';
   var ta=document.createElement('textarea');
   ta.value=spTab.autoRoomPrompt;
-  ta.placeholder='예: 미드센추리 모던 스타일, 우드톤+베이지 배색';
+  ta.placeholder='선택사항 — 비워두면 업로드한 사진 스타일을 그대로 유지해요. 예: 미드센추리 모던 스타일, 우드톤+베이지 배색';
   ta.style.cssText='width:100%;min-height:70px;padding:10px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;line-height:1.6;font-family:inherit;resize:vertical;box-sizing:border-box';
   ta.oninput=function(){ spTab.autoRoomPrompt=ta.value; };
   pw.appendChild(ta);
@@ -8541,7 +8577,10 @@ function mkAutoRoomCamera(p){
 
   var st=spTab.autoRoomState;
   var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
-  var totalCr=(1+selectedOthers.length)*20; // 기준 공간도 스타일 적용해서 다시 생성하므로 +1
+  var hasCustomStyleUI = !!(spTab.autoRoomPrompt && spTab.autoRoomPrompt.trim());
+  var anchorCr = hasCustomStyleUI ? 1 : 0; // 스타일을 안 적었으면 기준 공간은 원본 그대로 써서 무료
+  var totalCr=(anchorCr+selectedOthers.length)*20;
+  var totalCuts = anchorCr + selectedOthers.length;
   var goWrap=dv('ss');
   var goBtn=mk('button','actbtn ok');goBtn.id='autoroom-go-btn';
   goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
@@ -8550,6 +8589,11 @@ function mkAutoRoomCamera(p){
   goBtn.innerHTML=isRunning?'생성 중...':'🎥 '+(1+selectedOthers.length)+'컷 자동 생성 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCr+'cr</span>';
   goBtn.onclick=_autoRoomRun;
   goWrap.appendChild(goBtn);
+  var costHint=dv('');costHint.style.cssText='font-size:10px;color:var(--m2);text-align:center;margin-top:6px';
+  costHint.textContent = hasCustomStyleUI
+    ? '기준 공간도 새 스타일로 다시 생성돼요'
+    : '스타일을 안 적으셔서 기준 공간(★)은 원본 사진 그대로 쓰여요 — 무료, 총 '+totalCuts+'컷만 과금돼요';
+  goWrap.appendChild(costHint);
   if(!spTab.autoRoomAnchorImg){
     var need1=dv('');need1.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';need1.textContent='기준 공간 사진을 먼저 올려주세요';
     goWrap.appendChild(need1);
@@ -8567,12 +8611,12 @@ function mkAutoRoomCamera(p){
       var result=st.results[i];
       var rRow=dv('');rRow.style.cssText='background:var(--c2);border-radius:9px;padding:8px';
       var rHead=dv('');rHead.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;font-weight:700;color:var(--t2)';
-      rHead.textContent=(i===0?'★ 기준: ':'')+typeName;
+      rHead.innerHTML=(i===0?'★ 기준: ':'')+typeName+((result&&result.freeAnchor)?' <span style="color:var(--ac);font-weight:400">(원본, 무료)</span>':'');
       rRow.appendChild(rHead);
       if(result && result.url){
         var rImg=document.createElement('img');rImg.src=result.url;
         rImg.style.cssText='width:100%;border-radius:7px;cursor:pointer';
-        rImg.onclick=function(origU,resU){ return function(){ _showRoomResultInMain(origU,resU); }; }(i===0?spTab.autoRoomAnchorImg:null, result.url);
+        rImg.onclick=function(origU,resU){ return function(){ _showRoomResultInMain(origU,resU); }; }(result.prevUrl||(i===0?spTab.autoRoomAnchorImg:null), result.url);
         rRow.appendChild(rImg);
         var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='🔄 이 공간만 다시 생성';
         retryBtn.style.cssText='width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
@@ -8600,9 +8644,11 @@ function _autoRoomRun(){
   if(!spTab.autoRoomAnchorImg){ alert('먼저 기준 공간 사진을 올려주세요.'); return; }
   var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
   if(!selectedOthers.length){ alert('만들어줄 공간을 최소 1개는 선택해주세요.'); return; }
-  if(!spTab.autoRoomPrompt || !spTab.autoRoomPrompt.trim()){ alert('전체 공통 스타일을 설명해주세요.'); return; }
+  // ⚠️ 예전엔 스타일을 안 적으면 막고 알림을 띄웠는데, 그럴 필요 없이 비어있으면 "지금 사진에
+  // 보이는 스타일을 그대로 유지"로 자동 처리하면 됨 — _autoRoomGenerateStep에서 기본값을 채움.
   if(!_supaUser){ openMd('account'); return; }
-  var totalCr=(1+selectedOthers.length)*20;
+  var _hasStyleForCheck2 = !!(spTab.autoRoomPrompt && spTab.autoRoomPrompt.trim());
+  var totalCr=((_hasStyleForCheck2?1:0)+selectedOthers.length)*20;
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCr){
     alert('크레딧이 부족합니다. 필요: '+totalCr+'cr, 현재: '+G.cr+'cr');
     openMd('credits');
@@ -8622,7 +8668,16 @@ function _autoRoomGenerateStep(idx){
   renderSB();
   var isAnchor=(idx===0);
   var typeName=allTypes[idx];
-  var basePrompt=spTab.autoRoomPrompt.trim();
+  var hasCustomStyle = !!(spTab.autoRoomPrompt && spTab.autoRoomPrompt.trim());
+  // ⚠️ 스타일 문구를 안 적었으면 "원본이랑 똑같이 다시 그려줘"나 마찬가지라, 기준 공간을 굳이
+  // 돈 내고 재생성할 필요가 없음 — 원본 사진을 그대로 결과로 씀(크레딧 차감 없음). 스타일을
+  // 바꾸고 싶어서 직접 적은 경우에만 기준 공간도 그 스타일로 다시 생성함.
+  if(isAnchor && !hasCustomStyle){
+    st.results[idx]={url:spTab.autoRoomAnchorImg, freeAnchor:true};
+    _autoRoomGenerateStep(idx+1);
+    return;
+  }
+  var basePrompt=spTab.autoRoomPrompt.trim() || '이 사진에 보이는 현재 인테리어 스타일(색감, 마감재, 조명 톤, 가구·소재의 디자인 언어)을 그대로 유지하면서 전체적인 완성도와 사실감을 높여줘.';
   var task;
   if(isAnchor){
     task={id:Date.now(), img:spTab.autoRoomAnchorImg, wf:'space', prompt:basePrompt, selK:null, eng:'nano2', resolution:'1K'};
@@ -8646,6 +8701,8 @@ function _autoRoomRetryOne(idx){
   var spTab=getTab('space');
   var st=spTab.autoRoomState;
   if(!st) return;
+  // ⚠️ 직전 결과를 바로 지우지 않고 prevUrl로 보관 — 재생성 후 "직전 버전 vs 새 버전" 비교 가능하게 함.
+  var prevResult2 = st.results[idx];
   st.results[idx]=null;
   st.running=true; st.step=idx;
   renderSB();
@@ -8653,7 +8710,14 @@ function _autoRoomRetryOne(idx){
   var allTypes=[spTab.autoRoomAnchorType].concat(selectedOthers);
   var isAnchor=(idx===0);
   var typeName=allTypes[idx];
-  var basePrompt=spTab.autoRoomPrompt.trim();
+  var hasCustomStyle = !!(spTab.autoRoomPrompt && spTab.autoRoomPrompt.trim());
+  if(isAnchor && !hasCustomStyle){
+    st.results[idx]={url:spTab.autoRoomAnchorImg, freeAnchor:true, prevUrl:prevResult2&&prevResult2.url};
+    st.running=false;
+    renderSB();
+    return;
+  }
+  var basePrompt=spTab.autoRoomPrompt.trim() || '이 사진에 보이는 현재 인테리어 스타일(색감, 마감재, 조명 톤, 가구·소재의 디자인 언어)을 그대로 유지하면서 전체적인 완성도와 사실감을 높여줘.';
   var task;
   if(isAnchor){
     task={id:Date.now(), img:spTab.autoRoomAnchorImg, wf:'space', prompt:basePrompt, selK:null, eng:'nano2', resolution:'1K'};
@@ -8663,8 +8727,9 @@ function _autoRoomRetryOne(idx){
     task={id:Date.now()+idx, img:anchorResultUrl, wf:'space', prompt:reimaginePrompt, selK:null, eng:'nano2', resolution:'1K'};
   }
   procImgWithTask(task, function(resultUrl){
-    st.results[idx]={url:resultUrl};
+    st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
     st.running=false;
+    _showRoomResultInMain(prevResult2&&prevResult2.url, resultUrl);
     renderSB();
   }, function(err){
     st.results[idx]={error:String(err).slice(0,120)};
