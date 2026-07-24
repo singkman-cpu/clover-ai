@@ -2246,7 +2246,8 @@ var EV=[
   {k:'kling3',       n:'Kling 3.0 Pro',     cost:70,  t:'Cinematic',    d:'$0.84/5초 · 1080p · 시네마틱 · 오디오', lg:'k', res:['720p','1080p'], audio:true},
   {k:'veo31',        n:'Veo 3.1 Fast',       cost:114, t:'Quality',      d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true},
   {k:'seedance2',    n:'Seedance 2.0',       cost:190, t:'Premium,Best', d:'480p/720p/1080p (해상도별 크레딧 다름) · 최고품질 · 오디오', lg:'s', res:['480p','720p','1080p'], audio:true},
-  {k:'seedance2mini',n:'Seedance 2.0 Mini',  cost:95,  t:'Fast,Cheap',   d:'$0.73/5초 · 480p/720p · 빠르고 저렴 · 오디오', lg:'m', res:['480p','720p'], audio:true}
+  {k:'seedance2mini',n:'Seedance 2.0 Mini',  cost:95,  t:'Fast,Cheap',   d:'$0.73/5초 · 480p/720p · 빠르고 저렴 · 오디오', lg:'m', res:['480p','720p'], audio:true},
+  {k:'omniflash',    n:'Gemini Omni Flash',  cost:160, t:'New,Editable', d:'$0.13/초 · 720p · 대화형 편집 지원 · Google 최신 · 오디오 (최대 10초)', lg:'g', res:['720p'], audio:true}
 ];
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
 var WFC={space:20,render:20,edit:20,video:60,upscale:20};
@@ -6233,6 +6234,11 @@ function getCost(){
       // 480p는 픽셀 수가 약 45%라 더 저렴하고, 1080p는 약 2.25배라 더 비쌈.
       if(G.vres==='1080p') base = Math.round(base*2.2);       // 720p의 약 2.2배 ($0.682 vs $0.303/초)
       else if(G.vres==='480p') base = Math.round(base*0.5);   // 720p의 약 절반
+    } else if(eng==='omniflash'){
+      // Gemini Omni Flash(fal.ai) — 토큰 과금: 초당 5,792토큰 × $21.875/1M ≈ $0.127/초(출력) + 입력 토큰 소액
+      // ≈ $0.13/초 ≈ 184원/초 원가 대비, 다른 영상 엔진과 동일한 마진(~1.75배)을 적용해 32cr/초 → 5초 기준 160cr.
+      // API 자체가 3~10초만 지원해서(기본 8초) 10초를 넘겨도 실제 호출은 10초로 클램프됨.
+      base = 160 + Math.max(0, dur-5)*32;
     } else {
       base = 200 + Math.max(0, dur-5)*40;
     }
@@ -6676,8 +6682,8 @@ function _captureBudgetSnapshot(tab, isExtFlag, isCommercialFlag){
     if(tab.budgetAiNotApplicableItems) tab.budgetAiNotApplicableItems.forEach(function(n){ _naSet[n]=true; });
     snap.items = items.map(function(it){
       var name = it[0];
-      var isKept = _keepSet[name] && name!=='철거·폐기물처리' && name!=='예비비';
-      var isNotApplicable = _naSet[name] && name!=='철거·폐기물처리' && name!=='예비비';
+      var isKept = _keepSet[name] && name!=='예비비';
+      var isNotApplicable = _naSet[name] && name!=='예비비';
       if(isNotApplicable){
         return { name: name, amt: 0, material: null, notApplicable: true };
       }
@@ -6948,14 +6954,19 @@ function mkBudgetTier(p){
       // 구체적으로 판단하게 함 — 안 그러면 "가구는 재사용 가능"이라고 해놓고 소파·TV장에도 여전히
       // 돈이 배정되는 모순이 생김. (건축외관은 해당 항목 목록이 없어서 빈 배열로 둠)
       var _itemNames = isExt ? []
-        : isCommercial ? (COMMERCIAL_ITEM_BREAKDOWN[tab.budgetBizType]||[]).filter(function(it){return it[0]!=='철거·폐기물처리' && it[0]!=='예비비';}).map(function(it){return it[0];})
-        : (ROOM_ITEM_BREAKDOWN[tab.budgetRoom]||[]).filter(function(it){return it[0]!=='철거·폐기물처리' && it[0]!=='예비비';}).map(function(it){return it[0];});
+        : isCommercial ? (COMMERCIAL_ITEM_BREAKDOWN[tab.budgetBizType]||[]).filter(function(it){return it[0]!=='예비비'; /* 철거는 AI가 사진 보고 필요 여부 직접 판단하게 함 */}).map(function(it){return it[0];})
+        : (ROOM_ITEM_BREAKDOWN[tab.budgetRoom]||[]).filter(function(it){return it[0]!=='예비비'; /* 철거는 AI가 사진 보고 필요 여부 직접 판단하게 함 */}).map(function(it){return it[0];});
       var _roomLabelForAi = isExt ? '건물 외관 전체(신축·리모델링)'
         : isCommercial ? ((COMMERCIAL_BIZ_LABELS[tab.budgetBizType]||'상업공간')+' 전체')
         : ROOM_BUDGET_SHARE[tab.budgetRoom][0];
-      var reqBody={ roomLabel: _roomLabelForAi, totalPy: py2||0, totalBudget: totalAmt2, defaultSharePct: defaultPct, itemNames: _itemNames };
+      var reqBody={ roomLabel: _roomLabelForAi, totalPy: py2||0, totalBudget: totalAmt2, defaultSharePct: defaultPct, itemNames: _itemNames,
+        // '철거·폐기물처리'도 이제 itemNames에 포함해서 보냄 — 예전엔 무조건 고정 항목으로 청구됐는데,
+        // 콘크리트 골조만 노출된 상태(신축 셸 상태)이거나 기존 마감재를 뜯어낼 게 없는 사진이면
+        // notApplicableItems에 '철거·폐기물처리'를 넣어 0원 처리할 수 있게 함.
+        demolitionGuidance: '기존 마감재(바닥재·벽지·타일·조명·가구 등)가 이미 철거된 콘크리트 골조 노출 상태이거나, 신축이라 애초에 철거할 기존 마감재가 없는 경우에는 itemNames 중 "철거·폐기물처리"를 notApplicableItems에 포함시켜 주세요. 기존 마감재가 남아있어 실제로 뜯어내야 하는 경우에만 철거 비용을 포함하세요.'
+      };
       if(imgSrc.startsWith('data:')) reqBody.imageBase64=imgSrc; else reqBody.imageUrl=imgSrc;
-      // NOTE(백엔드 연동 필요): analyze-room-budget 서버리스 함수를 아래 3가지를 반영하도록 업데이트해야
+      // NOTE(백엔드 연동 필요): analyze-room-budget 서버리스 함수를 아래 4가지를 반영하도록 업데이트해야
       // 실제로 작동합니다 —
       // 1) referenceImageBase64Array/referenceImageUrlArray(배열, 여러 장) — "원본 사진(현재 상태)"뿐 아니라
       //    "레퍼런스 사진(원하는 스타일)"의 마감재·소재 수준까지 비전 모델에 같이 넣어 판단. 레퍼런스에 대리석·
@@ -6964,6 +6975,8 @@ function mkBudgetTier(p){
       //    등 "일반 리모델링 범위를 벗어나는 추가 비용 리스크"가 보이면 그 목록을 반환하도록.
       // 3) 응답에 styleMismatch(boolean)+styleMismatchNote(string, 선택) 필드 추가 — 레퍼런스가 요구하는
       //    마감재 등급이 입력한 예산으로는 현실적으로 어려워 보이면 true와 함께 이유를 반환하도록.
+      // 4) reqBody.demolitionGuidance(위 참고)를 실제 프롬프트에 반영 — 사진에서 이미 골조만 노출됐거나
+      //    신축 셸 상태로 보이면 notApplicableItems에 "철거·폐기물처리"를 포함해서 반환하도록.
       if(refImgsAll.length){
         reqBody.referenceImageBase64Array = refImgsAll.filter(function(r){return r.startsWith('data:');});
         reqBody.referenceImageUrlArray = refImgsAll.filter(function(r){return !r.startsWith('data:');});
@@ -7214,7 +7227,7 @@ function mkBudgetTier(p){
           }
         }
         var roomItems = ROOM_ITEM_BREAKDOWN[tab.budgetRoom];
-        var itemNamesForAi = roomItems.filter(function(it){return it[0]!=='철거·폐기물처리' && it[0]!=='예비비';}).map(function(it){return it[0];});
+        var itemNamesForAi = roomItems.filter(function(it){return it[0]!=='예비비'; /* 철거는 AI가 사진 보고 필요 여부 직접 판단하게 함 */}).map(function(it){return it[0];});
         // "천장등은 실링팬으로, 소파는 크림색 3인 가죽소파로 새로 구입, 테이블은 그대로, TV장은
         // 필요없고 벽걸이TV로" 같은 복합 문장은 항목별로 유지/교체가 섞여있어서 단순 키워드
         // 매칭으론 한계가 있었음 — AI가 문장을 읽고 항목별로 정확히 나눠서 판단하게 함. 이 결과는
@@ -7412,7 +7425,7 @@ function mkBudgetTier(p){
           return;
         }
         var bizItemsCur = COMMERCIAL_ITEM_BREAKDOWN[tab.budgetBizType] || [];
-        var itemNamesForAiBiz = bizItemsCur.filter(function(it){return it[0]!=='철거·폐기물처리' && it[0]!=='예비비';}).map(function(it){return it[0];});
+        var itemNamesForAiBiz = bizItemsCur.filter(function(it){return it[0]!=='예비비'; /* 철거는 AI가 사진 보고 필요 여부 직접 판단하게 함 */}).map(function(it){return it[0];});
         bizOvBtn.disabled=true; bizOvBtn.textContent='분석 중...';
         bizOvMsg.style.color='var(--m2)'; bizOvMsg.textContent='AI가 문장을 항목별로 나눠서 읽고 있어요...';
         var _curBizAmtForAi = Math.round((parseFloat(tab.budgetAmount)||0) * (tab.budgetBizAmtMultiplier!=null ? tab.budgetBizAmtMultiplier : 1));
@@ -7734,8 +7747,8 @@ function mkBudgetTier(p){
         if(naSet) tab.budgetAiNotApplicableItems.forEach(function(n){ naSet[n]=true; });
         items.forEach(function(it){
           var name=it[0];
-          var isKept = keepSet && keepSet[name] && name!=='철거·폐기물처리' && name!=='예비비';
-          var isNotApplicable = naSet && naSet[name] && name!=='철거·폐기물처리' && name!=='예비비';
+          var isKept = keepSet && keepSet[name] && name!=='예비비';
+          var isNotApplicable = naSet && naSet[name] && name!=='예비비';
           var row=dv('');row.style.cssText='display:flex;justify-content:space-between;align-items:center;font-size:11.5px;padding:3px 0;color:var(--t2)';
           var nameSpan=dv('');nameSpan.textContent=name;
           row.appendChild(nameSpan);
@@ -8224,12 +8237,21 @@ function sbUpscaleVideo(p){
 
   var curFile=null, curDuration=0, curFactor=2;
   dropBox.onclick=function(){ fi.click(); };
+  var warnEl=dv('');warnEl.style.cssText='margin-top:8px;font-size:11.5px;color:#f59e0b;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:8px 10px;display:none;line-height:1.5';
+  previewWrap.appendChild(warnEl);
   function _refreshMeta(){
     if(!curDuration) return;
     var cost=calcVideoUpscaleCost(curDuration);
     var resLbl=G.tabs.upscale.vidTargetRes==='4k'?'4K':'2K';
+    var alreadyThere = curFactor<=1.05;
+    if(alreadyThere){
+      warnEl.style.display='block';
+      warnEl.textContent='⚠️ 이 영상은 이미 목표 해상도('+resLbl+') 이상이라 업스케일해도 크기가 커지지 않아요. 이 상태로 실행하면 화질 정리 효과만 있고 '+cost+'cr이 그대로 나가니, 정말 필요한 경우에만 실행하세요.';
+    } else {
+      warnEl.style.display='none';
+    }
     metaLine.textContent='길이 '+curDuration.toFixed(1)+'초 · 목표 '+resLbl+'(약 '+curFactor.toFixed(2)+'배 확대) · 예상 비용 '+cost+'cr';
-    goBtn.textContent='🎬 영상 업스케일 시작 ('+cost+'cr)';
+    goBtn.textContent='🎬 영상 업스케일 시작 ('+cost+'cr)'+(alreadyThere?' — 불필요할 수 있음':'');
   }
   fi.onchange=function(){
     var f=fi.files&&fi.files[0]; if(!f) return;
@@ -9520,6 +9542,7 @@ function sbShorts(p){
       blankTa.value=im.blankText||'';
       blankTa.placeholder='이 페이지에 넣을 문구를 입력하세요 (여러 줄 가능)';
       blankTa.style.cssText='width:100%;min-height:48px;padding:6px 7px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:11.5px;line-height:1.5;font-family:inherit;resize:vertical;box-sizing:border-box';
+      info.appendChild(_shortsEmojiRow(blankTa));
       (function(item, cInputBg, cInputTx, ta, thumbEl){
         function _refreshThumb(){
           item.img=_shortsMakeBlankThumb(item.bgColor);
@@ -9830,75 +9853,6 @@ function sbShorts(p){
   bgmLinksWrap.appendChild(bgmLinksRow);
   bgmWrap.appendChild(bgmLinksWrap);
 
-  // ── (실험적) Jamendo 검색으로 바로 삽입 — 서버 함수(jamendo-music) 배포 + JAMENDO_CLIENT_ID
-  // 등록이 되어 있어야 동작함. 상업적 이용 라이선스는 반드시 Jamendo에 직접 확인 필요.
-  var jamendoWrap=dv('');jamendoWrap.style.cssText='margin-bottom:10px;padding:10px;border:1px dashed var(--bd2);border-radius:8px';
-  var jamendoLabel=dv('');jamendoLabel.innerHTML='🔍 <strong style="color:var(--t)">Jamendo에서 찾아 바로 삽입</strong> <span style="color:#f59e0b;font-size:10px">(실험적 · 서버 설정 필요 · 상업이용 라이선스 별도 확인 필요)</span>';
-  jamendoLabel.style.cssText='font-size:11px;margin-bottom:8px;line-height:1.5';
-  jamendoWrap.appendChild(jamendoLabel);
-  var jamendoSearchRow=dv('');jamendoSearchRow.style.cssText='display:flex;gap:6px';
-  var jamendoInput=document.createElement('input');jamendoInput.type='text';jamendoInput.placeholder='분위기·장르로 검색 (예: calm piano, upbeat)';
-  jamendoInput.style.cssText='flex:1;padding:7px 9px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:12px;font-family:inherit';
-  var jamendoSearchBtn=mk('button','');jamendoSearchBtn.type='button';jamendoSearchBtn.textContent='검색';
-  jamendoSearchBtn.style.cssText='padding:7px 14px;border-radius:6px;border:none;background:var(--ac);color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit';
-  jamendoSearchRow.appendChild(jamendoInput);jamendoSearchRow.appendChild(jamendoSearchBtn);
-  jamendoWrap.appendChild(jamendoSearchRow);
-  var jamendoResults=dv('');jamendoResults.style.cssText='margin-top:8px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto';
-  jamendoWrap.appendChild(jamendoResults);
-  var jamendoStatus=dv('');jamendoStatus.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;display:none';
-  jamendoWrap.appendChild(jamendoStatus);
-  function _doJamendoSearch(){
-    var q=jamendoInput.value.trim();
-    if(!q) return;
-    jamendoResults.innerHTML='';
-    jamendoStatus.style.display='block';jamendoStatus.style.color='var(--m2)';jamendoStatus.textContent='검색 중...';
-    fetch(SUPA_URL+'/functions/v1/jamendo-music',{
-      method:'POST', headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({action:'search', query:q})
-    }).then(function(r){return r.json();}).then(function(d){
-      if(d.error){ jamendoStatus.style.color='#f59e0b'; jamendoStatus.textContent='⚠️ '+d.error; return; }
-      if(!d.tracks || !d.tracks.length){ jamendoStatus.textContent='검색 결과가 없어요.'; return; }
-      jamendoStatus.style.display='none';
-      d.tracks.forEach(function(t){
-        var row=dv('');row.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--card);border-radius:6px';
-        var playBtn=mk('button','');playBtn.type='button';playBtn.textContent='▶';
-        playBtn.style.cssText='width:26px;height:26px;border-radius:50%;border:none;background:var(--ac);color:#000;cursor:pointer;font-size:11px;flex-shrink:0';
-        var audioPreview=null;
-        playBtn.onclick=function(){
-          if(audioPreview && !audioPreview.paused){ audioPreview.pause(); playBtn.textContent='▶'; return; }
-          jamendoResults.querySelectorAll('audio').forEach(function(a){ a.pause(); });
-          jamendoResults.querySelectorAll('.jm-play-btn').forEach(function(b){ b.textContent='▶'; });
-          if(!audioPreview){ audioPreview=new Audio(t.previewUrl); audioPreview.onended=function(){ playBtn.textContent='▶'; }; }
-          audioPreview.play().catch(function(){}); playBtn.textContent='⏸';
-        };
-        playBtn.className='jm-play-btn';
-        row.appendChild(playBtn);
-        var info=dv('');info.style.cssText='flex:1;min-width:0;font-size:11.5px;color:var(--t);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-        info.textContent=t.name+' — '+t.artist;
-        row.appendChild(info);
-        var selBtn=mk('button','');selBtn.type='button';selBtn.textContent='선택';
-        selBtn.style.cssText='padding:5px 10px;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit;flex-shrink:0';
-        selBtn.onclick=function(){
-          selBtn.disabled=true; selBtn.textContent='적용 중...';
-          fetch(SUPA_URL+'/functions/v1/jamendo-music',{
-            method:'POST', headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
-            body:JSON.stringify({action:'select', trackId:t.id, audioUrl:t.previewUrl})
-          }).then(function(r){return r.json();}).then(function(d2){
-            if(d2.error){ selBtn.disabled=false; selBtn.textContent='실패 — 다시'; return; }
-            opts.bgmUrl=d2.url; opts.bgmFile=null;
-            selBtn.textContent='✓ 적용됨';
-            renderMain('shorts');
-          }).catch(function(){ selBtn.disabled=false; selBtn.textContent='실패 — 다시'; });
-        };
-        row.appendChild(selBtn);
-        jamendoResults.appendChild(row);
-      });
-    }).catch(function(){ jamendoStatus.style.display='block'; jamendoStatus.style.color='#f59e0b'; jamendoStatus.textContent='⚠️ 검색 실패 — 서버 함수가 아직 배포 안 됐을 수 있어요.'; });
-  }
-  jamendoSearchBtn.onclick=_doJamendoSearch;
-  jamendoInput.onkeydown=function(e){ if(e.key==='Enter') _doJamendoSearch(); };
-  bgmWrap.appendChild(jamendoWrap);
-
   var bgmInput=document.createElement('input');
   bgmInput.type='file';bgmInput.accept='audio/*';bgmInput.style.cssText='width:100%;font-size:12px;color:var(--t2);cursor:pointer;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px';
   bgmInput.onchange=function(){
@@ -9983,6 +9937,28 @@ function sbShorts(p){
   // 레터박스일 때만: 위/아래 검은 여백에 직접 들어가는 문구 — 상단은 후킹용 헤드라인,
   // 하단은 이름·출처 같은 작은 캡션. 둘 다 항상 중앙정렬로 그려짐(참고 이미지 스타일 그대로).
   var SHORTS_TEXT_COLORS=[['#ffffff','흰색'],['#ffe600','노랑'],['#ff3b30','빨강'],['#00e5cc','민트']];
+  // 자주 쓰는 이모티콘 — 문구 입력창에 커서 위치에 바로 삽입할 수 있게 함
+  var SHORTS_EMOJIS=['🔥','❤️','✨','👍','😍','🎉','💯','👀','📍','✅','⭐','💡','🏠','🛋️','🎨','📸','👇','➡️','💬','😱','🤩','🙌','🚨','💰'];
+  function _shortsEmojiRow(taEl){
+    var wrap=dv('');wrap.style.cssText='display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px';
+    SHORTS_EMOJIS.forEach(function(em){
+      var b=mk('button','');b.type='button';b.textContent=em;
+      b.style.cssText='width:27px;height:27px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1';
+      b.onclick=function(){
+        var start=taEl.selectionStart!=null?taEl.selectionStart:taEl.value.length;
+        var end=taEl.selectionEnd!=null?taEl.selectionEnd:taEl.value.length;
+        var v=taEl.value;
+        taEl.value=v.slice(0,start)+em+v.slice(end);
+        var newPos=start+em.length;
+        taEl.focus();
+        try{ taEl.setSelectionRange(newPos,newPos); }catch(e){}
+        // 기존 oninput 핸들러들을 그대로 재사용 — 텍스트/상태 업데이트 로직 중복 없이 그대로 실행됨
+        taEl.dispatchEvent(new Event('input',{bubbles:true}));
+      };
+      wrap.appendChild(b);
+    });
+    return wrap;
+  }
   function _shortsColorSwatchRow(curColor, onPick){
     var row=dv('');row.style.cssText='display:flex;gap:6px';
     SHORTS_TEXT_COLORS.forEach(function(c){
@@ -10004,6 +9980,7 @@ function sbShorts(p){
     ta.placeholder=cfg.placeholder;
     ta.rows=cfg.rows;
     ta.style.cssText='width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12.5px;font-family:inherit;resize:vertical;box-sizing:border-box;margin-bottom:8px';
+    wrap.appendChild(_shortsEmojiRow(ta));
     wrap.appendChild(ta);
 
     // 글자 크기 슬라이더 — 검은 여백 안에서 실시간으로 크기 확인 가능
@@ -10172,6 +10149,41 @@ function sbShorts(p){
   });
   fontWrap.appendChild(fontRow);
   p.appendChild(fontWrap);
+
+  // ── 문구 타이핑 애니메이션 — 켜면 빈 페이지·레터박스 문구가 한 글자씩 나타남. 속도는 초당 글자 수로 조절.
+  var animWrap=dv('ss');
+  animWrap.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:11px 14px;margin-bottom:8px';
+  var animToggleRow=dv('');animToggleRow.style.cssText='display:flex;align-items:center;justify-content:space-between';
+  var animTxt=dv('');
+  animTxt.innerHTML='<div style="font-size:12.5px;font-weight:700;color:var(--t)">✍️ 문구 타이핑 애니메이션</div><div style="font-size:10.5px;color:var(--m2);margin-top:2px">빈 페이지·레터박스 문구가 한 글자씩 나타나요</div>';
+  var animToggleBtn=mk('button','');animToggleBtn.type='button';
+  var _animOn=opts.textAnim==='typewriter';
+  function _styleAnimToggle(){
+    animToggleBtn.style.cssText='flex-shrink:0;margin-left:10px;width:46px;height:26px;border-radius:13px;border:none;cursor:pointer;position:relative;background:'+(_animOn?'var(--ac)':'var(--bd2)')+';transition:background .15s';
+    animToggleBtn.innerHTML='<span style="position:absolute;top:3px;left:'+(_animOn?'23px':'3px')+';width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s"></span>';
+  }
+  _styleAnimToggle();
+  var animSpeedRow=dv('');animSpeedRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:10px;'+(_animOn?'':'display:none');
+  var animSpeedLbl=dv('');animSpeedLbl.style.cssText='font-size:10.5px;color:var(--t2);flex-shrink:0;width:78px';
+  var curSpeed=opts.textAnimSpeed||14;
+  animSpeedLbl.textContent='속도 '+curSpeed+'자/초';
+  var animSpeedSlider=document.createElement('input');
+  animSpeedSlider.type='range';animSpeedSlider.min='3';animSpeedSlider.max='30';animSpeedSlider.step='1';animSpeedSlider.value=curSpeed;
+  animSpeedSlider.style.cssText='flex:1;accent-color:var(--ac)';
+  animSpeedSlider.oninput=function(){
+    opts.textAnimSpeed=parseInt(animSpeedSlider.value,10);
+    animSpeedLbl.textContent='속도 '+opts.textAnimSpeed+'자/초';
+  };
+  animSpeedRow.appendChild(animSpeedLbl);animSpeedRow.appendChild(animSpeedSlider);
+  animToggleBtn.onclick=function(){
+    _animOn=!_animOn;
+    opts.textAnim=_animOn?'typewriter':'none';
+    _styleAnimToggle();
+    animSpeedRow.style.display=_animOn?'flex':'none';
+  };
+  animToggleRow.appendChild(animTxt);animToggleRow.appendChild(animToggleBtn);
+  animWrap.appendChild(animToggleRow);animWrap.appendChild(animSpeedRow);
+  p.appendChild(animWrap);
 
   // 역할별 머무는 시간 조절 — 예: 현장사진은 짧게 훅 지나가고, AI디자인 결과는 좀 더 오래 보여주고 싶을 때
   var holdWrap=dv('ss');
@@ -12218,7 +12230,7 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
     return;
   }
   if(entry.type==='hold'){
-    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,videoCache);
+    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,videoCache, t-entry.start);
   } else if(entry.type==='wipe'){
     // 이전 장면 → 다음 장면으로: 우측에서 슬라이더 바가 생성되어 좌측으로 이동하며
     // 그 자리에 다음 장면(오른쪽 영역)이 자연스럽게 드러난다.
@@ -12235,12 +12247,18 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
 }
 
 // 슬라이드 그리기
-function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache){
+// elapsed: 이 슬라이드가 화면에 나온 뒤 지난 시간(초) — 타이핑 애니메이션용. 없으면(undefined)
+// 전체 문구를 그대로 다 보여줌(썸네일·전환 중 프레임 등 애니메이션이 필요 없는 경우).
+function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed){
   if(!slide)return;
+  var revealCount=null;
+  if(elapsed!=null && opts && opts.textAnim==='typewriter'){
+    revealCount=Math.max(0, Math.floor(elapsed*(opts.textAnimSpeed||14)));
+  }
   if(slide.type==='blank'){
     ctx.fillStyle=slide.bgColor||'#0a0a0a';
     ctx.fillRect(0,0,W,H);
-    if(slide.blankText) _shortsDrawBlankText(ctx,W,H,slide.blankText,slide.textColor||'#fff',opts&&opts.fontFamily);
+    if(slide.blankText) _shortsDrawBlankText(ctx,W,H,slide.blankText,slide.textColor||'#fff',opts&&opts.fontFamily,revealCount);
     return;
   }
   if(slide.isVideo){
@@ -12278,7 +12296,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache){
   var _effTop = slide.skipTopText ? '' : (opts&&opts.topText);
   var _effBottom = slide.skipBottomText ? '' : (opts&&opts.bottomText);
   if(opts&&opts.fitMode==='contain'&&(_effTop||_effBottom)){
-    _shortsDrawLetterboxText(ctx,W,H,img,_effTop,_effBottom,opts&&opts.fontFamily,opts.topTextColor,opts.bottomTextColor,opts.topCharColors,opts.bottomCharColors,opts.topTextScale,opts.bottomTextScale);
+    _shortsDrawLetterboxText(ctx,W,H,img,_effTop,_effBottom,opts&&opts.fontFamily,opts.topTextColor,opts.bottomTextColor,opts.topCharColors,opts.bottomCharColors,opts.topTextScale,opts.bottomTextScale,revealCount);
     if(slide.label && opts.showSlideLabels!==false) _shortsDrawSlideLabelBadge(ctx,W,H,img,slide.label,opts&&opts.fontFamily,opts&&opts.textPos,!!_effTop,!!_effBottom);
   } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
     _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,img,opts&&opts.fitMode);
@@ -12288,7 +12306,8 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache){
 // 레터박스에서 하단 검은 바는 고정 브랜드 문구가 차지하고 있을 때, 장면별 내용(현장 사진/AI
 // 디자인 등)을 사진 위에 작게 배지로 보여줌 — 사진이 보이는 영역의 좌측 하단 모서리 안쪽에 배치.
 // 빈 페이지(배경색만 있는 슬라이드)에 문구를 중앙에 그림 — 길면 자동 줄바꿈, 엔터로 수동 줄바꿈도 가능
-function _shortsDrawBlankText(ctx, W, H, text, color, fontKey){
+// revealCount: 타이핑 애니메이션용 — 여기까지만(문자 수 기준) 그리고 나머지는 아직 안 보여줌. null이면 전체 표시.
+function _shortsDrawBlankText(ctx, W, H, text, color, fontKey, revealCount){
   if(!text)return;
   ctx.save();
   var fs=Math.round(W*0.09);
@@ -12313,7 +12332,19 @@ function _shortsDrawBlankText(ctx, W, H, text, color, fontKey){
   });
   var totalH=lines.length*lineHeight;
   var startY=H/2 - totalH/2 + lineHeight/2;
-  lines.forEach(function(ln,i){ ctx.fillText(ln, W/2, startY+i*lineHeight); });
+  if(revealCount==null){
+    lines.forEach(function(ln,i){ ctx.fillText(ln, W/2, startY+i*lineHeight); });
+  } else {
+    var drawn=0;
+    for(var i=0;i<lines.length;i++){
+      var remaining=revealCount-drawn;
+      if(remaining<=0) break;
+      var ln=lines[i];
+      var effLn = remaining<ln.length ? ln.slice(0,remaining) : ln;
+      ctx.fillText(effLn, W/2, startY+i*lineHeight);
+      drawn += ln.length+1; // +1: 줄바꿈/공백으로 소비된 문자 근사치
+    }
+  }
   ctx.restore();
 }
 function _shortsDrawSlideLabelBadge(ctx, W, H, img, label, fontKey, pos, hasTopText, hasBottomText){
@@ -12424,7 +12455,7 @@ function _shortsDrawImage(ctx, W, H, img, fitMode, zoom, offX, offY){
 // 레터박스 전용 텍스트 — 사진 위에 겹쳐 쓰는 게 아니라, 레터박스로 생긴 위/아래 검은 여백
 // 안에 딱 맞춰서 중앙정렬로 글자를 넣음 (틱톡/릴스에서 흔히 보는 "상단 헤드라인 + 하단 캡션" 형태).
 // barTopH/barBottomH: _shortsDrawContainImage와 똑같은 계산으로 구한, 실제 여백의 높이.
-function _shortsDrawLetterboxText(ctx, W, H, img, topText, bottomText, fontKey, topColor, bottomColor, topCharColors, bottomCharColors, topSizeScale, bottomSizeScale){
+function _shortsDrawLetterboxText(ctx, W, H, img, topText, bottomText, fontKey, topColor, bottomColor, topCharColors, bottomCharColors, topSizeScale, bottomSizeScale, revealCount){
   if(!img || (!topText && !bottomText)) return;
   var iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
   if(!iw||!ih) return;
@@ -12452,13 +12483,13 @@ function _shortsDrawLetterboxText(ctx, W, H, img, topText, bottomText, fontKey, 
     var fsTop=Math.max(14, Math.min(W*0.075, barTopH*0.28)) * (topSizeScale||1);
     ctx.font=_shortsFontCss(fontKey, fsTop);
     ctx.textBaseline='middle';
-    _shortsDrawWrappedColoredText(ctx, topText, W/2, barTopH*0.72, W*0.9, fsTop*1.2, topColor||'#fff', topCharColors);
+    _shortsDrawWrappedColoredText(ctx, topText, W/2, barTopH*0.72, W*0.9, fsTop*1.2, topColor||'#fff', topCharColors, revealCount);
   }
   if(bottomText){
     var fsBottom=Math.max(12, Math.min(W*0.05, barBottomH*0.32)) * (bottomSizeScale||1);
     ctx.font=_shortsFontCss(fontKey, fsBottom);
     ctx.textBaseline='middle';
-    _shortsDrawWrappedColoredText(ctx, bottomText, W/2, H-barBottomH/2, W*0.9, fsBottom*1.2, bottomColor||'rgba(255,255,255,.92)', bottomCharColors);
+    _shortsDrawWrappedColoredText(ctx, bottomText, W/2, H-barBottomH/2, W*0.9, fsBottom*1.2, bottomColor||'rgba(255,255,255,.92)', bottomCharColors, revealCount);
   }
   ctx.restore();
 }
@@ -12495,26 +12526,34 @@ function _shortsWrapWithIndex(ctx, text, maxW){
   return lines;
 }
 // 줄바꿈 + 글자별 색상(있으면)을 반영해서 중앙정렬로 그림
-function _shortsDrawWrappedColoredText(ctx, text, cx, cy, maxW, lineH, baseColor, charColors){
+// revealCount: 타이핑 애니메이션용 문자 수 제한(null이면 전체 표시)
+function _shortsDrawWrappedColoredText(ctx, text, cx, cy, maxW, lineH, baseColor, charColors, revealCount){
   var lines=_shortsWrapWithIndex(ctx, text, maxW);
   var startY = cy - (lines.length-1)*lineH/2;
   lines.forEach(function(L,i){
-    _shortsDrawColoredLine(ctx, L.line, L.startIdx, cx, startY+i*lineH, baseColor, charColors);
+    _shortsDrawColoredLine(ctx, L.line, L.startIdx, cx, startY+i*lineH, baseColor, charColors, revealCount);
   });
 }
 // 한 줄을 글자 하나하나 원하는 색으로 그리면서, 전체 폭 기준으로 중앙정렬함
-function _shortsDrawColoredLine(ctx, line, startIdx, cx, y, baseColor, charColors){
+// revealCount: startIdx 기준 전체 문자열에서 여기까지만 보여줌(null이면 제한 없음)
+function _shortsDrawColoredLine(ctx, line, startIdx, cx, y, baseColor, charColors, revealCount){
+  var effLine=line;
+  if(revealCount!=null){
+    var localReveal=revealCount-startIdx;
+    if(localReveal<=0) return; // 이 줄은 아직 시작 안 됨
+    if(localReveal<line.length) effLine=line.slice(0,localReveal);
+  }
   if(!charColors || Object.keys(charColors).length===0){
     ctx.fillStyle=baseColor;
-    ctx.fillText(line, cx, y);
+    ctx.fillText(effLine, cx, y);
     return;
   }
-  var totalW=ctx.measureText(line).width;
+  var totalW=ctx.measureText(effLine).width;
   var x=cx-totalW/2;
   var prevAlign=ctx.textAlign;
   ctx.textAlign='left';
-  for(var i=0;i<line.length;i++){
-    var ch=line[i];
+  for(var i=0;i<effLine.length;i++){
+    var ch=effLine[i];
     var color=charColors[startIdx+i]||baseColor;
     ctx.fillStyle=color;
     ctx.fillText(ch,x,y);
@@ -13561,7 +13600,8 @@ function loadHistFromStorage(){
           if(x.wf==='video' && !x.vidEng){
             var engNames={
               'Wan 2.2':'wan22','Kling 3.0 Pro':'kling3',
-              'Veo 3.1 Fast':'veo31','Seedance 2.0':'seedance2','Seedance 2.0 Mini':'seedance2mini'
+              'Veo 3.1 Fast':'veo31','Seedance 2.0':'seedance2','Seedance 2.0 Mini':'seedance2mini',
+              'Gemini Omni Flash':'omniflash'
             };
             (x.tags||[]).forEach(function(t){
               if(engNames[t]) x.vidEng=engNames[t];
@@ -16519,6 +16559,29 @@ function autoVideoPrompt(hasRefs){
   return prompts[Math.floor(Math.random()*prompts.length)];
 }
 
+// ── Gemini Omni Flash (Google, fal.ai · 대화형 편집 지원 · $0.13/초) ──
+// API가 3~10초만 지원(기본 8초)해서, 슬라이더로 그 이상을 골라도 10초로 클램프해서 호출한다.
+function runOmniFlash(imgDataUrl, prompt, duration, onDone, onErr){
+  var ldst=gE('ldst');
+  var finalPrompt = (prompt&&prompt.trim()) ? prompt : autoVideoPrompt();
+  var oDur = Math.max(3, Math.min(10, Math.round(duration||8)));
+  if(ldst)ldst.textContent='Gemini Omni Flash 영상 생성 중 (30~90초)...';
+  _doUpload(imgDataUrl, function(imgUrl){
+    falRun('google/gemini-omni-flash/image-to-video',{
+      image_url: imgUrl,
+      prompt: finalPrompt,
+      aspect_ratio: (G.vAspect==='9:16'?'9:16':'16:9'),
+      duration: oDur
+    }, function(d){
+      var url=falExtractVideoUrl(d)||falExtractImageUrl(d);
+      if(url){onDone(url);}else{onErr('Omni Flash: 결과 URL 없음');}
+    }, function(err){
+      console.warn('[Omni Flash 실패]',err,'→ Wan 폴백');
+      runWan22(imgDataUrl, finalPrompt, duration, onDone, onErr);
+    }, {wf:'video', vidEng:'omniflash', vdur:oDur});
+  });
+}
+
 // ── Wan 2.2 (기본 엔진 · $0.10/초) ─────────────────────────────────
 function runWan22(imgDataUrl, prompt, duration, onDone, onErr){
   var ldst=gE('ldst');
@@ -17387,6 +17450,8 @@ function procImgWithTask(task, onDone, onErr){
       runSeedance(img, vp, vdur, false, onDone, onErr);
     } else if(engK==='seedance2mini'){
       runSeedanceMini(img, vp, vdur, onDone, onErr);
+    } else if(engK==='omniflash'){
+      runOmniFlash(img, vp, vdur, onDone, onErr);
     } else {
       runKling(img, vp, vdur, onDone, onErr);
     }
@@ -17734,6 +17799,8 @@ function procImg(onDone, onErr) {
       runVeo31(_vTab.inputImg, vp, _vdur, onDone, onErr);
     } else if(engK === 'seedance2') {
       runSeedance(_vTab.inputImg, vp, _vdur, false, onDone, onErr);
+    } else if(engK === 'omniflash') {
+      runOmniFlash(_vTab.inputImg, vp, _vdur, onDone, onErr);
     } else {
       runKling(_vTab.inputImg, vp, _vdur, onDone, onErr);
     }
