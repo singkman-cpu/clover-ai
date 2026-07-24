@@ -8188,6 +8188,30 @@ function mkBudgetTier(p){
   p.appendChild(w);
 }
 function sbSpace(p){
+  var spTab=getTab('space');
+  if(!spTab.spaceMode) spTab.spaceMode='single';
+  // ── 단일 사진 vs 여러 공간 세트 모드 토글 ────────────────────────────
+  // "참조 이미지 유지" 기능 — 거실/주방/욕실/침실 등 같은 집의 여러 공간 사진을 한꺼번에 넣으면,
+  // 첫 번째 방(기준 공간)의 결과를 나머지 방들 생성할 때 참고이미지로 자동으로 같이 넣어서
+  // 마감재·색감·조명톤 등 스타일을 통일시켜줌. (완전히 똑같은 구조·창문까지 보장하는 건 기술적으로
+  // 불가능하지만 — 실제 인테리어 AI 업계에서도 "기준 공간을 먼저 만들고 그 결과를 나머지 공간의
+  // 스타일 레퍼런스로 쓰는" 방식이 표준적인 절충안으로 쓰이고 있음)
+  var modeWrap0=dv('ss');modeWrap0.style.cssText='margin-bottom:4px';
+  var modeRow0=dv('');modeRow0.style.cssText='display:flex;gap:8px';
+  [['single','📷 사진 한 장'],['multiRoom','🏠 여러 공간 세트로 (베타)']].forEach(function(pair){
+    var key=pair[0],lbl=pair[1];
+    var isOn=spTab.spaceMode===key;
+    var b=mk('button','');b.type='button';
+    b.style.cssText='flex:1;padding:9px 6px;border-radius:9px;border:1.5px solid '+(isOn?'var(--ac)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    b.textContent=lbl;
+    b.onclick=function(){ spTab.spaceMode=key; renderSB(); };
+    modeRow0.appendChild(b);
+  });
+  modeWrap0.appendChild(modeRow0);
+  p.appendChild(modeWrap0);
+
+  if(spTab.spaceMode==='multiRoom'){ mkMultiRoomSpace(p); return; }
+
   mkNote(p,'<strong style="color:var(--ac)">실제 현장사진 &#8594; 새로운 디자인</strong><br>현장 사진을 레퍼런스와 함께 AI로 변환합니다.');
   mkEng(p,false);mkUB(p,'현장사진 업로드','main');
   var photoTip=dv('');photoTip.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.5;padding:6px 2px 2px';
@@ -8199,6 +8223,212 @@ function sbSpace(p){
   mkTA(p,'예: 모던 미니멀, 북유럽 스타일, 조명 따뜻하게...');
   mkPre(p,PS_SPACE);
   mkSl(p,'Creativity','c0',-10,10);mkSl(p,'HDR','h0',-10,10);mkSl(p,'Resemblance','r0',-10,10);mkSl(p,'Fractality','f0',-10,10);
+}
+// ── 여러 공간 세트로 디자인 — "참조 이미지 유지" 기능 ────────────────────
+// 거실/주방/욕실/침실 등 같은 집의 여러 방 사진을 한꺼번에 넣으면, 첫 번째 방(기준 공간)을
+// 먼저 생성하고 그 결과를 나머지 방들 생성할 때 참고이미지로 자동으로 같이 넣어서 마감재·
+// 색감·조명톤 등 스타일을 통일시켜줌.
+var MULTIROOM_LABELS=['거실','주방','욕실','침실','현관','기타'];
+function mkMultiRoomSpace(p){
+  var spTab=getTab('space');
+  if(!spTab.multiRoomImages) spTab.multiRoomImages=[];
+  if(spTab.multiRoomPrompt==null) spTab.multiRoomPrompt='';
+
+  mkNote(p,'<strong style="color:var(--ac)">🏠 여러 공간 세트로 디자인 (베타)</strong><br>같은 집의 거실·주방·욕실·침실 사진을 한꺼번에 넣으면, 첫 번째 공간(기준)의 결과를 나머지 공간들 만들 때 참고이미지로 자동으로 같이 넣어서 마감재·색감·조명톤 등 스타일을 통일시켜요.<br><span style="font-size:10px;color:#f59e0b">⚠️ 벽·창문 구조까지 완전히 똑같이 맞춰주는 건 아니에요 — 각 공간의 원래 구조는 그대로 유지하면서 "같은 집 느낌"의 스타일만 통일해요.</span>');
+
+  var listWrap=dv('ss');listWrap.innerHTML='<div class="lbl">공간 목록 <span class="lbl-en">첫 번째가 기준 공간이 돼요</span></div>';
+  var listBox=dv('');listBox.style.cssText='display:flex;flex-direction:column;gap:8px';
+  spTab.multiRoomImages.forEach(function(room,idx){
+    var row=dv('');row.style.cssText='display:flex;align-items:center;gap:8px;background:var(--c2);border-radius:9px;padding:8px';
+    var thumb=document.createElement('img');thumb.src=room.img;
+    thumb.style.cssText='width:48px;height:48px;object-fit:cover;border-radius:7px;flex-shrink:0';
+    row.appendChild(thumb);
+    var badge=dv('');badge.style.cssText='width:20px;height:20px;border-radius:50%;background:'+(idx===0?'var(--ac)':'var(--card)')+';color:'+(idx===0?'#000':'var(--t2)')+';font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0';
+    badge.textContent=idx===0?'★':(idx+1);
+    badge.title=idx===0?'기준 공간':'';
+    row.appendChild(badge);
+    var sel=document.createElement('select');
+    sel.style.cssText='flex:1;padding:6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:12px;font-family:inherit';
+    MULTIROOM_LABELS.forEach(function(l){ var o=document.createElement('option');o.value=l;o.textContent=l;sel.appendChild(o); });
+    sel.value=room.label||MULTIROOM_LABELS[Math.min(idx,MULTIROOM_LABELS.length-1)];
+    room.label=sel.value;
+    sel.onchange=function(){ room.label=sel.value; };
+    row.appendChild(sel);
+    var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='✕';
+    delBtn.style.cssText='width:26px;height:26px;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:#f87171;cursor:pointer;font-size:12px';
+    delBtn.onclick=function(){ spTab.multiRoomImages=spTab.multiRoomImages.filter(function(r){return r.id!==room.id;}); renderSB(); };
+    row.appendChild(delBtn);
+    listBox.appendChild(row);
+  });
+  listWrap.appendChild(listBox);
+
+  var addBox=dv('');addBox.style.cssText='margin-top:8px;border:1.5px dashed var(--bd2);border-radius:9px;padding:14px;text-align:center;cursor:pointer;background:var(--c2)';
+  addBox.innerHTML='<div style="font-size:12px;color:var(--t2)">+ 공간 사진 추가</div>';
+  var addInput=document.createElement('input');addInput.type='file';addInput.accept='image/*';addInput.multiple=true;addInput.style.display='none';
+  addBox.appendChild(addInput);
+  addBox.onclick=function(){ addInput.click(); };
+  addInput.onchange=function(){
+    var files=Array.prototype.slice.call(addInput.files||[]);
+    var remaining=files.length;
+    if(!remaining) return;
+    files.forEach(function(f){
+      var reader=new FileReader();
+      reader.onload=function(){
+        var nextIdx=spTab.multiRoomImages.length;
+        spTab.multiRoomImages.push({id:Date.now()+Math.random(), img:reader.result, label:MULTIROOM_LABELS[Math.min(nextIdx,MULTIROOM_LABELS.length-1)]});
+        remaining--;
+        if(remaining<=0) renderSB();
+      };
+      reader.readAsDataURL(f);
+    });
+  };
+  listWrap.appendChild(addBox);
+  p.appendChild(listWrap);
+
+  var pw=dv('ss');pw.innerHTML='<div class="lbl">전체 공간에 공통으로 적용할 스타일</div>';
+  var ta=document.createElement('textarea');
+  ta.value=spTab.multiRoomPrompt;
+  ta.placeholder='예: 미드센추리 모던 스타일, 우드톤+베이지 배색, 전체적으로 따뜻한 조명';
+  ta.style.cssText='width:100%;min-height:70px;padding:10px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;line-height:1.6;font-family:inherit;resize:vertical;box-sizing:border-box';
+  ta.oninput=function(){ spTab.multiRoomPrompt=ta.value; };
+  pw.appendChild(ta);
+  p.appendChild(pw);
+
+  var st=spTab.multiRoomState;
+  var goWrap=dv('ss');
+  var goBtn=mk('button','actbtn ok');goBtn.id='multiroom-go-btn';
+  goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
+  var n=spTab.multiRoomImages.length;
+  var totalCost=n*20;
+  var isRunning=st&&st.running;
+  goBtn.disabled=!!isRunning || n<2;
+  goBtn.innerHTML=isRunning?'생성 중...':'🏠 세트로 생성 시작 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCost+'cr</span>';
+  goBtn.onclick=_multiRoomRun;
+  goWrap.appendChild(goBtn);
+  if(n<2){
+    var needMore=dv('');needMore.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';
+    needMore.textContent='최소 2개 공간을 넣어야 스타일을 통일할 의미가 있어요';
+    goWrap.appendChild(needMore);
+  }
+  p.appendChild(goWrap);
+
+  // 결과
+  if(st && (st.results.length || st.running)){
+    var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">결과</div>';
+    var resGrid=dv('');resGrid.style.cssText='display:flex;flex-direction:column;gap:10px';
+    for(var i=0;i<n;i++){
+      var room2=spTab.multiRoomImages[i];
+      var result=st.results[i];
+      var rRow=dv('');rRow.style.cssText='background:var(--c2);border-radius:9px;padding:8px';
+      var rHead=dv('');rHead.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11px;font-weight:700;color:var(--t2)';
+      rHead.innerHTML=(i===0?'★ ':'')+(room2?room2.label:'')+' '+(i+1)+'/'+n;
+      rRow.appendChild(rHead);
+      if(result && result.url){
+        var rImg=document.createElement('img');rImg.src=result.url;
+        rImg.style.cssText='width:100%;border-radius:7px;cursor:pointer';
+        rImg.onclick=function(u){ return function(){ window.open(u,'_blank'); }; }(result.url);
+        rRow.appendChild(rImg);
+        var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='🔄 이 공간만 다시 생성';
+        retryBtn.style.cssText='width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
+        retryBtn.onclick=function(idx2){ return function(){ _multiRoomRetryOne(idx2); }; }(i);
+        rRow.appendChild(retryBtn);
+      } else if(result && result.error){
+        var rErr=dv('');rErr.style.cssText='font-size:10.5px;color:#f87171';rErr.textContent='⚠️ 실패: '+result.error;
+        rRow.appendChild(rErr);
+      } else if(st.running && st.step===i){
+        rRow.innerHTML+='<div style="display:flex;align-items:center;gap:6px;padding:10px 0"><span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span><span style="font-size:11px;color:var(--t2)">생성 중...</span></div>';
+      } else {
+        var rWait=dv('');rWait.style.cssText='font-size:10.5px;color:var(--m2)';rWait.textContent='대기 중';
+        rRow.appendChild(rWait);
+      }
+      resGrid.appendChild(rRow);
+    }
+    resWrap.appendChild(resGrid);
+    p.appendChild(resWrap);
+  }
+  var styleTag=document.getElementById('agent-spin-style');
+  if(!styleTag){ styleTag=document.createElement('style'); styleTag.id='agent-spin-style'; styleTag.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}'; document.head.appendChild(styleTag); }
+}
+function _multiRoomRun(){
+  var spTab=getTab('space');
+  var n=spTab.multiRoomImages.length;
+  if(n<2){ alert('최소 2개 공간을 넣어주세요.'); return; }
+  if(!spTab.multiRoomPrompt || !spTab.multiRoomPrompt.trim()){ alert('전체 공간에 적용할 스타일을 설명해주세요.'); return; }
+  if(!_supaUser){ openMd('account'); return; }
+  var totalCost=n*20;
+  if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCost){
+    alert('크레딧이 부족합니다. 필요: '+totalCost+'cr, 현재: '+G.cr+'cr');
+    openMd('credits');
+    return;
+  }
+  spTab.multiRoomState={running:true, step:0, results:[], error:null};
+  renderSB();
+  _multiRoomGenerateStep(0);
+}
+function _multiRoomGenerateStep(idx){
+  var spTab=getTab('space');
+  var st=spTab.multiRoomState;
+  var rooms=spTab.multiRoomImages;
+  if(idx>=rooms.length){ st.running=false; renderSB(); return; }
+  st.step=idx; st.running=true;
+  renderSB();
+  var room=rooms[idx];
+  var isAnchor=(idx===0);
+  var anchorUrl = st.results[0] && st.results[0].url;
+  // ⚠️ 여기가 "참조 이미지 유지"의 핵심 — 기준 공간(0번)의 결과가 이미 나와있으면, 그 이미지를
+  // 참고이미지로 넣고 "같은 집의 다른 공간이니 마감재·색감·조명톤을 통일해달라"는 지시를
+  // 프롬프트에 명시적으로 추가함. procImgWithTask는 참고이미지를 task가 아니라 탭 상태
+  // (getTab(wf).refs)에서 읽으므로, 호출 직전에 임시로 채워넣음(순차 실행이라 안전함).
+  var prompt = spTab.multiRoomPrompt.trim();
+  var refs = [];
+  if(!isAnchor && anchorUrl){
+    refs.push(anchorUrl);
+    prompt += ' (중요: 첨부한 참고 이미지는 같은 집의 다른 공간을 이미 이 스타일로 디자인한 결과입니다 — 이 공간도 그 참고 이미지와 동일한 마감재 종류, 컬러 팔레트, 조명 톤, 가구·소재의 디자인 언어를 유지해서 "같은 집"처럼 느껴지도록 디자인해주세요. 다만 이 공간 고유의 벽·창문·구조·용도는 참고 이미지와 다를 수 있으니 그대로 유지하세요.)';
+  }
+  var origRefs = getTab('space').refs;
+  getTab('space').refs = refs;
+  var task={id:Date.now()+idx, img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:'1K'};
+  procImgWithTask(task, function(resultUrl){
+    getTab('space').refs = origRefs;
+    st.results[idx]={url:resultUrl};
+    _multiRoomGenerateStep(idx+1);
+  }, function(err){
+    getTab('space').refs = origRefs;
+    st.results[idx]={error:String(err).slice(0,120)};
+    _multiRoomGenerateStep(idx+1); // 한 공간이 실패해도 나머지는 계속 진행
+  });
+}
+function _multiRoomRetryOne(idx){
+  var spTab=getTab('space');
+  var st=spTab.multiRoomState;
+  if(!st) return;
+  st.results[idx]=null;
+  st.running=true; st.step=idx;
+  renderSB();
+  var rooms=spTab.multiRoomImages;
+  var room=rooms[idx];
+  var isAnchor=(idx===0);
+  var anchorUrl = st.results[0] && st.results[0].url;
+  var prompt=spTab.multiRoomPrompt.trim();
+  var refs=[];
+  if(!isAnchor && anchorUrl){
+    refs.push(anchorUrl);
+    prompt += ' (중요: 첨부한 참고 이미지는 같은 집의 다른 공간을 이미 이 스타일로 디자인한 결과입니다 — 이 공간도 그 참고 이미지와 동일한 마감재 종류, 컬러 팔레트, 조명 톤, 가구·소재의 디자인 언어를 유지해서 "같은 집"처럼 느껴지도록 디자인해주세요. 다만 이 공간 고유의 벽·창문·구조·용도는 참고 이미지와 다를 수 있으니 그대로 유지하세요.)';
+  }
+  var origRefs=getTab('space').refs;
+  getTab('space').refs=refs;
+  var task={id:Date.now()+idx, img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:'1K'};
+  procImgWithTask(task, function(resultUrl){
+    getTab('space').refs=origRefs;
+    st.results[idx]={url:resultUrl};
+    st.running=false;
+    renderSB();
+  }, function(err){
+    getTab('space').refs=origRefs;
+    st.results[idx]={error:String(err).slice(0,120)};
+    st.running=false;
+    renderSB();
+  });
 }
 function sbRender(p){
   mkNote(p,'<strong style="color:#a78bfa">3D 렌더/도면 &#8594; 실사 이미지</strong><br>3D 렌더링·스케치·도면을 실사 사진 수준으로.');
@@ -8651,9 +8881,9 @@ function sbAgent(p){
   if(!tab.vrTier) tab.vrTier='mini';
   if(!tab.upscaleScale) tab.upscaleScale='2x';
   if(!tab.upscaleEngine) tab.upscaleEngine='clarity';
-  mkNote(p,'<strong style="color:var(--ac)">🤖 AI 에이전트 (베타)</strong><br>사진 올리고 원하는 결과를 한 문장으로 설명하면, <b style="color:var(--t)">디자인 시안 3개 생성 → 마음에 드는 것 선택 → (업스케일 여부/방식 확인) → (VR 등급 확인)</b> 순서로 진행해요. 각 단계마다 직접 확인하고, 원하는 지점에서 언제든 멈춰도 돼요.');
+  mkNote(p,'<strong style="color:var(--ac)">🤖 AI 에이전트 (베타)</strong><br>사진을 올리면 그 현장을 바탕으로, <b style="color:var(--t)">사진 없이 글로만 설명해도</b> 새로운 공간을 상상해서 만들어드려요. 원하는 결과를 문장으로 설명하면 <b style="color:var(--t)">디자인 시안 3개 생성 → 마음에 드는 것 선택 → (업스케일 여부/방식 확인) → (VR 등급 확인)</b> 순서로 진행해요. 각 단계마다 직접 확인하고, 원하는 지점에서 언제든 멈춰도 돼요.');
 
-  mkUB(p,'현장사진 업로드','main');
+  mkUB(p,'현장사진 업로드 (선택사항 — 없으면 글 설명만으로 새로 상상해서 만들어요)','main');
 
   var pw=dv('ss');pw.innerHTML='<div class="lbl">원하는 결과를 설명해주세요</div>';
   var ta=document.createElement('textarea');
@@ -8665,6 +8895,12 @@ function sbAgent(p){
   p.appendChild(pw);
 
   var st=tab.agentState;
+  // ⚠️ 버그 수정: 예전 버전(체크포인트 재설계 전)의 agentState가 남아있으면 .phase 필드가 없어서
+  // 지금 화면 조건 중 어디에도 안 걸려 진행상황 박스가 텅 빈 채로만 보이고 시작 버튼도 다시
+  // 안 나오는 상태가 됐었음(그래서 "렌더링 버튼이 없다"고 느껴졌음) — 유효하지 않은 상태면
+  // 그냥 새로 시작할 수 있게 자동으로 리셋함.
+  var _validPhases=['variants','upscaleChoice','vrChoice','done'];
+  if(st && _validPhases.indexOf(st.phase)===-1){ tab.agentState=null; st=null; }
   var showStartBtn = !st;
   if(showStartBtn){
     var goWrap=dv('ss');
@@ -8674,7 +8910,9 @@ function sbAgent(p){
     goBtn.onclick=_agentRun;
     goWrap.appendChild(goBtn);
     var costNote=dv('');costNote.style.cssText='font-size:10px;color:var(--m2);text-align:center;margin-top:6px';
-    costNote.textContent='디자인 시안 3장(20cr×3)을 먼저 만들어서 보여드려요 — 업스케일·VR은 그중 마음에 드는 걸 고른 뒤 따로 확인받고 진행해요';
+    costNote.textContent = tab.inputImg
+      ? '디자인 시안 3장(20cr×3)을 먼저 만들어서 보여드려요 — 업스케일·VR은 그중 마음에 드는 걸 고른 뒤 따로 확인받고 진행해요'
+      : '사진이 없어서 글 설명만으로 새 공간을 상상해서 만들어요 — 시안 3장(20cr×3), 업스케일·VR은 이후 따로 확인받고 진행해요';
     goWrap.appendChild(costNote);
     p.appendChild(goWrap);
   }
@@ -8864,12 +9102,14 @@ function sbAgent(p){
 }
 function _agentRun(){
   var tab=getTab('agent');
-  if(!tab.inputImg){ alert('먼저 현장사진을 업로드해주세요.'); return; }
   if(!tab.prompt || !tab.prompt.trim()){ alert('원하는 결과를 문장으로 설명해주세요.\n예: 34평 구축 아파트 거실을 미드센추리 스타일로 바꿔줘'); return; }
   if(!_supaUser){ openMd('account'); return; }
   // ⚠️ 2026-07-24 재설계 2차: 3가지 시안을 만들어서 고르게 하고, 업스케일/VR 각각 "할지 말지"와
   // "어떤 방식으로"까지 전부 사용자가 정하도록 함 — 완전 자동이 아니라 매 갈림길마다 확인받는
   // 구조로 바꿈. 원하면 시안 선택 직후에 끝내도 되고, 업스케일까지만 하고 끝내도 됨(전부 선택사항).
+  // ⚠️ 2026-07-24 추가: 사진 업로드도 이제 선택사항 — 없으면 현장사진을 편집하는 게 아니라
+  // 순수 텍스트만으로 새 공간을 상상해서 만드는 텍스트→이미지 방식으로 자동 전환됨.
+  var hasImg = !!tab.inputImg;
   var totalCost=20*3;
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCost){
     alert('크레딧이 부족합니다. 필요: '+totalCost+'cr, 현재: '+G.cr+'cr');
@@ -8882,13 +9122,13 @@ function _agentRun(){
   var doneCount=0, failCount=0;
   for(var i=0;i<3;i++){
     (function(idx){
-      var task={id:Date.now()+idx, img:tab.inputImg, wf:'space', prompt:tab.prompt.trim(), selK:null, eng:'nano2', resolution:'1K'};
-      procImgWithTask(task, function(url){
+      function onVariantDone(url){
         st.variants.push({id:idx, url:url});
         doneCount++;
         if(doneCount+failCount>=3){ st.running=false; }
         renderSB();
-      }, function(err){
+      }
+      function onVariantErr(err){
         failCount++;
         console.warn('[AI에이전트] 시안 '+(idx+1)+' 생성 실패:', err);
         if(doneCount+failCount>=3){
@@ -8896,9 +9136,26 @@ function _agentRun(){
           if(doneCount===0){ st.error='시안 생성에 모두 실패했어요: '+String(err).slice(0,150); }
         }
         renderSB();
-      });
+      }
+      if(hasImg){
+        var task={id:Date.now()+idx, img:tab.inputImg, wf:'space', prompt:tab.prompt.trim(), selK:null, eng:'nano2', resolution:'1K'};
+        procImgWithTask(task, onVariantDone, onVariantErr);
+      } else {
+        _agentGenerateTextOnly(tab.prompt.trim(), onVariantDone, onVariantErr);
+      }
     })(i);
   }
+}
+// 사진 없이 텍스트 설명만으로 새 공간을 상상해서 만드는 경로 — procImgWithTask는 이미지 편집
+// (nano-banana-2/edit) 전용이라 이미지가 없으면 아예 실행이 안 되므로, 진짜 텍스트→이미지 모델
+// (Seedream v4.5)로 직접 호출함. 과금은 기존 "space" 워크플로우와 동일한 기준(_bill)을 그대로 씀.
+function _agentGenerateTextOnly(promptText, onDone, onErr){
+  var ap = 'Interior architecture photography, photorealistic. ' + promptText + '. High quality, sharp details, professional real estate photography style.';
+  var _bill = {wf:'space', resolution:'1K'};
+  falRun('fal-ai/bytedance/seedream-v4.5', {prompt:ap, aspect_ratio:'16:9', num_images:1}, function(d){
+    var url=falExtractImageUrl(d);
+    if(url) onDone(url); else onErr('이미지 URL을 찾지 못했습니다');
+  }, function(err){ onErr(err); }, _bill);
 }
 function _agentSelectVariant(url){
   var tab=getTab('agent');
