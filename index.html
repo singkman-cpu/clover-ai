@@ -8285,6 +8285,47 @@ function _previewImageInMain(url, wf){
   G.HIST[wf].unshift({id:Date.now()+Math.random(), orig:url, origThumb:null, result:null, tags:[], ai:'', cx:50, fav:false, wf:wf, preview:true});
   if(G.wf===wf) renderMain(wf);
 }
+// ── 클라우드 갤러리 저장 공용 함수 ──────────────────────────────────────
+// ⚠️ 발견한 진짜 문제: 기존 executeSingleRender(일반 "생성하기" 버튼 흐름)는 결과를 Supabase
+// Storage+gallery 테이블에 자동으로 저장하는데, procImgWithTask를 직접 호출하는 새 기능들
+// (여러 공간 세트, AI 카메라 자동, AI 에이전트, 대화형 수정)은 그 큐 시스템을 안 거쳐서 이
+// 클라우드 저장 로직을 한 번도 안 탔음 — 즉 결과가 "이번 세션의 브라우저 메모리"에만 있었고,
+// 새로고침하거나 다른 기기에서 로그인하면 전부 사라지는 상태였음(갤러리에 중복으로 보이는 것보다
+// 훨씬 심각한 문제 — 데이터 유실). executeSingleRender의 저장 로직을 재사용 가능한 함수로 뽑아서
+// 새 기능들도 전부 이걸 호출하도록 연결함.
+function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution){
+  if(!(_supa && _supaUser && resultUrl)) return;
+  try{
+    var galleryId=id+'';
+    var filePath=_supaUser.id+'/'+wf+'/'+galleryId+'.jpg';
+    var origPath=_supaUser.id+'/'+wf+'/'+galleryId+'_orig.jpg';
+    fetch(resultUrl).then(function(r){return r.blob();}).then(function(blob){
+      _supa.storage.from('gallery').upload(filePath, blob, {contentType:'image/jpeg', upsert:true}).then(function(uploadRes){
+        if(uploadRes.error){ console.warn('[Gallery] 업로드 실패:', uploadRes.error.message); return; }
+        var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
+        function saveRow(origUrlFinal){
+          _supa.from('gallery').insert({
+            user_id:_supaUser.id, wf:wf, storage_path:filePath, public_url:publicUrl,
+            orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:'', budget_snapshot:null
+          }).select().single().then(function(){ console.log('[Gallery] 클라우드 저장 완료 ('+wf+')'); })
+            .catch(function(e){ console.warn('[Gallery] DB 저장 실패:', e); });
+        }
+        if(origUrl && origUrl.indexOf('data:')===0){
+          fetch(origUrl).then(function(r2){return r2.blob();}).then(function(origBlob){
+            _supa.storage.from('gallery').upload(origPath, origBlob, {contentType:'image/jpeg', upsert:true}).then(function(ou){
+              var origPubUrl = ou.error?null:_supa.storage.from('gallery').getPublicUrl(origPath).data.publicUrl;
+              saveRow(origPubUrl);
+            }).catch(function(){saveRow(null);});
+          }).catch(function(){saveRow(null);});
+        } else if(origUrl && origUrl.indexOf('http')===0){
+          saveRow(origUrl);
+        } else {
+          saveRow(null);
+        }
+      }).catch(function(e){console.warn('[Gallery] 업로드 오류:',e);});
+    }).catch(function(e){console.warn('[Gallery] fetch 오류:',e);});
+  }catch(e){ console.warn('[Gallery] 오류:', e); }
+}
 function _showRoomResultInMain(origUrl, resultUrl){
   if(!G.HIST.space) G.HIST.space=[];
   // ⚠️ 버그 수정: origUrl이 없는 경우(AI가 상상으로 만든 공간 — 실제 원본 사진이 없음) resultUrl로
@@ -8556,6 +8597,7 @@ function _multiRoomGenerateStep(idx){
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
     st.results[idx]={url:resultUrl};
+    _saveResultToCloudGallery('space', task.id, resultUrl, room.img, 'nano2', task.resolution);
     // ⚠️ "내 집 사진(수동)" 모드는 진짜 원본 사진이 있으니, 첫 렌더링이 끝나면 바로
     // 원본 vs 결과 비교 슬라이더를 보여줘도 됨(비교할 게 실제로 있으니까) — "컨셉 확장(자동)"
     // 모드와 다른 점: 그쪽은 상상으로 만든 공간이라 비교 대상이 없어서 첫 렌더링엔 슬라이더를
@@ -8589,6 +8631,7 @@ function _multiRoomRetryOne(idx){
     getTab('space').refs=origRefs;
     st.results[idx]={url:resultUrl, prevUrl:prevResult&&prevResult.url};
     st.running=false;
+    _saveResultToCloudGallery('space', task.id, resultUrl, room.img, 'nano2', task.resolution);
     // 재생성 끝나면 바로 메인 화면에 "직전 버전 vs 새 버전" 비교로 보여줘서, 클릭 한 번 더
     // 안 해도 바로 비교하며 마음에 드는 쪽을 고를 수 있게 함.
     _showRoomResultInMain(prevResult&&prevResult.url, resultUrl);
@@ -8851,6 +8894,7 @@ function _autoRoomGenerateStep(idx){
   }
   procImgWithTask(task, function(resultUrl){
     st.results[idx]={url:resultUrl};
+    _saveResultToCloudGallery('space', task.id, resultUrl, isAnchor?spTab.autoRoomAnchorImg:null, 'nano2', task.resolution);
     _autoRoomGenerateStep(idx+1);
   }, function(err){
     st.results[idx]={error:String(err).slice(0,120)};
@@ -8890,6 +8934,7 @@ function _autoRoomRetryOne(idx){
   procImgWithTask(task, function(resultUrl){
     st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
     st.running=false;
+    _saveResultToCloudGallery('space', task.id, resultUrl, isAnchor?spTab.autoRoomAnchorImg:null, 'nano2', task.resolution);
     _showRoomResultInMain(prevResult2&&prevResult2.url, resultUrl);
     renderSB();
   }, function(err){
@@ -9594,6 +9639,7 @@ function _agentRun(){
         st.variants.push({id:idx, url:url});
         doneCount++;
         if(doneCount+failCount>=3){ st.running=false; }
+        _saveResultToCloudGallery('agent', 'agent-'+Date.now()+'-'+idx, url, hasImg?tab.inputImg:null, 'nano2', '1K');
         renderSB();
       }
       function onVariantErr(err){
@@ -9650,6 +9696,7 @@ function _agentRunUpscale(){
     st.upscaleUrl=upscaledUrl;
     st.running=false; st.step=null;
     st.phase='vrChoice';
+    _saveResultToCloudGallery('agent', 'agent-up-'+Date.now(), upscaledUrl, st.selectedUrl, tab.upscaleEngine, '');
     renderSB();
   }, function(err){
     st.error='업스케일 실패: '+String(err).slice(0,150);
@@ -14250,6 +14297,7 @@ function _chatEditSend(promptText){
     G.HIST.edit=G.HIST.edit.filter(function(x){return x.id!==loadingId;});
     G.HIST.edit.unshift({ id:Date.now()+Math.random(), orig:baseImg, result:resultUrl, origThumb:null, tags:['대화형 수정 턴 '+tab.chatHistory.length, turnCost+'cr'], ai:'', cx:50, fav:false, wf:'edit', preview:false });
     tab.resultImg=resultUrl;
+    _saveResultToCloudGallery('edit', task.id, resultUrl, baseImg, 'nano2', task.resolution);
     if(G.wf==='edit') renderMain('edit');
     renderSB();
   }, function(err){
