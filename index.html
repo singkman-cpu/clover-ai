@@ -8241,6 +8241,27 @@ var SPACE_CATEGORIES={
   office:{ label:'🏢 오피스', types:['사무실','소회의실','대회의실','탕비실','리셉션·로비','라운지','폰부스','개인집무실','화장실'] },
   cafe:{ label:'☕ 카페·상업공간', types:['카운터','홀(좌석)','주방','룸(개별공간)','테라스','화장실','창고'] }
 };
+// 카테고리별 "한국에서 실제로 흔한 형태" 가이드 — 참고 디자인 이미지가 스타일(색감·소재·톤)을
+// 정해주는 것과 별개로, 공간의 형태·비례·구조 관습은 한국 시장 기준을 따르게 함.
+// 주거공간은 이미 VR 다중공간 기능(W3D_FLOORPLAN_TEMPLATES)에서 정리해둔 판상형/타워형/평형별
+// 지식을 그대로 텍스트로 요약해서 재사용함 — 국민평형(34평, 전용 84㎡) 기준 3~4bay 구조,
+// 판상형(남향 위주 일자 배치, 거실·주방 맞통풍, 넓은 발코니 서비스면적)과 타워형(Y자·ㅁ자 배치,
+// 다양한 조망 방향, 판상형보다 좁은 서비스면적) 특징을 반영.
+var KOREA_LAYOUT_GUIDE={
+  residential:'이 공간은 한국에서 실제로 흔히 짓는 아파트 형태·비례로 만들어주세요. 국민평형(전용 84㎡=34평, 방3+거실+주방 구성)을 기준으로 한 공간 크기감을 기본으로 하되, 사진 속 실제 공간 크기와 크게 다르면 사진을 우선하세요. 구조는 판상형(거실·주방이 남향으로 나란히 배치되어 맞통풍이 잘 되는 일자형 구조, 발코니 서비스면적이 넉넉함)이나 타워형(코너에 배치되어 2면 이상 창으로 개방감 있는 구조) 중 사진에 보이는 창 위치·구조와 자연스럽게 맞는 쪽으로 판단해서 반영하고, 시스템에어컨 배치, 붙박이장, 걸레받이·몰딩 마감 등 한국 아파트 특유의 디테일도 자연스럽게 넣어주세요.',
+  office:'이 공간은 한국 오피스에서 실제로 흔히 볼 수 있는 형태로 만들어주세요 — 오픈형 워크스테이션 배치, 유리 파티션으로 구분된 회의실, 탕비실·리셉션 등 최근 국내 스타트업·중소기업 오피스에서 흔한 비례와 구조를 반영해주세요.',
+  cafe:'이 공간은 한국 카페·상업공간에서 실제로 흔히 볼 수 있는 형태로 만들어주세요 — 협소 상가에 맞춘 효율적인 좌석 배치, 카운터-홀 동선, 국내 카페 인테리어에서 흔한 톤앤매너와 비례를 반영해주세요.'
+};
+// 방/공간 라벨(예: '거실', '사무실', '카운터')이 어느 카테고리에 속하는지 찾아서, 그 카테고리에
+// 맞는 KOREA_LAYOUT_GUIDE 문구를 고를 때 씀. 못 찾으면 주거공간을 기본값으로 함.
+function _categoryForRoomLabel(label){
+  var found='residential';
+  Object.keys(SPACE_CATEGORIES).some(function(catKey){
+    if(SPACE_CATEGORIES[catKey].types.indexOf(label)!==-1){ found=catKey; return true; }
+    return false;
+  });
+  return found;
+}
 var MULTIROOM_LABELS=['거실','주방','욕실','침실','현관','기타'];
 // 사이드바(여러 공간 세트/AI 카메라 자동 등)에서 만든 결과를 클릭했을 때, 새 탭을 여는 대신
 // 우측 메인 화면(Before/After 비교 큰 화면)에 바로 띄워줌 — 갤러리 히스토리에도 정식으로 남아서
@@ -8511,9 +8532,13 @@ function _multiRoomRun(){
 // 참고 디자인 이미지 하나만 보고 이 공간을 다시 디자인하도록 지시하는 프롬프트를 만듦 —
 // 색감, 천장 디자인, 창호 프레임(있는 경우), 문 형태, 소품, 가구 느낌·톤까지 전부 참고
 // 이미지를 따라가게 하고, 벽·창문 위치 같은 이 공간 고유의 구조는 그대로 유지하게 함.
-function _multiRoomBuildPrompt(userStyle){
+function _multiRoomBuildPrompt(userStyle, roomLabel){
   var prompt = (userStyle && userStyle.trim()) ? userStyle.trim()+' ' : '';
   prompt += '첨부한 참고 이미지는 사용자가 원하는 목표 디자인입니다. 이 공간(원본 사진)의 벽·창문 위치와 전체적인 구조·용도는 그대로 유지하되, 다음 항목들은 전부 참고 이미지를 그대로 따라서 새로 디자인해주세요: 색감(전체 컬러 팔레트), 천장 디자인, 창호가 있다면 창호 프레임의 디자인, 문의 형태, 소품들의 스타일, 가구의 느낌과 톤. 공간마다 서로 다른 걸 참고하는 게 아니라, 전부 이 참고 이미지 하나를 기준으로 통일감 있게 만들어주세요. 참고 이미지 속 특정 소품을 그대로 복사하지 말고, 이 공간의 크기·용도에 맞는 새로운 소품·가구로 같은 스타일 느낌만 재현하세요.';
+  // 스타일(색감·소재·톤)은 참고 이미지가 정하고, 공간의 형태·비례·구조 관습은 한국 시장 기준을
+  // 따르게 함 — 방 라벨(예: '거실','사무실','카운터')로 카테고리를 찾아서 그에 맞는 가이드를 붙임.
+  var cat = _categoryForRoomLabel(roomLabel);
+  prompt += ' ' + KOREA_LAYOUT_GUIDE[cat];
   return prompt;
 }
 function _multiRoomGenerateStep(idx){
@@ -8524,7 +8549,7 @@ function _multiRoomGenerateStep(idx){
   st.step=idx; st.running=true;
   renderSB();
   var room=rooms[idx];
-  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt);
+  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label);
   var origRefs = getTab('space').refs;
   getTab('space').refs = [spTab.multiRoomRefDesignImg];
   var task={id:Date.now()+idx, img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.multiRoomResolution||'1K'};
@@ -8551,7 +8576,7 @@ function _multiRoomRetryOne(idx){
   renderSB();
   var rooms=spTab.multiRoomImages;
   var room=rooms[idx];
-  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt);
+  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label);
   var origRefs=getTab('space').refs;
   getTab('space').refs=[spTab.multiRoomRefDesignImg];
   var task={id:Date.now()+idx, img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.multiRoomResolution||'1K'};
@@ -8805,6 +8830,9 @@ function _autoRoomGenerateStep(idx){
     return;
   }
   var basePrompt=spTab.autoRoomPrompt.trim() || '이 사진에 보이는 현재 인테리어 스타일(색감, 마감재, 조명 톤, 가구·소재의 디자인 언어)을 그대로 유지하면서 전체적인 완성도와 사실감을 높여줘.';
+  // 스타일은 사진/문구가 정하고, 공간의 형태·비례·구조 관습은 한국 시장 기준을 따르게 함
+  // (카테고리는 spTab.autoRoomCategory — 주거/오피스/카페 중 사용자가 고른 값).
+  basePrompt += ' ' + KOREA_LAYOUT_GUIDE[spTab.autoRoomCategory||'residential'];
   var task;
   if(isAnchor){
     task={id:Date.now(), img:spTab.autoRoomAnchorImg, wf:'space', prompt:basePrompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
@@ -8845,6 +8873,7 @@ function _autoRoomRetryOne(idx){
     return;
   }
   var basePrompt=spTab.autoRoomPrompt.trim() || '이 사진에 보이는 현재 인테리어 스타일(색감, 마감재, 조명 톤, 가구·소재의 디자인 언어)을 그대로 유지하면서 전체적인 완성도와 사실감을 높여줘.';
+  basePrompt += ' ' + KOREA_LAYOUT_GUIDE[spTab.autoRoomCategory||'residential'];
   var task;
   if(isAnchor){
     task={id:Date.now(), img:spTab.autoRoomAnchorImg, wf:'space', prompt:basePrompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
