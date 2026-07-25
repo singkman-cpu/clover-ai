@@ -8228,8 +8228,16 @@ function sbSpace(p){
 // 거실/주방/욕실/침실 등 같은 집의 여러 방 사진을 한꺼번에 넣으면, 첫 번째 방(기준 공간)을
 // 먼저 생성하고 그 결과를 나머지 방들 생성할 때 참고이미지로 자동으로 같이 넣어서 마감재·
 // 색감·조명톤 등 스타일을 통일시켜줌.
+// 공간 카테고리별 목록 — 검색 조사 결과 반영:
+//  · 오피스: 최근 트렌드는 회의실/탕비실뿐 아니라 리셉션·라운지(첫인상), 폰부스·개인집무실(집중업무)도
+//    표준적으로 들어감(BUILDUS 2025 오피스 트렌드 리포트 등 참고)
+//  · 카페: 카운터·홀·주방·화장실이 기본이고, 규모 있는 카페는 룸(개별공간)·테라스·창고까지 구성됨
+var SPACE_CATEGORIES={
+  residential:{ label:'🏠 주거공간', types:['거실','주방','안방','아이방','욕실','복도','현관','드레스룸','발코니'] },
+  office:{ label:'🏢 오피스', types:['사무실','소회의실','대회의실','탕비실','리셉션·로비','라운지','폰부스','개인집무실','화장실'] },
+  cafe:{ label:'☕ 카페·상업공간', types:['카운터','홀(좌석)','주방','룸(개별공간)','테라스','화장실','창고'] }
+};
 var MULTIROOM_LABELS=['거실','주방','욕실','침실','현관','기타'];
-var AUTOROOM_TYPES=['거실','주방','안방','아이방','욕실','복도','현관','드레스룸','발코니'];
 // 사이드바(여러 공간 세트/AI 카메라 자동 등)에서 만든 결과를 클릭했을 때, 새 탭을 여는 대신
 // 우측 메인 화면(Before/After 비교 큰 화면)에 바로 띄워줌 — 갤러리 히스토리에도 정식으로 남아서
 // 나중에 다시 찾아볼 수 있음.
@@ -8280,7 +8288,12 @@ function mkMultiRoomSpace(p){
     row.appendChild(badge);
     var sel=document.createElement('select');
     sel.style.cssText='flex:1;padding:6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:12px;font-family:inherit';
-    MULTIROOM_LABELS.forEach(function(l){ var o=document.createElement('option');o.value=l;o.textContent=l;sel.appendChild(o); });
+    Object.keys(SPACE_CATEGORIES).forEach(function(catKey){
+      var grp=document.createElement('optgroup');grp.label=SPACE_CATEGORIES[catKey].label;
+      SPACE_CATEGORIES[catKey].types.forEach(function(l){ var o=document.createElement('option');o.value=l;o.textContent=l;grp.appendChild(o); });
+      sel.appendChild(grp);
+    });
+    var etcOpt=document.createElement('option');etcOpt.value='기타';etcOpt.textContent='기타';sel.appendChild(etcOpt);
     sel.value=room.label||MULTIROOM_LABELS[Math.min(idx,MULTIROOM_LABELS.length-1)];
     room.label=sel.value;
     sel.onchange=function(){ room.label=sel.value; };
@@ -8499,12 +8512,35 @@ function _multiRoomRetryOne(idx){
 // nano-banana-2의 이미지 편집 능력을 "재해석" 용도로 활용함.
 function mkAutoRoomCamera(p){
   var spTab=getTab('space');
+  if(!spTab.autoRoomCategory) spTab.autoRoomCategory='residential';
+  var currentTypes=SPACE_CATEGORIES[spTab.autoRoomCategory].types;
   if(!spTab.autoRoomAnchorImg) spTab.autoRoomAnchorImg=null;
-  if(!spTab.autoRoomAnchorType) spTab.autoRoomAnchorType=AUTOROOM_TYPES[0];
-  if(!spTab.autoRoomSelected) spTab.autoRoomSelected=AUTOROOM_TYPES.slice();
+  if(!spTab.autoRoomAnchorType) spTab.autoRoomAnchorType=currentTypes[0];
+  if(!spTab.autoRoomSelected) spTab.autoRoomSelected=currentTypes.slice();
   if(spTab.autoRoomPrompt==null) spTab.autoRoomPrompt='';
 
-  mkNote(p,'<strong style="color:var(--ac)">🎥 AI 카메라 자동 (베타)</strong><br>공간 사진 1장만 올리면, 그 스타일을 유지한 채로 <b style="color:var(--t)">같은 집의 나머지 공간들을 AI가 상상해서</b> 만들어드려요.<br><span style="font-size:10px;color:#f59e0b">⚠️ 실제로 존재하지 않는 공간을 새로 상상해서 만드는 거라, 실제 우리집 구조와 다를 수 있어요 — 홍보용 컨셉 이미지 용도로 적합해요.</span>');
+  mkNote(p,'<strong style="color:var(--ac)">🎥 AI 카메라 자동 (베타)</strong><br>공간 사진 1장만 올리면, 그 스타일을 유지한 채로 <b style="color:var(--t)">나머지 공간들을 AI가 상상해서</b> 만들어드려요.<br><span style="font-size:10px;color:#f59e0b">⚠️ 실제로 존재하지 않는 공간을 새로 상상해서 만드는 거라, 실제 구조와 다를 수 있어요 — 홍보용 컨셉 이미지 용도로 적합해요.</span>');
+
+  var catWrap=dv('ss');catWrap.innerHTML='<div class="lbl">공간 종류</div>';
+  var catRow=dv('');catRow.style.cssText='display:flex;gap:6px';
+  Object.keys(SPACE_CATEGORIES).forEach(function(catKey){
+    var isOn=spTab.autoRoomCategory===catKey;
+    var b=mk('button','');b.type='button';
+    b.style.cssText='flex:1;padding:8px 4px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+    b.textContent=SPACE_CATEGORIES[catKey].label;
+    b.onclick=function(){
+      if(spTab.autoRoomCategory===catKey) return;
+      spTab.autoRoomCategory=catKey;
+      // 카테고리를 바꾸면 이전 카테고리의 공간 종류/선택 목록은 의미가 없어지므로 새 목록으로 리셋
+      var newTypes=SPACE_CATEGORIES[catKey].types;
+      spTab.autoRoomAnchorType=newTypes[0];
+      spTab.autoRoomSelected=newTypes.slice();
+      renderSB();
+    };
+    catRow.appendChild(b);
+  });
+  catWrap.appendChild(catRow);
+  p.appendChild(catWrap);
 
   var upWrap=dv('ss');upWrap.innerHTML='<div class="lbl">기준 공간 사진 1장</div>';
   var upBox=dv('');upBox.style.cssText='border:1.5px dashed var(--bd2);border-radius:10px;min-height:100px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;background:var(--c2)';
@@ -8537,7 +8573,7 @@ function mkAutoRoomCamera(p){
   var typeWrap=dv('ss');typeWrap.innerHTML='<div class="lbl">이 사진은 어떤 공간이에요?</div>';
   var typeSel=document.createElement('select');
   typeSel.style.cssText='width:100%;padding:8px;background:var(--card);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:12.5px;font-family:inherit';
-  AUTOROOM_TYPES.forEach(function(t){ var o=document.createElement('option');o.value=t;o.textContent=t;typeSel.appendChild(o); });
+  currentTypes.forEach(function(t){ var o=document.createElement('option');o.value=t;o.textContent=t;typeSel.appendChild(o); });
   typeSel.value=spTab.autoRoomAnchorType;
   typeSel.onchange=function(){ spTab.autoRoomAnchorType=typeSel.value; renderSB(); };
   typeWrap.appendChild(typeSel);
@@ -8548,7 +8584,7 @@ function mkAutoRoomCamera(p){
   selNote.textContent='💡 아래에서 고른 개수 + 기준 공간(원본 그대로 안 쓰고 스타일 적용해서 다시 생성) = 총 컷수예요';
   selWrap.appendChild(selNote);
   var selGrid=dv('');selGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px';
-  AUTOROOM_TYPES.forEach(function(t){
+  currentTypes.forEach(function(t){
     if(t===spTab.autoRoomAnchorType) return; // 기준 공간과 같은 종류는 목록에서 제외
     var row=dv('');row.style.cssText='display:flex;align-items:center;gap:6px;background:var(--c2);border-radius:7px;padding:7px 9px';
     var cb=document.createElement('input');cb.type='checkbox';cb.checked=spTab.autoRoomSelected.indexOf(t)!==-1;
