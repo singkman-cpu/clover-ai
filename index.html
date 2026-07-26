@@ -8286,7 +8286,13 @@ function _previewImageInMain(url, wf){
   wf = wf || G.wf;
   if(!G.HIST[wf]) G.HIST[wf]=[];
   G.HIST[wf]=G.HIST[wf].filter(function(x){return !x.preview;});
-  G.HIST[wf].unshift({id:Date.now()+Math.random(), orig:url, origThumb:null, result:null, tags:[], ai:'', cx:50, fav:false, wf:wf, preview:true});
+  // ⚠️ 진짜 원인 발견: 히스토리 카드 렌더링 함수(addHistEl)는 item.result가 있어야만 뭔가
+  // 그려주는 구조라서(orig만 있고 result가 없으면 완전히 빈 칸으로 렌더됨 — "beforeSrc 없어도
+  // result 있으면 표시(AFTER만)"라는 기존 주석이 힌트였음), orig에만 값을 넣고 result를 null로
+  // 뒀던 예전 코드는 클릭해도 메인화면에 아무것도 안 뜨는 상태였음. result 자리에 넣어야
+  // "원본 없이 결과 이미지 한 장만" 모드로 정상 렌더링되고, orig가 없으니 자동으로 슬라이더도
+  // 안 생김(hasBefore=false).
+  G.HIST[wf].unshift({id:Date.now()+Math.random(), orig:null, origThumb:null, result:url, tags:[], ai:'', cx:50, fav:false, wf:wf, preview:true});
   if(G.wf===wf) renderMain(wf);
 }
 // ── 클라우드 갤러리 저장 공용 함수 ──────────────────────────────────────
@@ -9402,7 +9408,24 @@ function sbAgent(p){
   if(!tab.vrTier) tab.vrTier='mini';
   if(!tab.upscaleScale) tab.upscaleScale='2x';
   if(!tab.upscaleEngine) tab.upscaleEngine='clarity';
-  mkNote(p,'<strong style="color:var(--ac)">🤖 AI 에이전트 (베타)</strong><br>사진을 올리면 그 현장을 바탕으로, <b style="color:var(--t)">사진 없이 글로만 설명해도</b> 새로운 공간을 상상해서 만들어드려요. 원하는 결과를 문장으로 설명하면 <b style="color:var(--t)">디자인 시안 3개 생성 → 마음에 드는 것 선택 → (업스케일 여부/방식 확인) → (VR 등급 확인)</b> 순서로 진행해요. 각 단계마다 직접 확인하고, 원하는 지점에서 언제든 멈춰도 돼요.');
+  mkNote(p,'<strong style="color:var(--ac)">🤖 AI 에이전트 (베타)</strong><br>사진을 올리면 그 현장을 바탕으로, <b style="color:var(--t)">사진 없이 글로만 설명해도</b> 새로운 공간을 상상해서 만들어드려요. 원하는 결과를 문장으로 설명하면 <b style="color:var(--t)">디자인 시안 여러 개 생성 → 마음에 드는 것 선택 → (업스케일 여부/방식 확인) → (VR 등급 확인)</b> 순서로 진행해요. 각 단계마다 직접 확인하고, 원하는 지점에서 언제든 멈춰도 돼요.');
+
+  // ⚠️ 요청 반영: 다른 탭 갔다 오면 작업 중이던 게 사라지는 것처럼 느껴진다는 피드백 — 이제
+  // 자동으로는 절대 안 지우고, "전체 리셋"을 명시적으로 눌러야만 처음부터 다시 시작할 수 있게
+  // 크고 눈에 띄게 버튼을 둠(작업 중일 때만 표시 — 아무것도 없으면 안 보임).
+  if(tab.inputImg || (tab.prompt&&tab.prompt.trim()) || tab.agentState){
+    var resetWrap=dv('ss');
+    var resetBtn=mk('button','');resetBtn.type='button';resetBtn.innerHTML='🔄 전체 리셋 <span style="font-size:10.5px;font-weight:400;opacity:.8">(사진·설명·진행상황 전부 초기화)</span>';
+    resetBtn.style.cssText='width:100%;padding:12px;border-radius:9px;border:1.5px solid #f87171;background:rgba(248,113,113,.08);color:#f87171;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit';
+    resetBtn.onclick=function(){
+      if(!confirm('업로드한 사진, 입력한 설명, 진행 중인 작업까지 전부 초기화돼요. 계속할까요?')) return;
+      tab.inputImg=null; tab.inputImgName=''; tab.prompt=''; tab.agentState=null;
+      tab.vrTier='mini'; tab.upscaleScale='2x'; tab.upscaleEngine='clarity'; tab.variantCount=2;
+      renderSB();
+    };
+    resetWrap.appendChild(resetBtn);
+    p.appendChild(resetWrap);
+  }
 
   mkUB(p,'현장사진 업로드 (선택사항 — 없으면 글 설명만으로 새로 상상해서 만들어요)','main');
 
@@ -9414,6 +9437,21 @@ function sbAgent(p){
   ta.oninput=function(){ tab.prompt=ta.value; };
   pw.appendChild(ta);
   p.appendChild(pw);
+
+  // ⚠️ 요청 반영: 예전엔 무조건 3개 고정이었는데, 시안 개수를 2~6개 중에서 고를 수 있게 함
+  // (기본값 2개 — 굳이 3개부터 시작해서 크레딧을 더 쓸 필요 없게).
+  if(!tab.variantCount) tab.variantCount=2;
+  var vcWrap=dv('ss');vcWrap.innerHTML='<div class="lbl">시안 개수</div>';
+  var vcRow=dv('');vcRow.style.cssText='display:flex;gap:5px';
+  [2,3,4,5,6].forEach(function(n){
+    var isOn=tab.variantCount===n;
+    var b=mk('button','');b.type='button';b.textContent=n;
+    b.style.cssText='flex:1;padding:8px 0;border-radius:7px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+    b.onclick=function(){ tab.variantCount=n; renderSB(); };
+    vcRow.appendChild(b);
+  });
+  vcWrap.appendChild(vcRow);
+  p.appendChild(vcWrap);
 
   var st=tab.agentState;
   // ⚠️ 버그 수정: 예전 버전(체크포인트 재설계 전)의 agentState가 남아있으면 .phase 필드가 없어서
@@ -9427,13 +9465,13 @@ function sbAgent(p){
     var goWrap=dv('ss');
     var goBtn=mk('button','');goBtn.id='agent-go-btn';goBtn.type='button';
     goBtn.style.cssText='border:none;border-radius:8px;cursor:pointer;font-family:inherit;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000;display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px;font-size:14px;font-weight:800';
-    goBtn.innerHTML='🤖 시안 3개 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">60cr</span>';
+    goBtn.innerHTML='🤖 시안 '+tab.variantCount+'개 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+(tab.variantCount*20)+'cr</span>';
     goBtn.onclick=_agentRun;
     goWrap.appendChild(goBtn);
     var costNote=dv('');costNote.style.cssText='font-size:10px;color:var(--m2);text-align:center;margin-top:6px';
     costNote.textContent = tab.inputImg
-      ? '디자인 시안 3장(20cr×3)을 먼저 만들어서 보여드려요 — 업스케일·VR은 그중 마음에 드는 걸 고른 뒤 따로 확인받고 진행해요'
-      : '사진이 없어서 글 설명만으로 새 공간을 상상해서 만들어요 — 시안 3장(20cr×3), 업스케일·VR은 이후 따로 확인받고 진행해요';
+      ? '디자인 시안 '+tab.variantCount+'장(20cr×'+tab.variantCount+')을 먼저 만들어서 보여드려요 — 업스케일·VR은 그중 마음에 드는 걸 고른 뒤 따로 확인받고 진행해요'
+      : '사진이 없어서 글 설명만으로 새 공간을 상상해서 만들어요 — 시안 '+tab.variantCount+'장(20cr×'+tab.variantCount+'), 업스케일·VR은 이후 따로 확인받고 진행해요';
     goWrap.appendChild(costNote);
     p.appendChild(goWrap);
   }
@@ -9456,13 +9494,14 @@ function sbAgent(p){
     progWrap.appendChild(retryBtn);
   }
 
-  // ── 단계 1: 시안 3개 생성 중 / 선택 대기 ────────────────────────────
+  // ── 단계 1: 시안 N개 생성 중 / 선택 대기 ────────────────────────────
   if(st.phase==='variants'){
+    var vCount = st.variantCount || tab.variantCount || 2;
     var vTitle=dv('');vTitle.style.cssText='font-size:12.5px;font-weight:700;color:var(--t);margin-bottom:8px';
-    vTitle.textContent=st.running ? ('시안 생성 중... ('+st.variants.length+'/3 완료)') : '마음에 드는 시안을 골라주세요 (사진 클릭 = 크게 보기)';
+    vTitle.textContent=st.running ? ('시안 생성 중... ('+st.variants.length+'/'+vCount+' 완료)') : '마음에 드는 시안을 골라주세요 (사진 클릭 = 크게 보기)';
     progWrap.appendChild(vTitle);
-    var vGrid=dv('');vGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px';
-    for(var vi=0; vi<3; vi++){
+    var vGrid=dv('');vGrid.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:6px';
+    for(var vi=0; vi<vCount; vi++){
       var vSlot=dv('');vSlot.style.cssText='display:flex;flex-direction:column;gap:4px';
       var vBox=dv('');vBox.style.cssText='position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1.5px solid var(--bd2);background:var(--card)';
       var variant=st.variants[vi];
@@ -9492,7 +9531,7 @@ function sbAgent(p){
     }
     progWrap.appendChild(vGrid);
     if(!st.running && st.variants.length){
-      var retryVBtn=mk('button','');retryVBtn.type='button';retryVBtn.textContent='🔄 3개 다시 생성하기 (프롬프트 수정 후, 60cr)';
+      var retryVBtn=mk('button','');retryVBtn.type='button';retryVBtn.textContent='🔄 '+vCount+'개 다시 생성하기 (프롬프트 수정 후, '+(vCount*20)+'cr)';
       retryVBtn.style.cssText='width:100%;margin-top:8px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit';
       retryVBtn.onclick=function(){ _agentRun(); };
       progWrap.appendChild(retryVBtn);
@@ -9680,30 +9719,32 @@ function _agentRun(){
   // 구조로 바꿈. 원하면 시안 선택 직후에 끝내도 되고, 업스케일까지만 하고 끝내도 됨(전부 선택사항).
   // ⚠️ 2026-07-24 추가: 사진 업로드도 이제 선택사항 — 없으면 현장사진을 편집하는 게 아니라
   // 순수 텍스트만으로 새 공간을 상상해서 만드는 텍스트→이미지 방식으로 자동 전환됨.
+  // ⚠️ 추가: 시안 개수도 2~6개 중 선택 가능 (기본 2개, 예전엔 3개 고정이었음).
   var hasImg = !!tab.inputImg;
-  var totalCost=20*3;
+  var vCount = tab.variantCount || 2;
+  var totalCost=20*vCount;
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCost){
     alert('크레딧이 부족합니다. 필요: '+totalCost+'cr, 현재: '+G.cr+'cr');
     openMd('credits');
     return;
   }
-  tab.agentState={ phase:'variants', running:true, error:null, variants:[], selectedUrl:null, upscaleUrl:null, vrUrl:null };
+  tab.agentState={ phase:'variants', running:true, error:null, variants:[], selectedUrl:null, upscaleUrl:null, vrUrl:null, variantCount:vCount };
   renderSB();
   var st=tab.agentState;
   var doneCount=0, failCount=0;
-  for(var i=0;i<3;i++){
+  for(var i=0;i<vCount;i++){
     (function(idx){
       function onVariantDone(url){
         st.variants.push({id:idx, url:url});
         doneCount++;
-        if(doneCount+failCount>=3){ st.running=false; }
+        if(doneCount+failCount>=vCount){ st.running=false; }
         _saveResultToCloudGallery('agent', 'agent-'+Date.now()+'-'+idx, url, hasImg?tab.inputImg:null, 'nano2', '1K');
         renderSB();
       }
       function onVariantErr(err){
         failCount++;
         console.warn('[AI에이전트] 시안 '+(idx+1)+' 생성 실패:', err);
-        if(doneCount+failCount>=3){
+        if(doneCount+failCount>=vCount){
           st.running=false;
           if(doneCount===0){ st.error='시안 생성에 모두 실패했어요: '+String(err).slice(0,150); }
         }
