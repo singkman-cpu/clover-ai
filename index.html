@@ -9459,23 +9459,34 @@ function sbAgent(p){
   // ── 단계 1: 시안 3개 생성 중 / 선택 대기 ────────────────────────────
   if(st.phase==='variants'){
     var vTitle=dv('');vTitle.style.cssText='font-size:12.5px;font-weight:700;color:var(--t);margin-bottom:8px';
-    vTitle.textContent=st.running ? ('시안 생성 중... ('+st.variants.length+'/3 완료)') : '마음에 드는 시안을 골라주세요';
+    vTitle.textContent=st.running ? ('시안 생성 중... ('+st.variants.length+'/3 완료)') : '마음에 드는 시안을 골라주세요 (사진 클릭 = 크게 보기)';
     progWrap.appendChild(vTitle);
     var vGrid=dv('');vGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px';
     for(var vi=0; vi<3; vi++){
-      var vSlot=dv('');vSlot.style.cssText='position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1.5px solid var(--bd2);background:var(--card)';
+      var vSlot=dv('');vSlot.style.cssText='display:flex;flex-direction:column;gap:4px';
+      var vBox=dv('');vBox.style.cssText='position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;border:1.5px solid var(--bd2);background:var(--card)';
       var variant=st.variants[vi];
       if(variant){
-        var vImg=document.createElement('img');vImg.src=variant.url;vImg.style.cssText='width:100%;height:100%;object-fit:cover;cursor:pointer';
-        (function(vUrl){ vImg.onclick=function(){ _agentSelectVariant(vUrl); }; })(variant.url);
-        vSlot.appendChild(vImg);
-        var vBadge=dv('');vBadge.style.cssText='position:absolute;bottom:3px;left:3px;right:3px;text-align:center;background:rgba(0,0,0,.6);color:#fff;font-size:9px;font-weight:700;border-radius:5px;padding:2px 0';
-        vBadge.textContent='선택';
-        vSlot.appendChild(vBadge);
+        var vImg=document.createElement('img');vImg.src=variant.url;vImg.style.cssText='width:100%;height:100%;object-fit:cover';
+        // ⚠️ 재설계: 이미지를 누르면 바로 선택되어버려서, 작게 보이는 썸네일만 보고 실수로
+        // 확정되는 문제가 있었음 — 이제 이미지 클릭은 "메인화면에 크게 보기"만 하고, 실제 선택은
+        // 아래 별도 "이걸로 선택" 버튼을 눌러야만 확정되게 분리함.
+        _wireImgPreview(vImg, variant.url, 'space');
+        vBox.appendChild(vImg);
+        var vNum=dv('');vNum.style.cssText='position:absolute;top:3px;left:3px;background:rgba(0,0,0,.6);color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px';
+        vNum.textContent=(vi+1)+'번';
+        vBox.appendChild(vNum);
+        vSlot.appendChild(vBox);
+        var vSelBtn=mk('button','');vSelBtn.type='button';vSelBtn.textContent='✓ 이걸로 선택';
+        vSelBtn.style.cssText='padding:6px 2px;border-radius:6px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+        (function(vUrl){ vSelBtn.onclick=function(){ _agentSelectVariant(vUrl); }; })(variant.url);
+        vSlot.appendChild(vSelBtn);
       } else if(st.running){
-        vSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span></div>';
+        vBox.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center"><span style="display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span></div>';
+        vSlot.appendChild(vBox);
       } else {
-        vSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#f87171;font-size:10px">실패</div>';
+        vBox.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#f87171;font-size:10px">실패</div>';
+        vSlot.appendChild(vBox);
       }
       vGrid.appendChild(vSlot);
     }
@@ -9487,13 +9498,21 @@ function sbAgent(p){
       progWrap.appendChild(retryVBtn);
     }
   }
+  // 시안 선택 이후 단계에서도 "다른 시안 다시 보기"로 돌아갈 수 있게 — 실수로 잘못 고른 경우
+  // 다시 생성하지 않고 3개 중에서 다시 고를 수 있게 함(이미 만든 3장은 그대로 살아있음).
+  if((st.phase==='upscaleChoice'||st.phase==='vrChoice') && st.variants && st.variants.length && !st.running){
+    var backToVBtn=mk('button','');backToVBtn.type='button';backToVBtn.textContent='◀ 다른 시안 다시 보기';
+    backToVBtn.style.cssText='width:100%;margin-bottom:8px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
+    backToVBtn.onclick=function(){ st.phase='variants'; st.upscaleUrl=null; renderSB(); };
+    progWrap.appendChild(backToVBtn);
+  }
 
   // ── 단계 2: 업스케일 여부 + 방식 확인 ────────────────────────────────
   if(st.phase==='upscaleChoice' && st.selectedUrl && !st.running){
     var u1=dv('');u1.style.cssText='margin-top:12px';
     var uImg=document.createElement('img');uImg.src=st.selectedUrl;
     uImg.style.cssText='width:100%;border-radius:9px;border:1px solid var(--bd2);margin-bottom:8px;cursor:pointer';
-    uImg.onclick=function(){ window.open(st.selectedUrl,'_blank'); };
+    _wireImgPreview(uImg, st.selectedUrl, 'space');
     u1.appendChild(uImg);
     var u1note=dv('');u1note.style.cssText='font-size:12px;font-weight:700;color:var(--t);text-align:center;margin-bottom:8px';
     u1note.textContent='업스케일 하시겠어요?';
@@ -9546,7 +9565,7 @@ function sbAgent(p){
     var v2=dv('');
     var v2img=document.createElement('img');v2img.src=vrBaseUrl;
     v2img.style.cssText='width:100%;border-radius:9px;border:1px solid var(--bd2);margin-bottom:8px;cursor:pointer';
-    v2img.onclick=function(){ window.open(vrBaseUrl,'_blank'); };
+    _wireImgPreview(v2img, vrBaseUrl, 'space');
     v2.appendChild(v2img);
     var v2note=dv('');v2note.style.cssText='font-size:12px;font-weight:700;color:var(--t);text-align:center;margin-bottom:8px';
     v2note.textContent=(st.upscaleUrl?'업스케일 완료. ':'')+'VR 투어를 만들까요? (가장 비싼 단계예요)';
@@ -9588,7 +9607,38 @@ function sbAgent(p){
     var doneTitle=dv('');doneTitle.style.cssText='text-align:center;font-size:13px;font-weight:800;color:var(--ac);margin-bottom:10px';
     doneTitle.textContent='✅ 완료!';
     progWrap.appendChild(doneTitle);
-    if(st.vrUrl){
+    if(st.vrUrl && st.vrSpzUrl){
+      // ⚠️ 버그 수정: 예전엔 marble.worldlabs.ai로 나가는 링크만 보여줘서, 눌러보면 우리 사이트를
+      // 벗어나 마블 홈페이지에서 보게 됐음 — VR투어 탭(_w3dTabPoll)이 이미 쓰고 있던 방식 그대로,
+      // 원본 스플랫(.spz) 파일을 우리 사이트 안의 자체 뷰어(_w3dInitViewer)로 직접 렌더링함.
+      // ⚠️ 사이드바는 renderSB()가 호출될 때마다(에이전트와 무관한 이유로도) 통째로 다시 그려지는데,
+      // 그때마다 새 컨테이너를 만들어서 무거운 WebGL 뷰어를 매번 새로 초기화하면 이전 뷰어가 정리
+      // 안 된 채 계속 쌓여서(WebGL 컨텍스트는 브라우저당 개수 제한이 있음) 성능이 나빠짐. 그렇다고
+      // 무작정 재사용을 막으면 두 번째 렌더부터 빈 검은 박스만 보이는 문제가 생김 — 그래서 실제
+      // DOM 노드 자체를 전역에 보관해뒀다가, 같은 스플랫이면 새로 안 만들고 그 노드를 그대로
+      // 옮겨붙이는(appendChild는 기존 노드면 이동만 함, 안의 캔버스는 그대로 살아있음) 방식으로 처리.
+      if(window._agentVrViewerEl && window._agentVrViewerEl.dataset.spz===st.vrSpzUrl){
+        progWrap.appendChild(window._agentVrViewerEl);
+      } else {
+        var vrViewerWrap=dv('');vrViewerWrap.id='agent-vr-viewer';vrViewerWrap.dataset.spz=st.vrSpzUrl;
+        vrViewerWrap.style.cssText='width:100%;aspect-ratio:16/9;border-radius:9px;overflow:hidden;border:1px solid var(--bd2);margin-bottom:8px;position:relative;background:#05050a';
+        window._agentVrViewerEl=vrViewerWrap;
+        progWrap.appendChild(vrViewerWrap);
+        (function(spzUrl, metricScale){
+          function initVR(){
+            var iw=vrViewerWrap.offsetWidth;
+            if(iw<=0){ setTimeout(initVR,80); return; }
+            if(window._w3dInitViewer) window._w3dInitViewer(vrViewerWrap, spzUrl, metricScale, st.selectedUrl||null, st.upscaleUrl||st.selectedUrl||null);
+          }
+          initVR();
+        })(st.vrSpzUrl, st.vrMetricScale||1);
+      }
+      var vrExtLink=document.createElement('a');vrExtLink.href=st.vrUrl;vrExtLink.target='_blank';vrExtLink.rel='noopener';
+      vrExtLink.style.cssText='display:block;text-align:center;margin-bottom:10px;font-size:10.5px;color:var(--m2);text-decoration:underline';
+      vrExtLink.textContent='↗ 마블(World Labs) 사이트에서 새 창으로 보기';
+      progWrap.appendChild(vrExtLink);
+    } else if(st.vrUrl){
+      // spz URL을 못 찾은 경우에 대한 안전한 대체 — 그래도 결과는 볼 수 있게 외부 링크는 남겨둠
       var vrLink=document.createElement('a');vrLink.href=st.vrUrl;vrLink.target='_blank';vrLink.rel='noopener';
       vrLink.style.cssText='display:block;text-align:center;margin-bottom:10px;padding:11px;border-radius:8px;background:var(--ac);color:#000;font-weight:800;text-decoration:none;font-size:13px';
       vrLink.textContent='🌐 완성된 VR 투어 열기';
@@ -9596,7 +9646,7 @@ function sbAgent(p){
     } else {
       var finalImg=document.createElement('img');finalImg.src=finalUrl;
       finalImg.style.cssText='width:100%;border-radius:9px;border:1px solid var(--bd2);margin-bottom:10px;cursor:pointer';
-      finalImg.onclick=function(){ window.open(finalUrl,'_blank'); };
+      _wireImgPreview(finalImg, finalUrl, 'space');
       progWrap.appendChild(finalImg);
     }
     var extraNote=dv('');extraNote.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-bottom:8px';
@@ -9726,8 +9776,10 @@ function _agentContinueToVR(){
   }
   st.running=true; st.step='running';
   renderSB();
-  _agentGenerateVR(vrBaseUrl, tab.vrTier, function(vrUrl){
+  _agentGenerateVR(vrBaseUrl, tab.vrTier, function(vrUrl, spzUrl, metricScale){
     st.vrUrl=vrUrl;
+    st.vrSpzUrl=spzUrl;
+    st.vrMetricScale=metricScale;
     st.running=false; st.step=null;
     st.phase='done';
     if(G.supaRole!=='admin' && G.plan!=='admin') deductCredits(vrCost);
@@ -9741,8 +9793,15 @@ function _agentContinueToVR(){
 // 결과가 애매할 때 — 자동 파이프라인을 여기서 멈추고, AI편집 탭으로 보내서 직접 세밀하게 수정하게 함
 // (브러시/화살표/영역선택/대화형 수정 등 정밀 도구를 그대로 쓸 수 있음).
 function _agentSendToEdit(imgUrl){
-  var editTab=getTab('edit');
-  editTab.inputImg=imgUrl; editTab.inputImgName=''; editTab.selK=null; editTab.prompt=''; editTab.extraPrompt='';
+  // ⚠️ 버그 수정: selectWF('edit')는 "G.QUEUE에 대기 중인 항목이 있으면 그걸로 inputImg를
+  // 덮어쓰는" 기존 로직이 있는데(다른 "AI편집으로 보내기" 기능들이 쓰는 표준 방식), 여기서는
+  // editTab.inputImg를 직접 설정만 하고 있어서 selectWF가 그 값을 무시하고 덮어써버렸음
+  // (큐가 비어있으면 아예 손도 안 대지만, 큐에 뭐가 남아있으면 조용히 덮어써짐) — 그래서
+  // "AI편집 탭에서 직접 수정" 눌러도 편집탭에 사진이 안 뜨는 것처럼 보였음. 표준 큐 방식을
+  // 그대로 써서 selectWF와 절대 충돌 안 나게 함.
+  // (큐에 다른 잔여 항목이 남아있으면 그게 먼저 shift되어 내 이미지가 밀릴 수 있으므로,
+  // 확실하게 이 항목 하나만 있는 상태로 만듦)
+  G.QUEUE = [{img: imgUrl}];
   selectWF('edit');
 }
 // 최종 결과를 쇼츠 제작 재료 목록에 바로 추가 — 쇼츠는 무료 기능이라 크레딧 없이 바로 이어서 쓸 수 있음
@@ -9773,6 +9832,10 @@ function _agentGenerateVR(imageUrl, tier, onDone, onErr){
     _agentPollVR(d.operation_id, onDone, onErr, 0);
   }).catch(function(e){ onErr(e.message||String(e)); });
 }
+// ⚠️ onDone(marbleUrl, spzUrl, metricScale)로 확장 — 예전엔 marble.worldlabs.ai 웹사이트 링크만
+// 넘겨줘서, "완성된 VR 투어 열기"를 누르면 우리 사이트를 벗어나 마블 홈페이지로 가버렸음.
+// 일반 VR투어 탭(_w3dTabPoll)이 이미 하고 있던 것과 똑같이, 우리 사이트 안에서 직접 렌더링할
+// 수 있는 원본 스플랫(.spz) 파일 URL도 같이 추출해서 넘겨줌.
 function _agentPollVR(operationId, onDone, onErr, retryCount){
   fetch(SUPA_URL+'/functions/v1/world-generate',{
     method:'POST',
@@ -9785,7 +9848,22 @@ function _agentPollVR(operationId, onDone, onErr, retryCount){
       var world=d.response;
       var url=world&&(world.world_marble_url||(world.world_id?('https://marble.worldlabs.ai/world/'+world.world_id):null));
       if(!url){ onErr('결과 URL을 찾지 못했습니다.'); return; }
-      onDone(url);
+      var spzUrl=null;
+      try{
+        var splatAsset=world&&world.assets&&world.assets.splats;
+        var su=splatAsset&&splatAsset.spz_urls;
+        if(su){
+          if(Array.isArray(su)){ spzUrl=su[0]; }
+          else if(typeof su==='object'){ spzUrl = su['full_res'] || su['500K'] || su['150K'] || su['100K'] || Object.values(su)[0]; }
+        }
+        if(!spzUrl && splatAsset && splatAsset.spz_url) spzUrl=splatAsset.spz_url;
+      }catch(e){}
+      var metricScale=1;
+      try{
+        var sm=world&&world.semantics_metadata;
+        if(sm&&sm.metric_scale_factor) metricScale=sm.metric_scale_factor;
+      }catch(e){}
+      onDone(url, spzUrl, metricScale);
     } else {
       if(retryCount>180){ onErr('시간 초과 — 너무 오래 걸려요. 잠시 후 VR 투어 탭에서 확인해보세요.'); return; }
       setTimeout(function(){ _agentPollVR(operationId, onDone, onErr, retryCount+1); }, 5000);
