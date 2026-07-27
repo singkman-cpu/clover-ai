@@ -551,6 +551,7 @@ select option{background:var(--c2)}
         </div>
         <div class="hgrid" id="hgrid">
           <div class="hc feat" data-wf="space"><div class="hc-badge">CORE</div><div class="hc-ic">&#127963;</div><div class="hc-t">현장사진 디자인</div><div class="hc-d">현장 사진을 AI로 변환</div></div>
+          <div class="hc feat" data-wf="agent"><div class="hc-badge">NEW</div><div class="hc-ic">&#129302;</div><div class="hc-t">AI 에이전트</div><div class="hc-d">한 문장으로 디자인부터 VR까지</div></div>
           <div class="hc feat" data-shortcut="multiRoom"><div class="hc-badge">NEW</div><div class="hc-ic">&#127970;</div><div class="hc-t">공간 컨셉 디자인</div><div class="hc-d">여러 공간 한번에 통일감 있게</div></div>
           <div class="hc feat" data-shortcut="budget"><div class="hc-badge">NEW</div><div class="hc-ic">&#128176;</div><div class="hc-t">AI 견적</div><div class="hc-d">사진 보고 AI가 항목별로 견적</div></div>
           <div class="hc" data-wf="render"><div class="hc-ic">&#10024;</div><div class="hc-t">3D 렌더 실사화</div><div class="hc-d">3D 렌더를 실사로</div></div>
@@ -559,6 +560,7 @@ select option{background:var(--c2)}
           <div class="hc" data-wf="upscale"><div class="hc-ic">&#11014;</div><div class="hc-t">업스케일</div><div class="hc-d">2x · 4x 업스케일</div></div>
           <div class="hc" data-wf="world3d"><div class="hc-ic">&#127957;</div><div class="hc-t">VR 투어</div><div class="hc-d">걸어다니는 3D 공간 (베타)</div></div>
           <div class="hc" data-wf="shorts"><div class="hc-ic">&#127916;</div><div class="hc-t">쇼츠 제작</div><div class="hc-d">9:16 브랜드 쇼츠 자동생성</div></div>
+          <div class="hc" data-wf="proposal"><div class="hc-ic">&#128196;</div><div class="hc-t">제안서 제작</div><div class="hc-d">클라이언트용 PDF 제안서</div></div>
           <div class="hc" style="cursor:default;border-style:dashed;display:flex;align-items:center;justify-content:center"><div style="font-size:11px;color:var(--m1);text-align:center;line-height:1.9">추천 워크플로우<br><span style="color:var(--m2)">현장&#8594;변환&#8594;편집&#8594;업스케일&#8594;VR투어</span></div></div>
         </div>
       </div>
@@ -2547,6 +2549,12 @@ function dv(cl){return mk('div',cl);}
 function slBg(r,v,mn,mx){r.style.background='linear-gradient(to right,var(--ac) '+Math.round((v-mn)/(mx-mn)*100)+'%,var(--bd2) '+Math.round((v-mn)/(mx-mn)*100)+'%)';r.value=v;}
 // ── G.tabs 헬퍼 ─────────────────────────────────────────────────
 function getTab(wf){ return G.tabs[wf||G.wf] || G.tabs.space; }
+// ⚠️ "공간 컨셉 디자인"(spaceset)/"AI 견적"(budget)은 진짜 워크플로우가 아니라 sbSpace를
+// 재사용하는 진입점이라 G.wf에 그대로 들어있을 수 있음 — 실제 생성 작업(task.wf)이나
+// 히스토리 저장(G.HIST[wf])에는 반드시 진짜 워크플로우 'space'로 바꿔서 써야 함. 안 그러면
+// 결제·저장이 'spaceset'/'budget'이라는 존재하지 않는 워크플로우로 나가서 과금·결과가 전부
+// 붕 떠버림(실제로 이 버그가 있었음 — task.wf가 G.wf를 그대로 써서 생성 자체가 깨졌었음).
+function _realWf(wf){ return (wf==='spaceset'||wf==='budget') ? 'space' : wf; }
 function setTabStatus(wf, status){ if(G.tabs[wf]) G.tabs[wf].status=status; }
 // origThumb: BEFORE 슬라이더 복원용 축소 썸네일 생성 (최대 300px, JPEG 0.65)
 function makeOrigThumb(dataUrl, cb){
@@ -2683,30 +2691,13 @@ function goHome(){gE('home-s').style.display='flex';
   updBtn();
 }
 // ── 공간 컨셉 디자인 / AI 견적을 사이드바에서 바로 보이게 하는 진입점 ──────────────
-// ⚠️ 요청 반영: 이 두 기능이 "현장사진 디자인" 탭 안에 접혀있는 서브 모드/섹션으로만 있어서
-// 회원들이 발견하기 어렵다는 피드백 — 실제 데이터·로직은 그대로 "space" 탭 것을 그대로 쓰되
-// (안정성을 위해 새로운 워크플로우를 통째로 새로 만들지 않음), 사이드바에 독립된 메뉴처럼
-// 보이도록 진입점만 따로 뺌. 눌리면 현장사진 디자인 탭으로 이동하면서 해당 모드를 자동으로
-// 켜주고, 사이드바 하이라이트도 이 버튼이 눌린 것처럼 보이게 직접 보정함.
+// ⚠️ 재설계: 예전엔 selectWF('space')를 부르고 모드만 바꾸는 "가짜 진입점" 방식이었는데, 그
+// 과정에서 렌더링 타이밍이 꼬여서 사이드바가 완전히 빈 화면으로 보이는 버그가 반복됐음.
+// 이제 'spaceset'/'budget'을 진짜 G.wf 값으로 그대로 씀 — renderSB의 map에도 정식 등록했고
+// (내부적으로 sbSpace를 재사용), renderMain에서도 G.HIST 조회 시 'space'로 별칭 처리해뒀으므로
+// 기존 selectWF/렌더링 파이프라인을 그대로 타면서 하이라이트도 자동으로 정확하게 맞음.
 function selectSpaceShortcut(kind){
-  // ⚠️ 버그 수정: 예전엔 selectWF('space')를 먼저 부르고 나서 spaceMode를 바꿨는데, selectWF
-  // 자체가 내부에서 이미 renderSB()를 한 번 호출해버려서 — 그 시점엔 아직 spaceMode가
-  // 안 바뀐 상태로 한 번 그려지고, 그 다음에 내가 다시 renderSB()를 부르는 이중 호출 구조였음.
-  // 이게 사이드바가 완전히 빈 화면으로 보이던 원인으로 의심되어, 상태를 먼저 확실히 세팅해두고
-  // selectWF를 부르는 순서로 바꿔서 selectWF 내부의 단 한 번뿐인 renderSB() 호출이 처음부터
-  // 정확한 모드를 그리도록 함(이중 렌더 자체를 없앰).
-  var spTab = getTab('space');
-  if(kind==='multiRoom'){
-    spTab.spaceMode = 'multiRoom';
-  } else if(kind==='budget'){
-    spTab.spaceMode = 'single';
-    spTab.budgetSectionCollapsed = false;
-  }
-  selectWF('space');
-  document.querySelectorAll('.wft').forEach(function(t){t.classList.remove('on');});
-  var btn = document.querySelector('.wft[data-w="'+(kind==='multiRoom'?'spaceset':'budget')+'"]');
-  if(btn) btn.classList.add('on');
-  if(window.innerWidth<=768){ setTimeout(function(){ mobTab('space'); }, 200); }
+  selectWF(kind==='multiRoom' ? 'spaceset' : 'budget');
 }
 function selectWF(wf){
   // ⚠️ 2026-07-25: 영상 제작을 Pro 전용으로 막아뒀었는데, 전체 플랜에서 다 쓸 수 있게 풀어달라는
@@ -2824,6 +2815,16 @@ var WF_INFO={
     title:'현장사진을 <span>클릭해서 업로드</span>',
     sub:'실제 현장 사진을 업로드하면 AI가 원하는 인테리어 스타일로 변환합니다'
   },
+  spaceset:{
+    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+    title:'공간 사진들을 <span>클릭해서 업로드</span>',
+    sub:'거실·주방·침실 등 여러 공간 사진을 참고 디자인 하나로 통일감 있게 만들어요'
+  },
+  budget:{
+    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+    title:'공간 사진을 <span>클릭해서 업로드</span>',
+    sub:'AI가 사진을 보고 항목별로 자재·시공 견적을 뽑아드려요'
+  },
   render:{
     icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
     title:'3D 렌더/도면을 <span>클릭해서 업로드</span>',
@@ -2883,7 +2884,12 @@ function loadImgSafe(src, onload, onerror){
   });
 }
 
-function renderMain(wf, preserveScroll){
+function renderMain(callWf, preserveScroll){
+  // ⚠️ "공간 컨셉 디자인"/"AI 견적"은 진짜 워크플로우가 아니라 "space" 탭을 특정 모드로 강제
+  // 진입시키는 진입점이라, G.wf엔 그대로 'spaceset'/'budget'이 들어있어야 사이드바 메뉴
+  // 하이라이트가 맞게 표시되지만, 실제 결과물 저장/조회는 전부 'space' 워크플로우로 통일되어
+  // 있으므로(G.HIST.space) 여기서는 별칭 처리해서 항상 'space' 기준으로 히스토리를 읽고 씀.
+  var wf = (callWf==='spaceset'||callWf==='budget') ? 'space' : callWf;
   // canvas-upload-box / hist-s 가 데스크탑·모바일 레이아웃에 각각 존재(중복 id) → 전부 갱신
   var ubAll=document.querySelectorAll('#canvas-upload-box');
   var hsAll=document.querySelectorAll('.hist-s');
@@ -2902,7 +2908,7 @@ function renderMain(wf, preserveScroll){
     });
   }
   // 화면 렌더는 현재 보이는 탭일 때만 (다른 탭 결과가 화면 덮어쓰기 방지)
-  if(wf !== G.wf) return;
+  if(callWf !== G.wf) return;
 
   // 쇼츠 탭은 hist-s를 쓰지 않고, 메인 캔버스에 슬롯 진행상황/미리보기를 직접 그린다
   if(wf==='shorts'){
@@ -3001,7 +3007,14 @@ function renderSB(){
   var allS=document.querySelectorAll('#ssets');
   if(!allS.length)return;
   if(!G.wf)return;
-  var map={space:sbSpace,render:sbRender,edit:sbEdit,video:sbVideo,upscale:sbUpscale,world3d:sbWorld3d,shorts:sbShorts,proposal:sbProposal,agent:sbAgent};
+  var map={
+    space:sbSpace,render:sbRender,edit:sbEdit,video:sbVideo,upscale:sbUpscale,world3d:sbWorld3d,shorts:sbShorts,proposal:sbProposal,agent:sbAgent,
+    // ⚠️ "공간 컨셉 디자인"/"AI 견적"은 진짜 새 워크플로우가 아니라 검증된 sbSpace를 그대로
+    // 재사용하되 모드만 강제로 맞춰서 들어가는 진입점 — sbSpace 자체가 이미 잘 동작하는 함수라
+    // 새로 만들지 않고 그대로 호출만 함(안정성 위해).
+    spaceset:function(s){ var t=getTab('space'); t.spaceMode='multiRoom'; sbSpace(s); },
+    budget:function(s){ var t=getTab('space'); t.spaceMode='single'; t.budgetSectionCollapsed=false; sbSpace(s); }
+  };
   allS.forEach(function(s){
     s.innerHTML='';
     if(map[G.wf]){
@@ -3088,9 +3101,9 @@ function rUB(b,key){
       if(imgSrc&&key==='main'){
         getTab(G.wf).inputImg=imgSrc;
         getTab(G.wf).status='idle';
-        if(!G.HIST[G.wf])G.HIST[G.wf]=[];
-        G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
-        G.HIST[G.wf].unshift({id:Date.now(),orig:imgSrc,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
+        if(!G.HIST[_realWf(G.wf)])G.HIST[_realWf(G.wf)]=[];
+        G.HIST[_realWf(G.wf)]=G.HIST[_realWf(G.wf)].filter(function(x){return !x.preview;});
+        G.HIST[_realWf(G.wf)].unshift({id:Date.now(),orig:imgSrc,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:_realWf(G.wf),preview:true});
         renderMain(G.wf);
         rUB(b,key);
         gE('stl').textContent='이미지 적용됨 - 실행하세요';
@@ -3114,9 +3127,9 @@ function rUB(b,key){
       if(imgSrc&&key==='main'){
         getTab(G.wf).inputImg=imgSrc;
         getTab(G.wf).status='idle';
-        if(!G.HIST[G.wf])G.HIST[G.wf]=[];
-        G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
-        G.HIST[G.wf].unshift({id:Date.now(),orig:imgSrc,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
+        if(!G.HIST[_realWf(G.wf)])G.HIST[_realWf(G.wf)]=[];
+        G.HIST[_realWf(G.wf)]=G.HIST[_realWf(G.wf)].filter(function(x){return !x.preview;});
+        G.HIST[_realWf(G.wf)].unshift({id:Date.now(),orig:imgSrc,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:_realWf(G.wf),preview:true});
         renderMain(G.wf);
         rUB(ub,key);
         gE('stl').textContent='이미지 적용됨 - 실행하세요';
@@ -15667,9 +15680,9 @@ function _loadFApply(v, f, key){
       tab.inputImgName=f.name||'';
       tab.status='idle';
       tab.budgetManualLock=false; // 새 사진을 올리면 이전 사진에 걸어둔 금액 잠금은 해제(새로 분석 필요)
-      if(!G.HIST[G.wf])G.HIST[G.wf]=[];
-      G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
-      G.HIST[G.wf].unshift({id:Date.now(),orig:v,origName:f.name||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
+      if(!G.HIST[_realWf(G.wf)])G.HIST[_realWf(G.wf)]=[];
+      G.HIST[_realWf(G.wf)]=G.HIST[_realWf(G.wf)].filter(function(x){return !x.preview;});
+      G.HIST[_realWf(G.wf)].unshift({id:Date.now(),orig:v,origName:f.name||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:_realWf(G.wf),preview:true});
       // 이미지 픽셀 정보 표시
       var _infoImg=new Image();
       _infoImg.onload=function(){
@@ -15731,9 +15744,9 @@ function addHist(orig,result,tags,ai,preview){
     console.warn('[addHist] 유효하지 않은 result, 저장 안함:', result ? result.slice(0,40) : 'null');
     return;
   }
-  var item={id:Date.now(),orig:orig,result:hasResult?result:null,tags:tags,ai:ai,preview:preview,cx:50,fav:false,wf:G.wf};
-  if(!G.HIST[G.wf])G.HIST[G.wf]=[];
-  G.HIST[G.wf].unshift(item); // 최신이 배열 앞
+  var item={id:Date.now(),orig:orig,result:hasResult?result:null,tags:tags,ai:ai,preview:preview,cx:50,fav:false,wf:_realWf(G.wf)};
+  if(!G.HIST[_realWf(G.wf)])G.HIST[_realWf(G.wf)]=[];
+  G.HIST[_realWf(G.wf)].unshift(item); // 최신이 배열 앞
   // hist-s가 데스크탑/모바일 두 곳에 존재 → 둘 다에 추가
   document.querySelectorAll('.hist-s').forEach(function(hs){ addHistEl(item,true,hs); });
   if(!preview)saveHistToStorage();
@@ -16795,7 +16808,7 @@ function _w3dMaybeUpscaleSrc_DISABLED(src){
   img.src=src;
 }
 function sendTo(wf,id){
-  var item=(G.HIST[G.wf]||[]).find(function(x){return x.id===id;});
+  var item=(G.HIST[_realWf(G.wf)]||[]).find(function(x){return x.id===id;});
   if(item) sendToWf(wf, item);
 }
 // ── Compare drag — Chrome compatible ──────────────────────────
@@ -17096,7 +17109,7 @@ function _saveActiveJob(reqId, baseUrl, label){
       var curTab=getTab(G.wf);
       if(curTab && curTab.inputImg && curTab.inputImg.startsWith('http')) curOrig=curTab.inputImg;
     }catch(e0){}
-    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',wf:G.wf||'edit',ts:Date.now(),origImg:curOrig});
+    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',wf:_realWf(G.wf)||'edit',ts:Date.now(),origImg:curOrig});
     localStorage.setItem('clover_active_jobs',JSON.stringify(jobs));
   }catch(e){}
 }
@@ -19032,7 +19045,7 @@ function _runToolWithPromptActual(translatedPrompt){
     id:        Date.now(),
     img:       tab.inputImg,
     rimg:      G.wf==='edit'?tab.inputImg:null,
-    wf:        G.wf,
+    wf:        _realWf(G.wf),
     prompt:    translatedPrompt,
     selK:      tab.selK||null,
     eng:       G.eng,
