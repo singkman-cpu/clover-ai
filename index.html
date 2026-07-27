@@ -2424,6 +2424,19 @@ var G={
       prompt:'', selK:null, resolution:'1K',
       status:'idle'
     },
+    // ⚠️ 요청 반영: "공간 컨셉 디자인"/"AI 견적"이 "현장사진 디자인"이랑 똑같이 getTab('space')만
+    // 공유해서 써서, 메인화면(업로드 이미지·결과)이 세 탭 다 똑같은 걸로 보이는 문제가 있었음
+    // (다른 탭들은 각자 독립된 화면인데 이 셋만 안 그랬음). 이제 각자 독립된 탭 데이터를 가짐 —
+    // 나머지 필드(multiRoomImages, budgetRoom 등)는 각 기능 함수 안에서 처음 쓸 때 자동으로
+    // 채워짐(space 탭도 원래 이런 지연 초기화 방식이었음).
+    spaceset:{
+      inputImg:null, resultImg:null,
+      status:'idle'
+    },
+    budget:{
+      inputImg:null, resultImg:null,
+      status:'idle'
+    },
     render:{
       inputImg:null, resultImg:null,
       refs:Array(6).fill(null),
@@ -2888,11 +2901,10 @@ function loadImgSafe(src, onload, onerror){
 }
 
 function renderMain(callWf, preserveScroll){
-  // ⚠️ "공간 컨셉 디자인"/"AI 견적"은 진짜 워크플로우가 아니라 "space" 탭을 특정 모드로 강제
-  // 진입시키는 진입점이라, G.wf엔 그대로 'spaceset'/'budget'이 들어있어야 사이드바 메뉴
-  // 하이라이트가 맞게 표시되지만, 실제 결과물 저장/조회는 전부 'space' 워크플로우로 통일되어
-  // 있으므로(G.HIST.space) 여기서는 별칭 처리해서 항상 'space' 기준으로 히스토리를 읽고 씀.
-  var wf = (callWf==='spaceset'||callWf==='budget') ? 'space' : callWf;
+  // ⚠️ 재설계: 예전엔 "공간 컨셉 디자인"/"AI 견적"을 "space"로 별칭 처리해서 같은 히스토리를
+  // 공유했는데, 그러면 세 탭의 메인화면이 전부 똑같이 보이는 문제가 있었음(다른 탭들은 전부
+  // 독립적인데 이 셋만 안 그랬음) — 이제 각자 진짜 독립된 G.HIST를 쓰도록 별칭 처리를 없앰.
+  var wf = callWf;
   // canvas-upload-box / hist-s 가 데스크탑·모바일 레이아웃에 각각 존재(중복 id) → 전부 갱신
   var ubAll=document.querySelectorAll('#canvas-upload-box');
   var hsAll=document.querySelectorAll('.hist-s');
@@ -8489,7 +8501,6 @@ function sbSpace(p){
   //  · 'spaceset'(공간 컨셉 디자인) → 여러 공간 모드만, 모드 토글 없음
   //  · 'budget'(AI 견적)           → 예산 계산기만, 사진 업로드 + 예산 섹션만(레퍼런스·프리셋 없음)
   if(G.wf==='spaceset'){
-    spTab.spaceMode='multiRoom';
     mkMultiRoomSpace(p);
     return;
   }
@@ -8583,11 +8594,7 @@ function _previewImageInMain(url, wf){
   // "원본 없이 결과 이미지 한 장만" 모드로 정상 렌더링되고, orig가 없으니 자동으로 슬라이더도
   // 안 생김(hasBefore=false).
   G.HIST[wf].unshift({id:Date.now()+Math.random(), orig:null, origThumb:null, result:url, tags:[], ai:'', cx:50, fav:false, wf:wf, preview:true});
-  // ⚠️ 버그 수정: 이 함수를 부르는 곳들이 대부분 wf를 'space'로 하드코딩해두는데, "공간 컨셉
-  // 디자인"/"AI 견적" 탭에 있을 땐 G.wf가 'spaceset'/'budget'이라 'space'와 안 맞아서 조용히
-  // 렌더링이 무시됐음 — 'space' 계열끼리는 같은 걸로 취급해서 지금 보고 있는 탭 기준으로 그림.
-  var _sameGroup = (wf===G.wf) || (wf==='space' && (G.wf==='spaceset'||G.wf==='budget'));
-  if(_sameGroup) renderMain(G.wf);
+  if(G.wf===wf) renderMain(wf);
 }
 // ── 클라우드 갤러리 저장 공용 함수 ──────────────────────────────────────
 // ⚠️ 발견한 진짜 문제: 기존 executeSingleRender(일반 "생성하기" 버튼 흐름)는 결과를 Supabase
@@ -8631,20 +8638,19 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
   }catch(e){ console.warn('[Gallery] 오류:', e); }
 }
 function _showRoomResultInMain(origUrl, resultUrl){
-  if(!G.HIST.space) G.HIST.space=[];
-  // ⚠️ 버그 수정: origUrl이 없는 경우(AI가 상상으로 만든 공간 — 실제 원본 사진이 없음) resultUrl로
-  // 대신 채워넣고 있었는데, 그러면 "원본"과 "결과"가 똑같은 이미지가 되어 비교할 게 없는데도
-  // Before/After 슬라이더가 뜨는 의미없는 상황이 됐었음. 진짜 원본이 있을 때만 슬라이더로,
-  // 없으면(순수 상상 생성) 그냥 단일 이미지로 보여줌.
-  G.HIST.space.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:['공간 세트'], ai:'', cx:50, fav:false, wf:'space', preview:false });
-  getTab('space').resultImg=resultUrl;
-  // ⚠️ 버그 수정: "공간 컨셉 디자인" 탭이 이제 G.wf==='spaceset'로 독립됐는데 여기서 항상
-  // renderMain('space')만 불러서, spaceset 탭에서 보고 있을 땐 G.wf(spaceset)랑 안 맞아
-  // 렌더링이 조용히 무시되고 결과가 화면에 안 뜨는 문제가 있었음 — 지금 탭 기준으로 렌더링.
-  if(G.wf==='space'||G.wf==='spaceset') renderMain(G.wf);
+  // ⚠️ 재설계: "공간 컨셉 디자인"이 "현장사진 디자인"이랑 G.HIST.space를 같이 써서 메인화면이
+  // 두 탭에서 똑같이 보이는 문제가 있었음 — 이제 이 함수는 오직 "공간 컨셉 디자인"(spaceset)
+  // 전용이므로 G.HIST.spaceset(독립된 배열)에 저장하고 그 탭 화면만 갱신함.
+  if(!G.HIST.spaceset) G.HIST.spaceset=[];
+  // 원본이 없는 경우(AI가 상상으로 만든 공간) result로 대신 채우면 "원본"과 "결과"가 똑같아져서
+  // 비교할 게 없는데도 Before/After 슬라이더가 뜨는 의미없는 상황이 됨 — 진짜 원본이 있을 때만
+  // 슬라이더로, 없으면(순수 상상 생성) 단일 이미지로 보여줌.
+  G.HIST.spaceset.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:['공간 세트'], ai:'', cx:50, fav:false, wf:'spaceset', preview:false });
+  getTab('spaceset').resultImg=resultUrl;
+  if(G.wf==='spaceset') renderMain('spaceset');
 }
 function mkMultiRoomSpace(p){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   if(!spTab.multiRoomImages) spTab.multiRoomImages=[];
   if(spTab.multiRoomPrompt==null) spTab.multiRoomPrompt='';
   if(!spTab.multiRoomSubMode) spTab.multiRoomSubMode='manual';
@@ -8700,7 +8706,7 @@ function mkMultiRoomSpace(p){
     if(spTab.multiRoomRefDesignImg){
       var rimg=document.createElement('img');rimg.src=spTab.multiRoomRefDesignImg;
       rimg.style.cssText='width:100%;max-height:160px;object-fit:contain;display:block';
-      _wireImgPreview(rimg, spTab.multiRoomRefDesignImg, 'space');
+      _wireImgPreview(rimg, spTab.multiRoomRefDesignImg, 'spaceset');
       refDesignBox.appendChild(rimg);
       var rdel=mk('button','');rdel.type='button';rdel.textContent='✕';
       rdel.style.cssText='position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;cursor:pointer;font-size:11px';
@@ -8734,7 +8740,7 @@ function mkMultiRoomSpace(p){
     var thumbCol=dv('');thumbCol.style.cssText='display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0';
     var thumb=document.createElement('img');thumb.src=room.img;
     thumb.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:7px;cursor:pointer';
-    _wireImgPreview(thumb, room.img, 'space');
+    _wireImgPreview(thumb, room.img, 'spaceset');
     thumbCol.appendChild(thumb);
     var thumbLbl=dv('');thumbLbl.style.cssText='font-size:8.5px;color:var(--m2);white-space:nowrap';thumbLbl.textContent='내 방 사진(원본)';
     thumbCol.appendChild(thumbLbl);
@@ -8779,7 +8785,7 @@ function mkMultiRoomSpace(p){
         rDelBtn.style.cssText='position:absolute;top:-4px;right:-4px;width:17px;height:17px;border-radius:50%;background:rgba(0,0,0,.75);color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0';
         rDelBtn.onclick=function(e){ e.stopPropagation(); room.refImg=null; renderRoomRefSlot(); };
         refSlot.appendChild(rDelBtn);
-        _wireImgPreview(rImgEl, room.refImg, 'space');
+        _wireImgPreview(rImgEl, room.refImg, 'spaceset');
       } else {
         refSlot.style.border='1.5px dashed var(--bd2)';
         refSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--m2)">+</div>';
@@ -8931,7 +8937,7 @@ function mkMultiRoomSpace(p){
   if(!styleTag){ styleTag=document.createElement('style'); styleTag.id='agent-spin-style'; styleTag.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}'; document.head.appendChild(styleTag); }
 }
 function _multiRoomRun(){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   var n=spTab.multiRoomImages.length;
   if(n<1){ alert('공간 사진을 최소 1개는 넣어주세요.'); return; }
   // ⚠️ 재설계: 참고 디자인 이미지가 필수 입력값이 됨 — 이게 없으면 애초에 "이런 느낌으로
@@ -8979,7 +8985,7 @@ function _multiRoomBuildPrompt(userStyle, roomLabel, hasRoomRef){
   return prompt;
 }
 function _multiRoomGenerateStep(idx){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   var st=spTab.multiRoomState;
   var rooms=spTab.multiRoomImages;
   if(idx>=rooms.length){ st.running=false; renderSB(); return; }
@@ -9007,7 +9013,7 @@ function _multiRoomGenerateStep(idx){
   });
 }
 function _multiRoomRetryOne(idx){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   var st=spTab.multiRoomState;
   if(!st) return;
   if(!spTab.multiRoomRefDesignImg){ alert('참고 디자인 이미지가 없어요. 위에서 다시 올려주세요.'); return; }
@@ -9047,7 +9053,7 @@ function _multiRoomRetryOne(idx){
 // 완전히 다른 종류의 공간(예: 주방)으로 다시 그려달라"는 강한 지시를 프롬프트에 담아서
 // nano-banana-2의 이미지 편집 능력을 "재해석" 용도로 활용함.
 function mkAutoRoomCamera(p){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   if(!spTab.autoRoomCategory) spTab.autoRoomCategory='residential';
   var currentTypes=SPACE_CATEGORIES[spTab.autoRoomCategory].types;
   if(!spTab.autoRoomAnchorImg) spTab.autoRoomAnchorImg=null;
@@ -9086,7 +9092,7 @@ function mkAutoRoomCamera(p){
     if(spTab.autoRoomAnchorImg){
       var img=document.createElement('img');img.src=spTab.autoRoomAnchorImg;
       img.style.cssText='width:100%;max-height:220px;object-fit:contain;display:block';
-      _wireImgPreview(img, spTab.autoRoomAnchorImg, 'space');
+      _wireImgPreview(img, spTab.autoRoomAnchorImg, 'spaceset');
       upBox.appendChild(img);
       var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='✕';
       delBtn.style.cssText='position:absolute;top:6px;right:6px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;cursor:pointer;font-size:12px';
@@ -9239,7 +9245,7 @@ function mkAutoRoomCamera(p){
   if(!styleTag){ styleTag=document.createElement('style'); styleTag.id='agent-spin-style'; styleTag.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}'; document.head.appendChild(styleTag); }
 }
 function _autoRoomRun(){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   if(!spTab.autoRoomAnchorImg){ alert('먼저 기준 공간 사진을 올려주세요.'); return; }
   var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
   if(!selectedOthers.length){ alert('만들어줄 공간을 최소 1개는 선택해주세요.'); return; }
@@ -9259,7 +9265,7 @@ function _autoRoomRun(){
   _autoRoomGenerateStep(0);
 }
 function _autoRoomGenerateStep(idx){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   var st=spTab.autoRoomState;
   var selectedOthers=spTab.autoRoomSelected.filter(function(t){return t!==spTab.autoRoomAnchorType;});
   var allTypes=[spTab.autoRoomAnchorType].concat(selectedOthers);
@@ -9302,7 +9308,7 @@ function _autoRoomGenerateStep(idx){
   });
 }
 function _autoRoomRetryOne(idx){
-  var spTab=getTab('space');
+  var spTab=getTab('spaceset');
   var st=spTab.autoRoomState;
   if(!st) return;
   // ⚠️ 직전 결과를 바로 지우지 않고 prevUrl로 보관 — 재생성 후 "직전 버전 vs 새 버전" 비교 가능하게 함.
@@ -16734,28 +16740,32 @@ var _CATEGORY_TO_BIZTYPE = {
 };
 function _sendToBudgetEstimate(resultUrl, roomLabel, categoryKey){
   if(!resultUrl){ alert('견적 낼 이미지가 없습니다.'); return; }
-  var spTab = getTab('space');
-  spTab.spaceMode = 'single'; // 견적 계산기는 단일 이미지 모드에만 있으므로 강제 전환
-  spTab.inputImg = resultUrl;
-  spTab.inputImgName = '';
-  spTab.status = 'idle';
-  spTab.budgetSectionCollapsed = false; // 넘어가자마자 바로 보이게 펼쳐둠
+  // ⚠️ 재설계: "AI 견적"이 이제 독립된 탭(G.wf==='budget', getTab('budget'))이라 그쪽으로 넘겨야 함
+  // — 예전엔 getTab('space')/selectWF('space')로 보내서, "현장사진 디자인" 화면으로 잘못
+  // 이동하거나 두 탭이 서로 데이터를 덮어쓰는 문제가 있었음.
+  var budTab = getTab('budget');
+  budTab.inputImg = resultUrl;
+  budTab.inputImgName = '';
+  budTab.status = 'idle';
+  budTab.budgetSectionCollapsed = false; // 넘어가자마자 바로 보이게 펼쳐둠
 
   if(categoryKey && categoryKey!=='residential' && _CATEGORY_TO_BIZTYPE[categoryKey]){
     // 오피스/카페/식당 등 상업공간 카테고리면 예산 계산기도 상업공간 모드로, 업종까지 자동 매칭
-    spTab.budgetModeOverride = 'commercial';
-    spTab.budgetBizType = _CATEGORY_TO_BIZTYPE[categoryKey];
+    budTab.budgetModeOverride = 'commercial';
+    budTab.budgetBizType = _CATEGORY_TO_BIZTYPE[categoryKey];
   } else if(roomLabel && _RESIDENTIAL_LABEL_TO_ROOMKEY[roomLabel]){
     // 주거공간이면 방 라벨(거실/주방 등)로 예산 계산기의 방 종류를 자동 매칭
-    spTab.budgetModeOverride = null;
-    spTab.budgetRoom = _RESIDENTIAL_LABEL_TO_ROOMKEY[roomLabel];
+    budTab.budgetModeOverride = null;
+    budTab.budgetRoom = _RESIDENTIAL_LABEL_TO_ROOMKEY[roomLabel];
   }
 
-  if(!G.HIST.space) G.HIST.space=[];
-  G.HIST.space = G.HIST.space.filter(function(x){return !x.preview;});
-  G.HIST.space.unshift({id:Date.now()+Math.random(), orig:resultUrl, result:null, origThumb:null, tags:['견적용'], ai:'', cx:50, fav:false, wf:'space', preview:true});
-  selectWF('space');
-  if(window.innerWidth<=768){ setTimeout(function(){ mobTab('space'); }, 200); }
+  if(!G.HIST.budget) G.HIST.budget=[];
+  G.HIST.budget = G.HIST.budget.filter(function(x){return !x.preview;});
+  // ⚠️ addHistEl은 item.result가 있어야만 렌더링하는 구조라(orig만 있으면 빈 칸) result
+  // 자리에 넣어야 함 — 예전에 이미 한 번 겪었던 버그와 같은 패턴.
+  G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:null, result:resultUrl, origThumb:null, tags:['견적용'], ai:'', cx:50, fav:false, wf:'budget', preview:true});
+  selectWF('budget');
+  if(window.innerWidth<=768){ setTimeout(function(){ mobTab('budget'); }, 200); }
 }
 function sendToWf(wf, item){
   if(!item)return;
