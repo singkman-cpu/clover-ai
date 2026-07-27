@@ -8792,6 +8792,10 @@ function mkMultiRoomSpace(p){
         retryBtn.style.cssText='width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
         retryBtn.onclick=function(idx2){ return function(){ _multiRoomRetryOne(idx2); }; }(i);
         rRow.appendChild(retryBtn);
+        var estBtn=mk('button','');estBtn.type='button';estBtn.textContent='💰 이 공간 견적 보기';
+        estBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.08);color:#fbbf24;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+        estBtn.onclick=function(resUrl,lbl,cat){ return function(){ _sendToBudgetEstimate(resUrl, lbl, cat); }; }(result.url, room2?room2.label:null, spTab.multiRoomCategory);
+        rRow.appendChild(estBtn);
       } else if(result && result.error){
         var rErr=dv('');rErr.style.cssText='font-size:10.5px;color:#f87171';rErr.textContent='⚠️ 실패: '+result.error;
         rRow.appendChild(rErr);
@@ -9089,6 +9093,10 @@ function mkAutoRoomCamera(p){
         retryBtn.style.cssText='width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
         retryBtn.onclick=function(idx2){ return function(){ _autoRoomRetryOne(idx2); }; }(i);
         rRow.appendChild(retryBtn);
+        var estBtn=mk('button','');estBtn.type='button';estBtn.textContent='💰 이 공간 견적 보기';
+        estBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.08);color:#fbbf24;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+        estBtn.onclick=function(resUrl,lbl,cat){ return function(){ _sendToBudgetEstimate(resUrl, lbl, cat); }; }(result.url, typeName, spTab.autoRoomCategory);
+        rRow.appendChild(estBtn);
       } else if(result && result.error){
         var rErr=dv('');rErr.style.cssText='font-size:10.5px;color:#f87171';rErr.textContent='⚠️ 실패: '+result.error;
         rRow.appendChild(rErr);
@@ -9954,6 +9962,15 @@ function sbAgent(p){
     toProposalBtn.onclick=function(){ _agentSendToProposal(finalUrl, tab.inputImg); };
     extraBtns.appendChild(toShortsBtn);extraBtns.appendChild(toProposalBtn);
     progWrap.appendChild(extraBtns);
+    // 렌더링 끝난 결과로 바로 예산 견적까지 볼 수 있게 함 — VR 링크가 아니라 실제 디자인
+    // 이미지(업스케일했으면 그걸, 아니면 선택한 시안)를 예산 계산기로 넘김.
+    var estImgUrl = st.upscaleUrl || st.selectedUrl;
+    if(estImgUrl){
+      var estBtn2=mk('button','');estBtn2.type='button';estBtn2.textContent='💰 이 디자인 견적 보기';
+      estBtn2.style.cssText='width:100%;margin-top:6px;padding:9px;border-radius:8px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.1);color:#fbbf24;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+      estBtn2.onclick=function(){ _sendToBudgetEstimate(estImgUrl, null, null); };
+      progWrap.appendChild(estBtn2);
+    }
     var restartBtn=mk('button','');restartBtn.type='button';restartBtn.textContent='🔄 새로 시작하기';
     restartBtn.style.cssText='width:100%;margin-top:8px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
     restartBtn.onclick=function(){ tab.agentState=null; renderSB(); };
@@ -16555,6 +16572,46 @@ function _showDrawingQuickMenu(item, anchorBtn){
       if(e.key==='Escape'){ overlay.remove(); document.removeEventListener('keydown', _escClose); }
     });
   }, 0);
+}
+// ── 렌더링 완료된 결과를 예산 계산기로 바로 넘김 — 여러 공간 세트/컨셉 확장/AI 에이전트에서
+// "이 공간 견적 보기"를 누르면, 기존에 이미 정교하게 만들어져 있는 예산 계산기(주거 6개 방/
+// 상업 82개 업종 항목별 breakdown + AI 사진 분석)를 그대로 재사용함 — 새로 만들 필요 없이
+// 완성된 결과 이미지를 "현장사진 디자인" 탭에 단일 이미지로 넘기고, 방 종류/업종까지 최대한
+// 자동으로 맞춰줌.
+var _RESIDENTIAL_LABEL_TO_ROOMKEY = {
+  '거실':'living','주방':'kitchen','욕실':'bath','화장실':'bath',
+  '안방':'bedroom','침실':'bedroom','아이방':'bedroom',
+  '현관':'hall','복도':'hall',
+  '드레스룸':'etc','발코니':'etc','기타':'etc'
+};
+var _CATEGORY_TO_BIZTYPE = {
+  cafe:'biz_cafe', restaurant:'biz_restaurant', medical:'biz_clinic',
+  academy:'biz_academy', gym:'biz_gym', salon:'biz_salon', office:'biz_office'
+};
+function _sendToBudgetEstimate(resultUrl, roomLabel, categoryKey){
+  if(!resultUrl){ alert('견적 낼 이미지가 없습니다.'); return; }
+  var spTab = getTab('space');
+  spTab.spaceMode = 'single'; // 견적 계산기는 단일 이미지 모드에만 있으므로 강제 전환
+  spTab.inputImg = resultUrl;
+  spTab.inputImgName = '';
+  spTab.status = 'idle';
+  spTab.budgetSectionCollapsed = false; // 넘어가자마자 바로 보이게 펼쳐둠
+
+  if(categoryKey && categoryKey!=='residential' && _CATEGORY_TO_BIZTYPE[categoryKey]){
+    // 오피스/카페/식당 등 상업공간 카테고리면 예산 계산기도 상업공간 모드로, 업종까지 자동 매칭
+    spTab.budgetModeOverride = 'commercial';
+    spTab.budgetBizType = _CATEGORY_TO_BIZTYPE[categoryKey];
+  } else if(roomLabel && _RESIDENTIAL_LABEL_TO_ROOMKEY[roomLabel]){
+    // 주거공간이면 방 라벨(거실/주방 등)로 예산 계산기의 방 종류를 자동 매칭
+    spTab.budgetModeOverride = null;
+    spTab.budgetRoom = _RESIDENTIAL_LABEL_TO_ROOMKEY[roomLabel];
+  }
+
+  if(!G.HIST.space) G.HIST.space=[];
+  G.HIST.space = G.HIST.space.filter(function(x){return !x.preview;});
+  G.HIST.space.unshift({id:Date.now()+Math.random(), orig:resultUrl, result:null, origThumb:null, tags:['견적용'], ai:'', cx:50, fav:false, wf:'space', preview:true});
+  selectWF('space');
+  if(window.innerWidth<=768){ setTimeout(function(){ mobTab('space'); }, 200); }
 }
 function sendToWf(wf, item){
   if(!item)return;
