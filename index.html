@@ -2596,7 +2596,10 @@ function canRun(){
 function updBtn(){
   var ok=canRun();
   // 쇼츠 탭에서는 actbtn 숨김 (자체 생성 버튼 사용)
-  var isShorts=(G.wf==='shorts'||G.wf==='proposal'||G.wf==='agent');
+  // ⚠️ "공간 컨셉 디자인"(spaceset)은 자체 "세트로 생성 시작" 버튼을 따로 갖고 있고,
+  // "AI 견적"(budget)은 애초에 별도 생성 버튼이 필요 없어서(예산 계산기 자체 UI로 동작) —
+  // 둘 다 일반 하단 실행버튼을 보여주면 헷갈리고, 잘못 누르면 이미지도 없이 실행되어 에러남.
+  var isShorts=(G.wf==='shorts'||G.wf==='proposal'||G.wf==='agent'||G.wf==='spaceset'||G.wf==='budget');
   document.querySelectorAll('.actbtn').forEach(function(b){
     b.style.display=isShorts?'none':'';
   });
@@ -8478,33 +8481,31 @@ function mkBudgetTier(p){
 function sbSpace(p){
   var spTab=getTab('space');
   if(!spTab.spaceMode) spTab.spaceMode='single';
-  // ── 단일 사진 vs 여러 공간 세트 모드 토글 ────────────────────────────
-  // "참조 이미지 유지" 기능 — 거실/주방/욕실/침실 등 같은 집의 여러 공간 사진을 한꺼번에 넣으면,
-  // 사용자가 넣은 "참고 디자인 이미지" 하나만 보고 모든 공간이 각자 독립적으로 스타일이 맞춰짐
-  // (공간끼리 서로 참고하는 체이닝 방식이 아니라, 전부 참고 디자인 이미지 하나가 기준).
-  var modeWrap0=dv('ss');modeWrap0.style.cssText='margin-bottom:4px';
-  var modeRow0=dv('');modeRow0.style.cssText='display:flex;gap:8px';
-  [['single','📸 현장 디자인'],['multiRoom','🏢 공간 컨셉 디자인']].forEach(function(pair){
-    var key=pair[0],lbl=pair[1];
-    var isOn=spTab.spaceMode===key;
-    var b=mk('button','');b.type='button';
-    b.style.cssText='flex:1;padding:9px 6px;border-radius:9px;border:1.5px solid '+(isOn?'var(--ac)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
-    b.textContent=lbl;
-    b.onclick=function(){ spTab.spaceMode=key; renderSB(); };
-    modeRow0.appendChild(b);
-  });
-  modeWrap0.appendChild(modeRow0);
-  p.appendChild(modeWrap0);
-
-  if(spTab.spaceMode==='multiRoom'){ mkMultiRoomSpace(p); return; }
-
+  // ⚠️ 재설계: "현장사진 디자인"/"공간 컨셉 디자인"/"AI 견적"이 전부 이 함수(sbSpace)를
+  // 재사용하다 보니, 3개 탭에서 전부 똑같이 모드 토글·예산 섹션이 다 보이는 문제가 있었음
+  // (사용자가 "각 탭은 자기 내용만 있어야 한다"고 명확히 지적함). 이제 G.wf를 보고 딱 그
+  // 탭에 해당하는 내용만 그리도록 완전히 분리함:
+  //  · 'space'(현장사진 디자인)    → 단일 사진 모드만, 모드 토글 없음, 예산 섹션 없음
+  //  · 'spaceset'(공간 컨셉 디자인) → 여러 공간 모드만, 모드 토글 없음
+  //  · 'budget'(AI 견적)           → 예산 계산기만, 사진 업로드 + 예산 섹션만(레퍼런스·프리셋 없음)
+  if(G.wf==='spaceset'){
+    spTab.spaceMode='multiRoom';
+    mkMultiRoomSpace(p);
+    return;
+  }
+  if(G.wf==='budget'){
+    mkNote(p,'<strong style="color:var(--ac)">💰 AI 견적</strong><br>공간 사진을 업로드하면 AI가 사진을 보고 항목별로 자재·시공 견적을 뽑아드려요.');
+    mkUB(p,'견적 낼 공간 사진 업로드','main');
+    mkBudgetTier(p);
+    return;
+  }
+  // G.wf==='space' (현장사진 디자인) — 단일 사진 모드만, 모드 토글/예산 섹션 없음
   mkNote(p,'<strong style="color:var(--ac)">실제 현장사진 &#8594; 새로운 디자인</strong><br>현장 사진을 레퍼런스와 함께 AI로 변환합니다.');
   mkEng(p,false);mkUB(p,'현장사진 업로드','main');
   var photoTip=dv('');photoTip.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.5;padding:6px 2px 2px';
   photoTip.innerHTML='💡 마감재(타일·도배·바닥재)가 일부라도 남아있는 사진일수록 결과 정확도가 높습니다. 콘크리트 골조만 보이는 완전 철거 사진은 벽·창문 구조가 다르게 나올 수 있습니다.';
   p.appendChild(photoTip);
   mkRef(p,6,'디자인 레퍼런스');
-  mkBudgetTier(p);
   mkResolution(p);
   mkTA(p,'예: 모던 미니멀, 북유럽 스타일, 조명 따뜻하게...');
   mkPre(p,PS_SPACE);
@@ -8582,7 +8583,11 @@ function _previewImageInMain(url, wf){
   // "원본 없이 결과 이미지 한 장만" 모드로 정상 렌더링되고, orig가 없으니 자동으로 슬라이더도
   // 안 생김(hasBefore=false).
   G.HIST[wf].unshift({id:Date.now()+Math.random(), orig:null, origThumb:null, result:url, tags:[], ai:'', cx:50, fav:false, wf:wf, preview:true});
-  if(G.wf===wf) renderMain(wf);
+  // ⚠️ 버그 수정: 이 함수를 부르는 곳들이 대부분 wf를 'space'로 하드코딩해두는데, "공간 컨셉
+  // 디자인"/"AI 견적" 탭에 있을 땐 G.wf가 'spaceset'/'budget'이라 'space'와 안 맞아서 조용히
+  // 렌더링이 무시됐음 — 'space' 계열끼리는 같은 걸로 취급해서 지금 보고 있는 탭 기준으로 그림.
+  var _sameGroup = (wf===G.wf) || (wf==='space' && (G.wf==='spaceset'||G.wf==='budget'));
+  if(_sameGroup) renderMain(G.wf);
 }
 // ── 클라우드 갤러리 저장 공용 함수 ──────────────────────────────────────
 // ⚠️ 발견한 진짜 문제: 기존 executeSingleRender(일반 "생성하기" 버튼 흐름)는 결과를 Supabase
@@ -8633,7 +8638,10 @@ function _showRoomResultInMain(origUrl, resultUrl){
   // 없으면(순수 상상 생성) 그냥 단일 이미지로 보여줌.
   G.HIST.space.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:['공간 세트'], ai:'', cx:50, fav:false, wf:'space', preview:false });
   getTab('space').resultImg=resultUrl;
-  if(G.wf==='space') renderMain('space');
+  // ⚠️ 버그 수정: "공간 컨셉 디자인" 탭이 이제 G.wf==='spaceset'로 독립됐는데 여기서 항상
+  // renderMain('space')만 불러서, spaceset 탭에서 보고 있을 땐 G.wf(spaceset)랑 안 맞아
+  // 렌더링이 조용히 무시되고 결과가 화면에 안 뜨는 문제가 있었음 — 지금 탭 기준으로 렌더링.
+  if(G.wf==='space'||G.wf==='spaceset') renderMain(G.wf);
 }
 function mkMultiRoomSpace(p){
   var spTab=getTab('space');
@@ -8680,9 +8688,9 @@ function mkMultiRoomSpace(p){
   // ── 참고 디자인 이미지(필수) — "내 거실 사진"이 아니라 "이런 느낌으로 만들어줘"라는 완성된
   // 디자인 예시 이미지. 이 모드에서는 필수 입력값이며, 모든 공간이 서로가 아니라 이 이미지
   // 하나만 보고 각자 독립적으로 스타일이 맞춰짐(공간1이 공간2의 기준이 되는 방식이 아님).
-  var refDesignWrap=dv('ss');refDesignWrap.innerHTML='<div class="lbl">참고 디자인 이미지 <span class="lbl-en" style="color:#f59e0b">필수</span></div>';
+  var refDesignWrap=dv('ss');refDesignWrap.innerHTML='<div class="lbl">🎨 참고 디자인 이미지 (내 방 사진 아님) <span class="lbl-en" style="color:#f59e0b">필수</span></div>';
   var refDesignNote=dv('');refDesignNote.style.cssText='font-size:10px;color:var(--m2);margin-bottom:6px';
-  refDesignNote.textContent='💡 "이런 느낌으로 우리 집 전체를 바꿔줘"할 마음에 드는 디자인 사진(잡지, 핀터레스트 등)을 넣어주세요. 색감·천장 디자인·창호 프레임·문 형태·소품·가구 톤까지 이 사진 기준으로 모든 공간에 똑같이 적용돼요.';
+  refDesignNote.textContent='💡 이건 "이런 느낌으로 바꿔줘"하는 스타일 참고용 사진(잡지, 핀터레스트 등)이에요 — 우리집 실제 사진이 아니에요! 색감·천장 디자인·창호 프레임·문 형태·소품·가구 톤까지 이 사진 기준으로 모든 공간에 똑같이 적용돼요. 우리집 실제 사진은 아래 "공간 목록"에 따로 넣어주세요.';
   refDesignWrap.appendChild(refDesignNote);
   var refDesignBox=dv('');refDesignBox.style.cssText='border:1.5px dashed '+(spTab.multiRoomRefDesignImg?'var(--bd2)':'#f59e0b')+';border-radius:9px;min-height:70px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;background:var(--c2)';
   var refDesignInput=document.createElement('input');refDesignInput.type='file';refDesignInput.accept='image/*';refDesignInput.style.display='none';
@@ -8718,20 +8726,24 @@ function mkMultiRoomSpace(p){
   refDesignWrap.appendChild(refDesignBox);refDesignWrap.appendChild(refDesignInput);
   p.appendChild(refDesignWrap);
 
-  var listWrap=dv('ss');listWrap.innerHTML='<div class="lbl">공간 목록 <span class="lbl-en">각자 참고 디자인 이미지를 보고 독립적으로 만들어져요</span></div>';
-  var listBox=dv('');listBox.style.cssText='display:flex;flex-direction:column;gap:8px';
+  var listWrap=dv('ss');listWrap.innerHTML='<div class="lbl">📷 공간 목록 (우리집 실제 사진) <span class="lbl-en">각자 참고 디자인 이미지를 보고 독립적으로 만들어져요</span></div>';
+  var listBox=dv('');listBox.style.cssText='display:flex;flex-direction:column;gap:10px';
   spTab.multiRoomImages.forEach(function(room,idx){
-    var cardWrap=dv('');cardWrap.style.cssText='background:var(--c2);border-radius:9px;padding:8px';
+    var cardWrap=dv('');cardWrap.style.cssText='background:var(--c2);border-radius:9px;padding:10px';
     var row=dv('');row.style.cssText='display:flex;align-items:center;gap:8px';
+    var thumbCol=dv('');thumbCol.style.cssText='display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0';
     var thumb=document.createElement('img');thumb.src=room.img;
-    thumb.style.cssText='width:48px;height:48px;object-fit:cover;border-radius:7px;flex-shrink:0';
+    thumb.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:7px;cursor:pointer';
     _wireImgPreview(thumb, room.img, 'space');
-    row.appendChild(thumb);
+    thumbCol.appendChild(thumb);
+    var thumbLbl=dv('');thumbLbl.style.cssText='font-size:8.5px;color:var(--m2);white-space:nowrap';thumbLbl.textContent='내 방 사진(원본)';
+    thumbCol.appendChild(thumbLbl);
+    row.appendChild(thumbCol);
     var badge=dv('');badge.style.cssText='width:20px;height:20px;border-radius:50%;background:var(--card);color:var(--t2);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0';
     badge.textContent=(idx+1);
     row.appendChild(badge);
     var sel=document.createElement('select');
-    sel.style.cssText='flex:1;padding:6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:12px;font-family:inherit';
+    sel.style.cssText='flex:1;padding:6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:12px;font-family:inherit;align-self:flex-start';
     // 위에서 고른 카테고리(주거/오피스/카페)에 맞는 공간 종류만 보여줌 — 예전엔 3개 카테고리를
     // 전부 optgroup으로 섞어서 보여줘서 목록이 너무 길었음.
     SPACE_CATEGORIES[spTab.multiRoomCategory].types.forEach(function(l){ var o=document.createElement('option');o.value=l;o.textContent=l;sel.appendChild(o); });
@@ -8742,7 +8754,7 @@ function mkMultiRoomSpace(p){
     sel.onchange=function(){ room.label=sel.value; };
     row.appendChild(sel);
     var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='✕';
-    delBtn.style.cssText='width:26px;height:26px;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:#f87171;cursor:pointer;font-size:12px';
+    delBtn.style.cssText='width:26px;height:26px;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:#f87171;cursor:pointer;font-size:12px;align-self:flex-start';
     delBtn.onclick=function(){ spTab.multiRoomImages=spTab.multiRoomImages.filter(function(r){return r.id!==room.id;}); renderSB(); };
     row.appendChild(delBtn);
     cardWrap.appendChild(row);
@@ -8753,25 +8765,24 @@ function mkMultiRoomSpace(p){
     // 이 방 전용 참고"를 같이 보고 만들어지고(통일감은 유지하면서 이 방만 더 정확하게), 안
     // 넣은 방은 지금처럼 전체 참고 이미지 하나로만 만들어짐 — 방마다 유동적으로 넣거나 안
     // 넣거나 자유롭게 섞어 쓸 수 있음.
-    var refRow=dv('');refRow.style.cssText='display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--bd2)';
-    var refLbl=dv('');refLbl.style.cssText='font-size:10px;color:var(--m2);flex-shrink:0';refLbl.textContent='이 공간 전용 참고(선택)';
-    refRow.appendChild(refLbl);
-    var refSlot=dv('');refSlot.style.cssText='width:28px;height:28px;border-radius:6px;position:relative;cursor:pointer;flex-shrink:0;overflow:hidden;border:1px dashed var(--bd2);background:var(--card)';
+    // ⚠️ 보완: 슬롯이 28px밖에 안 돼서 거의 안 보인다는 피드백 — 56px로 키우고 라벨도 명확하게.
+    var refRow=dv('');refRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd2)';
+    var refSlot=dv('');refSlot.style.cssText='width:56px;height:56px;border-radius:7px;position:relative;cursor:pointer;flex-shrink:0;overflow:hidden;border:1.5px dashed var(--bd2);background:var(--card)';
     var refFileInp=document.createElement('input');refFileInp.type='file';refFileInp.accept='image/*';refFileInp.style.display='none';
     function renderRoomRefSlot(){
       refSlot.innerHTML='';
       if(room.refImg){
-        refSlot.style.border='1px solid var(--acb)';
+        refSlot.style.border='1.5px solid var(--acb)';
         var rImgEl=document.createElement('img');rImgEl.src=room.refImg;rImgEl.style.cssText='width:100%;height:100%;object-fit:cover';
         refSlot.appendChild(rImgEl);
         var rDelBtn=document.createElement('button');rDelBtn.type='button';rDelBtn.textContent='✕';
-        rDelBtn.style.cssText='position:absolute;top:-3px;right:-3px;width:13px;height:13px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;font-size:8px;cursor:pointer;line-height:1;padding:0';
+        rDelBtn.style.cssText='position:absolute;top:-4px;right:-4px;width:17px;height:17px;border-radius:50%;background:rgba(0,0,0,.75);color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0';
         rDelBtn.onclick=function(e){ e.stopPropagation(); room.refImg=null; renderRoomRefSlot(); };
         refSlot.appendChild(rDelBtn);
         _wireImgPreview(rImgEl, room.refImg, 'space');
       } else {
-        refSlot.style.border='1px dashed var(--bd2)';
-        refSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--m2)">+</div>';
+        refSlot.style.border='1.5px dashed var(--bd2)';
+        refSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--m2)">+</div>';
       }
     }
     refSlot.onclick=function(e){ if(!room.refImg){ e.stopPropagation(); refFileInp.click(); } };
@@ -8785,6 +8796,11 @@ function mkMultiRoomSpace(p){
     };
     renderRoomRefSlot();
     refRow.appendChild(refSlot);refRow.appendChild(refFileInp);
+    var refTextCol=dv('');refTextCol.style.cssText='flex:1';
+    var refTitleEl=dv('');refTitleEl.style.cssText='font-size:11.5px;font-weight:700;color:var(--t)';refTitleEl.textContent='이 공간만의 전용 참고 이미지';
+    var refSubEl=dv('');refSubEl.style.cssText='font-size:10px;color:var(--m2);margin-top:2px;line-height:1.4';refSubEl.textContent='선택사항 — 넣으면 전체 참고 + 이 사진 둘 다 보고 만들어져요. 안 넣으면 전체 참고 이미지로만 만들어져요.';
+    refTextCol.appendChild(refTitleEl);refTextCol.appendChild(refSubEl);
+    refRow.appendChild(refTextCol);
     cardWrap.appendChild(refRow);
 
     listBox.appendChild(cardWrap);
