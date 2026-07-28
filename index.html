@@ -8715,37 +8715,40 @@ function _addMultiRoomPhotosFromFiles(fileList){
 }
 function mkMultiRoomSpace(p){
   var spTab=getTab('spaceset');
-  // ⚠️ 요청 반영: 참고 이미지도 많고 방 사진도 여러 장 올려야 해서, 새로고침하거나 다른 탭
-  // 갔다 오면 전부 날아가서 다시 올려야 하는 게 너무 힘들다는 피드백 — 쇼츠/제안서 탭이 이미
-  // 쓰고 있던 것과 같은 draft(임시저장) 시스템을 그대로 재사용해서, 새로고침해도 24시간 안에는
-  // 자동으로 복원되게 함.
+  // ⚠️ 재설계: localStorage 기반 draft는 사진이 많아지면 용량 제한(보통 5~10MB)에 걸려 조용히
+  // 저장 실패 → 새로고침하면 다 사라지는 문제가 실제로 발생했음(즐겨찾기 등 다른 localStorage
+  // 데이터에도 영향 줬을 수 있음). 훨씬 넉넉한 IndexedDB로 옮김 — 단, IndexedDB는 비동기라서
+  // "처음 들어왔을 때"만 비동기로 불러오고, 그 사이엔 빈 상태로 우선 그린 뒤 로드가 끝나면
+  // 다시 그림(_mrDraftLoadedOnce로 한 번만 시도하게 막아서 반복 로드 방지).
   if(!spTab.multiRoomImages){
-    var _mrDraft = _draftLoad(_multiRoomDraftKey, 24*60*60*1000);
-    if(_mrDraft){
-      spTab.multiRoomImages = _mrDraft.multiRoomImages || [];
-      spTab.multiRoomRefDesignImg = _mrDraft.multiRoomRefDesignImg || null;
-      spTab.multiRoomPrompt = _mrDraft.multiRoomPrompt || '';
-      spTab.multiRoomCategory = _mrDraft.multiRoomCategory || 'residential';
-      spTab.multiRoomResolution = _mrDraft.multiRoomResolution || '1K';
-    } else {
-      spTab.multiRoomImages=[];
+    spTab.multiRoomImages=[];
+    if(!spTab._mrDraftLoadedOnce){
+      spTab._mrDraftLoadedOnce=true;
+      idbLoadDraft(_multiRoomDraftKey, 7*24*60*60*1000).then(function(data){
+        if(!data) return;
+        spTab.multiRoomImages = data.multiRoomImages || [];
+        spTab.multiRoomRefDesignImg = data.multiRoomRefDesignImg || null;
+        spTab.multiRoomPrompt = data.multiRoomPrompt || '';
+        spTab.multiRoomCategory = data.multiRoomCategory || 'residential';
+        spTab.multiRoomResolution = data.multiRoomResolution || '1K';
+        if(G.wf==='spaceset') renderSB();
+      }).catch(function(){});
     }
   }
   if(spTab.multiRoomPrompt==null) spTab.multiRoomPrompt='';
   if(!spTab.multiRoomSubMode) spTab.multiRoomSubMode='manual';
   // 매번 렌더될 때마다(=뭔가 바뀔 때마다) 자동 저장 — 별도로 "저장" 버튼 안 눌러도 됨.
-  // 용량이 너무 크면(_draftSave 내부에서) 조용히 실패하고 넘어가게 되어있어 앱이 멈추진 않음.
   // ⚠️ 이미지 데이터가 커서 매 렌더마다 즉시 저장하면(예: 스타일 텍스트박스 타이핑할 때마다)
   // 버벅일 수 있어서, 짧게 디바운스 처리함(연속 변경 중엔 마지막 것만 저장).
   clearTimeout(window._multiRoomDraftSaveTimer);
   window._multiRoomDraftSaveTimer = setTimeout(function(){
-    _draftSave(_multiRoomDraftKey, {
+    idbSaveDraft(_multiRoomDraftKey, {
       multiRoomImages: spTab.multiRoomImages,
       multiRoomRefDesignImg: spTab.multiRoomRefDesignImg,
       multiRoomPrompt: spTab.multiRoomPrompt,
       multiRoomCategory: spTab.multiRoomCategory,
       multiRoomResolution: spTab.multiRoomResolution
-    });
+    }).catch(function(){});
   }, 600);
 
   var subModeWrap=dv('ss');subModeWrap.style.cssText='margin-bottom:4px';
@@ -10780,6 +10783,59 @@ function idbDeleteVideo(key){
       try{
         var tx=db.transaction('videos','readwrite');
         tx.objectStore('videos').delete(String(key));
+        tx.oncomplete=function(){resolve();};
+        tx.onerror=function(){resolve();};
+      }catch(e){resolve();}
+    });
+  }).catch(function(){});
+}
+// ══════════════════════════════════════════════════════════════
+// 범용 draft(임시저장) 저장소 — IndexedDB 버전
+// ⚠️ "공간 컨셉 디자인"처럼 사진을 여러 장 다루는 draft는 localStorage(보통 5~10MB 한도)를
+// 금방 채워서, 용량 초과 시 조용히 저장 실패 → 새로고침하면 다 사라지는 문제가 실제로 발생함
+// (즐겨찾기 등 같은 localStorage를 쓰는 다른 데이터에도 영향 줄 수 있음). IndexedDB는 보통
+// 수백MB~수GB 단위로 훨씬 넉넉해서, 이미지가 많은 draft는 여기로 옮김. 위의 쇼츠 영상용
+// IndexedDB(cloverai_shorts)와는 별도 DB(cloverai_drafts)로 분리해서 서로 안 섞이게 함.
+function _idbOpenDrafts(){
+  return new Promise(function(resolve,reject){
+    if(!window.indexedDB){reject(new Error('no idb'));return;}
+    var req=indexedDB.open('cloverai_drafts',1);
+    req.onupgradeneeded=function(){ if(!req.result.objectStoreNames.contains('drafts')) req.result.createObjectStore('drafts'); };
+    req.onsuccess=function(){resolve(req.result);};
+    req.onerror=function(){reject(req.error);};
+  });
+}
+function idbSaveDraft(key, data){
+  return _idbOpenDrafts().then(function(db){
+    return new Promise(function(resolve,reject){
+      var tx=db.transaction('drafts','readwrite');
+      tx.objectStore('drafts').put({data:data, ts:Date.now()}, String(key));
+      tx.oncomplete=function(){resolve();};
+      tx.onerror=function(){reject(tx.error);};
+    });
+  });
+}
+function idbLoadDraft(key, maxAgeMs){
+  return _idbOpenDrafts().then(function(db){
+    return new Promise(function(resolve,reject){
+      var tx=db.transaction('drafts','readonly');
+      var req=tx.objectStore('drafts').get(String(key));
+      req.onsuccess=function(){
+        var rec=req.result;
+        if(!rec){ resolve(null); return; }
+        if(maxAgeMs && (Date.now()-rec.ts)>maxAgeMs){ resolve(null); return; }
+        resolve(rec.data);
+      };
+      req.onerror=function(){reject(req.error);};
+    });
+  });
+}
+function idbDeleteDraft(key){
+  return _idbOpenDrafts().then(function(db){
+    return new Promise(function(resolve){
+      try{
+        var tx=db.transaction('drafts','readwrite');
+        tx.objectStore('drafts').delete(String(key));
         tx.oncomplete=function(){resolve();};
         tx.onerror=function(){resolve();};
       }catch(e){resolve();}
