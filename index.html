@@ -3990,9 +3990,11 @@ function _openPresetBrowseFromTopbar(){
 // is not a function" 에러가 났던 진짜 원인. 원래 있던 (갇혀있는) 정의는 위험을 피하기 위해
 // 그대로 두고, 여기 진짜 최상위 레벨에 똑같은 내용을 하나 더 만들어서 항상 확실히 쓸 수 있게 함.
 function _checkAndApplyFloorEngineOverride(tab){
+  // ⚠️ 버그 수정: tab.selK(프리셋)로만 판정하면 AI견적(budget) 탭은 selK가 항상 비어있어서
+  // isExt가 항상 false로 나옴 — budgetModeOverride 기반 판정도 같이 인정하도록 함.
   var preset = [].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
   var _pTypeFn = (typeof _presetType==='function') ? _presetType : (window._presetType||function(){return null;});
-  var isExt = preset ? (_pTypeFn(preset.pt)==='ext') : false;
+  var isExt = preset ? (_pTypeFn(preset.pt)==='ext') : (tab.budgetModeOverride==='ext');
   if(!isExt) return false;
   if(tab.extConstructionMode!=='new' && tab.extConstructionMode!=='addition') return false;
   var existF = parseFloat(tab.extExistingFloors)||0;
@@ -5824,9 +5826,11 @@ window.PRESET_KO_DESC=PRESET_KO_DESC;
 // 순간(층수 계산기, 반박 프롬프트 창) 바로 전환해서, 사용자가 엔진 배지가 즉시 바뀌는 걸 눈으로
 // 보고 확인할 수 있게 함(생성 시점까지 숨겨져있으면 실제로 적용됐는지 알기 어려움).
 function _checkAndApplyFloorEngineOverride(tab){
+  // ⚠️ 버그 수정: tab.selK(프리셋)로만 판정하면 AI견적(budget) 탭은 selK가 항상 비어있어서
+  // isExt가 항상 false로 나옴 — budgetModeOverride 기반 판정도 같이 인정하도록 함.
   var preset = [].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
   var _pTypeFn = (typeof _presetType==='function') ? _presetType : (window._presetType||function(){return null;});
-  var isExt = preset ? (_pTypeFn(preset.pt)==='ext') : false;
+  var isExt = preset ? (_pTypeFn(preset.pt)==='ext') : (tab.budgetModeOverride==='ext');
   if(!isExt) return false;
   if(tab.extConstructionMode!=='new' && tab.extConstructionMode!=='addition') return false;
   var existF = parseFloat(tab.extExistingFloors)||0;
@@ -7298,6 +7302,23 @@ function _noWheelScroll(inp){
 function mkBudgetTier(p){
   var w=dv('ss');
   var tab=getTab(G.wf);
+  // ⚠️ 요청 반영: 모드별 이미지(tab.budgetImgByMode)가 순수 메모리에만 있어서, 새로고침하거나
+  // 탭을 완전히 껐다 다시 들어오면 사라지고 있었음(예: 건축외관에 올린 사진이 없어지고 주거
+  // 이미지만 남아있는 것처럼 보임) — IndexedDB에 저장해서 새로고침해도 모드별로 유지되게 함.
+  if(!tab.budgetImgByMode && !tab._budgetImgByModeLoadedOnce){
+    tab._budgetImgByModeLoadedOnce = true;
+    idbLoadDraft('clover_budget_img_by_mode', 30*24*60*60*1000).then(function(data){
+      if(!data) return;
+      tab.budgetImgByMode = data;
+      var _curMode = tab.budgetModeOverride || 'residential';
+      // 지금 화면에 이미 사용자가 뭔가 올려놓은 상태가 아닐 때만 복원(사용자가 방금 올린 걸 덮어쓰지 않도록)
+      if(!tab.inputImg && data[_curMode] && data[_curMode].img){
+        tab.inputImg = data[_curMode].img;
+        tab.inputImgName = data[_curMode].name || '';
+        if(G.wf==='budget') renderSB();
+      }
+    }).catch(function(){});
+  }
   var _curPreset=[].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
   // ⚠️ 실제로 재현된 크래시 방지용 방어코드 — 어떤 로드 순서에서는 이 시점에 _presetType이 아직
   // 준비 안 된 채로 호출돼서 "not defined" 에러가 나며 예산 패널 전체가 깨지는 게 확인됐음(그러면
@@ -7335,6 +7356,7 @@ function mkBudgetTier(p){
       tab.inputImg = _saved ? _saved.img : null;
       tab.inputImgName = _saved ? _saved.name : '';
       tab.status = tab.inputImg ? 'idle' : tab.status;
+      idbSaveDraft('clover_budget_img_by_mode', tab.budgetImgByMode).catch(function(){});
       renderSB();
     };
     modeToggleWrap.appendChild(btn);
@@ -7445,9 +7467,23 @@ function mkBudgetTier(p){
             tab.extAiReasoning = res.reasoning||''; // 건축외관도 생성 시 참고할 수 있게 저장
           }
           var diff = res.adjustedSharePct - defaultPct;
-          var diffTxt = isExt
-            ? (diff>15 ? '<span style="color:#f87171">▲ 이 상태로 이 예산이면 다소 빠듯할 수 있어요</span>' : diff<-15 ? '<span style="color:#4ade80">▼ 이 예산이면 여유있게 가능해 보여요</span>' : '<span style="color:var(--m2)">입력하신 예산과 현재 상태가 대체로 맞아 보여요</span>')
-            : (diff>0 ? ('<span style="color:#4ade80">▲ 기본보다 '+diff+'%p 더 배분</span>') : diff<0 ? ('<span style="color:#f87171">▼ 기본보다 '+Math.abs(diff)+'%p 덜 배분</span>') : '<span style="color:var(--m2)">기본 배분과 동일</span>');
+          // ⚠️ 버그 수정: "이 예산이면 여유있다"(AI 사진분석, res.adjustedSharePct 기반)와
+          // "평당가격 기준으로는 OOOO만원 부족하다"(classify()의 결정론적 계산, tab._budgetMinRealisticAmt)
+          // 가 서로 모순되는 경우가 실제로 발생함 — 둘은 완전히 다른 방식(LLM의 주관적 판단 vs
+          // 평당 실제 시공비 기준 계산)으로 계산되기 때문. 결정론적 계산이 실제 숫자에 기반한 더
+          // 신뢰할 수 있는 판단이므로, 둘이 어긋나면 결정론적 계산을 우선시해서 AI 쪽 문구를
+          // 덮어씀 — 두 군데가 서로 다른 말을 하는 걸 사용자가 보지 않게 함.
+          var _detMinAmt = tab._budgetMinRealisticAmt;
+          var _detShortfall = _detMinAmt ? (totalAmt2 - _detMinAmt) : null;
+          var diffTxt;
+          if(_detMinAmt && _detShortfall<0){
+            // 결정론적 계산이 "부족하다"고 판단했는데 AI가 "여유있다"고 했으면, 결정론적 판단으로 덮어씀
+            diffTxt = '<span style="color:#f87171">▲ 평당 실제 시공비 기준으로는 약 '+Math.abs(_detShortfall).toLocaleString()+'만원 부족해 보여요</span>';
+          } else if(isExt){
+            diffTxt = (diff>15 ? '<span style="color:#f87171">▲ 이 상태로 이 예산이면 다소 빠듯할 수 있어요</span>' : diff<-15 ? '<span style="color:#4ade80">▼ 이 예산이면 여유있게 가능해 보여요</span>' : '<span style="color:var(--m2)">입력하신 예산과 현재 상태가 대체로 맞아 보여요</span>');
+          } else {
+            diffTxt = (diff>0 ? ('<span style="color:#4ade80">▲ 기본보다 '+diff+'%p 더 배분</span>') : diff<0 ? ('<span style="color:#f87171">▼ 기본보다 '+Math.abs(diff)+'%p 덜 배분</span>') : '<span style="color:var(--m2)">기본 배분과 동일</span>');
+          }
           aiResultBox.style.background='linear-gradient(135deg,rgba(0,229,204,.14),rgba(0,229,204,.04))';
           aiResultBox.innerHTML='<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">'+
             '<span style="font-size:16px">🤖</span><span style="font-weight:800;color:var(--t);font-size:12.5px">AI 사진 분석 완료</span>'+
@@ -7526,7 +7562,10 @@ function mkBudgetTier(p){
   _updateSettingsSummary();
 
   settingsBody.appendChild(regionWrap);
-  w.appendChild(aiResultBox); // 인테리어/건축외관 공통 — AI 분석 결과가 있을 때만 보임(기본 숨김), 설정 아코디언 밖(항상 보임)
+  // ⚠️ 요청 반영: 이 박스(AI 사진 분석 결과)가 사이드바 맨 위쪽에 있어서, "AI 견적 확인하기"
+  // 버튼(한참 아래, 여러 입력을 다 채운 뒤에 있음)을 누르면 결과가 화면 밖(위쪽)에 나타나서
+  // 스크롤을 올려야만 보였음 — 버튼 바로 아래로 옮겨서 누르자마자 바로 보이게 함(실제
+  // appendChild는 아래 "AI 견적 확인하기" 버튼 바로 다음 지점 참고).
 
   if(isResidential && !isExt){
     // ── 우리 집 공간 구성 (침실·욕실·기타공간 개수) ──────────────────
@@ -8326,6 +8365,7 @@ function mkBudgetTier(p){
     _maybeRunAiAnalysis();
   };
   w.appendChild(aiRunBtn);
+  w.appendChild(aiResultBox); // 버튼 바로 아래 — 누르자마자 결과가 바로 보이게
 
   var roomBudgetLine=dv('');roomBudgetLine.style.cssText='font-size:13px;color:var(--ac);font-weight:700;margin-bottom:5px;min-height:18px;line-height:1.5';
   w.appendChild(roomBudgetLine);
@@ -8432,6 +8472,17 @@ function mkBudgetTier(p){
   function classify(){
     var py=parseFloat(pyInp.value), totalAmt=parseFloat(amtInp.value);
     tab.budgetPy = pyInp.value; tab.budgetAmount = amtInp.value;
+    // 모드 전환 없이 업로드만 하고 끝내는 경우도 저장되도록, classify()가 돌 때마다(디바운스)
+    // 지금 모드의 이미지를 IndexedDB에 동기화함.
+    if(tab.inputImg){
+      clearTimeout(window._budgetImgSaveTimer);
+      window._budgetImgSaveTimer = setTimeout(function(){
+        if(!tab.budgetImgByMode) tab.budgetImgByMode={};
+        var _cm = tab.budgetModeOverride || 'residential';
+        tab.budgetImgByMode[_cm] = {img:tab.inputImg, name:tab.inputImgName||''};
+        idbSaveDraft('clover_budget_img_by_mode', tab.budgetImgByMode).catch(function(){});
+      }, 800);
+    }
     if(!totalAmt || totalAmt<=0){ tab.budgetTier=''; feedback.textContent=''; roomBudgetLine.textContent=''; itemBreakdownBox.style.display='none'; materialsBox.style.display='none'; realismWarn.style.display='none'; additionSplitBox.style.display='none'; updBtn(); return; }
 
     // 방별 배정 금액(시공+가구+소품+가전 다 포함)은 "참고용 표시"로만 따로 계산해서 보여줌
