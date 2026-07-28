@@ -11094,16 +11094,28 @@ setInterval(function(){
   _shortsSaveDraftAsync();
   if(G_PROPOSAL.scenes && G_PROPOSAL.scenes.length) _draftSave(_proposalDraftKey, G_PROPOSAL);
 }, 6000); // 6초마다 자동 저장 (이미지나 문구가 있을 때만)
-// ⚠️ 요청 반영: 마우스 뒤로가기 버튼을 실수로 누르면 저장 확인 없이 그냥 사이트를 완전히
-// 벗어나버리는 문제 — 브라우저 표준 "나가시겠습니까?" 확인창을 띄우게 함. 이 방식은 뒤로가기
-// 버튼뿐 아니라 탭 닫기·새로고침·다른 주소 입력 전부에 동일하게 적용됨(브라우저 공통 동작이라
-// 문구는 브라우저가 자체적으로 보여주는 기본 문구가 뜸 — 커스텀 문구는 최신 브라우저에서 보안상
-// 지원 안 함). 작업 중인 게 있을 때 정말 나가시려면 확인창에서 "나가기"를 한 번 더 눌러주시면 됨.
-window.addEventListener('beforeunload', function(e){
-  e.preventDefault();
-  e.returnValue = '';
-  return '';
-});
+// ⚠️ 요청 반영: 새로고침·탭 닫기 등 다른 상황엔 안 물어보고, 마우스 뒤로가기/앞으로가기
+// 버튼을 눌렀을 때만 확인창이 뜨게 함 — beforeunload는 모든 나가는 상황에 다 걸려서
+// (새로고침도 포함) 너무 광범위했음. popstate 이벤트는 브라우저의 뒤로/앞으로가기 버튼을
+// 눌렀을 때만 발생하고 새로고침에는 안 걸리므로, 이걸로 뒤로가기만 정확히 잡아냄.
+// 동작 방식: 페이지에 들어오자마자 현재 주소를 히스토리에 하나 더 쌓아두고(더미 항목),
+// 뒤로가기를 누르면 그 더미 항목으로 먼저 이동하는데(=popstate 발생), 이때 확인창을 띄워서
+// "취소"면 다시 같은 자리에 더미 항목을 쌓아 그대로 머무르게 하고, "나가기"면 진짜로 한 번 더
+// 뒤로가기를 실행해서 원래 가려던 페이지로 보내줌.
+(function(){
+  var _backLeaveConfirmed = false;
+  try{ history.pushState(null, '', location.href); }catch(e){}
+  window.addEventListener('popstate', function(){
+    if(_backLeaveConfirmed) return; // 이미 "나가기"를 선택해서 실제로 나가는 중 — 다시 안 물어봄
+    var wantsToLeave = confirm('페이지에서 나가시겠습니까? 저장하지 않은 작업 내용이 사라질 수 있어요.');
+    if(wantsToLeave){
+      _backLeaveConfirmed = true;
+      history.back(); // 방금 쌓아둔 더미 항목을 한 번 더 넘어가서 실제로 이전 페이지로 이동
+    } else {
+      try{ history.pushState(null, '', location.href); }catch(e){} // 다시 더미 항목을 쌓아서 이 페이지에 그대로 머무름
+    }
+  });
+})();
 
 window.addEventListener('beforeunload', function(){
   // beforeunload는 비동기 작업(fetch로 blob→base64 변환)을 기다려주지 않는 브라우저가 많음.
