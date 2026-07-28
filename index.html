@@ -3686,7 +3686,7 @@ function _openGalleryInNewWindow(id){
       (it.tags.length?'<div class="tag">'+it.tags.join(' · ')+'</div>':'')+
       '</div>';
   }).join('');
-  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['shorts','쇼츠'],['proposal','제안서'],['upscale','업스케일'],['world3d','VR 투어']];
+  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['shorts','쇼츠'],['proposal','제안서'],['upscale','업스케일'],['world3d','VR 투어'],['agent','AI 에이전트'],['spaceset','공간 컨셉 디자인'],['budget','AI 견적']];
   var wfOptHtml=wfTypes.map(function(w){return '<option value="'+w[0]+'">'+w[1]+'</option>';}).join('');
   var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>CLOVER AI — 갤러리</title><style>'+
     'body{margin:0;background:#0a0a0c;color:#f2f2f8;font-family:Pretendard,-apple-system,sans-serif;padding:16px}'+
@@ -9495,7 +9495,16 @@ function sbEdit(p){
     b.style.cssText='padding:10px 8px;border-radius:9px;border:1.5px solid '+(isOn?'var(--ac)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';cursor:pointer;font-family:inherit;text-align:left';
     b.innerHTML='<div style="font-size:12.5px;font-weight:700;color:'+(isOn?'var(--ac)':'var(--t)')+'">'+m[1]+'</div>'+
       '<div style="font-size:10px;color:var(--t2);margin-top:2px;line-height:1.3">'+m[2]+'</div>';
-    b.onclick=function(){ G.editMode=m[0]; if(m[0]==='normal') togDraw(false); renderSB(); };
+    b.onclick=function(){
+      G.editMode=m[0];
+      // ⚠️ 버그 수정: 예전엔 'normal'로 갈 때만 오버레이(브러시 캔버스·화살표·영역선택)를 숨겨서,
+      // "브러시로 영역 선택" 모드에서 화살표를 찍어놓고 "대화형 수정"으로 바로 넘어가면 화살표가
+      // 화면에 계속 남아있는 것처럼 보이는 문제가 있었음 — 'mask' 모드가 아닌 모든 모드에서
+      // 오버레이를 숨기도록 수정(데이터 자체는 지우지 않고 화면 표시만 숨김 — 다시 '브러시로
+      // 영역 선택'으로 돌아오면 그대로 복원돼서 보임).
+      if(m[0]!=='mask') togDraw(false);
+      renderSB();
+    };
     modeRow.appendChild(b);
   });
   modeWrap.appendChild(modeRow);
@@ -13814,7 +13823,7 @@ function _shortsAddImageFlow(){
   galLabel.textContent=allItems.length>0?'또는 내 CLOVER AI 갤러리에서 선택 (여러 장 선택 가능, 역할 자동 인식, '+allItems.length+'개):':'갤러리가 비어있어요 — 파일에서 업로드해주세요.';
   ov.appendChild(galLabel);
   // 워크플로우 필터 — 렌더실사화/AI편집처럼 특정 탭 결과물만 골라서 찾기 쉽게
-  var WF_SOURCE_LABELS={space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서'};
+  var WF_SOURCE_LABELS={space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',agent:'AI 에이전트',spaceset:'공간 컨셉 디자인',budget:'AI 견적'};
   var presentWfs=Object.keys(_diagCounts).filter(function(wf){ return (G.HIST[wf]||[]).some(function(it){return !!it.result;}); });
   if(presentWfs.length>1){
     var filterRow=document.createElement('div');
@@ -13842,6 +13851,36 @@ function _shortsAddImageFlow(){
     });
     ov.appendChild(filterRow);
   }
+  // ⚠️ 요청 반영: "프로젝트에 담아둔 이미지들만 골라서 불러오기"가 안 됐음 — 프로젝트 목록을
+  // 드롭다운으로 보여주고, 고르면 그 프로젝트에 담긴 이미지만 그리드에 남기도록 필터링함.
+  // 위의 워크플로우 필터(현장사진/AI편집 등)와 같이 써도 되게(AND 조건) 만듦.
+  var _pickerProjects = _getProjects();
+  if(_pickerProjects.length){
+    var projFilterRow=document.createElement('div');
+    projFilterRow.style.cssText='display:flex;align-items:center;gap:8px;padding:0 20px 10px;flex-shrink:0';
+    var projFilterLbl=document.createElement('span');
+    projFilterLbl.textContent='📁 프로젝트에서 선택:';
+    projFilterLbl.style.cssText='font-size:11.5px;color:rgba(255,255,255,.5);white-space:nowrap';
+    var projFilterSel=document.createElement('select');
+    projFilterSel.style.cssText='flex:1;max-width:260px;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:#18181e;color:#fff;font-size:12px;font-family:inherit';
+    var projAllOpt=document.createElement('option');projAllOpt.value='';projAllOpt.textContent='(전체 — 프로젝트 무관)';
+    projFilterSel.appendChild(projAllOpt);
+    _pickerProjects.forEach(function(proj){
+      var o=document.createElement('option');o.value=proj.id;
+      o.textContent=proj.name+(proj.client?' ('+proj.client+')':'')+' · '+(proj.itemIds?proj.itemIds.length:0)+'개';
+      projFilterSel.appendChild(o);
+    });
+    projFilterSel.onchange=function(){
+      var pid=projFilterSel.value;
+      var proj=pid?_pickerProjects.find(function(x){return x.id===pid;}):null;
+      var idSet=proj&&proj.itemIds?proj.itemIds.reduce(function(m,id){m[id]=true;return m;},{}):null;
+      grid.querySelectorAll('[data-card-id]').forEach(function(c){
+        c.style.display = (!idSet || idSet[c.dataset.cardId] || idSet[Number(c.dataset.cardId)]) ? '' : 'none';
+      });
+    };
+    projFilterRow.appendChild(projFilterLbl);projFilterRow.appendChild(projFilterSel);
+    ov.appendChild(projFilterRow);
+  }
   // 그리드
   var scroll=document.createElement('div');scroll.style.cssText='flex:1;overflow-y:auto;padding:8px 16px 24px';
   var grid=document.createElement('div');
@@ -13851,6 +13890,7 @@ function _shortsAddImageFlow(){
   allItems.slice(0,150).forEach(function(item){
     var wrap=document.createElement('div');
     wrap.dataset.cardWf=item.wf||'';
+    wrap.dataset.cardId=item.id;
     wrap.style.cssText='border-radius:10px;overflow:hidden;cursor:pointer;border:3px solid transparent;transition:border-color .15s;aspect-ratio:1;background:#111;position:relative';
     var isVidItem = item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1);
     if(isVidItem){
@@ -15363,12 +15403,17 @@ function _mkMaskExecute(){
   getTab(G.wf).prompt=combined;
   if(refImgs.length){ getTab(G.wf).refs=refImgs; }
   G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations(); // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
+  G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){}); // 브러시 칠한 것도 같이 초기화
   togDraw(false);if(canRun())runTool();
 }
 function _mkMaskClearAll(){
   var cv=gE('draw-canvas');if(cv){var ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);}
   G.drawHist=[];G.polyPts=[];G.strokePoints=[];G.maskColorPrompts={};G.maskColorRefImg={};
   G.arrows=[];G.arrowsHist=[];G.polyAreas=[];G.polyAreasHist=[];_saveMaskAnnotations();
+  // 저장해둔 브러시 캔버스 복원 데이터도 같이 지움 — 안 그러면 다음에 브러시 모드 들어갈 때
+  // 방금 지운 내용이 다시 살아나 보임.
+  G._pendingMaskCanvasRestore=null;
+  idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
   var polyOv=gE('poly-overlay');if(polyOv)polyOv.innerHTML='';
   var arrOv=gE('arrow-overlay');if(arrOv)arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:'';
   renderSB();
@@ -15385,6 +15430,15 @@ function togDraw(on, mode){
       tmpI.onload=function(){
         cv.width=tmpI.naturalWidth;
         cv.height=tmpI.naturalHeight;
+        // ⚠️ 요청 반영: 브러시로 칠한 내용이 새로고침하면 사라지던 문제 — IndexedDB에 저장해둔
+        // 이전 캔버스 내용이 있으면 여기서 복원함(캔버스가 새로 만들어지는 이 시점에만 필요).
+        if(G._pendingMaskCanvasRestore){
+          var _restoreImg=new Image();
+          _restoreImg.onload=function(){
+            try{ cv.getContext('2d').drawImage(_restoreImg,0,0,cv.width,cv.height); }catch(e){}
+          };
+          _restoreImg.src=G._pendingMaskCanvasRestore;
+        }
         // CSS로 화면 표시 크기에 맞춤
         cv.style.width=ce.offsetWidth+'px';
         cv.style.height=ce.offsetHeight+'px';
@@ -15986,6 +16040,10 @@ function _saveMaskAnnotations(){
   try{
     localStorage.setItem('clover_edit_arrows', JSON.stringify(G.arrows||[]));
     localStorage.setItem('clover_edit_polyareas', JSON.stringify(G.polyAreas||[]));
+    // ⚠️ 화살표·영역은 저장되는데 브러시 색상별로 적은 프롬프트·참고이미지는 저장 안 되고 있었음
+    // — 같이 저장해서 새로고침해도 남아있게 함.
+    localStorage.setItem('clover_edit_maskprompts', JSON.stringify(G.maskColorPrompts||{}));
+    localStorage.setItem('clover_edit_maskrefimg', JSON.stringify(G.maskColorRefImg||{}));
   }catch(e){ console.warn('[화살표/영역 저장 실패]', e.message); }
 }
 function _loadMaskAnnotations(){
@@ -15994,7 +16052,18 @@ function _loadMaskAnnotations(){
     if(a){ var parsedA=JSON.parse(a); if(Array.isArray(parsedA)) G.arrows=parsedA; }
     var pa=localStorage.getItem('clover_edit_polyareas');
     if(pa){ var parsedPa=JSON.parse(pa); if(Array.isArray(parsedPa)) G.polyAreas=parsedPa; }
+    var mp=localStorage.getItem('clover_edit_maskprompts');
+    if(mp){ var parsedMp=JSON.parse(mp); if(parsedMp && typeof parsedMp==='object') G.maskColorPrompts=parsedMp; }
+    var mr=localStorage.getItem('clover_edit_maskrefimg');
+    if(mr){ var parsedMr=JSON.parse(mr); if(parsedMr && typeof parsedMr==='object') G.maskColorRefImg=parsedMr; }
   }catch(e){ console.warn('[화살표/영역 복원 실패]', e.message); }
+  // ⚠️ 요청 반영: 화살표·영역·색상별 텍스트는 저장되는데, 정작 "브러시로 직접 칠한 캔버스 내용"
+  // 자체는 아예 저장이 안 되고 있었음(순수 메모리상의 canvas 픽셀이라 새로고침하면 무조건 사라짐)
+  // — 브러시 칠한 그림도 IndexedDB에 이미지로 저장해두고, 브러시 모드로 들어갈 때 복원함.
+  idbLoadDraft('clover_edit_mask_canvas', 7*24*60*60*1000).then(function(dataUrl){
+    if(!dataUrl) return;
+    G._pendingMaskCanvasRestore = dataUrl;
+  }).catch(function(){});
 }
 function saveHistToStorage(){try{
     localStorage.setItem('clover_eng',    G.eng||'nano2');
@@ -17066,7 +17135,19 @@ document.addEventListener('mousemove',function(e){
   if(G.dragId!==-1){e.preventDefault();moveDragX(e.clientX);}
   if(G.drawing)drawMv(e);
 },{passive:false});
-document.addEventListener('mouseup',function(){G.dragId=-1;G.drawing=false;G.lastPt=null;});
+// 브러시로 칠한 캔버스 내용을 IndexedDB에 저장(디바운스) — 스트로크가 끝날 때마다 호출됨
+function _saveMaskCanvasDebounced(){
+  clearTimeout(window._maskCanvasSaveTimer);
+  window._maskCanvasSaveTimer = setTimeout(function(){
+    var cv=gE('draw-canvas');
+    if(!cv || !cv.classList.contains('active')) return;
+    try{
+      var dataUrl = cv.toDataURL();
+      idbSaveDraft('clover_edit_mask_canvas', dataUrl).catch(function(){});
+    }catch(e){}
+  }, 500);
+}
+document.addEventListener('mouseup',function(){G.dragId=-1;G.drawing=false;G.lastPt=null;_saveMaskCanvasDebounced();});
 document.addEventListener('touchmove',function(e){
   if(G.dragId!==-1){e.preventDefault();moveDragX(e.touches[0].clientX);return;}
   // 슬라이더 영역에서 터치가 시작됐지만, 아직 가로/세로 방향이 판단 안 된 경우
@@ -17146,7 +17227,7 @@ function drawDn(e){
       if(!G.drawing)return; e.preventDefault();
       var t=e.touches[0]; drawMv({clientX:t.clientX, clientY:t.clientY});
     }, {passive:false});
-    cv0.addEventListener('touchend', function(){ G.drawing=false; G.lastPt=null; });
+    cv0.addEventListener('touchend', function(){ G.drawing=false; G.lastPt=null; _saveMaskCanvasDebounced(); });
   }
 })();
 function _drawShapePreview(ctx,pt){
@@ -22223,7 +22304,7 @@ function openPanel(id){
   searchInp.placeholder='🔍 태그·메모로 검색...';
   searchInp.style.cssText='flex:1;min-width:160px;padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
   searchBar.appendChild(searchInp);
-  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['shorts','쇼츠'],['proposal','제안서'],['upscale','업스케일'],['world3d','VR 투어']];
+  var wfTypes=[['','전체'],['space','현장사진'],['render','렌더실사화'],['edit','AI편집'],['video','영상'],['shorts','쇼츠'],['proposal','제안서'],['upscale','업스케일'],['world3d','VR 투어'],['agent','AI 에이전트'],['spaceset','공간 컨셉 디자인'],['budget','AI 견적']];
   var wfSel=document.createElement('select');
   wfSel.id='gallery-wf-filter';
   wfSel.style.cssText='padding:7px 10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit';
@@ -22958,7 +23039,10 @@ function renderProjectDetail(b, projectId){
     var cell=document.createElement('div');
     cell.style.cssText='position:relative;border-radius:8px;overflow:hidden;background:var(--c2);aspect-ratio:1';
     var img=document.createElement('img');img.src=src;img.style.cssText='width:100%;height:100%;object-fit:cover;cursor:pointer';
-    _wireImgPreview(img, src, item.wf);
+    // ⚠️ 요청 반영: 예전엔 클릭해도 단순 이미지 확대만 됐는데(영상/AI편집/업스케일/VR투어/
+    // 다운로드/공유/태그/즐겨찾기 버튼이 하나도 없었음), 일반 갤러리 카드랑 똑같이 풍부한
+    // 액션바가 있는 확대뷰(_galleryZoomShow)로 열리도록 통일함.
+    img.onclick=function(){ _galleryZoomShow(allItems, allItems.indexOf(item)); };
     cell.appendChild(img);
     var rmBtn=document.createElement('button');rmBtn.type='button';rmBtn.textContent='✕';
     rmBtn.title='이 프로젝트에서 빼기(결과물 자체는 안 지워짐)';
@@ -24201,7 +24285,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
     }
   };
   document.onmousemove=function(e){if(G.drawing)drawMv(e);};
-  document.onmouseup=function(){G.dragId=-1;G.drawing=false;G.lastPt=null;};
+  document.onmouseup=function(){G.dragId=-1;G.drawing=false;G.lastPt=null;_saveMaskCanvasDebounced();};
 
   var ce=gE('canvas');
   if(ce){
@@ -24743,7 +24827,17 @@ function onSupaLogin(user){
       var crn=gE('cr-n');
       if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
       // 클라우드 갤러리 로드
-      loadCloudGallery();
+      // ⚠️ 버그 수정(성능): Supabase 인증 이벤트(SIGNED_IN·INITIAL_SESSION·TOKEN_REFRESHED 등)가
+      // 세션 하나에서 여러 번 발생할 수 있는데, 그때마다 이 아래에서 워크플로우 9개를 각각
+      // 따로 조회(총 9개 병렬 네트워크 요청)하는 loadCloudGallery()가 매번 다시 실행되고
+      // 있었음 — "갤러리가 무겁고 느리다"는 문제의 실제 원인. 같은 계정으로 이미 한 번
+      // 불러왔으면 다시 안 부르게 가드를 추가함(계정이 바뀌면 다시 불러옴).
+      if(G._cloudGalleryLoadedForUid !== user.id){
+        G._cloudGalleryLoadedForUid = user.id;
+        loadCloudGallery();
+      } else {
+        console.log('[클라우드 갤러리] 이미 이 세션에서 로드됨 — 재요청 생략');
+      }
       // 사이드바 재렌더링 (레퍼런스 슬롯 반영)
       if(G.wf) renderSB();
     }
