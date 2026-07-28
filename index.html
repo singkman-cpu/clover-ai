@@ -2884,8 +2884,16 @@ var WF_INFO={
 // aspect_ratio:'auto'를 쓰던 자리를 전부 이걸로 교체함)
 // ⚠️ 요청 반영: 사용자가 직접 출력 비율을 골라놨으면(getTab(G.wf).forcedAspect) 원본 이미지
 // 비율 측정보다 그걸 최우선으로 씀 — 예: 16:9 참고 이미지를 넣어도 9:16(쇼츠용)으로 바로 뽑기.
+// ⚠️ 매우 중요한 버그 수정: "8층으로 신축" 같은 층수 증가 요청을 하면, AI가 그릴 세로 공간을
+// 최대한 확보하려고 세로로 긴 비율(9:21)을 강제하는 로직(_forceTallAspect)이 runNanoBanana()
+// 안에만 있었음 — 그런데 "이 견적 구성 그대로 렌더링해보기" 버튼을 포함한 대부분의 생성 경로는
+// runNanoBanana가 아니라 procImgWithTask → _withExplicitAspect를 거치는데, 여기엔 이 로직이
+// 아예 없어서 8층을 요청해도 원본 사진 비율(예: 3:4처럼 그다지 세로로 길지 않은 비율) 그대로
+// 생성되고 있었음 — 세로 공간이 부족하니 AI가 층수를 다 못 그리고 3층 정도에서 멈추는 실제
+// 원인이었음.
 function _withExplicitAspect(imgSrc, cb){
   var _fTab = getTab(G.wf);
+  if(_fTab && _fTab._extFloorOverrideForThisRun){ cb('9:21'); return; }
   if(_fTab && _fTab.forcedAspect && _fTab.forcedAspect!=='auto'){ cb(_fTab.forcedAspect); return; }
   if(!imgSrc){ cb('auto'); return; }
   loadImgSafe(imgSrc, function(pi){
@@ -8137,67 +8145,52 @@ function mkBudgetTier(p){
       };
       existRow.appendChild(existLbl);existRow.appendChild(existingFloorsInp);existRow.appendChild(existUnitShort);
       existBox.appendChild(existRow);
-      // ⚠️ 요청 반영: "목표 층수"를 알아내려면 "📐 층수×층당평수로 계산하기"를 펼쳐서 계산기를
-      // 써야 했는데, 훨씬 직관적으로 바로 밑에 "몇 층으로 증축/신축하실 건가요?" 숫자 입력을
-      // 하나 더 두는 게 훨씬 자연스러움 — 지금 층수 입력 바로 다음 줄에 배치함. 여기 입력하면
-      // 위의 층수×평수 계산기(펼치는 방식)와 똑같이 tab.extTargetFloors에 반영되고, 층당 평수
-      // 기준(extPyPerFloorBasis)이 있으면 평수도 같이 자동 계산해줌.
-      var targetRow=dv('');targetRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:8px';
-      var targetLbl=dv('');targetLbl.style.cssText='font-size:11.5px;color:var(--t2);white-space:nowrap;flex:none';
-      targetLbl.textContent = tab.extConstructionMode==='addition' ? '몇 층으로 증축을 하고 싶으신가요?' : '몇 층으로 신축을 지으실 건가요?';
-      var targetFloorsInp=mk('input','');targetFloorsInp.type='number';targetFloorsInp.placeholder='예: 4';targetFloorsInp.value=tab.extTargetFloors||'';
-      targetFloorsInp.style.cssText='width:70px;flex:none;background:var(--sb,#111);border:1px solid var(--acb);color:var(--ac);padding:7px 9px;font-size:13px;font-weight:700;border-radius:7px;outline:none;box-sizing:border-box;text-align:center';
-      _noWheelScroll(targetFloorsInp);
-      var targetUnitShort=dv('');targetUnitShort.style.cssText='font-size:11.5px;color:var(--m2);flex:none';targetUnitShort.textContent='층';
-      targetFloorsInp.oninput=function(){
-        tab.extTargetFloors=targetFloorsInp.value;
-        var tf=parseFloat(tab.extTargetFloors)||0;
-        // 층당 평수 기준을 알고 있으면(기존 층수를 입력했을 때 자동으로 잡힘) 평수도 같이 계산
-        if(tab.extPyPerFloorBasis>0 && tf>0){
-          pyInp.value = Math.round(tab.extPyPerFloorBasis*tf*10)/10;
-        }
-        if(_checkAndApplyFloorEngineOverride(tab)) updBtn(); // Pro 엔진 전환 조건이면 배지도 즉시 갱신
-        classify();
-      };
-      targetRow.appendChild(targetLbl);targetRow.appendChild(targetFloorsInp);targetRow.appendChild(targetUnitShort);
-      existBox.appendChild(targetRow);
-      // 긴 설명 문구는 같은 줄에 억지로 끼워넣지 않고 아래 별도 줄에 — 좁은 사이드바에서 flex
-      // 자식이 짓눌려 한 글자씩 세로로 줄바꿈되던 버그가 있었음(이 문구 길이 때문에).
+      // ⚠️ 요청 반영(재수정): 지난 턴에 추가했던 "몇 층으로 증축/신축하실 건가요?" 단독 숫자
+      // 입력은, "층당 평수 기준(extPyPerFloorBasis)"이 미리 잡혀있지 않으면 평수가 전혀
+      // 자동계산이 안 되는 문제가 있었음 — 그 결과 총 평수(연면적)가 실제 목표 층수와 안 맞는
+      // 채로 남아서, "12억이면 여유있다"는 AI 사진분석과 "평당가격 기준 예산 부족"이라는
+      // 하단 경고가 서로 모순되는 상황이 실제로 발생함. 이 단독 입력은 없애고, 바로 아래
+      // "층수×층당평수" 계산기를 접이식이 아니라 항상 보이는 필수 입력으로 바꿔서, 목표 층수와
+      // 정확한 연면적(총평수)을 반드시 같이 입력하게 함(더 이상 건너뛸 수 없음).
       var existNote=dv('');existNote.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.5';
-      existNote.textContent = tab.extConstructionMode==='addition' ? '아래 목표 층수와 비교해 자동 계산돼요' : '목표 층수가 더 높으면 카메라를 뒤로 빼서 새 건물 전체를 보여줘요';
+      existNote.textContent = '바로 아래에서 목표 층수와 층당 평수를 입력하면, 정확한 총 연면적(평수)이 자동으로 계산돼요.';
       existBox.appendChild(existNote);
       w.appendChild(existBox);
     }
   }
 
-  if(isExt){
-    var floorToggle=dv('');
-    floorToggle.style.cssText='font-size:11.5px;color:var(--ac);cursor:pointer;text-decoration:underline;margin:-4px 0 10px';
-    floorToggle.textContent = tab.extConstructionMode==='addition' ? '📐 목표(최종) 층수·평수로 계산하기' : '📐 연면적을 모르겠다면 — 층수×층당 평수로 계산하기';
-    w.appendChild(floorToggle);
+  if(isExt && (tab.extConstructionMode==='addition' || tab.extConstructionMode==='new')){
+    // 예전 값(예: 리모델링할 때 쓰던 80평) 그대로 남아있는 채로 견적이 계산되는 문제가 있었음
+    // — 그 결과 "12억이면 여유있다"는 AI 사진분석과 "평당가격 기준 예산 부족"이라는 하단
+    // 경고가 서로 모순되는 상황이 실제로 발생함(80평 기준=평당 1500만원 vs 실제 목표층수
+    // 기준=평당 187만원, 완전히 다른 계산). 이제 접었다 펴는 방식이 아니라 항상 화면에 보이는
+    // 필수 입력으로 바꿔서, 신축/증축을 고른 이상 반드시 여기서 목표 층수와 층당 평수를
+    // 채우게 함 — 건너뛸 방법을 아예 없앰.
+    var floorCalcTitle=dv('');
+    floorCalcTitle.style.cssText='font-size:12px;font-weight:700;color:var(--ac);margin-bottom:6px';
+    floorCalcTitle.textContent = tab.extConstructionMode==='addition' ? '📐 목표(최종) 층수·평수 (필수)' : '📐 목표 층수·평수 (필수)';
+    w.appendChild(floorCalcTitle);
 
-    var floorCalcBox=dv('');floorCalcBox.style.cssText='display:none;background:var(--c2);border-radius:9px;padding:10px;margin:-4px 0 10px;max-width:360px';
-    floorCalcBox.innerHTML='<div style="font-size:10.5px;color:var(--m2);margin-bottom:6px;line-height:1.5">💡 대지면적이 아니라, 각 층 바닥면적을 합친 "연면적" 기준으로 계산해요 (같은 땅이어도 층수를 올리면 실제 공사비가 늘어나기 때문). 숫자만 입력하면 자동으로 계산돼요.</div>';
+    var floorCalcBox=dv('');floorCalcBox.style.cssText='background:var(--c2);border:1px solid var(--acb);border-radius:9px;padding:10px;margin:0 0 10px;max-width:360px';
+    floorCalcBox.innerHTML='<div style="font-size:10.5px;color:var(--m2);margin-bottom:6px;line-height:1.5">💡 대지면적이 아니라, 각 층 바닥면적을 합친 "연면적" 기준으로 계산해요 (같은 땅이어도 층수를 올리면 실제 공사비가 늘어나기 때문). 숫자만 입력하면 위 "평수" 칸에 자동으로 반영돼요 — 이 계산 없이는 정확한 예산 판단이 안 되니 꼭 입력해주세요.</div>';
     var floorRow=dv('');floorRow.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;max-width:340px';
-    var floorsInp=mk('input','');floorsInp.type='number';floorsInp.placeholder='층수';floorsInp.style.cssText='width:64px;flex:none;background:var(--sb,#111);border:1px solid var(--bd2);color:var(--t);padding:8px 9px;font-size:13px;font-weight:700;border-radius:7px;outline:none;box-sizing:border-box';
+    var floorsInp=mk('input','');floorsInp.type='number';floorsInp.placeholder=tab.extConstructionMode==='addition'?'목표층수':'층수';floorsInp.value=tab.extTargetFloors||'';floorsInp.style.cssText='width:80px;flex:none;background:var(--sb,#111);border:1px solid var(--bd2);color:var(--t);padding:8px 9px;font-size:13px;font-weight:700;border-radius:7px;outline:none;box-sizing:border-box';
     _noWheelScroll(floorsInp);
     var xLabel=dv('');xLabel.style.cssText='color:var(--m2);font-size:13px';xLabel.textContent='층 ×';
-    var perFloorInp=mk('input','');perFloorInp.type='number';perFloorInp.placeholder='층당 평수';perFloorInp.style.cssText='width:90px;flex:none;background:var(--sb,#111);border:1px solid var(--bd2);color:var(--t);padding:8px 9px;font-size:13px;font-weight:700;border-radius:7px;outline:none;box-sizing:border-box';
+    var perFloorInp=mk('input','');perFloorInp.type='number';perFloorInp.placeholder='층당 평수';perFloorInp.value=tab.extPerFloorPy||'';perFloorInp.style.cssText='width:90px;flex:none;background:var(--sb,#111);border:1px solid var(--bd2);color:var(--t);padding:8px 9px;font-size:13px;font-weight:700;border-radius:7px;outline:none;box-sizing:border-box';
     _noWheelScroll(perFloorInp);
     var pyLabel2=dv('');pyLabel2.style.cssText='color:var(--m2);font-size:13px';pyLabel2.textContent='평 =';
-    var floorResultSpan=dv('');floorResultSpan.style.cssText='color:var(--ac);font-size:14px;font-weight:800;min-width:44px';floorResultSpan.textContent='—';
-    // "적용" 버튼은 자동계산의 보조 수단일 뿐이라(숫자 입력만으로 이미 반영됨), 사이드바를 넓혀도
-    // 다른 요소들과 같이 줄바꿈되게 하고, 폭이 넓어져도 멀리 떨어지지 않도록 별도 줄에 작게 둠.
+    var floorResultSpan=dv('');floorResultSpan.style.cssText='color:var(--ac);font-size:14px;font-weight:800;min-width:44px';
+    floorResultSpan.textContent = (tab.extTargetFloors && tab.extPerFloorPy) ? (Math.round(tab.extTargetFloors*tab.extPerFloorPy*10)/10)+'평' : '—';
     var applyFloorBtn=mk('button','');applyFloorBtn.type='button';applyFloorBtn.textContent='적용';
     applyFloorBtn.style.cssText='padding:8px 12px;border-radius:7px;border:none;background:var(--ac);color:#000;font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;white-space:nowrap;flex:none';
     applyFloorBtn.onclick=function(){
       var fl=parseFloat(floorsInp.value), pf=parseFloat(perFloorInp.value);
       if(fl>0 && pf>0){
         pyInp.value = Math.round(fl*pf*10)/10;
-        tab.extTargetFloors = fl;
+        tab.extTargetFloors = fl; tab.extPerFloorPy = pf;
         if(_checkAndApplyFloorEngineOverride(tab)) updBtn();
         classify();
-        floorCalcBox.style.display='none';
       }
     };
     // 작은 "적용" 버튼을 모바일에서 정확히 못 누르는 경우가 있을 수 있어서, 숫자 두 칸이 다
@@ -8209,7 +8202,7 @@ function mkBudgetTier(p){
         var result = Math.round(fl*pf*10)/10;
         pyInp.value = result;
         floorResultSpan.textContent = result+'평';
-        tab.extTargetFloors = fl; // 증축 모드의 기존층/목표층 비율 계산에 씀
+        tab.extTargetFloors = fl; tab.extPerFloorPy = pf; // 층수×층당평수 둘 다 저장해서 다음 렌더에도 값이 남아있게 함
         if(_checkAndApplyFloorEngineOverride(tab)) updBtn(); // Pro로 바뀌면 크레딧 배지도 바로 갱신
         classify();
       } else {
@@ -8221,10 +8214,6 @@ function mkBudgetTier(p){
     floorRow.appendChild(floorsInp);floorRow.appendChild(xLabel);floorRow.appendChild(perFloorInp);floorRow.appendChild(pyLabel2);floorRow.appendChild(floorResultSpan);floorRow.appendChild(applyFloorBtn);
     floorCalcBox.appendChild(floorRow);
     w.appendChild(floorCalcBox);
-
-    floorToggle.onclick=function(){
-      floorCalcBox.style.display = floorCalcBox.style.display==='none' ? 'block' : 'none';
-    };
 
     // 건축외관엔 "반박 프롬프트" 창이 아예 없었음 — "10층으로 신축하고 싶다, 20억"처럼 자유롭게
     // 쓰면 금액(20억)과 목표 층수(10층)를 같이 인식해서 반영함. 층수가 늘어나면 위 카메라 재구도
@@ -8361,6 +8350,20 @@ function mkBudgetTier(p){
     if(!tab.inputImg){ alert('공간 사진을 먼저 업로드해주세요.'); return; }
     var mats2 = tab._lastBudgetMats;
     if(!mats2 || mats2.length<2){ alert('견적을 먼저 확인해주세요.'); return; }
+    // ⚠️ 요청 반영: 실제 시공비보다 예산이 뚜렷하게 부족한 상태(예: 8층 신축인데 예산은 2층
+    // 지을 돈밖에 없는 경우)에서도 렌더링이 그냥 진행돼서, "기본형" 수준으로 그럴싸하게 보이는
+    // 결과가 나와버려 실제로는 불가능한 계획을 가능하다고 착각하게 만들 수 있었음 — 주거/
+    // 상업공간/건축외관(리모델링·증축·신축) 전부 공통으로, classify()에서 계산해둔 최소 필요
+    // 금액(tab._budgetMinRealisticAmt)과 비교해서 뚜렷하게 부족하면(70% 미만) 렌더링을 막고,
+    // 예산을 늘리거나 규모(건축은 층수, 그 외엔 평수·항목)를 줄여달라고 명확히 안내함.
+    var _curTotalAmt = parseFloat(amtInp.value)||0;
+    if(tab._budgetMinRealisticAmt){
+      var _scaleAdvice = isExt
+        ? (tab.extConstructionMode==='addition' ? '목표 층수를 낮추시거나' : tab.extConstructionMode==='new' ? '목표 층수를 낮추시거나' : '평수(연면적)를 줄이시거나')
+        : '평수나 항목 범위를 줄이시거나';
+      alert('입력하신 예산으로는 지금 설정('+(isExt?'층수·평수':'평수·항목')+')을 실제로 시공하기 많이 부족해 보여요.\n\n최소 필요 금액: 약 '+tab._budgetMinRealisticAmt.toLocaleString()+'만원\n현재 입력한 예산: '+_curTotalAmt.toLocaleString()+'만원\n\n예산을 늘리시거나, '+_scaleAdvice+' 해서 예산 안에 맞춰주세요. 그래야 실제로 가능한 수준의 결과를 보여드릴 수 있어요.');
+      return;
+    }
     if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<20){ alert('크레딧이 부족합니다. 필요: 20cr, 현재: '+G.cr+'cr'); openMd('credits'); return; }
     var matList = mats2.slice(1).join(', ');
     var budgetPrompt = '이 공간을 다음 마감재·가구 구성으로 리모델링해주세요 (실제로 이 등급의 예산으로 시공했을 때의 느낌): '+matList+'. 이 목록에 없는 구조(벽·창문·문)는 그대로 유지하고, 목록에 있는 항목들의 등급감(소재·마감 품질)을 사실적으로 반영해주세요.';
@@ -8699,9 +8702,11 @@ function mkBudgetTier(p){
         // 처럼 구체적인 숫자로 바로 알려줌. 회원들이 "아 이 정도는 있어야 되는구나"를 바로
         // 감 잡을 수 있게 하기 위함.
         var _minNeededTotal = Math.round(realismFloor * py);
+        tab._budgetMinRealisticAmt = _minNeededTotal; // 렌더링 버튼에서 예산 부족 여부 체크할 때 씀
         realismWarn.style.display='block';
         realismWarn.innerHTML='⚠️ 평당 '+Math.round(perPy)+'만원은 실제 시공으로는 거의 불가능한 금액이에요. AI는 이 숫자를 실제 원가로 계산하는 게 아니라 "기본형" 느낌만 반영하는 거라, 결과 이미지가 실제 이 예산으로 가능한 수준보다 훨씬 좋아 보일 수 있어요.<br><br>💡 지금 입력하신 '+py+'평 기준으로는 <b style="color:var(--ac)">최소 '+_minNeededTotal.toLocaleString()+'만원</b> 정도는 있어야 실제로 (기본형 수준이라도) 시공이 가능해요 — 참고해주세요.';
       } else {
+        tab._budgetMinRealisticAmt = null;
         realismWarn.style.display='none';
       }
     } else {
@@ -8712,9 +8717,11 @@ function mkBudgetTier(p){
       // ⚠️ 평수를 안 넣어서 평당 단가를 못 구하는 경우에도, 최소한 "이 정도는 있어야 기본형이라도
       // 가능해요"라는 감은 잡을 수 있게 amtBounds의 기본형 하한선과 비교해서 알려줌.
       if(_tierAmtBasis < amtBounds[0]*0.5){
+        tab._budgetMinRealisticAmt = Math.round(amtBounds[0]*0.5);
         realismWarn.style.display='block';
         realismWarn.innerHTML='⚠️ 입력하신 금액은 실제 시공으로는 다소 빠듯할 수 있어요. AI는 이 금액을 실제 원가로 계산하는 게 아니라 "기본형" 느낌만 반영하는 거라, 결과 이미지가 실제 이 예산으로 가능한 수준보다 훨씬 좋아 보일 수 있어요.<br><br>💡 최소 <b style="color:var(--ac)">'+Math.round(amtBounds[0]*0.5).toLocaleString()+'만원</b> 정도는 있어야 기본형 수준이라도 시공이 가능해요 — 참고해주세요.';
       } else {
+        tab._budgetMinRealisticAmt = null;
         realismWarn.style.display='none';
       }
     }
@@ -8737,6 +8744,7 @@ function mkBudgetTier(p){
         var _spNewCost = _spNewPy * _spNewRate;
         var _spTotalNeeded = _spExistCost + _spNewCost;
         var _spShort = totalAmt - _spTotalNeeded;
+        tab._budgetMinRealisticAmt = _spTotalNeeded; // 증축 전용 정밀 계산값이 더 정확하므로 위에서 계산된 값을 덮어씀
         additionSplitBox.style.display='block';
         additionSplitBox.innerHTML =
           '<div style="font-weight:800;color:var(--ac);margin-bottom:4px">🏗 증축 비용 분리 계산 (표준형 기준)</div>' +
