@@ -3158,7 +3158,86 @@ function rUB(b,key){
       var f=e.dataTransfer.files[0];if(f)loadF(f,key);
     };
     b.innerHTML='';b.appendChild(ub);
+    // ⚠️ 요청 반영: 업로드 박스를 누르면 항상 "내 컴퓨터 파일 선택"만 열려서, 예전에 CLOVER AI로
+    // 만들었던 결과물(다른 탭 결과 포함)을 다시 불러오려면 방법이 없었음(갤러리에서 드래그하는
+    // 숨겨진 방법만 있었음) — 버튼으로 명확하게 드러나는 "내 갤러리에서 불러오기"를 추가함.
+    var galPickBtn=mk('button','');galPickBtn.type='button';
+    galPickBtn.textContent='🖼 내 갤러리에서 불러오기';
+    galPickBtn.style.cssText='width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
+    galPickBtn.onclick=function(e){ e.stopPropagation(); _openGalleryPickerForUpload(key, b); };
+    b.appendChild(galPickBtn);
   }
+}
+// ⚠️ 위 요청에 대한 실제 구현 — 업로드 박스 전용 "내 갤러리에서 불러오기" 모달.
+// 이미지가 있는 모든 히스토리 항목(현재 워크플로우 뿐 아니라 전체)을 최신순으로 보여주고,
+// 클릭하면 그 결과물(없으면 원본)을 이 탭의 업로드 이미지로 바로 설정함.
+function _openGalleryPickerForUpload(key, boxEl){
+  var allItems=[];
+  Object.keys(G.HIST||{}).forEach(function(wf){
+    (G.HIST[wf]||[]).forEach(function(it){
+      if(it.result || it.orig) allItems.push(it);
+    });
+  });
+  allItems.sort(function(a,b2){ return (b2.id||0)-(a.id||0); });
+  if(!allItems.length){ alert('아직 갤러리에 저장된 이미지가 없어요.'); return; }
+  var _wfLabelsForPicker={space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',agent:'AI 에이전트',spaceset:'공간 컨셉 디자인',budget:'AI 견적'};
+
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+
+  var modal=document.createElement('div');
+  modal.style.cssText='background:var(--card,#141518);border:1px solid var(--bd2);border-radius:14px;width:100%;max-width:760px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden';
+  modal.onclick=function(e){e.stopPropagation();};
+
+  var head=document.createElement('div');
+  head.style.cssText='padding:16px 18px;border-bottom:1px solid var(--bd2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0';
+  head.innerHTML='<div style="font-size:14px;font-weight:800;color:var(--t)">🖼 내 갤러리에서 불러오기</div>';
+  var closeX=document.createElement('button');closeX.type='button';closeX.textContent='✕';
+  closeX.style.cssText='width:28px;height:28px;border-radius:50%;border:none;background:var(--c2);color:var(--t2);cursor:pointer;font-size:13px';
+  closeX.onclick=function(){ov.remove();};
+  head.appendChild(closeX);
+  modal.appendChild(head);
+
+  var grid=document.createElement('div');
+  grid.style.cssText='padding:16px 18px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px';
+  allItems.slice(0,200).forEach(function(it){
+    var src=it.result||it.orig;
+    if(!src) return;
+    var cell=document.createElement('div');
+    cell.style.cssText='aspect-ratio:1;border-radius:9px;overflow:hidden;cursor:pointer;border:1.5px solid var(--bd2);position:relative;background:var(--c2)';
+    var img=document.createElement('img');img.src=src;img.loading='lazy';img.decoding='async';
+    img.style.cssText='width:100%;height:100%;object-fit:cover';
+    cell.appendChild(img);
+    if(it.wf){
+      var wfBadge=document.createElement('div');
+      wfBadge.style.cssText='position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:8.5px;font-weight:700;padding:2px 5px;border-radius:4px';
+      wfBadge.textContent=_wfLabelsForPicker[it.wf]||it.wf;
+      cell.appendChild(wfBadge);
+    }
+    cell.onclick=function(){
+      var tab=getTab(G.wf);
+      if(key==='main'){
+        tab.inputImg=src; tab.status='idle';
+        if(!G.HIST[G.wf])G.HIST[G.wf]=[];
+        G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
+        G.HIST[G.wf].unshift({id:Date.now(),orig:src,result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
+        renderMain(G.wf);
+        rUB(boxEl,key);
+        var stl=gE('stl'); if(stl) stl.textContent='이미지 적용됨 - 실행하세요';
+        updBtn();
+        if(G.wf==='world3d')_w3dRefreshButtonStates();
+      } else {
+        G.tabs.video.endImg=src;
+        rUB(boxEl,key);
+      }
+      ov.remove();
+    };
+    grid.appendChild(cell);
+  });
+  modal.appendChild(grid);
+  ov.appendChild(modal);
+  document.body.appendChild(ov);
 }
 // ── 무드보드 저장/불러오기 (현재 탭의 레퍼런스 이미지 묶음을 이름 붙여 저장, 다른 작업에서도 재사용) ──
 function _getMoodboards(){
