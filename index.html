@@ -3974,6 +3974,34 @@ function _openPresetBrowseFromTopbar(){
     if(tryOpen() || tries>20) clearInterval(iv);
   }, 100);
 }
+// ⚠️ 매우 중요한 버그 수정 발견: 이 함수(및 window 노출)는 원래 훨씬 아래(자재 팔레트 근처)에
+// 정의돼 있었는데, 실수로 mkPre() 함수 몸통 안에 중첩되어 들어가 있었음(mkPre의 닫는 중괄호
+// 위치가 어긋나서 그 뒤 수천 줄이 mkPre 안에 갇혀버린 구조적 버그). 그래서 이 함수는 mkPre가
+// 실제로 한 번이라도 호출된 적이 있어야만 정의되는 상태였음 — "AI 견적"처럼 mkPre를 거치지
+// 않는 화면에서 먼저 층수 입력·렌더링 버튼을 누르면 "window._checkAndApplyFloorEngineOverride
+// is not a function" 에러가 났던 진짜 원인. 원래 있던 (갇혀있는) 정의는 위험을 피하기 위해
+// 그대로 두고, 여기 진짜 최상위 레벨에 똑같은 내용을 하나 더 만들어서 항상 확실히 쓸 수 있게 함.
+function _checkAndApplyFloorEngineOverride(tab){
+  var preset = [].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
+  var _pTypeFn = (typeof _presetType==='function') ? _presetType : (window._presetType||function(){return null;});
+  var isExt = preset ? (_pTypeFn(preset.pt)==='ext') : false;
+  if(!isExt) return false;
+  if(tab.extConstructionMode!=='new' && tab.extConstructionMode!=='addition') return false;
+  var existF = parseFloat(tab.extExistingFloors)||0;
+  var targetF = parseFloat(tab.extTargetFloors)||0;
+  if(targetF>0 && (existF===0 || targetF>existF)){
+    G.eng = 'nano_pro';
+    return true;
+  }
+  return false;
+}
+window._checkAndApplyFloorEngineOverride=_checkAndApplyFloorEngineOverride;
+// ⚠️ 위 window 노출에도 불구하고 실제로 "window._checkAndApplyFloorEngineOverride is not a
+// function" 에러가 재현됐음(콘솔에서 확인됨) — window 프로퍼티 할당 타이밍이 100% 보장이 안
+// 되는 경우가 있는 것으로 보임. 바로 위 최상위 function 선언은 자바스크립트 호이스팅 덕분에
+// 이 스크립트 어디서든 window 경유 없이 이름으로 직접 호출해도 항상 안전하므로, 아래 모든
+// 호출부를 window.을 거치지 않는 직접 호출(_checkAndApplyFloorEngineOverride(tab))로 바꿔서
+// 이 에러 자체가 다시는 안 나게 함.
 function mkPre(p,list){
   if(!list||!list.length)return;
   var w=dv('ss');w.innerHTML='<div class="lbl">스타일 프리셋 <span class="lbl-en">단일 선택</span></div>';
@@ -8128,7 +8156,7 @@ function mkBudgetTier(p){
         if(tab.extPyPerFloorBasis>0 && tf>0){
           pyInp.value = Math.round(tab.extPyPerFloorBasis*tf*10)/10;
         }
-        if(window._checkAndApplyFloorEngineOverride(tab)) updBtn(); // Pro 엔진 전환 조건이면 배지도 즉시 갱신
+        if(_checkAndApplyFloorEngineOverride(tab)) updBtn(); // Pro 엔진 전환 조건이면 배지도 즉시 갱신
         classify();
       };
       targetRow.appendChild(targetLbl);targetRow.appendChild(targetFloorsInp);targetRow.appendChild(targetUnitShort);
@@ -8167,7 +8195,7 @@ function mkBudgetTier(p){
       if(fl>0 && pf>0){
         pyInp.value = Math.round(fl*pf*10)/10;
         tab.extTargetFloors = fl;
-        if(window._checkAndApplyFloorEngineOverride(tab)) updBtn();
+        if(_checkAndApplyFloorEngineOverride(tab)) updBtn();
         classify();
         floorCalcBox.style.display='none';
       }
@@ -8182,7 +8210,7 @@ function mkBudgetTier(p){
         pyInp.value = result;
         floorResultSpan.textContent = result+'평';
         tab.extTargetFloors = fl; // 증축 모드의 기존층/목표층 비율 계산에 씀
-        if(window._checkAndApplyFloorEngineOverride(tab)) updBtn(); // Pro로 바뀌면 크레딧 배지도 바로 갱신
+        if(_checkAndApplyFloorEngineOverride(tab)) updBtn(); // Pro로 바뀌면 크레딧 배지도 바로 갱신
         classify();
       } else {
         floorResultSpan.textContent = '—';
@@ -8257,7 +8285,7 @@ function mkBudgetTier(p){
           msgParts.push('연면적도 '+_newPy+'평으로 자동 확장');
         }
       }
-      window._checkAndApplyFloorEngineOverride(tab); // 조건 맞으면 여기서 바로 Pro로 전환 — 아래 renderSB()가 배지에 반영함
+      _checkAndApplyFloorEngineOverride(tab); // 조건 맞으면 여기서 바로 Pro로 전환 — 아래 renderSB()가 배지에 반영함
       if(!msgParts.length){
         extOvMsg.style.color='#fbbf24';
         extOvMsg.textContent='⚠️ 금액("20억") 이나 층수("10층")를 포함해서 적어주시면 자동 인식돼요. 이 문장은 이미지 생성 시 참고 요청으로만 반영됩니다.';
@@ -8350,7 +8378,7 @@ function mkBudgetTier(p){
     // 그대로 렌더링해보기" 버튼은 완전히 별도 경로(procImgWithTask를 여기서 직접 호출)라 그 로직을
     // 전혀 안 거치고 있었음 — 그래서 "4층으로 증축"이라고 입력해도 결과 이미지엔 층수 증가가 전혀
     // 반영 안 되고 있었던 것. 메인 버튼과 동일한 층수 override 로직을 여기도 그대로 적용함.
-    var _floorOverrideActiveForBudget = isExt ? window._checkAndApplyFloorEngineOverride(tab) : false;
+    var _floorOverrideActiveForBudget = isExt ? _checkAndApplyFloorEngineOverride(tab) : false;
     tab._extFloorOverrideForThisRun = _floorOverrideActiveForBudget;
     if(_floorOverrideActiveForBudget){
       var _bExistF = parseFloat(tab.extExistingFloors)||0;
@@ -24174,7 +24202,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       }
       var _curPresetForBudget=[].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
       var _isExtForBudget = _curPresetForBudget ? (_presetType(_curPresetForBudget.pt)==='ext') : false;
-      var _floorOverrideActive = window._checkAndApplyFloorEngineOverride(tab); // 이 안에서 조건 맞으면 G.eng='nano_pro'까지 처리함
+      var _floorOverrideActive = _checkAndApplyFloorEngineOverride(tab); // 이 안에서 조건 맞으면 G.eng='nano_pro'까지 처리함
       tab._extFloorOverrideForThisRun = _floorOverrideActive; // runNanoBanana가 세로로 긴 비율(9:21)을 강제할지 판단하는 데 씀
       var _floorOverrideExistF = parseFloat(tab.extExistingFloors)||0;
       var _floorOverrideTargetF = parseFloat(tab.extTargetFloors)||0;
