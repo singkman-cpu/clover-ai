@@ -2885,7 +2885,7 @@ var WF_INFO={
 // ⚠️ 요청 반영: 사용자가 직접 출력 비율을 골라놨으면(getTab(G.wf).forcedAspect) 원본 이미지
 // 비율 측정보다 그걸 최우선으로 씀 — 예: 16:9 참고 이미지를 넣어도 9:16(쇼츠용)으로 바로 뽑기.
 // ⚠️ 매우 중요한 버그 수정: "8층으로 신축" 같은 층수 증가 요청을 하면, AI가 그릴 세로 공간을
-// 최대한 확보하려고 세로로 긴 비율(9:21)을 강제하는 로직(_forceTallAspect)이 runNanoBanana()
+// 최대한 확보하려고 세로로 긴 비율(9:16)을 강제하는 로직(_forceTallAspect)이 runNanoBanana()
 // 안에만 있었음 — 그런데 "이 견적 구성 그대로 렌더링해보기" 버튼을 포함한 대부분의 생성 경로는
 // runNanoBanana가 아니라 procImgWithTask → _withExplicitAspect를 거치는데, 여기엔 이 로직이
 // 아예 없어서 8층을 요청해도 원본 사진 비율(예: 3:4처럼 그다지 세로로 길지 않은 비율) 그대로
@@ -2893,7 +2893,9 @@ var WF_INFO={
 // 원인이었음.
 function _withExplicitAspect(imgSrc, cb){
   var _fTab = getTab(G.wf);
-  if(_fTab && _fTab._extFloorOverrideForThisRun){ cb('9:21'); return; }
+  // ⚠️ 버그 수정: fal.ai(Nano Banana 2/Pro)는 '9:21'을 지원하지 않음(literal_error로 거부됨) —
+  // 유효한 값 중 가장 세로로 긴 '9:16'으로 교체. 지원 목록: auto,21:9,16:9,3:2,4:3,5:4,1:1,4:5,3:4,2:3,9:16
+  if(_fTab && _fTab._extFloorOverrideForThisRun){ cb('9:16'); return; }
   if(_fTab && _fTab.forcedAspect && _fTab.forcedAspect!=='auto'){ cb(_fTab.forcedAspect); return; }
   if(!imgSrc){ cb('auto'); return; }
   loadImgSafe(imgSrc, function(pi){
@@ -6160,6 +6162,11 @@ function makePi(q, g){
       {t:['빵집','베이커리','제과점'],m:['베이커리','빵']},
       {t:['숙소','호텔','펜션','리조트','숙박'],m:['호텔','펜션','풀빌라','리조트','모텔','스테이']},
       {t:['사무실','오피스','사무공간','회의실'],m:['오피스','사무실','회의실','대표실']},
+      // ⚠️ 버그 수정: "건축"만 쳐서 나오는 프리셋 라벨(예: "...건축 스타일")과 "외관"만 쳐서 나오는
+      // 라벨(예: "...주택 외관", "...파사드")이 서로 다른 그룹이라 "건축외관"처럼 붙여 쓰면 둘 다
+      // 해당 안 돼서 검색 결과가 0건이었음 — 건축/외관/파사드/사옥 계열을 한 그룹으로 묶어서
+      // 어떤 단어로 쳐도(건축, 외관, 파사드, 사옥, 건축외관, 건물외관 등) 이 전체 풀이 다 나오게 함.
+      {t:['건축외관','건축 외관','건물외관','건물 외관','건축물외관','외관','파사드','건축','사옥','건축물'],m:['외관','파사드','건축','사옥']},
       {t:['네일샵','네일아트','손톱'],m:['네일']},
       {t:['빨래방','세탁소','코인빨래방'],m:['빨래','세탁','런드리']},
       {t:['동물병원','수의사'],m:['동물병원','애견']},
@@ -6179,15 +6186,32 @@ function makePi(q, g){
       var q=(qraw||'').trim().toLowerCase();
       if(!q) return null;
       var terms=[q];
+      // ⚠️ 개선: 예전엔 입력한 검색어 "전체 문자열"이 동의어 그룹의 트리거 단어와 겹치는지만 봐서,
+      // "모던 사무실"처럼 여러 단어를 같이 치면(전체 문자열엔 "사무실"이 부분 포함돼있긴 하지만)
+      // 매칭이 헐거워지는 경우가 있었음 — 공백으로 나눈 개별 단어도 각각 동의어 확장 대상에 포함시켜서
+      // 여러 단어를 섞어 쳐도 각 단어 기준으로 폭넓게 잡히게 함.
+      var qWords = q.split(/\s+/).filter(Boolean);
+      if(qWords.length>1) terms = terms.concat(qWords);
       SEARCH_SYN.forEach(function(grp){
-        var hit=grp.t.some(function(t){var tl=t.toLowerCase();return tl.indexOf(q)!==-1||q.indexOf(tl)!==-1;});
+        var hit=grp.t.some(function(t){
+          var tl=t.toLowerCase();
+          if(tl.indexOf(q)!==-1||q.indexOf(tl)!==-1) return true;
+          // 쿼리 전체와 안 겹쳐도, 공백으로 나눈 단어 중 하나라도 트리거와 겹치면 매칭
+          return qWords.some(function(w){ return tl.indexOf(w)!==-1||w.indexOf(tl)!==-1; });
+        });
         if(hit) terms=terms.concat(grp.m);
       });
       return terms;
     }
     function _searchItemMatch(label, terms){
       var l=(label||'').toLowerCase();
-      return terms.some(function(t){return l.indexOf(t.toLowerCase())!==-1;});
+      // 라벨/검색어 사이의 사소한 띄어쓰기 차이(예: "건물 외관" vs "건물외관")로 놓치는 걸 막기 위해
+      // 공백을 제거한 버전으로도 한 번 더 비교함.
+      var lNoSpace = l.replace(/\s+/g,'');
+      return terms.some(function(t){
+        var tl=t.toLowerCase();
+        return l.indexOf(tl)!==-1 || lNoSpace.indexOf(tl.replace(/\s+/g,''))!==-1;
+      });
     }
 
     searchInput.oninput=function(){
@@ -8445,7 +8469,7 @@ function mkBudgetTier(p){
         '-story building fits in frame from ground to roofline. --- ' + budgetPrompt +
         ' CRITICAL CAMERA OVERRIDE (this replaces any earlier "preserve the exact camera angle" instruction): the building in the result must now be EXACTLY '+_bTargetF+' floors tall, '+_bExistClause+
         '. Count the ground-level floor as floor 1, then count each additional horizontal row of windows/balconies stacked above it as floors 2, 3, 4 and so on up to floor '+_bTargetF+
-        ' — the facade must show exactly '+_bTargetF+' such repeating rows, no more and no fewer. A rooftop/penthouse structure does not count as one of these floors. Because of this height increase, pull the camera back and/or reframe the shot (roughly the same angle and side of the building, but from a greater distance) so the ENTIRE new '+_bTargetF+'-floor building is fully and clearly visible within the frame, like a real estate marketing photo of the completed building.';
+        ' — the facade must show exactly '+_bTargetF+' such repeating rows, no more and no fewer. A rooftop/penthouse structure does not count as one of these floors. IMPORTANT — the output image frame itself is a FIXED vertical rectangle and will NOT become taller or narrower no matter how many floors are added: the ONLY way to fit a taller building inside this same fixed frame is to move the camera further away (a wider, more distant shot), never by changing the frame\'s shape. So, because of this height increase, pull the camera back (roughly the same angle and side of the building, but from a much greater distance as needed — the more floors, the further back) so the ENTIRE new '+_bTargetF+'-floor building fits fully and clearly inside this same fixed frame, like a real estate marketing photo of the completed building shot from across the street.';
     }
     // 신축(완전 철거 후 새로 짓기)은 원본 창문·문·벽을 그대로 유지하라는 일반 규칙이 안 맞음 —
     // 메인 버튼과 동일하게 전면 재설계를 허용하는 예외 지시를 추가함.
@@ -19202,7 +19226,7 @@ function urlToDataUrl(url, cb) {
 // 생성해버리는 경우가 있어서, 원본 실제 비율을 직접 측정해 명시적으로 지정해주는 게 훨씬 안전함.
 var _NB2_ASPECT_RATIOS = [
   ['1:1',1/1],['9:16',9/16],['16:9',16/9],['3:4',3/4],['4:3',4/3],
-  ['2:3',2/3],['3:2',3/2],['4:5',4/5],['5:4',5/4],['9:21',9/21],['21:9',21/9],
+  ['2:3',2/3],['3:2',3/2],['4:5',4/5],['5:4',5/4],['21:9',21/9], // ⚠️ '9:21'은 fal.ai가 지원하지 않아 제거함 (literal_error 원인)
 ];
 function _nearestAspectRatioStr(w,h){
   if(!w||!h) return 'auto';
@@ -19228,7 +19252,7 @@ function runNanoBanana(prompt, imgDataUrl, modelSlug, onDone, onErr, resKey) {
   // ⚠️ 진짜 원인 발견 — 층수를 늘리는 증축/신축 요청인데 출력 비율을 원본 사진 비율 그대로
   // 강제하고 있었음. 5층짜리 사진의 비율 그대로 10층·20층을 우겨넣으려니 물리적으로 한 층당
   // 세로 픽셀이 부족해서, 텍스트로 아무리 강조해도 실제로는 8~11층 선에서 막히던 진짜 원인이었음.
-  // 층수 증가가 감지되면 원본 비율을 무시하고 사용 가능한 가장 세로로 긴 비율(9:21)로 강제 전환해서
+  // 층수 증가가 감지되면 원본 비율을 무시하고 사용 가능한 가장 세로로 긴 비율(9:16)로 강제 전환해서
   // 층을 그릴 세로 공간을 최대한 확보함.
   var _tabForAspect = getTab(G.wf);
   var _forceTallAspect = !!(_tabForAspect && _tabForAspect._extFloorOverrideForThisRun);
@@ -19243,10 +19267,10 @@ function runNanoBanana(prompt, imgDataUrl, modelSlug, onDone, onErr, resKey) {
     _afterAspectProbe();
   } else {
   loadImgSafe(imgDataUrl, function(probeImg){
-    _explicitAspect = _forceTallAspect ? '9:21' : _nearestAspectRatioStr(probeImg.naturalWidth, probeImg.naturalHeight);
+    _explicitAspect = _forceTallAspect ? '9:16' : _nearestAspectRatioStr(probeImg.naturalWidth, probeImg.naturalHeight);
     console.log('[NB2] 원본 비율 측정:', probeImg.naturalWidth+'x'+probeImg.naturalHeight, '→ aspect_ratio:', _explicitAspect, _forceTallAspect?'(층수 증가로 세로 비율 강제)':'');
     _afterAspectProbe();
-  }, function(){ _explicitAspect = _forceTallAspect ? '9:21' : 'auto'; _afterAspectProbe(); }); // 측정 실패해도 층수 증가 케이스면 세로 비율 유지
+  }, function(){ _explicitAspect = _forceTallAspect ? '9:16' : 'auto'; _afterAspectProbe(); }); // 측정 실패해도 층수 증가 케이스면 세로 비율 유지
   }
 
   function doFalRun(allUrls){
@@ -24300,7 +24324,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       var _curPresetForBudget=[].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
       var _isExtForBudget = _curPresetForBudget ? (_presetType(_curPresetForBudget.pt)==='ext') : false;
       var _floorOverrideActive = _checkAndApplyFloorEngineOverride(tab); // 이 안에서 조건 맞으면 G.eng='nano_pro'까지 처리함
-      tab._extFloorOverrideForThisRun = _floorOverrideActive; // runNanoBanana가 세로로 긴 비율(9:21)을 강제할지 판단하는 데 씀
+      tab._extFloorOverrideForThisRun = _floorOverrideActive; // runNanoBanana가 세로로 긴 비율(9:16)을 강제할지 판단하는 데 씀
       var _floorOverrideExistF = parseFloat(tab.extExistingFloors)||0;
       var _floorOverrideTargetF = parseFloat(tab.extTargetFloors)||0;
       if(G.supaRole!=='admin'&&G.plan!=='admin'){
@@ -24385,15 +24409,19 @@ document.addEventListener('DOMContentLoaded',function(){try{
           'distinct repeating horizontal rows of windows/balconies when counted this way, no more and no fewer. A rooftop '+
           'structure, penthouse, or mechanical room on top does NOT count as one of these '+_floorOverrideTargetF+' main '+
           'floors — it is an optional small addition on top of the '+_floorOverrideTargetF+'th floor, not a substitute '+
-          'for a full floor. Because of this height increase, you MUST pull the camera back and/or reframe '+
-          'the shot (keeping roughly the same viewing angle and side of the building, but at a greater distance '+
-          'and/or slightly lower or wider framing as needed) so that the ENTIRE new '+_floorOverrideTargetF+'-floor '+
-          'building — from the ground/parking level up to the very top of the roofline — is fully and clearly '+
-          'visible within the frame, exactly like a real estate or architectural marketing photograph of a '+
-          'completed building of that height taken from a sensible distance across the street or an adjacent '+
-          'open area. Do NOT keep the original close-in camera framing, since that would cut off the top of the '+
-          'taller new building — an incomplete building view like that is a failure regardless of how good the '+
-          'facade design itself looks. Also do NOT simply keep the building at its original height, and do NOT '+
+          'for a full floor. IMPORTANT — the output image frame itself is a FIXED vertical rectangle (it will NOT '+
+          'become taller, narrower, or otherwise change shape no matter how many floors are added). The ONLY way '+
+          'to fit a taller building inside this same fixed frame is to move the camera FURTHER AWAY — never by '+
+          'stretching, cropping, or changing the frame\'s shape/proportions. So, because of this height increase, '+
+          'you MUST pull the camera back (keeping roughly the same viewing angle and side of the building, but at '+
+          'a much greater distance as needed — the more floors requested, the further back the camera must go) '+
+          'so that the ENTIRE new '+_floorOverrideTargetF+'-floor building — from the ground/parking level up to '+
+          'the very top of the roofline — fits fully and clearly inside this same fixed frame, exactly like a real '+
+          'estate or architectural marketing photograph of a completed building of that height taken from a '+
+          'sensible distance across the street or an adjacent open area. Do NOT keep the original close-in camera '+
+          'framing, since that would cut off the top of the taller new building — an incomplete building view '+
+          'like that is a failure regardless of how good the facade design itself looks. Also do NOT simply keep '+
+          'the building at its original height, and do NOT '+
           'stop partway (e.g. building only 7 or 8 floors when '+_floorOverrideTargetF+' were requested is a FAILURE, '+
           'not an acceptable approximation) — you must actually construct/render it as a genuine '+_floorOverrideTargetF+
           '-story building with exactly that many floors of windows/balconies clearly repeating up the full height. '+
