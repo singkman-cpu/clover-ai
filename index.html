@@ -8801,7 +8801,12 @@ function mkBudgetTier(p){
         var _spExistCost = _spExistPy * _spRemodelRate;
         var _spNewCost = _spNewPy * _spNewRate;
         var _spTotalNeeded = _spExistCost + _spNewCost;
-        var _spShort = totalAmt - _spTotalNeeded;
+        // ⚠️ 심각한 버그 수정: "totalAmt - _spTotalNeeded"로 계산하면, 예산이 부족할 때(예:
+        // 6억 입력, 20.32억 필요) 이 값이 음수(-14.32억)가 되는데, 그 아래에서 "이 값이 양수면
+        // 부족하다"고 체크하고 있었음 — 그러니 진짜 부족한 상황(음수)에서는 오히려 "여유있다"고
+        // 거꾸로 나오고 있었음. 부족 금액은 "필요 금액 - 입력 금액"으로 계산해야 부족할 때
+        // 양수가 나옴 — 방향을 반대로 고침.
+        var _spShortfall = _spTotalNeeded - totalAmt; // 양수면 부족한 금액, 음수/0이면 충분함
         tab._budgetMinRealisticAmt = _spTotalNeeded; // 증축 전용 정밀 계산값이 더 정확하므로 위에서 계산된 값을 덮어씀
         additionSplitBox.style.display='block';
         additionSplitBox.innerHTML =
@@ -8809,8 +8814,8 @@ function mkBudgetTier(p){
           '<div>기존 '+_spExistF+'개층('+_spExistPy+'평) 리모델링: <b>'+_spExistCost.toLocaleString()+'만원</b> <span style="color:var(--m2)">(평당 '+_spRemodelRate+'만원)</span></div>' +
           '<div>신규 '+_spNewFloors+'개층('+_spNewPy+'평) 구조체 신축: <b>'+_spNewCost.toLocaleString()+'만원</b> <span style="color:var(--m2)">(평당 '+_spNewRate+'만원)</span></div>' +
           '<div style="margin-top:4px;padding-top:4px;border-top:1px solid var(--bd2)">최소 필요 예상 금액: <b style="color:var(--ac)">'+_spTotalNeeded.toLocaleString()+'만원</b></div>' +
-          (_spShort>0
-            ? '<div style="color:#f87171;margin-top:4px">⚠️ 입력하신 '+totalAmt.toLocaleString()+'만원으로는 약 '+_spShort.toLocaleString()+'만원 부족해 보여요 — 이 층수로 증축하기엔 예산이 빠듯할 수 있어요.</div>'
+          (_spShortfall>0
+            ? '<div style="color:#f87171;margin-top:4px">⚠️ 입력하신 '+totalAmt.toLocaleString()+'만원으로는 약 '+_spShortfall.toLocaleString()+'만원 부족해 보여요 — 이 층수로 증축하기엔 예산이 빠듯할 수 있어요.</div>'
             : '<div style="color:#4ade80;margin-top:4px">✓ 입력하신 '+totalAmt.toLocaleString()+'만원이면 이 층수 증축에 표준형 기준으로 여유가 있어 보여요.</div>')+
           '<div style="font-size:10px;color:var(--m2);margin-top:4px">※ 실제 시세는 지역·구조·설계 난이도에 따라 크게 달라질 수 있어요. 참고용 추정치예요.</div>';
       } else {
