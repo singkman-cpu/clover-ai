@@ -8469,7 +8469,7 @@ function mkBudgetTier(p){
         '-story building fits in frame from ground to roofline. --- ' + budgetPrompt +
         ' CRITICAL CAMERA OVERRIDE (this replaces any earlier "preserve the exact camera angle" instruction): the building in the result must now be EXACTLY '+_bTargetF+' floors tall, '+_bExistClause+
         '. Count the ground-level floor as floor 1, then count each additional horizontal row of windows/balconies stacked above it as floors 2, 3, 4 and so on up to floor '+_bTargetF+
-        ' — the facade must show exactly '+_bTargetF+' such repeating rows, no more and no fewer. A rooftop/penthouse structure does not count as one of these floors. IMPORTANT — the output image frame itself is a FIXED vertical rectangle and will NOT become taller or narrower no matter how many floors are added: the ONLY way to fit a taller building inside this same fixed frame is to move the camera further away (a wider, more distant shot), never by changing the frame\'s shape. So, because of this height increase, pull the camera back (roughly the same angle and side of the building, but from a much greater distance as needed — the more floors, the further back) so the ENTIRE new '+_bTargetF+'-floor building fits fully and clearly inside this same fixed frame, like a real estate marketing photo of the completed building shot from across the street.';
+        ' — the facade must show exactly '+_bTargetF+' such repeating rows, no more and no fewer. A rooftop/penthouse structure does not count as one of these floors. IMPORTANT — the output image frame itself is a FIXED vertical rectangle and will NOT become taller or narrower no matter how many floors are added: the ONLY way to fit a taller building inside this same fixed frame is to move the camera further away (a wider, more distant shot), never by changing the frame\'s shape. So, because of this height increase, pull the camera back (roughly the same angle and side of the building, but from a much greater distance as needed — the more floors, the further back) so the ENTIRE new '+_bTargetF+'-floor building fits fully and clearly inside this same fixed frame, like a real estate marketing photo of the completed building shot from across the street. CRITICAL — DO NOT SCALE UP THE WHOLE SCENE, ONLY MOVE THE CAMERA: a real camera moving further away makes every foreground/background object that is NOT the subject building appear the SAME real-world size or smaller in the frame (never bigger) — it is only the subject building itself that should occupy a different portion of the frame because it is now taller. Utility poles, power lines, street lamps, neighboring buildings, parked cars, trees, the road and sidewalk must all keep their correct real-world proportions relative to the subject building and to each other — do NOT enlarge the utility pole, street furniture, or neighboring buildings just because the subject building grew taller. If everything in the scene appears to have been uniformly scaled up together, that is a failure — only the subject building\'s height should change; everything else must look like it was photographed from a greater distance, not blown up in size.';
     }
     // 신축(완전 철거 후 새로 짓기)은 원본 창문·문·벽을 그대로 유지하라는 일반 규칙이 안 맞음 —
     // 메인 버튼과 동일하게 전면 재설계를 허용하는 예외 지시를 추가함.
@@ -20506,11 +20506,20 @@ function procImgWithTask(task, onDone, onErr){
   if(wf==='space'||wf==='render'||wf==='edit'){
     var _rawOnDone = onDone;
     var _selKForPost = task.selK;
+    // ⚠️ 버그 수정: 층수 증축(9:16으로 카메라를 뒤로 뺀 렌더링)인데도 이 "원본 비율 맞춤" 단계가
+    // 무조건 실행되면서, AI가 실제로는 카메라를 잘 빼서 만든 세로로 긴 결과물을 원본(대개 3:4 계열)
+    // 비율에 맞춰 위아래를 다시 크롭해버려서 — 카메라를 뺀 효과 자체가 사라져 보이는 원인이었음
+    // (콘솔에 "비율 보정(세로 크롭) 768x1376 → 674x902" 처럼 찍히는 게 바로 이 현상). 층수 증축
+    // 렌더링일 때는 이 크롭 단계를 건너뛰고 AI가 만든 비율/프레이밍을 그대로 유지한다.
+    var _isFloorOverrideRender = !!(getTab(G.wf) && getTab(G.wf)._extFloorOverrideForThisRun);
     onDone = function(ri){
       if(_selKForPost==='texture_from_photo' || _selKForPost==='texture_seamless' || _selKForPost==='texture_normal_map'){
         // 텍스처/맵소스 프리셋은 원본 크기에 맞출 필요가 없음(타일링용 정사각 이미지) —
         // 대신 이음새가 안 끊기도록 기계적 보정(오프셋 블렌드)을 한 번 더 거친다.
         _makeSeamlessTile(ri, _rawOnDone);
+      } else if(_isFloorOverrideRender){
+        console.log('[원본 크기 맞춤 건너뜀] 층수 증축 렌더링 — 카메라를 뺀 프레이밍을 그대로 유지');
+        _rawOnDone(ri);
       } else {
         _resizeToOriginalScale(img, ri, resolution, _rawOnDone);
       }
@@ -24425,6 +24434,15 @@ document.addEventListener('DOMContentLoaded',function(){try{
           'stop partway (e.g. building only 7 or 8 floors when '+_floorOverrideTargetF+' were requested is a FAILURE, '+
           'not an acceptable approximation) — you must actually construct/render it as a genuine '+_floorOverrideTargetF+
           '-story building with exactly that many floors of windows/balconies clearly repeating up the full height. '+
+          'CRITICAL — DO NOT SCALE UP THE WHOLE SCENE, ONLY MOVE THE CAMERA: a real camera moving further away makes '+
+          'every foreground/background object that is NOT the subject building appear the SAME real-world size or '+
+          'smaller in the frame (never bigger) — only the subject building itself should occupy a different portion '+
+          'of the frame because it is now taller. Utility poles, power lines, street lamps, neighboring buildings, '+
+          'parked cars, trees, the road and sidewalk must all keep their correct real-world proportions relative to '+
+          'the subject building and to each other — do NOT enlarge the utility pole, street furniture, or neighboring '+
+          'buildings just because the subject building grew taller. If everything in the scene appears to have been '+
+          'uniformly scaled up together, that is a failure — only the subject building\'s height should change; '+
+          'everything else must look like it was photographed from a greater distance, not blown up in size. '+
           '(This exact instruction was already given at the very start of this prompt — '+
           'this is the detailed version, follow both consistently.)';
       }
