@@ -8939,11 +8939,13 @@ function sbSpace(p){
   if(G.wf==='budget'){
     mkNote(p,'<strong style="color:var(--ac)">💰 AI 견적</strong><br>공간 사진을 업로드하면 AI가 사진을 보고 항목별로 자재·시공 견적을 뽑아드려요.');
     mkUB(p,'견적 낼 공간 사진 업로드','main');
-    // ⚠️ 요청 반영: "AI 견적"에도 "현장사진 디자인"에서 쓰는 스타일 프리셋(카페·오피스 스타일 등)을
-    // 그대로 골라 쓸 수 있게 함 — 고르면 "이 견적 구성 그대로 렌더링해보기"를 눌렀을 때 그 프리셋
-    // 스타일이 마감재 등급 지시와 함께 최우선으로 반영됨(아래 렌더링 프롬프트 생성부에서 사용).
-    mkPre(p,PS_SPACE);
     mkBudgetTier(p);
+    // ⚠️ 요청 반영: 스타일 프리셋을 사진 업로드 바로 아래(예산 입력·"AI 견적 확인하기" 버튼보다
+    // 위)에 두니, 프리셋 목록이 워낙 길어서 정작 예산 입력하는 곳 자체가 안 보이는 문제가
+    // 있었음 — 예산 섹션(견적 확인·렌더링 버튼 포함) 전부를 먼저 보여주고, 프리셋 선택은 맨
+    // 아래(렌더링 직전 단계)로 옮김 — 실제로 프리셋은 "이 견적 구성 그대로 렌더링해보기"를
+    // 누를 때만 쓰이니 그 근처가 더 자연스럽기도 함.
+    mkPre(p,PS_SPACE);
     return;
   }
   // G.wf==='space' (현장사진 디자인) — 단일 사진 모드만, 모드 토글/예산 섹션 없음
@@ -11533,17 +11535,33 @@ setInterval(function(){
 // 뒤로가기를 실행해서 원래 가려던 페이지로 보내줌.
 (function(){
   var _backLeaveConfirmed = false;
-  try{ history.pushState(null, '', location.href); }catch(e){}
-  window.addEventListener('popstate', function(){
-    if(_backLeaveConfirmed) return; // 이미 "나가기"를 선택해서 실제로 나가는 중 — 다시 안 물어봄
-    var wantsToLeave = confirm('페이지에서 나가시겠습니까? 저장하지 않은 작업 내용이 사라질 수 있어요.');
-    if(wantsToLeave){
-      _backLeaveConfirmed = true;
-      history.back(); // 방금 쌓아둔 더미 항목을 한 번 더 넘어가서 실제로 이전 페이지로 이동
-    } else {
-      try{ history.pushState(null, '', location.href); }catch(e){} // 다시 더미 항목을 쌓아서 이 페이지에 그대로 머무름
-    }
-  });
+  // ⚠️ 버그 수정: 구글 로그인 후 리다이렉트로 돌아오는 시점에, 이 트랩(더미 히스토리 쌓기)이
+  // OAuth 콜백 처리 과정의 히스토리 조작과 겹쳐서 popstate가 의도치 않게 발생 → 로그인하자마자
+  // "페이지에서 나가시겠습니까?" 확인창이 떠버리는 문제가 있었음. 로그인 리다이렉트 직후인지
+  // (URL에 OAuth 콜백 흔적이 있는지, 또는 로그인 버튼을 누르기 직전 심어둔 세션 플래그가
+  // 있는지) 확인해서, 그런 경우엔 이 트랩 자체를 잠깐 건너뛰어서 이 문제를 원천 차단함.
+  var _looksLikeOAuthReturn = /access_token=|refresh_token=|[?&]code=/.test(location.hash+location.search);
+  var _oauthFlagSet = false;
+  try{ _oauthFlagSet = sessionStorage.getItem('clover_oauth_redirecting')==='1'; sessionStorage.removeItem('clover_oauth_redirecting'); }catch(e){}
+  if(_looksLikeOAuthReturn || _oauthFlagSet){
+    // 로그인 처리가 끝나고 URL 정리 등이 다 마무리될 시간을 준 뒤에 트랩을 설치함
+    setTimeout(_installBackLeaveTrap, 2500);
+  } else {
+    _installBackLeaveTrap();
+  }
+  function _installBackLeaveTrap(){
+    try{ history.pushState(null, '', location.href); }catch(e){}
+    window.addEventListener('popstate', function(){
+      if(_backLeaveConfirmed) return; // 이미 "나가기"를 선택해서 실제로 나가는 중 — 다시 안 물어봄
+      var wantsToLeave = confirm('페이지에서 나가시겠습니까? 저장하지 않은 작업 내용이 사라질 수 있어요.');
+      if(wantsToLeave){
+        _backLeaveConfirmed = true;
+        history.back(); // 방금 쌓아둔 더미 항목을 한 번 더 넘어가서 실제로 이전 페이지로 이동
+      } else {
+        try{ history.pushState(null, '', location.href); }catch(e){} // 다시 더미 항목을 쌓아서 이 페이지에 그대로 머무름
+      }
+    });
+  }
 })();
 
 window.addEventListener('beforeunload', function(){
@@ -25363,6 +25381,8 @@ function supaSignIn(){
   // 아이폰 Safari 포함 모든 브라우저에서 redirect 방식으로 처리
   // (Safari는 팝업 차단, redirectTo는 Supabase 대시보드에 등록된 URL이어야 함)
   var redirectUrl = window.location.origin + window.location.pathname;
+  // 리다이렉트로 돌아왔을 때 "뒤로가기 확인" 트랩이 오작동하지 않도록 미리 표시해둠
+  try{ sessionStorage.setItem('clover_oauth_redirecting','1'); }catch(e){}
   // ⚠️ 요청 반영: 예전엔 access_type:'offline' + prompt:'consent' 조합을 써서, 구글 API를
   // 계속 호출하는 앱처럼 매번 로그인할 때마다 "다시 로그인/동의하는 중입니다" 화면이 강제로
   // 떴었음 — CLOVER AI는 로그인(신원 확인) 용도로만 구글 계정을 쓰지, 구글 API를 대신 호출할
