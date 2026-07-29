@@ -2884,18 +2884,14 @@ var WF_INFO={
 // aspect_ratio:'auto'를 쓰던 자리를 전부 이걸로 교체함)
 // ⚠️ 요청 반영: 사용자가 직접 출력 비율을 골라놨으면(getTab(G.wf).forcedAspect) 원본 이미지
 // 비율 측정보다 그걸 최우선으로 씀 — 예: 16:9 참고 이미지를 넣어도 9:16(쇼츠용)으로 바로 뽑기.
-// ⚠️ 매우 중요한 버그 수정: "8층으로 신축" 같은 층수 증가 요청을 하면, AI가 그릴 세로 공간을
-// 최대한 확보하려고 세로로 긴 비율(9:16)을 강제하는 로직(_forceTallAspect)이 runNanoBanana()
-// 안에만 있었음 — 그런데 "이 견적 구성 그대로 렌더링해보기" 버튼을 포함한 대부분의 생성 경로는
-// runNanoBanana가 아니라 procImgWithTask → _withExplicitAspect를 거치는데, 여기엔 이 로직이
-// 아예 없어서 8층을 요청해도 원본 사진 비율(예: 3:4처럼 그다지 세로로 길지 않은 비율) 그대로
-// 생성되고 있었음 — 세로 공간이 부족하니 AI가 층수를 다 못 그리고 3층 정도에서 멈추는 실제
-// 원인이었음.
+// ⚠️ 요청 반영: 층수 증축/신축 렌더링에서도 캔버스 비율을 억지로(9:16 등) 바꾸지 않고 원본 사진
+// 비율을 그대로 유지함 — 대신 프롬프트(budgetPrompt/_finalPrompt의 "CRITICAL CAMERA OVERRIDE"
+// 지시)로 "이 고정된 프레임 안에 다 들어오도록 카메라를 더 뒤로 빼라"고 지시해서, 비율은 원본과
+// 그대로인 채 카메라 거리만으로 층수 증가를 해결하도록 함. (예전엔 여기서 무조건 '9:16'으로
+// 강제해서, 원본이 3:4처럼 그다지 세로로 길지 않은 사진이어도 결과물이 9:16으로 확 달라져
+// 보이는 문제가 있었음 — 이제 아래 일반 측정 로직을 그대로 타서 원본과 가장 가까운 비율을 씀.)
 function _withExplicitAspect(imgSrc, cb){
   var _fTab = getTab(G.wf);
-  // ⚠️ 버그 수정: fal.ai(Nano Banana 2/Pro)는 '9:21'을 지원하지 않음(literal_error로 거부됨) —
-  // 유효한 값 중 가장 세로로 긴 '9:16'으로 교체. 지원 목록: auto,21:9,16:9,3:2,4:3,5:4,1:1,4:5,3:4,2:3,9:16
-  if(_fTab && _fTab._extFloorOverrideForThisRun){ cb('9:16'); return; }
   if(_fTab && _fTab.forcedAspect && _fTab.forcedAspect!=='auto'){ cb(_fTab.forcedAspect); return; }
   if(!imgSrc){ cb('auto'); return; }
   loadImgSafe(imgSrc, function(pi){
@@ -8477,16 +8473,27 @@ function mkBudgetTier(p){
       budgetPrompt = 'CRITICAL OVERRIDE — FULL DEMOLITION AND NEW CONSTRUCTION (신축): any instruction about preserving the exact original window/door count, position or wall shape does NOT apply — this is a complete teardown-and-rebuild. Freely design the new building\'s window layout, massing and roofline based on the style/budget described below, but keep everything OUTSIDE the subject building (neighboring buildings, street, sky) unchanged. --- ' + budgetPrompt;
     }
     renderFromBudgetBtn.disabled=true; renderFromBudgetBtn.textContent='⏳ 렌더링 중...';
+    // ⚠️ 버그 수정: 다른 렌더링 경로들(executeSingleRender)은 시작하자마자 G.HIST에 loading:true
+    // 항목을 넣고 renderMain()을 호출해서 메인 화면에 "렌더링 중..." 로딩 카드가 바로 뜨는데,
+    // 이 버튼은 procImgWithTask를 여기서 직접 호출하는 별도 경로라 그 과정이 통째로 빠져있었음 —
+    // 그래서 버튼 텍스트만 바뀌고 메인 화면(캔버스)에는 아무 표시가 없어 보였던 것. 동일한 방식으로
+    // 로딩 카드를 직접 추가/제거해서 메인 화면에도 진행 상태가 보이게 함.
+    var _budgetLoadingId = Date.now()+Math.random();
+    if(!G.HIST.budget) G.HIST.budget=[];
+    G.HIST.budget.unshift({id:_budgetLoadingId, orig:tab.inputImg, result:null, origThumb:null, tags:['견적 렌더링 중...'], ai:'', cx:50, fav:false, wf:'budget', preview:false, loading:true});
+    if(G.wf==='budget') renderMain('budget');
     var _task={id:Date.now(), img:tab.inputImg, wf:'space', prompt:budgetPrompt, selK:null, eng:(G.eng||'nano2'), resolution:'1K'};
     procImgWithTask(_task, function(resultUrl){
       renderFromBudgetBtn.disabled=false; renderFromBudgetBtn.innerHTML='🎨 이 견적 구성 그대로 렌더링해보기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">20cr</span>';
       _saveResultToCloudGallery('budget', _task.id, resultUrl, tab.inputImg, 'nano2', '1K');
       if(!G.HIST.budget) G.HIST.budget=[];
-      G.HIST.budget = G.HIST.budget.filter(function(x){return !x.preview;});
+      G.HIST.budget = G.HIST.budget.filter(function(x){return !x.preview && x.id!==_budgetLoadingId;});
       G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:tab.inputImg, result:resultUrl, origThumb:null, tags:['견적 렌더링'], ai:'', cx:50, fav:false, wf:'budget', preview:false});
       if(G.wf==='budget') renderMain('budget');
     }, function(err){
       renderFromBudgetBtn.disabled=false; renderFromBudgetBtn.innerHTML='🎨 이 견적 구성 그대로 렌더링해보기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">20cr</span>';
+      G.HIST.budget = (G.HIST.budget||[]).filter(function(x){return x.id!==_budgetLoadingId;});
+      if(G.wf==='budget') renderMain('budget');
       alert('렌더링 실패: '+String(err).slice(0,150));
     });
   };
@@ -19249,28 +19256,27 @@ function runNanoBanana(prompt, imgDataUrl, modelSlug, onDone, onErr, resKey) {
   // 원본(메인) 이미지의 실제 가로세로 비율을 미리 측정해서 명시적으로 지정 — 'auto'에만 맡기면
   // 레퍼런스 이미지가 같이 들어갈 때 엉뚱한 비율(예: 세로 사진인데 가로로)로 생성되는 문제가 있었음.
   var _explicitAspect = 'auto';
-  // ⚠️ 진짜 원인 발견 — 층수를 늘리는 증축/신축 요청인데 출력 비율을 원본 사진 비율 그대로
-  // 강제하고 있었음. 5층짜리 사진의 비율 그대로 10층·20층을 우겨넣으려니 물리적으로 한 층당
-  // 세로 픽셀이 부족해서, 텍스트로 아무리 강조해도 실제로는 8~11층 선에서 막히던 진짜 원인이었음.
-  // 층수 증가가 감지되면 원본 비율을 무시하고 사용 가능한 가장 세로로 긴 비율(9:16)로 강제 전환해서
-  // 층을 그릴 세로 공간을 최대한 확보함.
+  // ⚠️ 요청 반영: 층수 증축/신축이어도 캔버스 비율(9:16 등)을 억지로 강제하지 않고 원본 사진 비율을
+  // 그대로 유지함 — 결과물이 원본과 형태가 확 달라지는 문제가 있었기 때문. 층수 증가는 비율을
+  // 바꾸는 대신 프롬프트의 "CRITICAL CAMERA OVERRIDE" 지시(카메라를 더 뒤로 빼서 이 고정된 프레임
+  // 안에 다 담으라는 지시)로 해결한다. 그래서 이 함수는 이제 층수 증가 여부와 무관하게 항상
+  // 원본(또는 사용자가 직접 고른) 비율을 그대로 측정해서 씀.
   var _tabForAspect = getTab(G.wf);
-  var _forceTallAspect = !!(_tabForAspect && _tabForAspect._extFloorOverrideForThisRun);
   // ⚠️ 요청 반영: 예전엔 원본 이미지 비율을 자동 측정해서 무조건 그대로 강제했음(16:9 사진
   // 넣으면 결과도 항상 16:9) — 쇼츠용으로 9:16을 처음부터 뽑고 싶어도 방법이 없었음. 사용자가
   // 직접 비율을 골라놨으면(tab.forcedAspect) 그걸 최우선으로 쓰고, 안 골랐으면('auto'/미지정)
   // 기존처럼 원본 비율을 그대로 자동 측정해서 씀.
   var _userForcedAspect = (_tabForAspect && _tabForAspect.forcedAspect && _tabForAspect.forcedAspect!=='auto') ? _tabForAspect.forcedAspect : null;
-  if(_userForcedAspect && !_forceTallAspect){
+  if(_userForcedAspect){
     _explicitAspect = _userForcedAspect;
     console.log('[NB2] 사용자 지정 비율 사용:', _explicitAspect);
     _afterAspectProbe();
   } else {
   loadImgSafe(imgDataUrl, function(probeImg){
-    _explicitAspect = _forceTallAspect ? '9:16' : _nearestAspectRatioStr(probeImg.naturalWidth, probeImg.naturalHeight);
-    console.log('[NB2] 원본 비율 측정:', probeImg.naturalWidth+'x'+probeImg.naturalHeight, '→ aspect_ratio:', _explicitAspect, _forceTallAspect?'(층수 증가로 세로 비율 강제)':'');
+    _explicitAspect = _nearestAspectRatioStr(probeImg.naturalWidth, probeImg.naturalHeight);
+    console.log('[NB2] 원본 비율 측정:', probeImg.naturalWidth+'x'+probeImg.naturalHeight, '→ aspect_ratio:', _explicitAspect);
     _afterAspectProbe();
-  }, function(){ _explicitAspect = _forceTallAspect ? '9:16' : 'auto'; _afterAspectProbe(); }); // 측정 실패해도 층수 증가 케이스면 세로 비율 유지
+  }, function(){ _explicitAspect = 'auto'; _afterAspectProbe(); });
   }
 
   function doFalRun(allUrls){
@@ -20503,23 +20509,17 @@ function procImgWithTask(task, onDone, onErr){
   // ── 결과 이미지를 항상 "원본 픽셀 크기" 기준으로 정확히 맞춰준다 ──
   // (모델이 매번 1K/2K라는 고정된 크기로 다시 그리기 때문에, 원본이 더 크면 그냥 두면 작아져 보임)
   // 1K 선택 = 원본과 동일한 픽셀 크기로, 2K 선택 = 원본의 2배 픽셀 크기로 리사이즈
+  // ⚠️ 요청 반영: 층수 증축 렌더링도 이제 캔버스 비율을 억지로 바꾸지 않고 원본과 가장 가까운
+  // 비율을 그대로 쓰므로(_withExplicitAspect/runNanoBanana 참고), 이 단계를 건너뛸 필요가 없어짐 —
+  // 비율 차이가 거의 없으니 아래 로직이 크롭 없이 단순 리사이즈만 수행해서 원본 픽셀 크기에 맞춰줌.
   if(wf==='space'||wf==='render'||wf==='edit'){
     var _rawOnDone = onDone;
     var _selKForPost = task.selK;
-    // ⚠️ 버그 수정: 층수 증축(9:16으로 카메라를 뒤로 뺀 렌더링)인데도 이 "원본 비율 맞춤" 단계가
-    // 무조건 실행되면서, AI가 실제로는 카메라를 잘 빼서 만든 세로로 긴 결과물을 원본(대개 3:4 계열)
-    // 비율에 맞춰 위아래를 다시 크롭해버려서 — 카메라를 뺀 효과 자체가 사라져 보이는 원인이었음
-    // (콘솔에 "비율 보정(세로 크롭) 768x1376 → 674x902" 처럼 찍히는 게 바로 이 현상). 층수 증축
-    // 렌더링일 때는 이 크롭 단계를 건너뛰고 AI가 만든 비율/프레이밍을 그대로 유지한다.
-    var _isFloorOverrideRender = !!(getTab(G.wf) && getTab(G.wf)._extFloorOverrideForThisRun);
     onDone = function(ri){
       if(_selKForPost==='texture_from_photo' || _selKForPost==='texture_seamless' || _selKForPost==='texture_normal_map'){
         // 텍스처/맵소스 프리셋은 원본 크기에 맞출 필요가 없음(타일링용 정사각 이미지) —
         // 대신 이음새가 안 끊기도록 기계적 보정(오프셋 블렌드)을 한 번 더 거친다.
         _makeSeamlessTile(ri, _rawOnDone);
-      } else if(_isFloorOverrideRender){
-        console.log('[원본 크기 맞춤 건너뜀] 층수 증축 렌더링 — 카메라를 뺀 프레이밍을 그대로 유지');
-        _rawOnDone(ri);
       } else {
         _resizeToOriginalScale(img, ri, resolution, _rawOnDone);
       }
@@ -24333,7 +24333,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       var _curPresetForBudget=[].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
       var _isExtForBudget = _curPresetForBudget ? (_presetType(_curPresetForBudget.pt)==='ext') : false;
       var _floorOverrideActive = _checkAndApplyFloorEngineOverride(tab); // 이 안에서 조건 맞으면 G.eng='nano_pro'까지 처리함
-      tab._extFloorOverrideForThisRun = _floorOverrideActive; // runNanoBanana가 세로로 긴 비율(9:16)을 강제할지 판단하는 데 씀
+      tab._extFloorOverrideForThisRun = _floorOverrideActive; // 카메라 풀백 프롬프트 지시를 넣을지 판단하는 데 씀 (비율은 더 이상 이걸로 안 바꿈)
       var _floorOverrideExistF = parseFloat(tab.extExistingFloors)||0;
       var _floorOverrideTargetF = parseFloat(tab.extTargetFloors)||0;
       if(G.supaRole!=='admin'&&G.plan!=='admin'){
