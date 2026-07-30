@@ -7936,6 +7936,10 @@ function mkBudgetTier(p){
         if(_bizKeepSet) tab.budgetAiKeepItems.forEach(function(n){ _bizKeepSet[n]=true; });
         var _bizNaSet = tab.budgetAiNotApplicableItems ? {} : null;
         if(_bizNaSet) tab.budgetAiNotApplicableItems.forEach(function(n){ _bizNaSet[n]=true; });
+        // ⚠️ 요청 반영: "조명이든 뭐든 금액에 맞게 들어가야 하는 건 주거든 상업공간이든 건축이든
+        // 다 똑같이 적용돼야 한다" — 상업공간도 항목별 계산 금액을 저장해서 렌더 프롬프트에서
+        // 쓸 수 있게 함(그동안 이 저장 자체가 주거공간에만 있었음).
+        tab._lastBudgetItemAmts = {};
         bizItems.forEach(function(it){
           var name=it[0];
           var isKept = _bizKeepSet && _bizKeepSet[name];
@@ -7957,6 +7961,7 @@ function mkBudgetTier(p){
           }
           var defaultAmt=Math.round(bizTotalAmt*it[1]);
           var manualAmt=(tab.budgetItemManualAmts && tab.budgetItemManualAmts[name]!=null)?tab.budgetItemManualAmts[name]:defaultAmt;
+          tab._lastBudgetItemAmts[name] = manualAmt;
           bizSum+=manualAmt;
           var itInp2=mk('input','');itInp2.type='number';itInp2.value=manualAmt;
           itInp2.style.cssText='width:70px;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:4px 6px;font-size:11px;border-radius:5px;outline:none;text-align:right';
@@ -8448,6 +8453,28 @@ function mkBudgetTier(p){
     if(!isExt && tab.budgetAiKeepItems && tab.budgetAiKeepItems.length){
       budgetPrompt += ' 다만, 사진 분석 결과 다음 항목들은 이미 상태가 양호해서 재사용 가능하다고 판단됐으니, 위 마감재 등급 지시와 무관하게 원본 사진 그대로 유지하고 절대 바꾸지 마세요: '+tab.budgetAiKeepItems.join(', ')+'.';
     }
+    // ⚠️ 버그 수정: keepItems(유지 항목)뿐 아니라 "해당없음"(이 공간엔 애초에 필요 없다고 판단된
+    // 항목 — 예: 좁은 방이라 침대·붙박이장 자리가 없음)도 똑같이 빠져있었음. 이것도 안 넣으면
+    // "침대 필요없음"이라고 견적엔 나오는데 실제 렌더링에는 침대가 들어가는 불일치가 생김.
+    if(!isExt && tab.budgetAiNotApplicableItems && tab.budgetAiNotApplicableItems.length){
+      budgetPrompt += ' 또한, 사진 분석 결과 이 공간에는 공간·용도상 다음 항목이 애초에 해당되지 않는다고 판단됐으니, 결과 이미지에 억지로 넣지 마세요: '+tab.budgetAiNotApplicableItems.join(', ')+'.';
+    }
+    // ⚠️ 요청 반영: "조명 예산이 5만원인데 벽조명+천장조명+스탠드까지 나오면 의미가 없다"는
+    // 지적 — 항목별로 실제 계산된 금액(tab._lastBudgetItemAmts)이 있는데도 이 버튼 프롬프트는
+    // 그 금액을 전혀 안 보고 있었음. 금액이 적으면 개수도 적고 소재도 저렴하게, 금액이 크면
+    // 그만큼 여러 개·고급 소재로 보이게 — 조명은 특히 개수로 직접 체감되니 상한을 숫자로 못박고,
+    // 나머지 항목들도 금액 수준에 맞는 간소함/화려함으로 만들라는 일반 원칙을 같이 넣음.
+    var _budgetScaleTxt = '';
+    if(!isExt && tab._lastBudgetItemAmts){
+      var _lightKey = Object.keys(tab._lastBudgetItemAmts).find(function(k){ return k.indexOf('조명')===0; });
+      if(_lightKey){
+        var _lAmt = tab._lastBudgetItemAmts[_lightKey];
+        var _lCap = _lAmt<40 ? 1 : _lAmt<80 ? 2 : _lAmt<150 ? 3 : 4;
+        _budgetScaleTxt += ' LIGHTING FIXTURE COUNT LIMIT (CRITICAL): the lighting budget for this room is approximately '+_lAmt+'만원. At this budget level, show AT MOST '+_lCap+' separate light fixture(s) total — count a ceiling fixture, a wall sconce, a floor lamp, a table lamp, and a pendant each separately (two matching wall sconces count as one fixture TYPE). Do not add a ceiling light AND wall sconces AND a floor lamp all at once just because the style mentions "layered lighting" — at this budget, pick the single most impactful fixture and skip the rest.';
+      }
+      _budgetScaleTxt += ' GENERAL BUDGET-TO-SCALE RULE: for every item above with a low assigned amount, render it as simple, minimal and inexpensive-looking (fewer units, basic materials, no elaborate multi-piece setups) — do not let the style description below push any low-budget item toward an elaborate or expensive-looking version. Items with a higher assigned amount may look correspondingly more elaborate or premium.';
+      budgetPrompt += _budgetScaleTxt;
+    }
     // ⚠️ 요청 반영: AI 견적에도 스타일 프리셋(카페·오피스 스타일 등)을 골라 쓸 수 있게 했으므로,
     // 프리셋을 골랐으면 그 프리셋의 스타일 지시를 마감재 등급 지시와 함께 반영함 — 등급(마감재
     // 품질)은 예산에서, 구체적인 스타일 방향은 프리셋에서 가져오는 조합.
@@ -8459,9 +8486,23 @@ function mkBudgetTier(p){
       // 지시해도 프리셋 쪽의 더 강한 문구에 밀려서 무시되는 경우가 있었음(재사용 항목이 있는데
       // 프리셋을 같이 골랐을 때만 재사용 판단이 안 지켜지는 것처럼 보이는 게 이 때문). 프리셋
       // 지시 바로 뒤에 우선순위를 다시 한번 명확히 못박아서, 프리셋을 몇 번째로 고르든 유지 항목이
-      // 항상 이기게 함.
+      // 항상 이기게 함. "해당없음" 항목도 똑같은 원리로 같이 못박음(프리셋이 그 항목을 넣으라고
+      // 해도 이 공간엔 안 들어가야 함). 예산-규모 원칙(조명 개수 등)도 프리셋이 화려한 스타일을
+      // 요구해도 항상 이기도록 여기서 한 번 더 반복함.
       if(!isExt && tab.budgetAiKeepItems && tab.budgetAiKeepItems.length){
         budgetPrompt += ' PRIORITY OVERRIDE: regardless of anything the style description above says (even if it says a change is "mandatory" or "required"), the following items must still be preserved exactly as they appear in the original photo — do not change their material, color, or design: '+tab.budgetAiKeepItems.join(', ')+'. The keep-instruction for these specific items always wins over the general style description.';
+      }
+      if(!isExt && tab.budgetAiNotApplicableItems && tab.budgetAiNotApplicableItems.length){
+        budgetPrompt += ' PRIORITY OVERRIDE: regardless of anything the style description above suggests adding, do NOT include the following items in the final image, since a room-specific assessment found no realistic space or use for them here: '+tab.budgetAiNotApplicableItems.join(', ')+'.';
+      }
+      if(_budgetScaleTxt){
+        budgetPrompt += ' PRIORITY OVERRIDE: regardless of how elaborate or lavish the style description above sounds, the budget-based quantity/quality limits above (including the lighting fixture count limit, if given) always take priority — do not let the style push any low-budget item beyond what its assigned amount realistically allows.';
+      }
+      // ⚠️ 요청 반영: "조명은 예시일 뿐, 주거든 상업공간이든 건축이든 전부 금액에 맞게 들어가야
+      // 한다"는 지적 — 항목 단위 계산이 없는 건축(isExt)에도 적용되도록, 이미 정해진 등급(tier)
+      // 자체가 프리셋 때문에 더 화려해지지 않게 마지막으로 한 번 더 못박음.
+      if(tab.budgetTier){
+        budgetPrompt += ' PRIORITY OVERRIDE (applies to every material, finish, fixture and quantity in this project — not just what is listed above): this project is budgeted at the "'+tab.budgetTier+'" tier level. Regardless of how upscale or elaborate the style description above sounds, every material, finish, fixture and quantity in the final result must stay realistically consistent with what that budget tier can actually afford — do not let the style description push the overall look to a noticeably higher-end tier than the stated budget supports.';
       }
     }
     // ⚠️ 버그 수정: 사용자가 항목별로 직접 적어서 "적용"까지 눌러도(화면엔 "✓ 반영됨"이라고 뜨는데도),
@@ -8611,6 +8652,10 @@ function mkBudgetTier(p){
           floorNoteDiv.textContent='✓ 재사용 가능한 항목을 빼고도 실제 시공 가능한 최소 금액(약 '+_roomRealismFloor.toLocaleString()+'만원)에 맞춰 자동으로 보정했어요.';
           itemBreakdownBox.appendChild(floorNoteDiv);
         }
+        // ⚠️ 요청 반영: "조명 예산이 5만원인데 벽조명+천장조명+스탠드까지 몇백만원어치가 나오면
+        // 의미가 없다"는 지적 — 각 항목의 실제 계산된 금액을 render 버튼(budgetPrompt)에서도
+        // 쓸 수 있게 여기서 tab에 저장해둠(그동안은 화면 표시용으로만 쓰이고 저장은 안 됐음).
+        tab._lastBudgetItemAmts = {};
         items.forEach(function(it){
           var name=it[0];
           var isKept = keepSet && keepSet[name] && name!=='예비비';
@@ -8649,6 +8694,7 @@ function mkBudgetTier(p){
             defaultAmt = Math.max(defaultAmt, _demoFloor);
           }
           var itAmt = (tab.budgetItemManualAmts[name]!=null) ? tab.budgetItemManualAmts[name] : defaultAmt;
+          tab._lastBudgetItemAmts[name] = itAmt;
           amtForThisSpace += itAmt;
           if(it[2]==='f') furnTotal+=itAmt; else conTotal+=itAmt;
           var inpWrap=dv('');inpWrap.style.cssText='display:flex;align-items:center;gap:3px';
