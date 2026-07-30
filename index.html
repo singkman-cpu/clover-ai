@@ -7388,6 +7388,21 @@ function mkBudgetTier(p){
       }
     }).catch(function(){});
   }
+  // ⚠️ 요청 반영: 평수·예산·방 선택 등 모드별 상태(budgetStateByMode)도 이미지와 똑같이
+  // 새로고침해도 유지되게 함.
+  if(!tab.budgetStateByMode && !tab._budgetStateByModeLoadedOnce){
+    tab._budgetStateByModeLoadedOnce = true;
+    idbLoadDraft('clover_budget_state_by_mode', 30*24*60*60*1000).then(function(data){
+      if(!data) return;
+      tab.budgetStateByMode = data;
+      var _curMode2 = tab.budgetModeOverride || 'residential';
+      // 지금 화면에 이미 평수/예산을 입력해놓은 상태가 아닐 때만 복원
+      if(!tab.budgetPy && !tab.budgetAmount && data[_curMode2]){
+        Object.keys(data[_curMode2]).forEach(function(f){ if(tab[f]==null) tab[f] = data[_curMode2][f]; });
+        if(G.wf==='budget') renderSB();
+      }
+    }).catch(function(){});
+  }
   var _curPreset=[].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
   // ⚠️ 실제로 재현된 크래시 방지용 방어코드 — 어떤 로드 순서에서는 이 시점에 _presetType이 아직
   // 준비 안 된 채로 호출돼서 "not defined" 에러가 나며 예산 패널 전체가 깨지는 게 확인됐음(그러면
@@ -7413,19 +7428,38 @@ function mkBudgetTier(p){
     btn.style.cssText='flex:1;padding:8px 6px;border-radius:9px;border:1px solid '+(isActive?'var(--ac)':'var(--bd2)')+';background:'+(isActive?'var(--acg)':'var(--c2)')+';color:'+(isActive?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
     btn.textContent=lbl_;
     btn.onclick=function(){
-      // ⚠️ 요청 반영: 주거/상업공간/건축외관은 서로 완전히 다른 용도의 사진인데, 업로드한 이미지가
-      // getTab('budget').inputImg 하나에만 저장돼서 세 모드가 전부 같은 사진을 공유하고 있었음
-      // (주거에서 올린 사진이 건축외관 탭에도 그대로 보이는 버그). 모드를 바꿀 때 지금 모드의
-      // 이미지를 따로 저장해두고, 바꾼 모드에 저장돼 있던 이미지(없으면 빈 상태)로 복원함.
+      // ⚠️ 요청 반영: "건축하다가 주거로 왔는데 방금 건축에서 쓰던 평수·예산이 그대로 남아있다"는
+      // 지적 — 업로드 이미지는 이미 모드별로 분리해뒀었는데(budgetImgByMode), 평수·예산·방 선택·
+      // AI 분석 결과 등 나머지 상태는 전부 tab 위에 공용 필드로 남아있어서 모드를 바꿔도 하나도
+      // 안 지워지고 있었음. 이제 이미지와 똑같은 방식으로 이 상태들을 전부 모드별로 완전히
+      // 분리함 — 주거·상업공간·건축외관이 서로의 값을 절대 안 보게 함.
+      var _MODE_SCOPED_FIELDS = ['budgetPy','budgetAmount','budgetRoom','budgetBizType','extConstructionMode',
+        'extExistingFloors','extTargetFloors','budgetTier','budgetAiKeepItems','budgetAiNotApplicableItems',
+        'budgetAiReasoning','budgetItemManualAmts','budgetRoomShareOverride','budgetBizAmtMultiplier',
+        'budgetManualAmt','budgetRoomSlot','budgetManualLock','budgetItemOverrideText','extOverrideText',
+        'refs','budgetShowDetail','_aiLastKeySnapshot'];
       if(!tab.budgetImgByMode) tab.budgetImgByMode={};
+      if(!tab.budgetStateByMode) tab.budgetStateByMode={};
       var _curModeKey = tab.budgetModeOverride || 'residential';
       tab.budgetImgByMode[_curModeKey] = {img:tab.inputImg||null, name:tab.inputImgName||''};
+      var _curSnapshot = {};
+      _MODE_SCOPED_FIELDS.forEach(function(f){ _curSnapshot[f] = tab[f]!==undefined ? tab[f] : null; });
+      tab.budgetStateByMode[_curModeKey] = _curSnapshot;
+
       tab.budgetModeOverride = mk_;
       var _saved = tab.budgetImgByMode[mk_];
       tab.inputImg = _saved ? _saved.img : null;
       tab.inputImgName = _saved ? _saved.name : '';
       tab.status = tab.inputImg ? 'idle' : tab.status;
+
+      // 바뀐 모드에 저장된 값이 있으면 복원, 없으면(처음 들어와보는 모드) 전부 깨끗하게 초기화 —
+      // 절대 이전 모드 값이 남아있지 않게 함.
+      var _restore = tab.budgetStateByMode[mk_] || {};
+      _MODE_SCOPED_FIELDS.forEach(function(f){ tab[f] = (_restore[f]!==undefined) ? _restore[f] : null; });
+      if(tab.budgetShowDetail==null) tab.budgetShowDetail=false; // 불리언 필드는 null 대신 기본값으로
+
       idbSaveDraft('clover_budget_img_by_mode', tab.budgetImgByMode).catch(function(){});
+      idbSaveDraft('clover_budget_state_by_mode', tab.budgetStateByMode).catch(function(){});
       renderSB();
     };
     modeToggleWrap.appendChild(btn);
@@ -8453,6 +8487,17 @@ function mkBudgetTier(p){
   var roomBudgetLine=dv('');roomBudgetLine.style.cssText='font-size:13px;color:var(--ac);font-weight:700;margin-bottom:5px;min-height:18px;line-height:1.5';
   w.appendChild(roomBudgetLine);
 
+  // ⚠️ 버그 수정: feedback(등급 라벨)·realismWarn(예산 부족 경고)이 코드 훨씬 아래쪽(렌더링
+  // 버튼보다도 뒤)에서 만들어지고 있어서, 실제 화면에서 "이 견적 구성 그대로 렌더링해보기"
+  // 버튼 밑에, 심지어 마감재 체크리스트보다도 아래에 뚝 떨어져서 나오고 있었음 — "자세히 보기"
+  // 관련 요약 정보들(roomBudgetLine과 짝을 이루는 내용)인데 위치만 엉뚱하게 맨 아래였던 것.
+  // 논리적으로 같은 묶음인 roomBudgetLine 바로 옆으로 옮겨서 순서를 바로잡음.
+  var feedback=dv('');feedback.style.cssText='font-size:13px;font-weight:700;min-height:18px;margin-bottom:5px';
+  w.appendChild(feedback);
+
+  var realismWarn=dv('');realismWarn.style.cssText='font-size:12px;color:#f59e0b;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:7px;padding:8px 10px;margin-bottom:6px;line-height:1.6;display:none';
+  w.appendChild(realismWarn);
+
   // ⚠️ 요청 반영: "버튼 하나 누르면 큰 숫자 하나만 딱 보이는" 간단한 화면을 기본으로 하고,
   // 항목별로 하나하나 조정하고 싶은 사람만 "자세히 보기"를 눌러서 펼치게 함 — 지금까지는
   // 평수·예산만 넣으면 항목 10개짜리 편집 UI가 무조건 다 펼쳐져서 나왔었음.
@@ -8613,6 +8658,12 @@ function mkBudgetTier(p){
     // 있었음 — 어떤 예산으로 나온 결과인지 카드만 봐도 바로 알 수 있게 총 예산 금액을 태그에 다시 넣음.
     var _budgetTagAmt = _curTotalAmt.toLocaleString()+'만원';
     var _budgetTagRoom = (!isExt && tab.budgetRoom && ROOM_BUDGET_SHARE[tab.budgetRoom]) ? (ROOM_BUDGET_SHARE[tab.budgetRoom][0]+' · ') : (isCommercial && tab.budgetBizType) ? (COMMERCIAL_BIZ_LABELS[tab.budgetBizType]+' · ') : '';
+    // ⚠️ 버그 수정: "이 견적 구성 그대로 렌더링해보기"로 만든 결과는 다른 예산 관련 결과들과
+    // 달리 항목별 상세 정보(budgetSnapshot)가 아예 안 붙어있어서, 렌더링 결과 옆에 뜨는 "💰 예산
+    // 정보" 패널(_buildBudgetInfoPanel)이 안 나오고 있었음 — 태그(총액)만 보이고 항목별 breakdown은
+    // 안 보이는 게 이것 때문. 이미 있는 _captureBudgetSnapshot() 헬퍼로 지금 화면의 항목별 견적을
+    // 그대로 캡처해서 붙임.
+    var _budgetSnapForRender = _captureBudgetSnapshot(tab, isExt, isCommercial);
     G.HIST.budget.unshift({id:_budgetLoadingId, orig:tab.inputImg, result:null, origThumb:null, tags:['견적 렌더링 중... ('+_budgetTagRoom+_budgetTagAmt+')'], ai:'', cx:50, fav:false, wf:'budget', preview:false, loading:true});
     if(G.wf==='budget') renderMain('budget');
     var _task={id:Date.now(), img:tab.inputImg, wf:'space', prompt:budgetPrompt, selK:null, eng:(G.eng||'nano2'), resolution:'1K'};
@@ -8627,7 +8678,7 @@ function mkBudgetTier(p){
       _saveResultToCloudGallery('budget', _task.id, resultUrl, tab.inputImg, 'nano2', '1K');
       if(!G.HIST.budget) G.HIST.budget=[];
       G.HIST.budget = G.HIST.budget.filter(function(x){return !x.preview && x.id!==_budgetLoadingId;});
-      G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:tab.inputImg, result:resultUrl, origThumb:null, tags:['견적 렌더링 · '+_budgetTagRoom+_budgetTagAmt], ai:'', cx:50, fav:false, wf:'budget', preview:false});
+      G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:tab.inputImg, result:resultUrl, origThumb:null, tags:['견적 렌더링 · '+_budgetTagRoom+_budgetTagAmt], ai:'', cx:50, fav:false, wf:'budget', preview:false, budgetSnapshot:_budgetSnapForRender});
       if(G.wf==='budget') renderMain('budget');
     }, function(err){
       getTab('space').refs = _budgetOrigSpaceRefs;
@@ -8638,11 +8689,6 @@ function mkBudgetTier(p){
     });
   };
 
-  var feedback=dv('');feedback.style.cssText='font-size:13px;font-weight:700;min-height:18px;margin-bottom:5px';
-  w.appendChild(feedback);
-
-  var realismWarn=dv('');realismWarn.style.cssText='font-size:12px;color:#f59e0b;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:7px;padding:8px 10px;margin-bottom:6px;line-height:1.6;display:none';
-  w.appendChild(realismWarn);
   // ⚠️ 요청 반영: "1억5천으로 2층→4층 증축이 실제로 되나?"를 사용자가 직접 계산 안 해도 바로
   // 판단할 수 있게, 기존 층(리모델링 단가)과 새로 올리는 층(신축 프리미엄 단가)의 비용을 각각
   // 따로 분리해서 보여주고, 실제 필요한 최소 금액과 입력한 예산을 직접 비교해줌 — 그냥 "평당
@@ -8672,6 +8718,21 @@ function mkBudgetTier(p){
         idbSaveDraft('clover_budget_img_by_mode', tab.budgetImgByMode).catch(function(){});
       }, 800);
     }
+    // 평수·예산 등 모드별 상태도 이미지와 동일하게 디바운스로 동기화(모드 전환 버튼을 안
+    // 눌러도, 지금 모드에 입력한 값이 계속 최신으로 저장되게 함).
+    clearTimeout(window._budgetStateSaveTimer);
+    window._budgetStateSaveTimer = setTimeout(function(){
+      if(!tab.budgetStateByMode) tab.budgetStateByMode={};
+      var _cm2 = tab.budgetModeOverride || 'residential';
+      var _fields2 = ['budgetPy','budgetAmount','budgetRoom','budgetBizType','extConstructionMode',
+        'extExistingFloors','extTargetFloors','budgetTier','budgetAiKeepItems','budgetAiNotApplicableItems',
+        'budgetAiReasoning','budgetItemManualAmts','budgetRoomShareOverride','budgetBizAmtMultiplier',
+        'budgetManualAmt','budgetRoomSlot','budgetManualLock','budgetItemOverrideText','extOverrideText',
+        'refs','budgetShowDetail'];
+      var _snap2={}; _fields2.forEach(function(f){ _snap2[f]=tab[f]!==undefined?tab[f]:null; });
+      tab.budgetStateByMode[_cm2] = _snap2;
+      idbSaveDraft('clover_budget_state_by_mode', tab.budgetStateByMode).catch(function(){});
+    }, 800);
     if(!totalAmt || totalAmt<=0){ tab.budgetTier=''; feedback.textContent=''; roomBudgetLine.textContent=''; itemBreakdownBox.style.display='none'; materialsBox.style.display='none'; realismWarn.style.display='none'; additionSplitBox.style.display='none'; simpleSummaryCard.style.display='none'; detailToggleBtn.style.display='none'; updBtn(); return; }
 
     // 방별 배정 금액(시공+가구+소품+가전 다 포함)은 "참고용 표시"로만 따로 계산해서 보여줌
