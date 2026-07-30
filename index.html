@@ -7837,7 +7837,7 @@ function mkBudgetTier(p){
       itemOvLabel.textContent='✏️ 추가 요청사항';
       w.appendChild(itemOvLabel);
       var itemOvWrap=dv('');itemOvWrap.style.cssText='display:flex;gap:6px;margin-bottom:10px';
-      var itemOvInp=mk('textarea','');itemOvInp.id='budget-item-override-ta';itemOvInp.rows=2;itemOvInp.placeholder='예: 천장등은 실링팬으로 교체, 소파는 크림색 3인 가죽소파로 새로 구입, 테이블은 그대로 사용, TV장은 없이 벽걸이TV로';
+      var itemOvInp=mk('textarea','');itemOvInp.id='budget-item-override-ta';itemOvInp.rows=2;itemOvInp.placeholder='예: 천장등은 실링팬으로 교체, 소파는 크림색 3인 가죽소파로 새로 구입, 테이블은 그대로 사용, TV장은 없이 벽걸이TV로 / 레퍼런스 바닥재는 안 쓰고 기존 유지, 벽지는 레퍼런스랑 같은 종류인데 색만 더 밝게';
       itemOvInp.value=tab.budgetItemOverrideText||'';
       itemOvInp.style.cssText='flex:1;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:9px 11px;font-size:12px;border-radius:8px;outline:none;box-sizing:border-box;resize:vertical;min-height:52px;font-family:inherit';
       var itemOvBtn=mk('button','');itemOvBtn.type='button';itemOvBtn.textContent='적용';
@@ -8610,7 +8610,13 @@ function mkBudgetTier(p){
     G.HIST.budget.unshift({id:_budgetLoadingId, orig:tab.inputImg, result:null, origThumb:null, tags:['견적 렌더링 중... ('+_budgetTagRoom+_budgetTagAmt+')'], ai:'', cx:50, fav:false, wf:'budget', preview:false, loading:true});
     if(G.wf==='budget') renderMain('budget');
     var _task={id:Date.now(), img:tab.inputImg, wf:'space', prompt:budgetPrompt, selK:null, eng:(G.eng||'nano2'), resolution:'1K'};
+    // ⚠️ 요청 반영: 레퍼런스 이미지(tab.refs, 이 화면에서 방금 추가함)가 AI 비용 분석에는 이미
+    // 반영되는데, 실제 렌더링 파이프라인은 task.wf('space') 기준으로 getTab('space').refs를
+    // 읽으므로(다른 기능들과 동일한 패턴) 여기서도 잠깐 옮겨줬다가 복원해서 렌더링에도 반영되게 함.
+    var _budgetOrigSpaceRefs = getTab('space').refs;
+    getTab('space').refs = (tab.refs && tab.refs.length) ? tab.refs : undefined;
     procImgWithTask(_task, function(resultUrl){
+      getTab('space').refs = _budgetOrigSpaceRefs;
       renderFromBudgetBtn.disabled=false; renderFromBudgetBtn.innerHTML='🎨 이 견적 구성 그대로 렌더링해보기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">20cr</span>';
       _saveResultToCloudGallery('budget', _task.id, resultUrl, tab.inputImg, 'nano2', '1K');
       if(!G.HIST.budget) G.HIST.budget=[];
@@ -8618,6 +8624,7 @@ function mkBudgetTier(p){
       G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:tab.inputImg, result:resultUrl, origThumb:null, tags:['견적 렌더링 · '+_budgetTagRoom+_budgetTagAmt], ai:'', cx:50, fav:false, wf:'budget', preview:false});
       if(G.wf==='budget') renderMain('budget');
     }, function(err){
+      getTab('space').refs = _budgetOrigSpaceRefs;
       renderFromBudgetBtn.disabled=false; renderFromBudgetBtn.innerHTML='🎨 이 견적 구성 그대로 렌더링해보기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">20cr</span>';
       G.HIST.budget = (G.HIST.budget||[]).filter(function(x){return x.id!==_budgetLoadingId;});
       if(G.wf==='budget') renderMain('budget');
@@ -9222,6 +9229,13 @@ function sbSpace(p){
   if(G.wf==='budget'){
     mkNote(p,'<strong style="color:var(--ac)">💰 AI 견적</strong><br>공간 사진을 업로드하면 AI가 사진을 보고 항목별로 자재·시공 견적을 뽑아드려요.');
     mkUB(p,'견적 낼 공간 사진 업로드','main');
+    // ⚠️ 요청 반영: "우리집 사진 + 원하는 레퍼런스 사진을 같이 넣으면, AI가 레퍼런스 스타일을
+    // 구현하는 데 실제로 얼마가 드는지까지 계산해서 예산 안에서 가능한지 판단해달라"는 요청 —
+    // 확인해보니 백엔드(analyze-room-budget)는 이미 레퍼런스 이미지를 받아서 마감재 등급을
+    // 판단하고, 예산이 부족하면 styleMismatch로 알려주는 로직까지 다 갖춰져 있었는데, 정작
+        // 프론트엔드에 레퍼런스 이미지를 올릴 칸 자체가 없어서 이 기능이 죽어있었음 — 여기에
+    // 추가해서 실제로 쓸 수 있게 함. "AI 견적 확인하기"를 누르면 이 레퍼런스도 같이 분석된다.
+    mkRef(p,3,'레퍼런스 이미지 <span style="font-size:10px;color:var(--m2)">(선택 — 원하는 스타일 사진을 넣으면 AI가 우리집 사진과 같이 보고 판단해요)</span>');
     mkBudgetTier(p);
     // ⚠️ 요청 반영: 스타일 프리셋을 사진 업로드 바로 아래(예산 입력·"AI 견적 확인하기" 버튼보다
     // 위)에 두니, 프리셋 목록이 워낙 길어서 정작 예산 입력하는 곳 자체가 안 보이는 문제가
