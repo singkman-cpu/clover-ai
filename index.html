@@ -1642,6 +1642,7 @@ function _buildProposalPDF(data, cb){
 
   var toLoad=[];
   if(heroSrc) toLoad.push({key:'hero', src:heroSrc});
+  if(data.logo) toLoad.push({key:'logo', src:data.logo});
   scenes.forEach(function(sc, i){
     if(sc.orig) toLoad.push({key:'b'+i, src:sc.orig});
     toLoad.push({key:'a'+i, src:sc.result});
@@ -1662,10 +1663,10 @@ function _buildProposalPDF(data, cb){
     }
     // 표지 + 목차 + 내용페이지들 + (견적 요약, 있으면) + 마무리 페이지
     var totalPages=chunks.length+3+(hasBudget?1:0);
-    pageCanvases.push(_proposalDrawCoverPage(data, loaded.hero));
+    pageCanvases.push(_proposalDrawCoverPage(data, loaded.hero, loaded.logo));
     pageCanvases.push(_proposalDrawTOCPage(data, totalPages));
     chunks.forEach(function(chunk, ci){
-      pageCanvases.push(_proposalDrawContentPage(chunk, loaded, data, ci+2, totalPages));
+      pageCanvases.push(_proposalDrawContentPage(chunk, loaded, data, ci+2, totalPages, loaded.logo));
     });
     if(hasBudget){
       pageCanvases.push(_proposalDrawBudgetPage(data, chunks.length+2, totalPages));
@@ -1690,7 +1691,7 @@ function _buildProposalPDF(data, cb){
 }
 
 // 표지 페이지 — 첫 장면의 완성본을 풀블리드 배경으로 쓰고, 그 위에 프로젝트명/업체명을 얹는다
-function _proposalDrawCoverPage(data, heroImg){
+function _proposalDrawCoverPage(data, heroImg, logoImg){
   var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H;
   var canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
   var ctx=canvas.getContext('2d');
@@ -1769,6 +1770,14 @@ function _proposalDrawCoverPage(data, heroImg){
   try{ctx.letterSpacing='0px';}catch(e){}
 
   var pad=100;
+  // ⚠️ 요청 반영: 업체 로고를 업로드했으면 회사명 텍스트 위에 실제 로고 이미지를 같이 그려서,
+  // 고객에게 우리(Clover AI)가 아니라 그 업체의 브랜드로 보이는 표지가 되게 함(화이트라벨).
+  if(logoImg){
+    var _logoMaxH=64, _logoMaxW=220;
+    var _logoScale=Math.min(_logoMaxH/logoImg.naturalHeight, _logoMaxW/logoImg.naturalWidth, 1);
+    var _logoW=logoImg.naturalWidth*_logoScale, _logoH=logoImg.naturalHeight*_logoScale;
+    ctx.drawImage(logoImg, pad, H-360-_logoH-14, _logoW, _logoH);
+  }
   ctx.textAlign='left';ctx.textBaseline='bottom';
   ctx.fillStyle=GOLD;
   ctx.font='700 26px '+PROPOSAL_FONT;
@@ -1822,7 +1831,7 @@ function _proposalHexToRgba(hex, alpha){
 }
 
 // 내용 페이지 — 장면 최대 3개, 각 장면마다 Before/After(흰 글씨 라벨) + 설명 문단
-function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages){
+function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages, logoImg){
   var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H;
   var canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
   var ctx=canvas.getContext('2d');
@@ -1942,14 +1951,22 @@ function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages){
     y+=46;
   });
 
-  // 러닝 푸터 — 모든 내용 페이지에 공통으로: 업체명(좌) · 페이지 번호(우)
+  // 러닝 푸터 — 모든 내용 페이지에 공통으로: 로고+업체명(좌) · 페이지 번호(우)
   var footY=H-64;
   ctx.strokeStyle=DIVIDER;ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(pad,footY);ctx.lineTo(W-pad,footY);ctx.stroke();
+  var footTextX=pad;
+  if(logoImg){
+    var _fLogoH=22;
+    var _fLogoScale=Math.min(_fLogoH/logoImg.naturalHeight, 1);
+    var _fLogoW=logoImg.naturalWidth*_fLogoScale;
+    ctx.drawImage(logoImg, pad, footY+13, _fLogoW, _fLogoH);
+    footTextX = pad+_fLogoW+10;
+  }
   ctx.fillStyle=MUTED;
   ctx.font='500 15px '+PROPOSAL_FONT;
   ctx.textAlign='left';ctx.textBaseline='top';
-  ctx.fillText([data.company,data.contact].filter(Boolean).join('   ·   '), pad, footY+16);
+  ctx.fillText([data.company,data.contact].filter(Boolean).join('   ·   '), footTextX, footY+16);
   ctx.textAlign='right';
   ctx.fillStyle=GOLD;
   ctx.font='700 15px '+PROPOSAL_FONT;
@@ -9048,10 +9065,29 @@ function mkBudgetTier(p){
       roomBudgetLine.style.display = tab.budgetShowDetail ? 'block' : 'none';
       if(!tab.budgetShowDetail){
         simpleSummaryCard.style.display='block';
+        // ⚠️ 요청 반영: 셀프인테리어 하는 분들이 "이 예산이면 이 정도, 조금 더 쓰면 이 정도"를
+        // 한눈에 비교하고 싶어 함 — 매번 다시 렌더링(크레딧 소모) 안 해도, 다음 등급까지 얼마가
+        // 더 필요한지를 바로 계산해서 보여줌. 이미 최고 등급(프리미엄)이면 안 보여줌.
+        var _tierCompareTxt = '';
+        var _tierOrderArr = ['basic','standard','upper','premium'];
+        var _curTierIdx = _tierOrderArr.indexOf(tier);
+        if(_curTierIdx>=0 && _curTierIdx<3 && typeof bounds!=='undefined' && bounds){
+          var _cmpPy = (isResidential && !isExt && tab.budgetRoom) ? (typeof _typicalPy!=='undefined' ? _typicalPy : (ROOM_TYPICAL_PY[tab.budgetRoom]||(34/6))) : py;
+          if(_cmpPy>0){
+            var _nextTierKey = _tierOrderArr[_curTierIdx+1];
+            var _nextPerPy = bounds[_curTierIdx]; // 다음 등급으로 올라가는 데 필요한 평당 단가 시작점
+            var _nextAmt = Math.round(_nextPerPy * _cmpPy);
+            var _diffAmt = _nextAmt - _simpleAmt;
+            if(_diffAmt>0){
+              _tierCompareTxt = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bd2);font-size:11.5px;color:var(--t2)">💡 <b style="color:var(--t)">+'+_diffAmt.toLocaleString()+'만원</b> 정도 더 쓰면 <b style="color:var(--t)">'+DESIGN_SPEC_BY_TIER[_nextTierKey].label+'</b>(약 '+_nextAmt.toLocaleString()+'만원) 수준까지 올라가요.</div>';
+            }
+          }
+        }
         simpleSummaryCard.innerHTML =
           '<div style="font-size:12px;color:var(--t2);margin-bottom:4px">'+_simpleLabel+' 예상 몫</div>'+
           '<div style="font-size:30px;font-weight:800;color:var(--ac)">'+_simpleAmt.toLocaleString()+'만원</div>'+
-          '<div style="display:inline-block;margin-top:8px;background:var(--acg);color:'+color+';font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px">'+DESIGN_SPEC_BY_TIER[tier].label+' 가격대</div>';
+          '<div style="display:inline-block;margin-top:8px;background:var(--acg);color:'+color+';font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px">'+DESIGN_SPEC_BY_TIER[tier].label+' 가격대</div>'+
+          _tierCompareTxt;
       } else {
         simpleSummaryCard.style.display='none';
       }
@@ -13296,7 +13332,7 @@ function _proposalRenderCanvas(ub){
     newBtn.onclick=function(){
       G_PROPOSAL.resultUrl=null;G_PROPOSAL.resultPdf=null;G_PROPOSAL.resultPages=null;
       G_PROPOSAL.scenes=[];
-      G_PROPOSAL.opts={client:'',description:'',spaceType:'residential',summary:'',company:G_PROPOSAL.opts.company,contact:G_PROPOSAL.opts.contact,logo:null};
+      G_PROPOSAL.opts={client:'',description:'',spaceType:'residential',summary:'',company:G_PROPOSAL.opts.company,contact:G_PROPOSAL.opts.contact,logo:G_PROPOSAL.opts.logo||null};
       G_PROPOSAL._savedKey=null;
       renderSB();renderMain('proposal');
     };
@@ -13802,19 +13838,76 @@ function sbProposal(p){
   p.appendChild(wSummary);
 
   // 업체명/연락처
-  var wCompany=dv('ss');wCompany.innerHTML='<div class="lbl">업체명 <span class="lbl-en">선택</span></div>';
+  // ⚠️ 요청 반영: 인테리어 업체가 매번 새 고객 제안서를 만들 때마다 업체명·로고를 다시 입력해야
+  // 했음 — 한 번 입력하면 localStorage에 저장해뒀다가 다음 제안서를 만들 때 자동으로 채워지게
+  // 하고, 로고 이미지도 업로드해서 표지·러닝푸터에 우리(Clover AI) 브랜드 대신 그 업체 브랜드가
+  // 나가게 함(화이트라벨). 프로 업체가 고객에게 "우리 회사가 만든 제안서"로 보여줄 수 있어야
+  // 신뢹감이 생기기 때문.
+  function _proposalSaveBranding(){
+    try{
+      localStorage.setItem('clover_proposal_branding', JSON.stringify({company:opts.company||'', contact:opts.contact||'', logo:opts.logo||null}));
+    }catch(e){}
+  }
+  if(!opts.company && !opts.contact && !opts.logo){
+    try{
+      var _savedBranding = JSON.parse(localStorage.getItem('clover_proposal_branding')||'null');
+      if(_savedBranding){
+        opts.company = _savedBranding.company||''; opts.contact = _savedBranding.contact||''; opts.logo = _savedBranding.logo||null;
+      }
+    }catch(e){}
+  }
+
+  var wCompany=dv('ss');wCompany.innerHTML='<div class="lbl">업체명 <span class="lbl-en">선택 · 한 번 입력하면 다음에도 자동으로 채워져요</span></div>';
   var companyInput=document.createElement('input');companyInput.type='text';companyInput.placeholder='예: OO인테리어';
   companyInput.value=opts.company;
   companyInput.style.cssText='width:100%;padding:9px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;box-sizing:border-box';
-  companyInput.oninput=function(){ opts.company=companyInput.value; };
+  companyInput.oninput=function(){ opts.company=companyInput.value; _proposalSaveBranding(); };
   wCompany.appendChild(companyInput);
   p.appendChild(wCompany);
+
+  // 로고 업로드 — 표지·러닝푸터에 이 이미지가 함께 나감(화이트라벨)
+  var wLogo=dv('ss');wLogo.innerHTML='<div class="lbl">업체 로고 <span class="lbl-en">선택 · 표지에 우리 회사 로고로 나가요</span></div>';
+  var logoRow=dv('');logoRow.style.cssText='display:flex;align-items:center;gap:10px';
+  var logoPreviewBox=dv('');logoPreviewBox.style.cssText='width:52px;height:52px;border-radius:8px;border:1.5px dashed var(--bd2);background:var(--c2);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;cursor:pointer';
+  var logoFileInp=document.createElement('input');logoFileInp.type='file';logoFileInp.accept='image/*';logoFileInp.style.display='none';
+  function _renderLogoPreview(){
+    logoPreviewBox.innerHTML='';
+    if(opts.logo){
+      var limg=document.createElement('img');limg.src=opts.logo;limg.style.cssText='width:100%;height:100%;object-fit:contain';
+      logoPreviewBox.appendChild(limg);
+    } else {
+      logoPreviewBox.innerHTML='<span style="font-size:10px;color:var(--m2)">＋</span>';
+    }
+  }
+  _renderLogoPreview();
+  logoPreviewBox.onclick=function(){ logoFileInp.click(); };
+  logoFileInp.onchange=function(){
+    var f=logoFileInp.files&&logoFileInp.files[0]; if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      opts.logo = reader.result;
+      _proposalSaveBranding();
+      _renderLogoPreview();
+    };
+    reader.readAsDataURL(f);
+  };
+  var logoBtnCol=dv('');logoBtnCol.style.cssText='display:flex;flex-direction:column;gap:4px;flex:1';
+  var logoPickBtn=mk('button','');logoPickBtn.type='button';logoPickBtn.textContent='로고 이미지 선택';
+  logoPickBtn.style.cssText='padding:7px 10px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit;text-align:left';
+  logoPickBtn.onclick=function(){ logoFileInp.click(); };
+  var logoRemoveBtn=mk('button','');logoRemoveBtn.type='button';logoRemoveBtn.textContent='로고 제거';
+  logoRemoveBtn.style.cssText='padding:5px 10px;border-radius:7px;border:none;background:transparent;color:var(--m2);font-size:10.5px;cursor:pointer;font-family:inherit;text-align:left';
+  logoRemoveBtn.onclick=function(){ opts.logo=null; _proposalSaveBranding(); _renderLogoPreview(); };
+  logoBtnCol.appendChild(logoPickBtn); logoBtnCol.appendChild(logoRemoveBtn);
+  logoRow.appendChild(logoPreviewBox); logoRow.appendChild(logoBtnCol); logoRow.appendChild(logoFileInp);
+  wLogo.appendChild(logoRow);
+  p.appendChild(wLogo);
 
   var wContact=dv('ss');wContact.innerHTML='<div class="lbl">연락처 <span class="lbl-en">선택</span></div>';
   var contactInput=document.createElement('input');contactInput.type='text';contactInput.placeholder='예: 010-1234-5678 / 인스타 @OO_interior';
   contactInput.value=opts.contact;
   contactInput.style.cssText='width:100%;padding:9px 10px;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;color:var(--t);font-size:13px;font-family:inherit;box-sizing:border-box';
-  contactInput.oninput=function(){ opts.contact=contactInput.value; };
+  contactInput.oninput=function(){ opts.contact=contactInput.value; _proposalSaveBranding(); };
   wContact.appendChild(contactInput);
   p.appendChild(wContact);
 
@@ -23583,6 +23676,7 @@ function _untagResultFromProject(itemId, projectId){
   _saveProjects(list);
 }
 var _projectsDetailView = null; // 지금 상세보기 중인 프로젝트 id (null이면 목록 화면)
+var _projectsSearchQuery = ''; // 프로젝트 목록 검색어 (이름·고객명)
 // ══════════════════════════════════════════════════════════════
 // 💾 전체 데이터 백업 — 지금까지 모든 결과물이 클라우드(Supabase)와 브라우저에만 있어서,
 // 계정 문제나 서비스 장애가 생기면 복구할 방법이 없었음. 두 가지 백업을 제공함:
@@ -23761,6 +23855,46 @@ function renderProjectsBody(){
     return;
   }
 
+  // ⚠️ 요청 반영: 프로젝트가 몇 십~몇 백 개로 쌓이는 인테리어 업체 입장에서, 시간순으로만
+  // 쭉 나열되면 특정 고객 건을 찾기 힘들다는 지적 — 프로젝트명·고객명으로 바로 찾을 수 있게
+  // 검색창을 추가함.
+  if(list.length>3){
+    var searchWrap=dv('ss');
+    var searchInp=document.createElement('input');
+    searchInp.placeholder='🔍 프로젝트명 또는 고객명으로 검색';
+    searchInp.value=_projectsSearchQuery||'';
+    searchInp.style.cssText='width:100%;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12.5px;font-family:inherit;margin-bottom:12px;box-sizing:border-box';
+    searchInp.oninput=function(){ _projectsSearchQuery=searchInp.value; _renderProjectsListOnly(); };
+    searchWrap.appendChild(searchInp);
+    b.appendChild(searchWrap);
+  }
+  var _pq=(_projectsSearchQuery||'').trim().toLowerCase();
+  var filteredList = _pq ? list.filter(function(pr){
+    return (pr.name||'').toLowerCase().indexOf(_pq)!==-1 || (pr.client||'').toLowerCase().indexOf(_pq)!==-1;
+  }) : list;
+  var listAnchor=dv('proj-list-anchor');
+  b.appendChild(listAnchor);
+  _renderProjectsListInto(listAnchor, filteredList, activeId);
+}
+function _renderProjectsListOnly(){
+  var anchor=gE('proj-list-anchor'); if(!anchor) return;
+  var list=_getProjects(), activeId=_getActiveProjectId();
+  var _pq=(_projectsSearchQuery||'').trim().toLowerCase();
+  var filteredList = _pq ? list.filter(function(pr){
+    return (pr.name||'').toLowerCase().indexOf(_pq)!==-1 || (pr.client||'').toLowerCase().indexOf(_pq)!==-1;
+  }) : list;
+  _renderProjectsListInto(anchor, filteredList, activeId);
+}
+function _renderProjectsListInto(anchor, list, activeId){
+  anchor.innerHTML='';
+  if(!list.length){
+    var noMatch=document.createElement('div');
+    noMatch.style.cssText='text-align:center;color:var(--m2);padding:20px 10px;font-size:12px';
+    noMatch.textContent='검색 결과가 없어요.';
+    anchor.appendChild(noMatch);
+    return;
+  }
+
   var listWrap=document.createElement('div');
   listWrap.style.cssText='display:flex;flex-direction:column;gap:8px';
   list.forEach(function(proj){
@@ -23792,7 +23926,7 @@ function renderProjectsBody(){
     card.appendChild(metaEl);
     listWrap.appendChild(card);
   });
-  b.appendChild(listWrap);
+  anchor.appendChild(listWrap);
 }
 function renderProjectDetail(b, projectId){
   var list = _getProjects();
