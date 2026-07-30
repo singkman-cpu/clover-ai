@@ -8379,6 +8379,18 @@ function mkBudgetTier(p){
   var roomBudgetLine=dv('');roomBudgetLine.style.cssText='font-size:13px;color:var(--ac);font-weight:700;margin-bottom:5px;min-height:18px;line-height:1.5';
   w.appendChild(roomBudgetLine);
 
+  // ⚠️ 요청 반영: "버튼 하나 누르면 큰 숫자 하나만 딱 보이는" 간단한 화면을 기본으로 하고,
+  // 항목별로 하나하나 조정하고 싶은 사람만 "자세히 보기"를 눌러서 펼치게 함 — 지금까지는
+  // 평수·예산만 넣으면 항목 10개짜리 편집 UI가 무조건 다 펼쳐져서 나왔었음.
+  if(tab.budgetShowDetail==null) tab.budgetShowDetail=false;
+  var simpleSummaryCard=dv('');simpleSummaryCard.style.cssText='display:none;background:var(--c2);border-radius:12px;padding:20px 16px;margin-bottom:8px;text-align:center';
+  w.appendChild(simpleSummaryCard);
+
+  var detailToggleBtn=mk('button','');detailToggleBtn.type='button';
+  detailToggleBtn.style.cssText='width:100%;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;font-weight:600;cursor:pointer;margin-bottom:8px;font-family:inherit';
+  detailToggleBtn.onclick=function(){ tab.budgetShowDetail=!tab.budgetShowDetail; classify(); };
+  w.appendChild(detailToggleBtn);
+
   var itemBreakdownBox=dv('');itemBreakdownBox.style.cssText='display:none;background:var(--c2);border-radius:9px;padding:10px 12px;margin-bottom:8px';
   w.appendChild(itemBreakdownBox);
 
@@ -8516,7 +8528,7 @@ function mkBudgetTier(p){
         idbSaveDraft('clover_budget_img_by_mode', tab.budgetImgByMode).catch(function(){});
       }, 800);
     }
-    if(!totalAmt || totalAmt<=0){ tab.budgetTier=''; feedback.textContent=''; roomBudgetLine.textContent=''; itemBreakdownBox.style.display='none'; materialsBox.style.display='none'; realismWarn.style.display='none'; additionSplitBox.style.display='none'; updBtn(); return; }
+    if(!totalAmt || totalAmt<=0){ tab.budgetTier=''; feedback.textContent=''; roomBudgetLine.textContent=''; itemBreakdownBox.style.display='none'; materialsBox.style.display='none'; realismWarn.style.display='none'; additionSplitBox.style.display='none'; simpleSummaryCard.style.display='none'; detailToggleBtn.style.display='none'; updBtn(); return; }
 
     // 방별 배정 금액(시공+가구+소품+가전 다 포함)은 "참고용 표시"로만 따로 계산해서 보여줌
     // (방의 실제 평수를 모르기 때문에 이 금액을 전체 평수로 나누면 안 됨 — 방은 전체 평수의
@@ -8543,6 +8555,37 @@ function mkBudgetTier(p){
         if(keepSet) tab.budgetAiKeepItems.forEach(function(n){ keepSet[n]=true; });
         var naSet = tab.budgetAiNotApplicableItems ? {} : null;
         if(naSet) tab.budgetAiNotApplicableItems.forEach(function(n){ naSet[n]=true; });
+        // ⚠️ 요청 반영: "항목별 합계는 276만원인데 그 밑에서는 최소 400만원 있어야 한다"처럼,
+        // 같은 방에 대해 서로 다른 두 숫자가 따로 노는 게 신뢰를 깎는다는 지적 — 사실 이 둘은
+        // 원래 같은 계산에서 나와야 할 숫자인데, 항목별 합계 쪽만 "실제 시공 가능한 최소 금액"
+        // 하한선을 안 지키고 있었음. AI가 "바닥재·베란다는 재사용 가능"이라고 판단해서 그 두
+        // 항목을 0원 처리하는 건 맞지만, 나머지 항목(벽지·조명·가구 등)까지 다 더한 합계가 이
+        // 방을 실제로 시공 가능한 최소 금액보다 낮아지면 안 됨 — 그래서 그 경우 자동으로
+        // 부족분만큼 끌어올려서, 처음부터 하나의 일관된 숫자만 나오게 함(사용자가 방 전체
+        // 금액을 직접 지정한 경우는 그 선택을 존중해서 자동으로 끌어올리지 않고 기존처럼
+        // 경고만 보여줌).
+        var _spendableWeight = items.reduce(function(s,it){
+          var nm=it[0];
+          var skip = (keepSet && keepSet[nm] && nm!=='예비비') || (naSet && naSet[nm] && nm!=='예비비');
+          return s + (skip ? 0 : it[1]);
+        }, 0);
+        var _roomRegion = _getBudgetRegion();
+        var _roomRegionMult = REGION_MULTIPLIER[_roomRegion];
+        var _roomTypicalPy = { living:8, kitchen:4, bedroom:4, bath:1.5, hall:1.5, etc:3 }[tab.budgetRoom] || (34/6);
+        var _roomRealismFloor = Math.round(50 * _roomRegionMult * _roomTypicalPy);
+        var _autoFloorApplied = false;
+        if(!(tab.budgetManualAmt>0) && _spendableWeight>0){
+          var _neededBaseline = _roomRealismFloor / _spendableWeight;
+          if(fullBaselineAmt*severityMult < _neededBaseline){
+            severityMult = _neededBaseline / fullBaselineAmt;
+            _autoFloorApplied = true;
+          }
+        }
+        if(_autoFloorApplied){
+          var floorNoteDiv=dv('');floorNoteDiv.style.cssText='font-size:10px;color:#4ade80;margin-bottom:7px;line-height:1.5';
+          floorNoteDiv.textContent='✓ 재사용 가능한 항목을 빼고도 실제 시공 가능한 최소 금액(약 '+_roomRealismFloor.toLocaleString()+'만원)에 맞춰 자동으로 보정했어요.';
+          itemBreakdownBox.appendChild(floorNoteDiv);
+        }
         items.forEach(function(it){
           var name=it[0];
           var isKept = keepSet && keepSet[name] && name!=='예비비';
@@ -8654,7 +8697,8 @@ function mkBudgetTier(p){
       // 문제가 있었음 — 1개 고정인 종류는 슬롯을 자동으로 1번으로 취급함.
       var _slotToRecord = tab.budgetRoomSlot || ((_getRoomManifest()[tab.budgetRoom]||1)<=1 ? 1 : null);
       if(_slotToRecord) _setBudgetSlotAmt(tab.budgetRoom, _slotToRecord, amtForThisSpace);
-      itemBreakdownBox.style.display = items ? 'block' : 'none';
+      itemBreakdownBox.style.display = (items && tab.budgetShowDetail) ? 'block' : 'none';
+      var _simpleAmt = amtForThisSpace, _simpleLabel = ROOM_BUDGET_SHARE[tab.budgetRoom][0];
     } else if(isCommercial && tab.budgetBizType && COMMERCIAL_ITEM_BREAKDOWN[tab.budgetBizType]){
       // 상업공간도 residential이랑 똑같이 "📐 예상 몫 ≈ X만원" 요약을 보여줌 — 방 비율 개념이
       // 없어서 전체 예산에 AI 배수만 곱하면 됨(_getNormalizedRoomShare 같은 방-분할 계산 불필요).
@@ -8662,9 +8706,11 @@ function mkBudgetTier(p){
       var bizShareTagForLine = tab.budgetBizAmtMultiplier!=null ? ' <span style="color:#c084fc;font-weight:700">🤖 AI 조정됨</span>' : '';
       roomBudgetLine.innerHTML = '📐 '+COMMERCIAL_BIZ_LABELS[tab.budgetBizType]+' 예상 몫: 실제 필요한 항목만 합쳐서 ≈ '+Math.round(bizAmtForLine).toLocaleString()+'만원'+bizShareTagForLine+' <span style="color:var(--m2);font-weight:400">(시공+가구+집기 포함)</span>';
       itemBreakdownBox.style.display = 'none'; // 상업공간 항목별 목록은 이 박스가 아니라 별도(bizBreakdownBox)로 이미 표시됨
+      var _simpleAmt = Math.round(bizAmtForLine), _simpleLabel = COMMERCIAL_BIZ_LABELS[tab.budgetBizType];
     } else {
       roomBudgetLine.textContent = '';
       itemBreakdownBox.style.display = 'none';
+      var _simpleAmt = null, _simpleLabel = '';
     }
 
 
@@ -8905,6 +8951,30 @@ function mkBudgetTier(p){
     feedback.style.color=color;
     feedback.textContent=label;
 
+    // ⚠️ 요청 반영: 간단 모드에선 큰 숫자 하나 + 등급 배지만 보여주고, 항목별 세부 목록·마감재
+    // 체크리스트는 "자세히 보기"를 눌러야 펼쳐지게 함. feedback(등급 라벨)·roomBudgetLine(방
+    // 몫 텍스트)은 자세히 모드에서만 보이고, 간단 모드에서는 simpleSummaryCard 하나로 대체됨.
+    if(_simpleAmt!=null){
+      detailToggleBtn.style.display='block';
+      detailToggleBtn.textContent = tab.budgetShowDetail ? '▴ 간단히 보기' : '▾ 자세히 보기 (항목별로 직접 조정)';
+      feedback.style.display = tab.budgetShowDetail ? 'block' : 'none';
+      roomBudgetLine.style.display = tab.budgetShowDetail ? 'block' : 'none';
+      if(!tab.budgetShowDetail){
+        simpleSummaryCard.style.display='block';
+        simpleSummaryCard.innerHTML =
+          '<div style="font-size:12px;color:var(--t2);margin-bottom:4px">'+_simpleLabel+' 예상 몫</div>'+
+          '<div style="font-size:30px;font-weight:800;color:var(--ac)">'+_simpleAmt.toLocaleString()+'만원</div>'+
+          '<div style="display:inline-block;margin-top:8px;background:var(--acg);color:'+color+';font-size:12px;font-weight:700;padding:4px 12px;border-radius:20px">'+DESIGN_SPEC_BY_TIER[tier].label+' 가격대</div>';
+      } else {
+        simpleSummaryCard.style.display='none';
+      }
+    } else {
+      detailToggleBtn.style.display='none';
+      simpleSummaryCard.style.display='none';
+      feedback.style.display='block';
+      roomBudgetLine.style.display='block';
+    }
+
     // 등급별 추천 마감재 — 금액만 봐서는 감이 안 오니 구체적인 이름으로 보여줌
     // ⚠️ 예전엔 isCommercial을 아예 체크 안 해서, 상업공간(카페 등)을 골라도 항상 거실(living)
     // 재질 목록(강마루·원목테이블 등 주거용 항목)이 그대로 나오던 버그가 있었음. 상업공간일 땐
@@ -8941,7 +9011,7 @@ function mkBudgetTier(p){
         mHtml += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:10.5px;color:#fbbf24;line-height:1.5">⭐ 직접 지정하신 내용이 최우선 적용돼요: "'+tab.budgetItemOverrideText.trim()+'" — 위 목록과 겹치는 부분은 이 지시가 이깁니다.</div>';
       }
       materialsBox.innerHTML = mHtml;
-      materialsBox.style.display = 'block';
+      materialsBox.style.display = tab.budgetShowDetail ? 'block' : 'none';
       // 렌더링 버튼이 클릭될 때 이 재질 목록을 프롬프트로 쓸 수 있게 저장 + 사진 있을 때만 노출
       tab._lastBudgetMats = mats;
       renderFromBudgetWrap.style.display = tab.inputImg ? 'block' : 'none';
