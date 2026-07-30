@@ -1429,7 +1429,7 @@ function _proposalDrawDeco(ctx, theme, W, H, area){
 
 // 목차 페이지 — 표지 바로 다음. 전체 공간이 몇 개인지, 어떤 순서로 나오는지 한눈에 보여줘서
 // 프로급 제안서의 "구성 체계"를 갖추게 함(예전엔 표지 넘기면 바로 첫 공간이 나와서 다소 급작스러웠음).
-function _proposalDrawTOCPage(data, totalPages){
+function _proposalDrawTOCPage(data, totalPages, loaded){
   var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H;
   var canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
   var ctx=canvas.getContext('2d');
@@ -1455,37 +1455,74 @@ function _proposalDrawTOCPage(data, totalPages){
 
   var y=255;
   var scenes=data.scenes||[];
-  var rowH=56;
+  // ⚠️ 요청 반영: "목차 내용이 별로 없으면 페이지가 너무 텅 비어 보인다"는 지적 — 특히 공간이
+  // 1~2개뿐인 제안서는 목차에 글자 두 줄만 있고 나머지가 새하얗게 비어서 허전했음. 각 공간 항목에
+  // 실제 완성 이미지를 작은 썸네일 카드로 같이 보여줘서, 항목이 적어도 페이지가 꽉 차 보이게
+  // 하고 목차 자체도 더 보기 좋게 만듦.
+  var rowH = scenes.length<=3 ? 148 : (scenes.length<=5 ? 100 : 56);
+  var thumbSize = scenes.length<=3 ? 120 : (scenes.length<=5 ? 76 : 0);
   // 예산 페이지가 있으면 목차에도 한 줄 추가(공간 목록 다음, 마무리 페이지 전)
-  var tocEntries=scenes.map(function(sc,i){ return {num:i+1, label:sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), page:Math.floor(i/PROPOSAL_SCENES_PER_PAGE)+3}; });
+  var tocEntries=scenes.map(function(sc,i){ return {num:i+1, label:sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), page:Math.floor(i/PROPOSAL_SCENES_PER_PAGE)+3, thumbKey:'a'+i}; });
   var contentPageCount=Math.ceil(scenes.length/PROPOSAL_SCENES_PER_PAGE);
   var hasBudget = scenes.some(function(sc){return sc.budgetSnapshot;});
   if(hasBudget) tocEntries.push({num:'', label:'견적 요약', page:contentPageCount+3, isSpecial:true});
   tocEntries.push({num:'', label:'마무리 인사', page:totalPages, isSpecial:true});
 
   tocEntries.forEach(function(entry){
+    var thumbImg = (thumbSize>0 && !entry.isSpecial && loaded) ? loaded[entry.thumbKey] : null;
+    var textX = pad + (thumbImg ? thumbSize+24 : 52);
+    var rowCenterY = y + (thumbImg ? thumbSize/2 : 10);
+
+    if(thumbImg){
+      ctx.save();
+      ctx.shadowColor='rgba(40,35,25,.18)';ctx.shadowBlur=14;ctx.shadowOffsetY=5;
+      ctx.fillStyle='#000';
+      if(ctx.roundRect){ctx.beginPath();ctx.roundRect(pad,y,thumbSize,thumbSize,10);ctx.fill();}
+      ctx.restore();
+      _proposalCoverDrawRounded(ctx, thumbImg, pad, y, thumbSize, thumbSize, 10);
+    }
+
     ctx.textAlign='left';
     if(!entry.isSpecial){
-      ctx.fillStyle=GOLD;
-      ctx.font='700 20px '+PROPOSAL_FONT;
-      ctx.fillText((entry.num<10?'0':'')+entry.num, pad, y);
+      if(thumbImg){
+        // 썸네일이 있을 때는 번호를 썸네일 좌상단 모서리에 겹치는 작은 원형 배지로 표시
+        var badgeR=16;
+        ctx.beginPath(); ctx.arc(pad+badgeR-4, y+badgeR-4, badgeR, 0, Math.PI*2);
+        ctx.fillStyle=GOLD; ctx.fill();
+        ctx.fillStyle= theme.dark ? '#000000' : '#ffffff';
+        ctx.font='800 14px '+PROPOSAL_FONT;
+        ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(String(entry.num), pad+badgeR-4, y+badgeR-3);
+        ctx.textAlign='left';
+      } else {
+        ctx.fillStyle=GOLD;
+        ctx.font='700 20px '+PROPOSAL_FONT;
+        ctx.textBaseline='middle';
+        ctx.fillText((entry.num<10?'0':'')+entry.num, pad, rowCenterY);
+      }
     }
     ctx.fillStyle=entry.isSpecial?MUTED:INK;
     ctx.font=(entry.isSpecial?'600 20px ':'700 24px ')+PROPOSAL_FONT;
-    ctx.fillText(entry.label, pad+52, y-2);
+    ctx.textBaseline='middle';
+    ctx.fillText(entry.label, textX, rowCenterY);
     // 점선 리더 + 페이지 번호
     ctx.textAlign='right';
     ctx.fillStyle=MUTED;
     ctx.font='500 18px '+PROPOSAL_FONT;
-    ctx.fillText('P. '+entry.page, W-pad, y);
-    // 점선
-    ctx.save();
-    ctx.strokeStyle=DIVIDER;ctx.lineWidth=1;
-    ctx.setLineDash([2,4]);
-    var textW=ctx.measureText(entry.label).width;
-    ctx.beginPath();ctx.moveTo(pad+52+(entry.isSpecial?ctx.measureText(entry.label).width:180), y+22);ctx.lineTo(W-pad-50, y+22);ctx.stroke();
-    ctx.restore();
-    y+=rowH;
+    ctx.fillText('P. '+entry.page, W-pad, rowCenterY);
+    if(!thumbImg){
+      // 점선 리더는 썸네일 없는 촘촘한 레이아웃(공간이 많을 때)에서만 사용
+      ctx.save();
+      ctx.strokeStyle=DIVIDER;ctx.lineWidth=1;
+      ctx.setLineDash([2,4]);
+      ctx.beginPath();ctx.moveTo(textX+(entry.isSpecial?ctx.measureText(entry.label).width:180), rowCenterY+12);ctx.lineTo(W-pad-50, rowCenterY+12);ctx.stroke();
+      ctx.restore();
+    } else {
+      ctx.strokeStyle=DIVIDER;ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(pad,y+thumbSize+Math.round((rowH-thumbSize)/2));ctx.lineTo(W-pad,y+thumbSize+Math.round((rowH-thumbSize)/2));ctx.stroke();
+    }
+    ctx.textBaseline='top';
+    y += thumbImg ? rowH : 56;
   });
 
   ctx.textAlign='right';ctx.textBaseline='bottom';
@@ -1664,7 +1701,7 @@ function _buildProposalPDF(data, cb){
     // 표지 + 목차 + 내용페이지들 + (견적 요약, 있으면) + 마무리 페이지
     var totalPages=chunks.length+3+(hasBudget?1:0);
     pageCanvases.push(_proposalDrawCoverPage(data, loaded.hero, loaded.logo));
-    pageCanvases.push(_proposalDrawTOCPage(data, totalPages));
+    pageCanvases.push(_proposalDrawTOCPage(data, totalPages, loaded));
     chunks.forEach(function(chunk, ci){
       pageCanvases.push(_proposalDrawContentPage(chunk, loaded, data, ci+2, totalPages, loaded.logo));
     });
@@ -14029,6 +14066,7 @@ function sbProposal(p){
       summary:opts.summary,
       company:opts.company,
       contact:opts.contact,
+      logo:opts.logo,
       budgetText:parsedDesc.budgetManwon?_proposalFormatBudget(parsedDesc.budgetManwon):null,
       scenes:scenes,
       _tone:parsedDesc.tone,
