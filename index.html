@@ -9471,6 +9471,12 @@ var EXTERIOR_VIEW_PROMPTS={
   '야간뷰':'이 사진은 해질녘 또는 야간에 촬영된 건물 외관 사진이어야 합니다 — 건물의 경관 조명, 창문 너머로 새어 나오는 따뜻한 실내 조명, 야간 하늘을 함께 보여주는 나이트뷰입니다.',
   '디테일뷰(입구·자재)':'이 사진은 건물 전체가 아니라 현관·입구, 외장 마감재의 질감, 특징적인 디자인 디테일 중 하나를 가까이서 확대 촬영한 클로즈업 디테일컷이어야 합니다 — 건물 전체를 보여주는 구도가 아니라 좁고 집중된 프레임입니다.'
 };
+// ⚠️ 요청 반영: "건물 하나를 만들고 카메라 위치만 바꾸는 건데, 뷰마다 건물이 조금씩 다르게
+// 나온다"는 지적 — 특히 원본/기준 사진에서 아예 안 보이는 각도(좌측면·우측면·후면 등)일수록
+// AI가 그 부분을 처음부터 "상상"해서 채워야 해서 매번 다르게 나오기 쉬움. 모든 외관 뷰
+// 프롬프트에 공통으로 붙는 "건물 사양을 고정하는" 지시문 — 특히 주차장은 실제로 차가 드나들
+// 수 있어야 한다는 기본 상식(입구에 담장·벽이 있으면 안 됨)까지 명시함.
+var EXTERIOR_CONSISTENCY_RULE = ' ⚠️ CRITICAL BUILDING CONSISTENCY (모든 외관 뷰에 공통 적용): 지금 만드는 이 뷰가 몇 번째로 생성되든, 이건 정확히 "하나의 동일한 건물"을 카메라 위치만 바꿔서 촬영한 사진들의 세트입니다. 층수, 각 층의 창문 개수·크기·배치 패턴, 발코니 위치와 형태, 외장 마감재의 종류와 색감, 지붕/파라펫 형태, 건물의 전체 비례와 매싱은 이 세트 안에서 절대 달라지면 안 됩니다 — 지금 보이는 각도에서 실제로 안 보이는 부분(예: 반대편 측면, 후면)이라도 앞서 첨부된 참고 이미지들에서 확인되는 재료·색감·디자인 언어를 그대로 논리적으로 연장해서 그리세요, 새로운 재료나 색感을 마음대로 추가하지 마세요. 주차장(있는 경우): 주차 공간의 형태·바닥 마감·구조는 이 세트의 모든 뷰에서 동일해야 하고, 무엇보다 주차장 입구에는 차량이 실제로 드나들 수 있어야 하므로 담장·벽·펜스로 막혀있으면 절대 안 됩니다 — 입구는 항상 개방되어 있거나 차량용 게이트(자동 셔터, 접이식 게이트 등)만 있어야 합니다.';
 // 방/공간 라벨(예: '거실', '사무실', '카운터')이 어느 카테고리에 속하는지 찾아서, 그 카테고리에
 // 맞는 KOREA_LAYOUT_GUIDE 문구를 고를 때 씀. 못 찾으면 주거공간을 기본값으로 함.
 function _categoryForRoomLabel(label){
@@ -10179,6 +10185,52 @@ function _autoRoomTypesForCategory(catKey){
   return merged;
 }
 function _isExteriorViewType(t){ return SPACE_CATEGORIES.exterior.types.indexOf(t)!==-1; }
+// 컨셉확장(AI 카메라 자동)의 기준 사진(건물외관/실내) 박스용 — 하나 고르면 바로 setter 호출 후 닫힘.
+function _openGalleryPickerForAnchor(setter){
+  var allItems=[];
+  Object.keys(G.HIST||{}).forEach(function(wf){
+    (G.HIST[wf]||[]).forEach(function(it){ if(it.result || it.orig) allItems.push(it); });
+  });
+  allItems.sort(function(a,b2){ return (b2.id||0)-(a.id||0); });
+  if(!allItems.length){ alert('아직 갤러리에 저장된 이미지가 없어요.'); return; }
+  var _wfLabelsForPicker={space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',agent:'AI 에이전트',spaceset:'공간 컨셉 디자인',budget:'AI 견적'};
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  var modal=document.createElement('div');
+  modal.style.cssText='background:var(--card,#141518);border:1px solid var(--bd2);border-radius:14px;width:100%;max-width:760px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden';
+  modal.onclick=function(e){e.stopPropagation();};
+  var head=document.createElement('div');
+  head.style.cssText='padding:16px 18px;border-bottom:1px solid var(--bd2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0';
+  head.innerHTML='<div style="font-size:14px;font-weight:800;color:var(--t)">🖼 내 갤러리에서 불러오기</div>';
+  var closeX=document.createElement('button');closeX.type='button';closeX.textContent='✕';
+  closeX.style.cssText='width:28px;height:28px;border-radius:50%;border:none;background:var(--c2);color:var(--t2);cursor:pointer;font-size:13px';
+  closeX.onclick=function(){ov.remove();};
+  head.appendChild(closeX);
+  modal.appendChild(head);
+  var grid=document.createElement('div');
+  grid.style.cssText='padding:16px 18px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px';
+  allItems.slice(0,200).forEach(function(it){
+    var src=it.result||it.orig;
+    if(!src) return;
+    var cell=document.createElement('div');
+    cell.style.cssText='aspect-ratio:1;border-radius:9px;overflow:hidden;cursor:pointer;border:1.5px solid var(--bd2);position:relative;background:var(--c2)';
+    var img=document.createElement('img');img.src=src;img.loading='lazy';img.decoding='async';
+    img.style.cssText='width:100%;height:100%;object-fit:cover';
+    cell.appendChild(img);
+    if(it.wf){
+      var wfBadge=document.createElement('div');
+      wfBadge.style.cssText='position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:8.5px;font-weight:700;padding:2px 5px;border-radius:4px';
+      wfBadge.textContent=_wfLabelsForPicker[it.wf]||it.wf;
+      cell.appendChild(wfBadge);
+    }
+    cell.onclick=function(){ setter(src); renderSB(); ov.remove(); };
+    grid.appendChild(cell);
+  });
+  modal.appendChild(grid);
+  ov.appendChild(modal);
+  document.body.appendChild(ov);
+}
 function mkAutoRoomCamera(p){
   var spTab=getTab('spaceset');
   if(!spTab.autoRoomCategory || spTab.autoRoomCategory==='exterior') spTab.autoRoomCategory='residential';
@@ -10255,6 +10307,15 @@ function mkAutoRoomCamera(p){
     };
     render();
     col.appendChild(box);col.appendChild(inp);
+    // ⚠️ 요청 반영: "컨셉확장에는 갤러리에서 가져오기가 없다"는 지적 — 여기도 다른 업로드
+    // 박스들처럼 갤러리에서 바로 골라 넣을 수 있게 버튼을 추가함.
+    var galBtn2=mk('button','');galBtn2.type='button';galBtn2.textContent='🖼 갤러리에서 선택';
+    galBtn2.style.cssText='width:100%;margin-top:4px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:10px;font-weight:600;cursor:pointer;font-family:inherit';
+    galBtn2.onclick=function(e){
+      e.stopPropagation();
+      _openGalleryPickerForAnchor(setter);
+    };
+    col.appendChild(galBtn2);
     return col;
   }
   upsRow.appendChild(mkAnchorBox('🏗️ 건물 외관 사진', function(){return spTab.autoRoomExtImg;}, function(v){spTab.autoRoomExtImg=v;}));
@@ -10391,7 +10452,7 @@ function _autoRoomRun(){
     openMd('credits');
     return;
   }
-  spTab.autoRoomState={running:true, step:0, results:[], error:null};
+  spTab.autoRoomState={running:true, step:0, results:[], error:null, generatedExteriorUrls:[]};
   renderSB();
   _autoRoomGenerateStep(0);
 }
@@ -10404,14 +10465,14 @@ function _autoRoomBuildSingleAnchorPrompt(basePrompt, anchorIsExt, anchorLabel, 
   var targetIsExt = _isExteriorViewType(typeName);
   if(anchorIsExt && targetIsExt){
     var viewInstr = EXTERIOR_VIEW_PROMPTS[typeName] || ('이 사진은 "'+typeName+'" 앵글로 촬영된 건물 외관 사진이어야 합니다.');
-    return basePrompt + ' ' + viewInstr + ' 첨부한 사진은 이 건물을 다른 각도(' + anchorLabel + ')에서 촬영한 완성된 사진입니다. 이건 정확히 같은 건물입니다 — 같은 층수, 같은 창문·발코니 배치 패턴, 같은 외장재, 같은 색감을 유지한 채, 오직 카메라 앵글만 위에서 지시한 뷰로 바꿔서 다시 그려주세요. 다른 건물처럼 보이면 절대 안 됩니다.';
+    return basePrompt + ' ' + viewInstr + ' 첨부한 사진은 이 건물을 다른 각도(' + anchorLabel + ')에서 촬영한 완성된 사진입니다. 이건 정확히 같은 건물입니다 — 같은 층수, 같은 창문·발코니 배치 패턴, 같은 외장재, 같은 색감을 유지한 채, 오직 카메라 앵글만 위에서 지시한 뷰로 바꿔서 다시 그려주세요. 다른 건물처럼 보이면 절대 안 됩니다.' + EXTERIOR_CONSISTENCY_RULE;
   }
   if(anchorIsExt && !targetIsExt){
     return basePrompt + ' 첨부한 사진은 이 건물의 외관(' + anchorLabel + ')이 이미 완성된 모습입니다. 이 외관 사진을 그대로 편집하지 말고, 이 건물 내부에 있을 법한 "' + typeName + '"을(를) 그 공간에 맞는 구조·배치·카메라 구도로 처음부터 새로 상상해서 그려주세요. 외관 사진에서 가져올 것은 전체적인 디자인 언어와 재료감·색감뿐입니다(예: 외관이 노출콘크리트+우드톤+미니멀 라인이면 실내도 그런 재료·색감·분위기로 자연스럽게 이어지게 하세요) — 외관 사진 속 형태나 요소를 실내에 그대로 복사하지 말고, "이런 외관을 가진 건물이라면 내부는 이런 느낌일 것이다"라는 자연스러운 건축적 추론으로 완성하세요. 이 실내 공간(' + typeName + ')에 어울리는 구조·창문 위치·동선으로 새로 구성하되, 재료·색감 계열은 외관과 반드시 통일해서 같은 건물 안에 있다는 느낌이 들게 하세요.';
   }
   if(!anchorIsExt && targetIsExt){
     var viewInstr2 = EXTERIOR_VIEW_PROMPTS[typeName] || ('이 사진은 "'+typeName+'" 앵글로 촬영된 건물 외관 사진이어야 합니다.');
-    return basePrompt + ' ' + viewInstr2 + ' 첨부한 사진은 이 건물 내부의 실내 공간(' + anchorLabel + ')이 이미 완성된 모습입니다. 이 실내 사진을 그대로 편집하지 말고, 이 실내 공간이 속한 건물의 외관을 위에서 지시한 카메라 앵글로 처음부터 새로 상상해서 그려주세요. 실내 사진에서 가져올 것은 전체적인 디자인 언어와 재료감·색감뿐입니다(예: 실내가 노출콘크리트+우드톤+미니멀 라인이면 외관도 그런 재료·색감·분위기로 자연스럽게 이어지게 하세요) — 실내 사진 속 요소를 외관에 그대로 복사하지 말고, "이런 실내를 가진 건물이라면 외관은 이런 느낌일 것이다"라는 자연스러운 건축적 추론으로 완성하세요. 재료·색감 계열은 실내와 반드시 통일해서 같은 건물이라는 느낌이 들게 하세요.';
+    return basePrompt + ' ' + viewInstr2 + ' 첨부한 사진은 이 건물 내부의 실내 공간(' + anchorLabel + ')이 이미 완성된 모습입니다. 이 실내 사진을 그대로 편집하지 말고, 이 실내 공간이 속한 건물의 외관을 위에서 지시한 카메라 앵글로 처음부터 새로 상상해서 그려주세요. 실내 사진에서 가져올 것은 전체적인 디자인 언어와 재료감·색감뿐입니다(예: 실내가 노출콘크리트+우드톤+미니멀 라인이면 외관도 그런 재료·색감·분위기로 자연스럽게 이어지게 하세요) — 실내 사진 속 요소를 외관에 그대로 복사하지 말고, "이런 실내를 가진 건물이라면 외관은 이런 느낌일 것이다"라는 자연스러운 건축적 추론으로 완성하세요. 재료·색감 계열은 실내와 반드시 통일해서 같은 건물이라는 느낌이 들게 하세요.' + EXTERIOR_CONSISTENCY_RULE;
   }
   return basePrompt + ' — 첨부한 사진은 같은 집의 다른 공간(' + anchorLabel + ')이 이미 완성된 모습입니다. 이 사진을 그대로 편집하지 말고, 완전히 새로운 "' + typeName + '"을(를) 그 공간에 맞는 구조·배치·카메라 구도로 처음부터 다시 상상해서 그려주세요. 첨부 사진에서 가져올 것은 "스타일의 느낌"뿐입니다 — 벽/캐비닛의 색상 계열, 목재·석재 등 마감재의 종류와 톤, 조명의 색온도와 분위기, 가구·수납장의 전체적인 디자인 장르(예: 미드센추리, 미니멀 등)만 동일한 느낌으로 이어가세요. 절대 하지 말아야 할 것: 첨부 사진 속 러그/카펫 무늬, 액자·그림, 쿠션, 화분 등 특정 소품이나 장식품을 그대로 복사해서 새 공간에 똑같이 다시 배치하는 것 — 예를 들어 거실에 걸린 특정 그림 액자를 침실에도 똑같이 걸거나, 거실의 특정 러그 무늬를 주방에도 그대로 까는 식으로 반복하면 안 됩니다. 이건 실제 집이라면 절대 있을 수 없는 부자연스러운 반복입니다. 대신 이렇게 하세요: 색감 계열과 스타일 무드는 비슷하게 유지하되, 액자 속 그림의 실제 이미지 내용은 매번 다르게(예: 거실은 추상화, 침실은 다른 구도의 정물화나 사진), 러그·쿠션의 구체적인 패턴도 매번 다르게, 가구도 같은 디자인 장르·색 계열 안에서 실루엣과 디테일이 서로 다른 것으로 창작하세요. 소품·가구류는 이 공간(' + typeName + ')에 어울리게 매번 새로 창작하되, 색감과 스타일 장르만 같은 집처럼 통일감 있게 만들어주세요.';
 }
@@ -10421,7 +10482,7 @@ function _autoRoomBuildFusedPrompt(basePrompt, typeName){
   var tail = targetIsExt
     ? '이 결과는 건축 외관이므로 첫 번째(외관) 참고 사진의 매싱·재료·비례를 중심으로 따르되, 두 번째(실내) 참고 사진에서 느껴지는 색감·소재 감성도 외장재 디테일이나 톤에 은은하게 반영해서, 밖에서 봐도 "이 실내를 가진 건물이구나" 싶은 통일감을 주세요.'
     : '이 결과는 실내 공간이므로 두 번째(실내) 참고 사진의 공간 구성·가구·소재 감성을 중심으로 따르되, 첫 번째(외관) 참고 사진의 재료·색감 언어(예: 노출콘크리트, 벽돌, 우드 루버 등)도 마감재나 포인트 요소로 은은하게 반영해서, "이 외관을 가진 건물 안이구나" 싶은 통일감을 주세요.';
-  return basePrompt + ' ' + head + '첨부한 이미지 중 첫 번째는 이 건물의 외관(건축 디자인)이, 두 번째는 이 건물 내부의 실내 공간(인테리어 디자인)이 이미 완성된 모습입니다. 이 두 사진을 그대로 편집하지 말고, 두 사진에 담긴 디자인 포인트를 모두 살려서 융합한 하나의 통일된 디자인 언어로 "' + typeName + '"을(를) 처음부터 새로 상상해서 그려주세요. ' + tail + ' 두 사진 속 형태나 구체적인 요소를 그대로 복사하지 말고, 두 사진의 디자인 포인트를 종합해서 이 뷰에 맞게 새로 창작하세요.';
+  return basePrompt + ' ' + head + '첨부한 이미지 중 첫 번째는 이 건물의 외관(건축 디자인)이, 두 번째는 이 건물 내부의 실내 공간(인테리어 디자인)이 이미 완성된 모습입니다. 이 두 사진을 그대로 편집하지 말고, 두 사진에 담긴 디자인 포인트를 모두 살려서 융합한 하나의 통일된 디자인 언어로 "' + typeName + '"을(를) 처음부터 새로 상상해서 그려주세요. ' + tail + ' 두 사진 속 형태나 구체적인 요소를 그대로 복사하지 말고, 두 사진의 디자인 포인트를 종합해서 이 뷰에 맞게 새로 창작하세요.' + (targetIsExt?EXTERIOR_CONSISTENCY_RULE:'');
 }
 function _autoRoomImagesFor(typeName){
   var spTab=getTab('spaceset');
@@ -10459,14 +10520,24 @@ function _autoRoomGenerateStep(idx){
   var prompt = _autoRoomPromptFor(basePrompt, typeName);
   var imgs = _autoRoomImagesFor(typeName);
   var task={id:Date.now()+idx, img:imgs.primary, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
-  // ⚠️ 두 사진(외관+실내)이 다 있으면 주 이미지 외에 반대쪽 사진을 참고 이미지(refs)로 같이
-  // 넣어서 nano-banana-2가 두 장을 동시에 보고 디자인 포인트를 융합하게 함 — _multiRoomGenerateStep과
-  // 동일한 패턴(getTab('space').refs를 잠깐 바꿨다가 원복).
+  // ⚠️ 요청 반영: "뷰마다 건물이 조금씩 다르게 나온다"는 지적 — 각 뷰가 원본 기준사진 하나만
+  // 보고 매번 독립적으로 새로 상상하다 보니, 특히 기준사진에서 안 보이는 각도(측면·후면 등)는
+  // AI가 자유롭게 지어내서 매번 달라지기 쉬웠음. 이 배치(세트) 안에서 이미 완성된 다른 외관
+  // 뷰가 있으면, 그것도 참고 이미지로 같이 넘겨서 "실제로 완성된 같은 건물 사진"을 보고 그리게
+  // 함 — 텍스트 설명만으로 상상하는 것보다 훨씬 일관성이 높아짐.
   var origRefs = getTab('space').refs;
-  getTab('space').refs = imgs.ref ? [imgs.ref] : [];
+  var chainedRefs = imgs.ref ? [imgs.ref] : [];
+  if(_isExteriorViewType(typeName) && st.generatedExteriorUrls && st.generatedExteriorUrls.length){
+    chainedRefs = chainedRefs.concat(st.generatedExteriorUrls.slice(-2)); // 최근 2장까지만(너무 많으면 오히려 헷갈릴 수 있음)
+  }
+  getTab('space').refs = chainedRefs;
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
     st.results[idx]={url:resultUrl};
+    if(_isExteriorViewType(typeName)){
+      if(!st.generatedExteriorUrls) st.generatedExteriorUrls=[];
+      st.generatedExteriorUrls.push(resultUrl);
+    }
     _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution);
     _autoRoomGenerateStep(idx+1);
   }, function(err){
@@ -17580,8 +17651,20 @@ function addHistEl(item, scroll, targetHs, atBottom){
       afterLabel.style.cssText='position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(0,229,204,.82);color:#000;font-size:9px;font-weight:800;padding:4px 8px;border-radius:4px;z-index:3;pointer-events:none;letter-spacing:1px';
       afterLabel.textContent='AFTER';
       cw.appendChild(afterLabel);
+
+      // ⚠️ 진짜 원인 발견: 이 Divider(가운데 동그란 ◄► 손잡이)가 hasBefore와 상관없이 무조건
+      // 그려지고 있었음 — BEFORE 이미지가 없어서 비교할 게 아예 없는 경우(else 분기, 결과
+      // 이미지 1장만 표시)에도 손잡이만 화면 한가운데 떠서 "슬라이더가 있는 것처럼" 보였던 것
+      // (드래그해도 실제로 움직일 대상이 없어서 아무 반응 없었을 것). BEFORE가 진짜 있을 때만
+      // (이 if(hasBefore) 분기 안으로) 만들어지게 옮김.
+      var ln=dv('cmp-ln');ln.id='cl-'+item.id;ln.style.left='50%';
+      var hnd=dv('cmp-hnd');
+      hnd.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'+
+        'width:32px;height:32px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;'+
+        'font-size:12px;font-weight:800;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.7);pointer-events:none';
+      hnd.innerHTML='&#9664;&#9654;';ln.appendChild(hnd);cw.appendChild(ln);
     } else {
-      // BEFORE 없을 때: AFTER(결과) 이미지만 전체 표시
+      // BEFORE 없을 때: AFTER(결과) 이미지만 전체 표시 (슬라이더 손잡이도 당연히 없음)
       var imgOnly=mk('img','');
       imgOnly.loading='lazy';imgOnly.decoding='async';
       imgOnly.setAttribute('style',IMG_STYLE);
@@ -17602,13 +17685,6 @@ function addHistEl(item, scroll, targetHs, atBottom){
 
     // 업스케일 엔진 표시는 우상단 ptags에 통합됨
 
-    // Divider
-    var ln=dv('cmp-ln');ln.id='cl-'+item.id;ln.style.left='50%';
-    var hnd=dv('cmp-hnd');
-    hnd.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'+
-      'width:32px;height:32px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;'+
-      'font-size:12px;font-weight:800;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.7);pointer-events:none';
-    hnd.innerHTML='&#9664;&#9654;';ln.appendChild(hnd);cw.appendChild(ln);
 
     // 확대/축소: +/- 버튼 제거, Z키+마우스휠로 동작
     } // end else (non-video)
