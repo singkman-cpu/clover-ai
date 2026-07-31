@@ -3427,6 +3427,29 @@ function mkRef(p,cnt,title){
   }
   w.appendChild(g);p.appendChild(w);
 }
+// ⚠️ 요청 반영: "이미지 업로드하는 곳은 전체 다 Ctrl+V 가능하게 해줘" — 표준 업로드 박스(mkUB)와
+// 레퍼런스 슬롯(rSlot)은 이미 Ctrl+V가 됐지만, 공간 컨셉 디자인의 방별 사진·참고 디자인 이미지,
+// 컨셉확장의 기준 사진들, VR투어 반대쪽 뷰처럼 개별적으로 만들어진 업로드 박스들엔 이 기능이
+// 빠져있었음. 어디든 재사용할 수 있는 공용 헬퍼로 만들어서 한 번에 적용함 — 박스를 포커스 가능하게
+// 만들고(tabIndex), 그 박스에 포커스가 있는 상태에서 Ctrl+V 하면 문서 전역 붙여넣기(메인 이미지용)로
+// 새지 않고 정확히 이 박스에만 들어가게 함.
+function _wirePasteTarget(el, onImageFile){
+  if(!el) return;
+  el.tabIndex=0;
+  el.onpaste=function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    var items=(e.clipboardData && e.clipboardData.items) || [];
+    for(var k=0;k<items.length;k++){
+      if(items[k].type && items[k].type.indexOf('image')===0){
+        var f=items[k].getAsFile();
+        if(f){ onImageFile(f); }
+        return;
+      }
+    }
+    var stEl=gE('stl'); if(stEl) stEl.textContent='클립보드에 이미지가 없어요. 이미지를 먼저 복사한 뒤 붙여넣어주세요.';
+  };
+}
 function rSlot(sl,i){
   var _refs=getTab(G.wf).refs||[];
   sl.tabIndex=0; // 포커스 가능하게 만들어야 그 슬롯에 붙여넣기(Ctrl+V)가 먹힘
@@ -9498,6 +9521,12 @@ var EXTERIOR_VIEW_PROMPTS={
 // 프롬프트에 공통으로 붙는 "건물 사양을 고정하는" 지시문 — 특히 주차장은 실제로 차가 드나들
 // 수 있어야 한다는 기본 상식(입구에 담장·벽이 있으면 안 됨)까지 명시함.
 var EXTERIOR_CONSISTENCY_RULE = ' ⚠️ CRITICAL BUILDING CONSISTENCY (모든 외관 뷰에 공통 적용): 지금 만드는 이 뷰가 몇 번째로 생성되든, 이건 정확히 "하나의 동일한 건물"을 카메라 위치만 바꿔서 촬영한 사진들의 세트입니다. 층수, 각 층의 창문 개수·크기·배치 패턴, 발코니 위치와 형태, 외장 마감재의 종류와 색감, 지붕/파라펫 형태, 건물의 전체 비례와 매싱은 이 세트 안에서 절대 달라지면 안 됩니다 — 지금 보이는 각도에서 실제로 안 보이는 부분(예: 반대편 측면, 후면)이라도 앞서 첨부된 참고 이미지들에서 확인되는 재료·색감·디자인 언어를 그대로 논리적으로 연장해서 그리세요, 새로운 재료나 색感을 마음대로 추가하지 마세요. 주차장(있는 경우): 주차 공간의 형태·바닥 마감·구조는 이 세트의 모든 뷰에서 동일해야 하고, 무엇보다 주차장 입구에는 차량이 실제로 드나들 수 있어야 하므로 담장·벽·펜스로 막혀있으면 절대 안 됩니다 — 입구는 항상 개방되어 있거나 차량용 게이트(자동 셔터, 접이식 게이트 등)만 있어야 합니다.';
+// ⚠️ 요청 반영: "카페 뷰마다 바·홀·좌석이 전혀 다른 공간처럼 나온다, 천장 색도 매번 다르고
+// 가구도 매번 다르다"는 지적 — 외관에만 있던 "하나의 동일한 공간" 강제 규칙을 실내(주거·오피스·
+// 카페·식당 등 모든 카테고리) 뷰들에도 동일하게 적용함. 뷰마다 보여주는 "영역"은 다르지만
+// (예: 바·제조공간 뷰엔 제조공간이, 홀 뷰엔 좌석이 보임), 그 공간을 이루는 천장·바닥·벽 마감재·
+// 컬러·조명·가구 디자인 언어는 이 세트 전체에서 하나로 통일되어야 함.
+var INTERIOR_CONSISTENCY_RULE = ' ⚠️ CRITICAL SPACE CONSISTENCY (모든 실내 뷰에 공통 적용): 지금 만드는 이 뷰가 몇 번째로 생성되든, 이건 정확히 "하나의 동일한 공간(가게/집/사무실 등)"의 서로 다른 구역·각도를 촬영한 사진들의 세트입니다 — 뷰마다 보여주는 영역(예: 바 카운터, 홀 좌석, 출입구)은 서로 다르지만, 그 공간 전체를 관통하는 천장 마감재와 색상, 바닥재의 종류와 색상, 벽 마감재와 색상, 조명 기구의 디자인·색온도, 가구(테이블·의자·소파 등)의 디자인·소재·색상, 전체 컬러 팔레트와 톤앤매너는 이 세트 안에서 절대 달라지면 안 됩니다. 지금 보이는 구역에 실제로 없는 요소(예: 홀 뷰에 제조공간의 특정 장비가 안 보임)는 그냥 안 보이면 되는 것이지 다른 디자인으로 대체하면 안 됩니다 — 앞서 첨부된 참고 이미지들에서 확인되는 마감재·가구·색감을 그대로 이 뷰에도 동일하게 적용하세요, 새로운 재료나 다른 디자인의 가구를 마음대로 추가하지 마세요. 결과물들을 나란히 놓고 봤을 때 "이거 다른 가게 사진 아니야?"라는 느낌이 들면 실패입니다 — 반드시 "같은 가게를 여기저기서 찍은 사진들"처럼 보여야 합니다.';
 // ⚠️ 요청 반영: "간판 이름·로고 같은 특정 요소는 저작권 걸리기 딱 좋다" — 실존하는 브랜드
 // 로고·상표·프랜차이즈 간판이 결과 이미지에 그대로 들어가면 저작권/상표권 문제가 될 수 있어서,
 // 모든 생성 파이프라인(현장사진 디자인·렌더·편집·AI견적·공간 컨셉 디자인·컨셉확장·AI에이전트
@@ -9799,9 +9828,9 @@ function mkMultiRoomSpace(p){
       refDesignBox.innerHTML='<div style="font-size:11.5px;color:#f59e0b;padding:14px;text-align:center">⚠️ 탭해서 참고 디자인 사진 선택 (필수 — 없으면 생성할 수 없어요)</div>';
     }
   }
-  refDesignBox.onclick=function(){ if(!spTab.multiRoomRefDesignImg) refDesignInput.click(); };
-  refDesignInput.onchange=function(){
-    var f=refDesignInput.files&&refDesignInput.files[0]; if(!f) return;
+  refDesignBox.onclick=function(){ refDesignBox.focus(); if(!spTab.multiRoomRefDesignImg) refDesignInput.click(); };
+  function handleRefDesignFile(f){
+    if(!f) return;
     var reader=new FileReader();
     reader.onload=function(){
       _downscaleForMemorySafety(reader.result, function(resized){
@@ -9811,7 +9840,9 @@ function mkMultiRoomSpace(p){
       });
     };
     reader.readAsDataURL(f);
-  };
+  }
+  refDesignInput.onchange=function(){ handleRefDesignFile(refDesignInput.files&&refDesignInput.files[0]); };
+  _wirePasteTarget(refDesignBox, handleRefDesignFile);
   renderRefDesignBox();
   refDesignWrap.appendChild(refDesignBox);refDesignWrap.appendChild(refDesignInput);
   var refDesignGalBtn=mk('button','');refDesignGalBtn.type='button';refDesignGalBtn.textContent='🖼 내 갤러리에서 불러오기';
@@ -10290,6 +10321,7 @@ function mkAutoRoomCamera(p){
     b.onclick=function(){
       if(spTab.autoRoomCategory===catKey) return;
       spTab.autoRoomCategory=catKey;
+      spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenIntUrls=[]; // 카테고리 바꾸면 완전히 다른 공간이니 일관성 기록도 초기화
       var newTypes=_autoRoomTypesForCategory(catKey);
       spTab.autoRoomSelected=newTypes.slice();
       // 카테고리 바꾸면 실내 앵커 이름표도 새 카테고리의 첫 타입으로 리셋(이전 카테고리 방 이름이
@@ -10328,9 +10360,9 @@ function mkAutoRoomCamera(p){
         box.innerHTML='<div style="font-size:11px;color:var(--t2);padding:14px;text-align:center">탭해서 사진 선택</div>';
       }
     }
-    box.onclick=function(){ if(!getter()) inp.click(); };
-    inp.onchange=function(){
-      var f=inp.files&&inp.files[0]; if(!f) return;
+    box.onclick=function(){ box.focus(); if(!getter()) inp.click(); };
+    function handleFile(f){
+      if(!f) return;
       var reader=new FileReader();
       reader.onload=function(){
         _downscaleForMemorySafety(reader.result, function(resized){
@@ -10343,7 +10375,9 @@ function mkAutoRoomCamera(p){
         });
       };
       reader.readAsDataURL(f);
-    };
+    }
+    inp.onchange=function(){ handleFile(inp.files&&inp.files[0]); };
+    _wirePasteTarget(box, handleFile);
     render();
     col.appendChild(box);col.appendChild(inp);
     // ⚠️ 요청 반영: "컨셉확장에는 갤러리에서 가져오기가 없다"는 지적 — 여기도 다른 업로드
@@ -10357,7 +10391,7 @@ function mkAutoRoomCamera(p){
     col.appendChild(galBtn2);
     return col;
   }
-  upsRow.appendChild(mkAnchorBox('🏗️ 건물 외관 사진', function(){return spTab.autoRoomExtImg;}, function(v){spTab.autoRoomExtImg=v;}));
+  upsRow.appendChild(mkAnchorBox('🏗️ 건물 외관 사진', function(){return spTab.autoRoomExtImg;}, function(v){spTab.autoRoomExtImg=v; spTab.autoRoomGenExtUrls=[];}));
   upsWrap.appendChild(upsRow);
   p.appendChild(upsWrap);
 
@@ -10379,15 +10413,17 @@ function mkAutoRoomCamera(p){
       }
     }
     renderBox2();
-    box2.onclick=function(){ if(!anchor.img) inp2.click(); };
-    inp2.onchange=function(){
-      var f=inp2.files&&inp2.files[0]; if(!f) return;
+    box2.onclick=function(){ box2.focus(); if(!anchor.img) inp2.click(); };
+    function handleFile2(f){
+      if(!f) return;
       var reader=new FileReader();
       reader.onload=function(){
-        _downscaleForMemorySafety(reader.result, function(resized){ anchor.img=resized; renderSB(); });
+        _downscaleForMemorySafety(reader.result, function(resized){ anchor.img=resized; spTab.autoRoomGenIntUrls=[]; renderSB(); });
       };
       reader.readAsDataURL(f);
-    };
+    }
+    inp2.onchange=function(){ handleFile2(inp2.files&&inp2.files[0]); };
+    _wirePasteTarget(box2, handleFile2);
     row.appendChild(box2); row.appendChild(inp2);
 
     var midCol=dv('');midCol.style.cssText='flex:1;display:flex;flex-direction:column;gap:4px';
@@ -10577,7 +10613,14 @@ function _autoRoomRun(){
     openMd('credits');
     return;
   }
-  spTab.autoRoomState={running:true, step:0, results:[], error:null, generatedExteriorUrls:[]};
+  // ⚠️ 요청 반영(중요): "처음 2개 만들고 괜찮아서 나중에 10개 더 만들면 처음이랑 다른 느낌으로
+  // 나온다"는 지적 — 원인은 일관성 기록(generatedExteriorUrls)이 "생성하기" 버튼을 누를 때마다
+  // spTab.autoRoomState 통째로 새로 만들어지면서 매번 초기화되고 있었기 때문. 이걸 spTab에 직접
+  // 두고 여러 번 "생성하기"를 눌러도 기록이 계속 쌓이게(누적) 바꿔서, 나중에 추가로 만드는 뷰들도
+  // 맨 처음 만든 것들을 계속 참고하게 함 — 사진을 새로 바꾸거나 카테고리를 바꾸면 그때 초기화됨.
+  if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[];
+  if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[];
+  spTab.autoRoomState={running:true, step:0, results:[], error:null};
   renderSB();
   _autoRoomGenerateStep(0);
 }
@@ -10658,12 +10701,13 @@ function _autoRoomPromptFor(basePrompt, typeName){
   }
   var _fidelitySuffix = '';
   if(spTab.autoRoomFidelity==='loose'){
-    _fidelitySuffix = ' ⚠️ 반영도 설정(영감만 얻기) — 매우 중요: 위에서 뭐라고 했든, 참고 이미지의 구체적인 형태·구조·마감재·색감을 그대로 따라하지 마세요. 전체적인 무드(밝다/어둡다, 따뜻하다/차갑다 정도)만 살짝 참고하고, 나머지 디자인 요소는 전부 새롭고 독창적으로 창작하세요. 참고 이미지와 뚜렷하게 다른 결과물이어야 합니다.';
+    _fidelitySuffix = ' ⚠️ 반영도 설정(영감만 얻기) — 매우 중요: 위에서 뭐라고 했든, 참고 이미지를 살짝 참고만 하는 수준이 아니라 확실히 새로 창작해야 합니다. 컬러 톤(벽·바닥·가구의 색 조합)은 참고 이미지와 다른 새로운 팔레트로 완전히 바꾸세요. 마감재 종류(예: 참고 이미지가 우드면 이번엔 스톤이나 콘크리트, 참고 이미지가 밝은 톤이면 이번엔 어두운 톤 등)도 다른 것으로 바꾸세요. 가구는 같은 카테고리(예: 소파는 소파, 테이블은 테이블)로 기능은 유지하되, 구체적인 디자인·형태·색상은 참고 이미지와 분명히 다른 것으로 새로 창작하세요. 결과물을 참고 이미지 옆에 나란히 놓았을 때 "완전히 다른 디자인이네"라는 인상을 줘야 합니다 — 여전히 비슷해 보이면 실패입니다.';
   } else if(spTab.autoRoomFidelity==='medium'){
     _fidelitySuffix = ' ⚠️ 반영도 설정(비슷하게) — 중요: 참고 이미지와 분위기·색감 계열·스타일 장르는 비슷하게 만들되, 정확한 형태·구조·마감재의 세부 디테일까지 그대로 베끼지 마세요. 저작권이 있는 원본을 그대로 복제한 것처럼 보이면 안 됩니다 — 같은 스타일 계열의 다른 버전으로 창작한 느낌이어야 합니다.';
   }
   // 'tight'(최대한 동일하게)는 각 분기에 이미 있는 강한 지시를 그대로 두고 별도 문구를 안 붙임.
-  return prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName)] + _fidelitySuffix + NO_BRAND_TRADEMARK_RULE;
+  var _spaceConsistencyRule = _isExteriorViewType(typeName) ? '' : INTERIOR_CONSISTENCY_RULE;
+  return prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName)] + _spaceConsistencyRule + _fidelitySuffix + NO_BRAND_TRADEMARK_RULE;
 }
 function _autoRoomGenerateStep(idx){
   var spTab=getTab('spaceset');
@@ -10682,18 +10726,31 @@ function _autoRoomGenerateStep(idx){
   // AI가 자유롭게 지어내서 매번 달라지기 쉬웠음. 이 배치(세트) 안에서 이미 완성된 다른 외관
   // 뷰가 있으면, 그것도 참고 이미지로 같이 넘겨서 "실제로 완성된 같은 건물 사진"을 보고 그리게
   // 함 — 텍스트 설명만으로 상상하는 것보다 훨씬 일관성이 높아짐.
+  // ⚠️ 요청 반영: "뷰마다 건물이 조금씩 다르게 나온다"는 지적 — 각 뷰가 원본 기준사진 하나만
+  // 보고 매번 독립적으로 새로 상상하다 보니, 특히 기준사진에서 안 보이는 각도(측면·후면 등)는
+  // AI가 자유롭게 지어내서 매번 달라지기 쉬웠음. 이미 완성된 다른 뷰가 있으면(외관이든 실내든),
+  // 그것도 참고 이미지로 같이 넘겨서 "실제로 완성된 같은 공간 사진"을 보고 그리게 함 — 텍스트
+  // 설명만으로 상상하는 것보다 훨씬 일관성이 높아짐. ⚠️ 추가 요청 반영: 예전엔 이걸 외관에만
+  // 적용했는데, "카페 뷰마다 바·홀·좌석이 전혀 다른 공간처럼 나온다"는 지적처럼 실내도 똑같은
+  // 문제가 있어서 실내 뷰끼리도 서로 참고하게 확장함. 기록은 spTab에 있어서 "생성하기"를 여러
+  // 번 나눠서 눌러도 계속 누적됨(사진을 바꾸거나 카테고리를 바꾸면 그때 초기화).
   var origRefs = getTab('space').refs;
   var chainedRefs = imgs.ref ? imgs.ref.slice() : [];
-  if(_isExteriorViewType(typeName) && st.generatedExteriorUrls && st.generatedExteriorUrls.length){
-    chainedRefs = chainedRefs.concat(st.generatedExteriorUrls.slice(-2)); // 최근 2장까지만(너무 많으면 오히려 헷갈릴 수 있음)
+  var isExtType = _isExteriorViewType(typeName);
+  var genPool = isExtType ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+  if(genPool && genPool.length){
+    chainedRefs = chainedRefs.concat(genPool.slice(-2)); // 최근 2장까지만(너무 많으면 오히려 헷갈릴 수 있음)
   }
   getTab('space').refs = chainedRefs;
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
     st.results[idx]={url:resultUrl};
-    if(_isExteriorViewType(typeName)){
-      if(!st.generatedExteriorUrls) st.generatedExteriorUrls=[];
-      st.generatedExteriorUrls.push(resultUrl);
+    if(isExtType){
+      if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[];
+      spTab.autoRoomGenExtUrls.push(resultUrl);
+    } else {
+      if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[];
+      spTab.autoRoomGenIntUrls.push(resultUrl);
     }
     _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution);
     _autoRoomGenerateStep(idx+1);
@@ -10718,11 +10775,17 @@ function _autoRoomRetryOne(idx){
   var imgs = _autoRoomImagesFor(typeName);
   var task={id:Date.now()+idx, img:imgs.primary, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
   var origRefs = getTab('space').refs;
-  getTab('space').refs = imgs.ref ? imgs.ref.slice() : [];
+  var chainedRefs2 = imgs.ref ? imgs.ref.slice() : [];
+  var isExtType2 = _isExteriorViewType(typeName);
+  var genPool2 = isExtType2 ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+  if(genPool2 && genPool2.length){ chainedRefs2 = chainedRefs2.concat(genPool2.slice(-2)); }
+  getTab('space').refs = chainedRefs2;
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
     st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
     st.running=false;
+    if(isExtType2){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
+    else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
     _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution);
     // ⚠️ 요청 반영: "다시 생성"으로 재생성한 경우엔 직전 시도(prevResult2)가 있으니 그걸 "이전"으로
     // 넘겨서 슬라이더로 비교되게 함 — 첫 생성일 때만(prevResult2 없음) 단일 이미지로 보여줌.
@@ -11869,9 +11932,9 @@ function sbWorld3d(p){
     }
   }
   _renderOppBox();
-  oppBox.onclick=function(){ if(!tab0.oppositeImg) oppInp.click(); };
-  oppInp.onchange=function(){
-    var f=oppInp.files&&oppInp.files[0]; if(!f) return;
+  oppBox.onclick=function(){ oppBox.focus(); if(!tab0.oppositeImg) oppInp.click(); };
+  function handleOppFile(f){
+    if(!f) return;
     var reader=new FileReader();
     reader.onload=function(){
       _downscaleForMemorySafety(reader.result, function(resized){
@@ -11880,7 +11943,9 @@ function sbWorld3d(p){
       });
     };
     reader.readAsDataURL(f);
-  };
+  }
+  oppInp.onchange=function(){ handleOppFile(oppInp.files&&oppInp.files[0]); };
+  _wirePasteTarget(oppBox, handleOppFile);
   oppWrap.appendChild(oppBox); oppWrap.appendChild(oppInp);
   p.appendChild(oppWrap);
 
