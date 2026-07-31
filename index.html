@@ -3223,7 +3223,7 @@ function rUB(b,key){
 // ⚠️ 위 요청에 대한 실제 구현 — 업로드 박스 전용 "내 갤러리에서 불러오기" 모달.
 // 이미지가 있는 모든 히스토리 항목(현재 워크플로우 뿐 아니라 전체)을 최신순으로 보여주고,
 // 클릭하면 그 결과물(없으면 원본)을 이 탭의 업로드 이미지로 바로 설정함.
-function _openGalleryPickerForUpload(key, boxEl){
+function _openGalleryPickerForUpload(key, boxEl, refIdx){
   var allItems=[];
   Object.keys(G.HIST||{}).forEach(function(wf){
     (G.HIST[wf]||[]).forEach(function(it){
@@ -3269,7 +3269,20 @@ function _openGalleryPickerForUpload(key, boxEl){
     }
     cell.onclick=function(){
       var tab=getTab(G.wf);
-      if(key==='main'){
+      if(key==='ref'){
+        // ⚠️ 요청 반영: 레퍼런스 이미지 슬롯은 지금까지 파일 업로드만 가능했음(갤러리에서
+        // 이미 만든 결과물을 레퍼런스로 다시 쓸 방법이 없었음) — 이 갤러리 모달을 재사용해서
+        // 특정 슬롯(refIdx)에 바로 넣어줌.
+        if(!tab.refs) tab.refs=[];
+        tab.refs[refIdx]=src;
+        document.querySelectorAll('#rs-'+refIdx).forEach(function(sl){ rSlot(sl,refIdx); });
+      } else if(key==='spaceset-refdesign'){
+        // 공간 컨셉 디자인의 "참고 디자인 이미지"(전체 공통 스타일 기준)도 갤러리에서 바로 가져올 수 있게 함.
+        var spTab2=getTab('spaceset');
+        spTab2.multiRoomRefDesignImg=src;
+        _previewImageInMain(src, 'spaceset');
+        renderSB();
+      } else if(key==='main'){
         tab.inputImg=src; tab.status='idle';
         if(!G.HIST[G.wf])G.HIST[G.wf]=[];
         G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
@@ -3431,9 +3444,17 @@ function rSlot(sl,i){
     };
     sl.querySelector('.rs-del').onclick=function(e){e.stopPropagation();var _r2=getTab(G.wf).refs||[];_r2[i]=null;rSlot(sl,i);};
   } else {
+    // ⚠️ 요청 반영: 레퍼런스 슬롯도 파일 업로드만 되고 갤러리에서 가져오는 방법이 없었음 —
+    // 슬롯을 클릭하면 파일선택창이 뜨는 건 그대로 두고(가장 흔한 동작), 작은 갤러리 아이콘을
+    // 우하단에 따로 둬서 눌렀을 때만 "내 갤러리에서 불러오기" 모달이 뜨게 함.
     sl.innerHTML='<span style="font-size:10px;font-weight:700;color:var(--ac);line-height:1">'+(i+1)+'</span><span style="font-size:16px;color:var(--t2);line-height:1">+</span>';
-    sl.style.flexDirection='column';sl.style.gap='2px';sl.style.opacity='';sl.style.cursor='';
+    sl.style.flexDirection='column';sl.style.gap='2px';sl.style.opacity='';sl.style.cursor='';sl.style.position='relative';
     sl.onclick=function(){G.refIdx=i;sl.focus();gE('fi-ref').click();};
+    var galBtn=document.createElement('button');galBtn.type='button';galBtn.textContent='🖼';
+    galBtn.title='내 갤러리에서 불러오기';
+    galBtn.style.cssText='position:absolute;bottom:2px;right:2px;width:16px;height:16px;font-size:9px;line-height:1;padding:0;border-radius:4px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);cursor:pointer';
+    galBtn.onclick=function(e){ e.stopPropagation(); _openGalleryPickerForUpload('ref', null, i); };
+    sl.appendChild(galBtn);
   }
   // 드래그앤드롭으로 레퍼런스 이미지 교체/추가 (채워진 슬롯이든 빈 슬롯이든 항상 가능)
   sl.ondragover=function(e){e.preventDefault();sl.style.borderColor='var(--acb)';};
@@ -8698,6 +8719,15 @@ function mkBudgetTier(p){
     if(isExt && tab.extConstructionMode==='new'){
       budgetPrompt = 'CRITICAL OVERRIDE — FULL DEMOLITION AND NEW CONSTRUCTION (신축): any instruction about preserving the exact original window/door count, position or wall shape does NOT apply — this is a complete teardown-and-rebuild. Freely design the new building\'s window layout, massing and roofline based on the style/budget described below, but keep everything OUTSIDE the subject building (neighboring buildings, street, sky) unchanged. --- ' + budgetPrompt;
     }
+    // ⚠️ 버그 수정: "레퍼런스 이미지랑 완전히 다른 건물이 나온다"는 지적 — 원인을 찾아보니, 건축
+    // (특히 신축/증축)일 때 "MOST IMPORTANT INSTRUCTION, READ THIS FIRST"(층수·카메라 관련, 매우
+    // 길고 강한 문구)가 프롬프트 맨 앞에 붙으면서, 그 안에 이미 들어있던 레퍼런스 반영 지시가
+    // 상대적으로 묻혀서 AI가 덜 따르는 것으로 보임. 프롬프트 전체 조립이 다 끝난 마지막 시점에
+    // 레퍼런스 반영 지시를 다시 한번 짧고 강하게 못박아서, 항상 AI가 가장 마지막에 읽는 지시가
+    // 되게 함(레퍼런스 없으면 이 블록은 아예 안 붙음).
+    if(tab.refs && tab.refs.length){
+      budgetPrompt += ' ⚠️ FINAL REMINDER (do not skip this, regardless of everything else above): the attached reference image(s) show the target style for this project — the final result\'s materials, color palette and overall design language must clearly and visibly resemble the attached reference image(s), not just the original photo\'s existing style. If your result looks nothing like the attached reference image, that is a failure even if every other instruction above was followed correctly.';
+    }
     renderFromBudgetBtn.disabled=true; renderFromBudgetBtn.textContent='⏳ 렌더링 중...';
     // ⚠️ 버그 수정: 다른 렌더링 경로들(executeSingleRender)은 시작하자마자 G.HIST에 loading:true
     // 항목을 넣고 renderMain()을 호출해서 메인 화면에 "렌더링 중..." 로딩 카드가 바로 뜨는데,
@@ -9566,6 +9596,77 @@ function _addMultiRoomPhotosFromFiles(fileList){
     reader.readAsDataURL(f);
   });
 }
+// ⚠️ 요청 반영: "공간 컨셉 디자인도 그렇고 업로드 가능한 탭들이 다 외부 파일만 되고, 갤러리에
+// 이미 있는 렌더링 결과는 못 가져온다"는 지적 — 갤러리 이미지는 이미 data:/http URL이라
+// FileReader·다운스케일 과정 없이 바로 방으로 추가할 수 있음.
+function _addMultiRoomPhotoFromGallerySrc(src){
+  var spTab=getTab('spaceset');
+  if(!spTab.multiRoomImages) spTab.multiRoomImages=[];
+  var nextIdx=spTab.multiRoomImages.length;
+  var newRoom={id:Date.now()+Math.random(), img:src, label:MULTIROOM_LABELS[Math.min(nextIdx,MULTIROOM_LABELS.length-1)]};
+  spTab.multiRoomImages.push(newRoom);
+  if(G.wf==='spaceset') _showRoomResultInMain(null, src, newRoom.label);
+  renderSB();
+}
+// 여러 장을 연달아 고를 수 있는 갤러리 모달 — 표준 _openGalleryPickerForUpload와 달리 하나
+// 고른다고 바로 안 닫히고, "완료" 버튼을 눌러야 닫힘(공간 사진은 보통 여러 장 한꺼번에 추가하므로).
+function _openGalleryPickerForMultiRoom(){
+  var allItems=[];
+  Object.keys(G.HIST||{}).forEach(function(wf){
+    (G.HIST[wf]||[]).forEach(function(it){ if(it.result || it.orig) allItems.push(it); });
+  });
+  allItems.sort(function(a,b2){ return (b2.id||0)-(a.id||0); });
+  if(!allItems.length){ alert('아직 갤러리에 저장된 이미지가 없어요.'); return; }
+  var _wfLabelsForPicker={space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',agent:'AI 에이전트',spaceset:'공간 컨셉 디자인',budget:'AI 견적'};
+
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+
+  var modal=document.createElement('div');
+  modal.style.cssText='background:var(--card,#141518);border:1px solid var(--bd2);border-radius:14px;width:100%;max-width:760px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden';
+  modal.onclick=function(e){e.stopPropagation();};
+
+  var head=document.createElement('div');
+  head.style.cssText='padding:16px 18px;border-bottom:1px solid var(--bd2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0';
+  head.innerHTML='<div style="font-size:14px;font-weight:800;color:var(--t)">🖼 내 갤러리에서 공간 사진 추가</div><div style="font-size:10.5px;color:var(--m2);margin-top:2px">여러 장 눌러서 추가하고, 다 고르면 완료를 눌러주세요</div>';
+  var doneBtn=document.createElement('button');doneBtn.type='button';doneBtn.textContent='완료';
+  doneBtn.style.cssText='padding:7px 16px;border-radius:8px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:12px;cursor:pointer;flex-shrink:0';
+  doneBtn.onclick=function(){ov.remove();};
+  head.appendChild(doneBtn);
+  modal.appendChild(head);
+
+  var grid=document.createElement('div');
+  grid.style.cssText='padding:16px 18px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px';
+  allItems.slice(0,200).forEach(function(it){
+    var src=it.result||it.orig;
+    if(!src) return;
+    var cell=document.createElement('div');
+    cell.style.cssText='aspect-ratio:1;border-radius:9px;overflow:hidden;cursor:pointer;border:1.5px solid var(--bd2);position:relative;background:var(--c2)';
+    var img=document.createElement('img');img.src=src;img.loading='lazy';img.decoding='async';
+    img.style.cssText='width:100%;height:100%;object-fit:cover';
+    cell.appendChild(img);
+    if(it.wf){
+      var wfBadge=document.createElement('div');
+      wfBadge.style.cssText='position:absolute;top:4px;left:4px;background:rgba(0,0,0,.65);color:#fff;font-size:8.5px;font-weight:700;padding:2px 5px;border-radius:4px';
+      wfBadge.textContent=_wfLabelsForPicker[it.wf]||it.wf;
+      cell.appendChild(wfBadge);
+    }
+    var pickedBadge=document.createElement('div');
+    pickedBadge.style.cssText='position:absolute;inset:0;background:rgba(0,229,204,.35);display:none;align-items:center;justify-content:center;font-size:22px;color:#fff';
+    pickedBadge.textContent='✓';
+    cell.appendChild(pickedBadge);
+    cell.onclick=function(){
+      _addMultiRoomPhotoFromGallerySrc(src);
+      pickedBadge.style.display='flex';
+      cell.style.borderColor='var(--ac)';
+    };
+    grid.appendChild(cell);
+  });
+  modal.appendChild(grid);
+  ov.appendChild(modal);
+  document.body.appendChild(ov);
+}
 function mkMultiRoomSpace(p){
   var spTab=getTab('spaceset');
   // ⚠️ 재설계: localStorage 기반 draft는 사진이 많아지면 용량 제한(보통 5~10MB)에 걸려 조용히
@@ -9680,6 +9781,12 @@ function mkMultiRoomSpace(p){
   };
   renderRefDesignBox();
   refDesignWrap.appendChild(refDesignBox);refDesignWrap.appendChild(refDesignInput);
+  var refDesignGalBtn=mk('button','');refDesignGalBtn.type='button';refDesignGalBtn.textContent='🖼 내 갤러리에서 불러오기';
+  refDesignGalBtn.style.cssText='width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
+  refDesignGalBtn.onclick=function(){
+    _openGalleryPickerForUpload('spaceset-refdesign', null);
+  };
+  refDesignWrap.appendChild(refDesignGalBtn);
   p.appendChild(refDesignWrap);
 
   var listWrap=dv('ss');listWrap.innerHTML='<div class="lbl">📷 공간 목록 (우리집 실제 사진) <span class="lbl-en">각자 참고 디자인 이미지를 보고 독립적으로 만들어져요</span></div>';
@@ -9790,6 +9897,10 @@ function mkMultiRoomSpace(p){
   addBox.onclick=function(){ addInput.click(); };
   addInput.onchange=function(){ _addMultiRoomPhotosFromFiles(addInput.files); };
   listWrap.appendChild(addBox);
+  var addGalBtn=mk('button','');addGalBtn.type='button';addGalBtn.textContent='🖼 내 갤러리에서 공간 사진 추가';
+  addGalBtn.style.cssText='width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
+  addGalBtn.onclick=function(){ _openGalleryPickerForMultiRoom(); };
+  listWrap.appendChild(addGalBtn);
   p.appendChild(listWrap);
 
   var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">해상도</div>';
@@ -16928,6 +17039,28 @@ window._redrawPolyAreas=_redrawPolyAreas;
 // ── File loading ──────────────────────────────────────────────
 function loadF(f,key){
   if(!f||!f.type.startsWith('image/'))return;
+  // ⚠️ 버그 수정: "이미지 올리면 몇 박자 늦게 반영된다"는 지적 — 실제로는 FileReader로 파일을
+  // 읽고(특히 견적용으로 올리는 고화질 사진은 용량이 커서 이 과정이 꽤 걸림) 다시 캔버스로
+  // 리사이즈하는 과정이 전부 끝나야 화면이 바뀌는데, 그동안 화면엔 아무 반응이 없어서 "멈춘
+  // 것처럼" 느껴졌던 것. 파일을 고른 그 순간 바로 "업로드 중..." 로딩 표시를 띄워서, 실제
+  // 처리 시간은 그대로여도 체감 지연이 없게 함.
+  if(key==='main'){
+    var _ubLoading=gE('ub-main');
+    if(_ubLoading){
+      _ubLoading.innerHTML='<div style="display:flex;align-items:center;justify-content:center;gap:6px;min-height:72px;color:var(--t2);font-size:11px"><span style="display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span>업로드 중...</div>';
+      if(!document.getElementById('agent-spin-style')){
+        var _sTag=document.createElement('style');_sTag.id='agent-spin-style';_sTag.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}';document.head.appendChild(_sTag);
+      }
+    }
+  } else if(key==='ref'){
+    var _slLoading=document.querySelectorAll('#rs-'+G.refIdx);
+    _slLoading.forEach(function(sl){
+      sl.innerHTML='<span style="display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.15);border-top-color:var(--ac);border-radius:50%;animation:agentSpin .8s linear infinite"></span>';
+      if(!document.getElementById('agent-spin-style')){
+        var _sTag2=document.createElement('style');_sTag2.id='agent-spin-style';_sTag2.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}';document.head.appendChild(_sTag2);
+      }
+    });
+  }
   var r=new FileReader();
   r.onload=function(ev){
     var raw=ev.target.result;
