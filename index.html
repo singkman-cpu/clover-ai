@@ -7114,6 +7114,21 @@ function _captureBudgetSnapshot(tab, isExtFlag, isCommercialFlag){
   if(isExtFlag){
     snap.roomLabel = '건물 외관 전체';
     snap.roomAmt = totalAmt; // 건축외관은 방 개념 없이 예산 전체가 곧 이 공간 몫
+    // ⚠️ 버그 수정: 건축외관은 snap.items를 아예 안 채우고 있어서, 렌더링 결과 옆 예산 패널에
+    // "건물 외관 전체: OOO만원"이라는 총액 한 줄만 뜨고, 사이드바에 보이는 철거·골조공사·
+    // 외벽마감재·창호공사 같은 항목별 상세 내역이 전혀 안 보이고 있었음 — 주거/상업공간처럼
+    // EXT_ITEM_BREAKDOWN(신축/증축/리모델링별 항목표)을 그대로 캡처해서 채움.
+    var extItems = EXT_ITEM_BREAKDOWN[tab.extConstructionMode] || EXT_ITEM_BREAKDOWN.new;
+    var _extKeepSet = {}; if(tab.budgetAiKeepItems) tab.budgetAiKeepItems.forEach(function(n){ _extKeepSet[n]=true; });
+    var _extNaSet = {}; if(tab.budgetAiNotApplicableItems) tab.budgetAiNotApplicableItems.forEach(function(n){ _extNaSet[n]=true; });
+    snap.items = extItems.map(function(it){
+      var name = it[0];
+      if(_extNaSet[name]) return { name: name, amt: 0, material: null, notApplicable: true };
+      if(_extKeepSet[name]) return { name: name, amt: 0, material: null, kept: true };
+      var defaultAmt = Math.round(totalAmt * it[1]);
+      var manualAmt = (tab.budgetItemManualAmts && tab.budgetItemManualAmts[name]!=null) ? tab.budgetItemManualAmts[name] : null;
+      return { name: name, amt: (manualAmt!=null?manualAmt:defaultAmt), material: null };
+    });
   } else if(isCommercialFlag){
     snap.roomLabel = COMMERCIAL_BIZ_LABELS[tab.budgetBizType] || '상업공간';
     var _bizTotalAmt = totalAmt * (tab.budgetBizAmtMultiplier!=null ? tab.budgetBizAmtMultiplier : 1);
@@ -7437,7 +7452,7 @@ function mkBudgetTier(p){
         'extExistingFloors','extTargetFloors','budgetTier','budgetAiKeepItems','budgetAiNotApplicableItems',
         'budgetAiReasoning','budgetItemManualAmts','budgetRoomShareOverride','budgetBizAmtMultiplier',
         'budgetManualAmt','budgetRoomSlot','budgetManualLock','budgetItemOverrideText','extOverrideText',
-        'refs','budgetShowDetail','_aiLastKeySnapshot'];
+        'refs','budgetShowDetail','budgetRefFidelityPct','_aiLastKeySnapshot'];
       if(!tab.budgetImgByMode) tab.budgetImgByMode={};
       if(!tab.budgetStateByMode) tab.budgetStateByMode={};
       var _curModeKey = tab.budgetModeOverride || 'residential';
@@ -7556,6 +7571,11 @@ function mkBudgetTier(p){
       }
       _falProxyCall('analyze-room-budget', reqBody, function(res){
         if(res && typeof res.adjustedSharePct==='number'){
+          // ⚠️ 요청 반영: "레퍼런스를 무조건 100% 복사"는 예산이 부족하면 비현실적임 — AI가
+          // "이 예산으로 레퍼런스를 몇 % 정도 구현 가능한지"를 직접 판단해서 숫자로 주면(백엔드
+          // 응답 필드 referenceFidelityPct, 레퍼런스 있을 때만), 그 비율에 맞춰 렌더링 프롬프트의
+          // 반영 강도를 조절함(전체 분위기 > 벽·천장·바닥 > 가구·소품 순으로 우선순위 적용).
+          tab.budgetRefFidelityPct = (refImgsAll.length && typeof res.referenceFidelityPct==='number') ? Math.max(10,Math.min(100,Math.round(res.referenceFidelityPct))) : null;
           if(isCommercial){
             tab.budgetBizAmtMultiplier = res.adjustedSharePct/100; // 상업공간은 방-비율 개념이 없어서, 전체 예산에 곱하는 배수로 씀
             tab.budgetAiReasoning = res.reasoning||'';
@@ -7594,7 +7614,7 @@ function mkBudgetTier(p){
             (isExt?'':'<span style="margin-left:auto;background:var(--ac);color:#000;font-weight:800;font-size:12px;padding:2px 9px;border-radius:20px">'+res.adjustedSharePct+'%</span>')+'</div>'+
             '<div style="font-size:11px;margin-bottom:6px">'+diffTxt+'</div>'+
             '<div style="font-size:11px;color:var(--t2);background:rgba(0,0,0,.15);border-radius:7px;padding:8px 9px;line-height:1.55">💬 '+(res.reasoning||'')+'</div>'+
-            (res.styleMismatch ? ('<div style="font-size:11px;color:#fbbf24;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:7px;padding:8px 9px;margin-top:8px;line-height:1.55">⚠️ 레퍼런스-예산 불일치: '+(res.styleMismatchNote||'입력하신 예산으로는 레퍼런스 스타일의 마감재 수준을 그대로 구현하기 어려울 수 있어요.')+'</div>') : '') +
+            (res.styleMismatch ? ('<div style="font-size:11px;color:#fbbf24;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);border-radius:7px;padding:8px 9px;margin-top:8px;line-height:1.55">⚠️ 레퍼런스-예산 불일치'+(tab.budgetRefFidelityPct!=null?(' (이 예산으로는 약 '+tab.budgetRefFidelityPct+'% 정도 구현 가능)'):'')+': '+(res.styleMismatchNote||'입력하신 예산으로는 레퍼런스 스타일의 마감재 수준을 그대로 구현하기 어려울 수 있어요.')+'</div>') : '') +
             (Array.isArray(res.defectFlags) && res.defectFlags.length ? ('<div style="font-size:11px;color:#f87171;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:7px;padding:8px 9px;margin-top:8px;line-height:1.6">🔧 사진에서 추가 비용이 들 수 있는 부분이 보여요: '+res.defectFlags.join(', ')+' — 이런 항목은 일반적인 마감 예산과 별도로 비용이 더 들 수 있어요.</div>') : '') +
             (isExt ? '' : '<div id="ai-override-hint" style="font-size:10.5px;color:var(--ac);margin-top:8px;cursor:pointer;text-decoration:underline">✏️ 이 판단이 마음에 안 드세요? 위 "✏️ 추가 요청사항"에 직접 적어주시면 AI 분석보다 그게 항상 우선돼요 (예: "벽지만 빼고 바닥·조명·가구는 다 바꿔줘")</div>');
           var _ovHint=document.getElementById('ai-override-hint');
@@ -8575,7 +8595,7 @@ function mkBudgetTier(p){
       if(_lightKey){
         var _lAmt = tab._lastBudgetItemAmts[_lightKey];
         var _lCap = _lAmt<40 ? 1 : _lAmt<80 ? 2 : _lAmt<150 ? 3 : 4;
-        _budgetScaleTxt += ' LIGHTING FIXTURE COUNT LIMIT (CRITICAL): the lighting budget for this room is approximately '+_lAmt+'만원. At this budget level, show AT MOST '+_lCap+' separate light fixture(s) total — count a ceiling fixture, a wall sconce, a floor lamp, a table lamp, and a pendant each separately (two matching wall sconces count as one fixture TYPE). Do not add a ceiling light AND wall sconces AND a floor lamp all at once just because the style mentions "layered lighting" — at this budget, pick the single most impactful fixture and skip the rest.';
+        _budgetScaleTxt += ' LIGHTING FIXTURE COUNT LIMIT (CRITICAL): the lighting budget for this room is approximately '+_lAmt+'만원. At this budget level, show AT MOST '+_lCap+' separate light fixture(s) total — count a ceiling fixture, a wall sconce, a floor lamp, a table lamp, and a pendant each separately (two matching wall sconces count as one fixture TYPE). Do not add a ceiling light AND wall sconces AND a floor lamp all at once just because the style mentions "layered lighting" — at this budget, pick the single most impactful fixture and skip the rest. KOREAN APARTMENT LIGHTING CONVENTION (CRITICAL): in real Korean homes, a living room or bedroom ceiling ALWAYS has a main light fixture mounted at or near the center of the ceiling as the baseline — this is standard practice, never a bare/empty ceiling with only wall or floor lighting. If the fixture count above is 1, that single fixture MUST be this center ceiling fixture (e.g. a basic flush-mount LED panel, recessed downlights arranged around the center, or a ceiling fan with integrated light), never a wall sconce or floor lamp alone. Only when the budget allows more than 1 fixture should additional elements be layered on top of this base center fixture — a stepped/coffered ceiling (우물천장) with hidden indirect lighting around the perimeter, additional recessed downlights, a decorative pendant, or a ceiling fan — these are always ADDITIONS to the center fixture, never a replacement for it.';
       }
       _budgetScaleTxt += ' GENERAL BUDGET-TO-SCALE RULE: for every item above with a low assigned amount, render it as simple, minimal and inexpensive-looking (fewer units, basic materials, no elaborate multi-piece setups) — do not let the style description below push any low-budget item toward an elaborate or expensive-looking version. Items with a higher assigned amount may look correspondingly more elaborate or premium.';
       budgetPrompt += _budgetScaleTxt;
@@ -8608,6 +8628,38 @@ function mkBudgetTier(p){
       // 자체가 프리셋 때문에 더 화려해지지 않게 마지막으로 한 번 더 못박음.
       if(tab.budgetTier){
         budgetPrompt += ' PRIORITY OVERRIDE (applies to every material, finish, fixture and quantity in this project — not just what is listed above): this project is budgeted at the "'+tab.budgetTier+'" tier level. Regardless of how upscale or elaborate the style description above sounds, every material, finish, fixture and quantity in the final result must stay realistically consistent with what that budget tier can actually afford — do not let the style description push the overall look to a noticeably higher-end tier than the stated budget supports.';
+      }
+    }
+    // ⚠️ 요청 반영: "AI 견적에 레퍼런스 이미지를 넣으면, 현장사진세트에서처럼 소품·가구·마감재·
+    // 전체 컬러톤까지 거의 100% 그대로 복사해서 반영해달라" — 주거·상업공간·건축외관 전부 동일하게
+    // 적용. 이미 "현장사진세트"(mkMultiRoomSpace)에서 쓰던 것과 똑같은 강도의 문구를 그대로 가져와서
+    // 씀 — 단, 예산 등급(위 PRIORITY OVERRIDE)은 여전히 우선하므로 "재질의 종류·색감·스타일"은
+    // 레퍼런스를 그대로 따라가되, 그 재질이 이 예산 등급에서 실제로 쓸 수 있는 수준인지는 이미
+    // AI 사진 분석(styleMismatch)에서 판단해서 견적에 반영된 상태.
+    // ⚠️ 요청 반영: "레퍼런스를 무조건 100% 복사하라"는 예산이 부족하면 비현실적이라는 지적 —
+    // AI 분석에서 받은 실현 가능 비율(tab.budgetRefFidelityPct, 10~100)에 맞춰 반영 강도를
+    // 조절함. 100%(레퍼런스와 예산이 잘 맞음)면 기존처럼 거의 그대로 복제하고, 그 밑이면
+    // 우선순위를 나눠서 지시함 — 1순위 전체 분위기·톤(예산과 거의 무관하게 항상 최대한 비슷하게),
+    // 2순위 벽·천장·바닥(그 다음으로 비슷하게), 3순위 가구·소품(예산이 부족할수록 가장 먼저,
+    // 가장 많이 현실적인 수준으로 타협). 레퍼런스 없으면 이 블록 전체가 안 나감(기존과 동일).
+    if(tab.refs && tab.refs.length){
+      var _fidelityPct = tab.budgetRefFidelityPct!=null ? tab.budgetRefFidelityPct : 100;
+      if(_fidelityPct>=95){
+        // 예산과 레퍼런스가 잘 맞는 경우 — 기존처럼 거의 그대로 복제
+        if(isExt){
+          budgetPrompt += ' 첨부한 참고 이미지는 사용자가 원하는 목표 외관 스타일이며, 다음 항목을 최대한 똑같이 재현하세요: 외장 마감재의 정확한 종류(참고 이미지가 벽돌이면 반드시 벽돌로, 스타코면 스타코로, 세라믹 사이딩이나 노출콘크리트면 그대로 — 절대 다른 재질로 바꾸지 마세요), 전체 컬러 팔레트, 창호 프레임 색상, 조경·외부 조명 스타일까지 참고 이미지 수준으로 최대한 똑같이 만들어주세요.';
+        } else if(isCommercial){
+          budgetPrompt += ' 첨부한 참고 이미지는 사용자가 원하는 목표 스타일이며, 색감뿐 아니라 바닥재·벽 마감재의 정확한 종류(타일이면 타일, 우드면 우드, 돌이면 돌 — 절대 다른 재질로 바꾸지 마세요), 천장·조명 기구의 형태와 톤, 가구·집기의 스타일·형태·색상, 소품의 종류와 대략적인 개수까지 참고 이미지를 거의 그대로 복제하는 수준으로 재현하세요 (벽·문·창문의 구조는 예외이며 원본 사진 그대로 유지).';
+        } else {
+          budgetPrompt += ' 첨부한 참고 이미지는 사용자가 원하는 목표 스타일이며, 이 참고 이미지를 거의 그대로 복제하는 수준으로 따라가세요 — 색감뿐 아니라 바닥재 종류(타일이면 타일, 우드면 우드, 돌이면 돌 — 절대 다른 재질로 바꾸지 마세요), 벽 마감재와 색, 천장 디자인, 조명 기구의 형태, 가구(침대·소파·의자·테이블 등)의 스타일·형태·색상, 소품의 종류와 대략적인 개수(참고 이미지에 화분이 1~2개면 1~2개만, 없으면 넣지 마세요)까지 전부 이 참고 이미지를 기준으로 최대한 똑같이 재현하세요 (단, 벽·문·창문의 구조는 예외이며 원본 사진 그대로 유지 — 구조는 절대 참고 이미지를 따라가면 안 됩니다).';
+        }
+      } else {
+        // 예산이 레퍼런스 수준에 못 미치는 경우 — 우선순위 기반으로 반영 강도를 나눠서 지시
+        var _structureNote = isExt ? '' : ' (단, 벽·문·창문의 구조는 예외이며 원본 사진 그대로 유지 — 구조는 절대 참고 이미지를 따라가면 안 됩니다)';
+        budgetPrompt += ' 첨부한 참고 이미지는 사용자가 원하는 목표 스타일이지만, AI 분석 결과 지금 배정된 예산으로는 이 스타일을 약 '+_fidelityPct+'% 정도만 현실적으로 구현 가능하다고 판단됐습니다. 100% 그대로 복제하지 말고, 다음 우선순위로 반영 강도를 다르게 적용하세요: '+
+          '① 가장 먼저·가장 비슷하게(예산과 거의 무관): 전체적인 분위기·무드·컬러 톤·색감의 방향성은 참고 이미지와 최대한 비슷하게 만드세요 — 이건 돈이 크게 안 드는 요소라 예산이 부족해도 거의 그대로 따라갈 수 있습니다. '+
+          '② 그 다음(위 %에 맞는 현실적인 수준으로): 벽·천장·바닥의 마감재는 참고 이미지와 같은 계열의 색감·질감을 유지하되, 참고 이미지가 고급 자재(대리석, 원목 등)라도 이 예산에서 실제로 가능한 자재(타일, 강마루, 실크벽지 등)로 현실적으로 대체하세요 — 계열과 느낌은 유지하고 소재 등급만 예산에 맞게 낮추는 방식입니다. '+
+          '③ 가장 나중·가장 많이 타협 가능: 가구·소품은 참고 이미지의 스타일 방향성(색상·형태의 큰 느낌)만 참고하고, 구체적인 브랜드감·고급스러움 수준·개수는 이 예산에서 현실적으로 갖출 수 있는 수준으로 자유롭게 조정하세요 — 참고 이미지 속 가구·소품을 억지로 다 넣으려고 하지 마세요.'+_structureNote;
       }
     }
     // ⚠️ 버그 수정: 사용자가 항목별로 직접 적어서 "적용"까지 눌러도(화면엔 "✓ 반영됨"이라고 뜨는데도),
@@ -8728,7 +8780,7 @@ function mkBudgetTier(p){
         'extExistingFloors','extTargetFloors','budgetTier','budgetAiKeepItems','budgetAiNotApplicableItems',
         'budgetAiReasoning','budgetItemManualAmts','budgetRoomShareOverride','budgetBizAmtMultiplier',
         'budgetManualAmt','budgetRoomSlot','budgetManualLock','budgetItemOverrideText','extOverrideText',
-        'refs','budgetShowDetail'];
+        'refs','budgetShowDetail','budgetRefFidelityPct'];
       var _snap2={}; _fields2.forEach(function(f){ _snap2[f]=tab[f]!==undefined?tab[f]:null; });
       tab.budgetStateByMode[_cm2] = _snap2;
       idbSaveDraft('clover_budget_state_by_mode', tab.budgetStateByMode).catch(function(){});
@@ -9364,7 +9416,7 @@ var SPACE_CATEGORIES={
 // 나머지 상업 카테고리(식당/병원/학원/헬스장/미용실)는 국내 상업 인테리어 전문 업체들이 공통적으로
 // 다루는 업종 조사 결과를 반영함 — 업종마다 동선·설비 요구가 완전히 다르다는 게 공통된 포인트.
 var KOREA_LAYOUT_GUIDE={
-  residential:'이 공간은 한국에서 실제로 흔히 짓는 아파트 형태·비례로 만들어주세요. 국민평형(전용 84㎡=34평, 방3+거실+주방 구성)을 기준으로 한 공간 크기감을 기본으로 하되, 사진 속 실제 공간 크기와 크게 다르면 사진을 우선하세요. 구조는 판상형(거실·주방이 남향으로 나란히 배치되어 맞통풍이 잘 되는 일자형 구조, 발코니 서비스면적이 넉넉함)이나 타워형(코너에 배치되어 2면 이상 창으로 개방감 있는 구조) 중 사진에 보이는 창 위치·구조와 자연스럽게 맞는 쪽으로 판단해서 반영하고, 시스템에어컨 배치, 붙박이장, 걸레받이·몰딩 마감 등 한국 아파트 특유의 디테일도 자연스럽게 넣어주세요.',
+  residential:'이 공간은 한국에서 실제로 흔히 짓는 아파트 형태·비례로 만들어주세요. 국민평형(전용 84㎡=34평, 방3+거실+주방 구성)을 기준으로 한 공간 크기감을 기본으로 하되, 사진 속 실제 공간 크기와 크게 다르면 사진을 우선하세요. 구조는 판상형(거실·주방이 남향으로 나란히 배치되어 맞통풍이 잘 되는 일자형 구조, 발코니 서비스면적이 넉넉함)이나 타워형(코너에 배치되어 2면 이상 창으로 개방감 있는 구조) 중 사진에 보이는 창 위치·구조와 자연스럽게 맞는 쪽으로 판단해서 반영하고, 시스템에어컨 배치, 붙박이장, 걸레받이·몰딩 마감 등 한국 아파트 특유의 디테일도 자연스럽게 넣어주세요. 조명: 한국 아파트의 거실·침실은 천장 중앙(또는 중앙 부근)에 메인 조명이 항상 기본으로 설치되어 있습니다 — 벽등이나 스탠드만 있고 천장이 비어있는 구성은 절대 아닙니다. 이 중앙 메인 조명을 기본으로 두고, 예산·스타일에 따라 우물천장(간접조명), 다운라이트 추가, 실링팬 등을 그 위에 얹는 방식으로 구성하세요 — 중앙 메인 조명 자체를 빼고 다른 조명으로만 대체하면 안 됩니다.',
   exterior:'이 건물은 한국에서 실제로 흔히 볼 수 있는 신축·리모델링 건축 외관의 형태·비례로 만들어주세요 — 주차 공간, 필로티 구조, 계단식 후퇴(일조권 사선제한 반영), 옥상 난간, 발코니·테라스 구성 등 국내 다세대·근생 건축물에서 흔한 디테일을 자연스럽게 반영하고, 대지 경계·인접 건물·도로와의 관계도 실제 한국 도심/주택가 골목 풍경처럼 자연스럽게 표현해주세요.',
   office:'이 공간은 한국 오피스에서 실제로 흔히 볼 수 있는 형태로 만들어주세요 — 오픈형 워크스테이션 배치, 유리 파티션으로 구분된 회의실, 탕비실·리셉션 등 최근 국내 스타트업·중소기업 오피스에서 흔한 비례와 구조를 반영해주세요.',
   cafe:'이 공간은 한국 카페·상업공간에서 실제로 흔히 볼 수 있는 형태로 만들어주세요 — 협소 상가에 맞춘 효율적인 좌석 배치, 카운터-홀 동선, 국내 카페 인테리어에서 흔한 톤앤매너와 비례를 반영해주세요.',
@@ -25144,7 +25196,8 @@ document.addEventListener('DOMContentLoaded',function(){try{
             var _lightingCap = _lightingAmt<40 ? 1 : _lightingAmt<80 ? 2 : _lightingAmt<150 ? 3 : 4;
             _finalPrompt += ' LIGHTING FIXTURE COUNT LIMIT (CRITICAL): the lighting budget for this room is approximately '+_lightingAmt+'만원 (about '+(_lightingAmt*10000).toLocaleString()+' KRW). '+
               'At this budget level, the final image must show AT MOST '+_lightingCap+' separate light fixture(s) total — count every distinct fixture type (a ceiling fixture, a wall sconce, a floor lamp, a table lamp, a pendant are each counted separately; two wall sconces on opposite walls count as one fixture TYPE if they match). '+
-              'Do not add a ceiling light AND a floor lamp AND wall sconces AND a pendant all at once just because the style description mentions "layered lighting" — layered lighting at this budget means one or two well-chosen sources with varied brightness, not a large collection of separate fixtures. Choose the single most impactful lighting element for this budget and skip the rest.';
+              'Do not add a ceiling light AND a floor lamp AND wall sconces AND a pendant all at once just because the style description mentions "layered lighting" — layered lighting at this budget means one or two well-chosen sources with varied brightness, not a large collection of separate fixtures. Choose the single most impactful lighting element for this budget and skip the rest. '+
+              'KOREAN APARTMENT LIGHTING CONVENTION (CRITICAL): in real Korean homes, a living room or bedroom ceiling ALWAYS has a main light fixture mounted at or near the center of the ceiling as the baseline — this is standard practice, never a bare/empty ceiling lit only by wall or floor lighting. If the fixture count above is 1, that single fixture MUST be this center ceiling fixture (e.g. a basic flush-mount LED panel, recessed downlights arranged around the center, or a ceiling fan with integrated light), never a wall sconce or floor lamp alone. Only when the budget allows more than 1 fixture should additional elements be layered on top of this base center fixture — a stepped/coffered ceiling (우물천장) with hidden indirect lighting around the perimeter, additional recessed downlights, a decorative pendant, or a ceiling fan — these are always ADDITIONS to the center fixture, never a replacement for it.';
           }
         }
       }
