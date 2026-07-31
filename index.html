@@ -11501,6 +11501,50 @@ function sbWorld3d(p){
   var upscaleNote=dv('');upscaleNote.id='w3d-upscale-note';upscaleNote.style.cssText='font-size:11px;color:var(--ac);margin:-4px 0 8px 2px';
   p.appendChild(upscaleNote);
 
+  // ── 반대쪽 뷰 사진(선택) ────────────────────────────────────────────
+  // ⚠️ 요청 반영: "거실 사진 한 장만 넣으면 카메라 반대편(등 뒤쪽)은 AI가 상상해서 채우는데,
+  // 보통 거실 맞은편은 주방인 경우가 많으니 그 사진도 같이 넣으면 훨씬 자연스럽게 이어지지
+  // 않겠냐"는 지적 — 실제로 "여러 공간 연결"(_addRoomFiles) 기능은 이미 있었지만, 이 기본
+  // 단일 사진 흐름과 연결이 안 되어 있어서 안 쓰이고 있었음. 여기에 선택적 슬롯 하나만 추가해서,
+  // 넣으면 azimuth 180(카메라 정반대 방향)의 실제 사진으로 World Labs에 같이 넘어가게 함 —
+  // AI가 지어내는 게 아니라 진짜 사진이라 훨씬 정확하고 자연스럽게 연결됨.
+  var oppWrap=dv('ss');
+  oppWrap.innerHTML='<div class="lbl">🔄 반대쪽 뷰 사진 <span class="lbl-en">선택 — 보통 주방이에요</span></div>';
+  var oppHint=dv('');oppHint.style.cssText='font-size:10.5px;color:var(--m2);margin-bottom:6px;line-height:1.5';
+  oppHint.textContent='위 사진을 찍은 자리에서 카메라를 정반대(180도)로 돌렸을 때 보이는 실제 사진을 넣으면, 그 방향은 AI가 상상하지 않고 이 실제 사진으로 자연스럽게 이어붙여요. 안 넣으면 지금처럼 AI가 알아서 추론해요.';
+  oppWrap.appendChild(oppHint);
+  var oppBox=dv('');oppBox.style.cssText='border:1.5px dashed var(--bd2);border-radius:10px;min-height:76px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;background:var(--c2)';
+  var oppInp=document.createElement('input');oppInp.type='file';oppInp.accept='image/*';oppInp.style.display='none';
+  function _renderOppBox(){
+    oppBox.innerHTML='';
+    if(tab0.oppositeImg){
+      var oimg=document.createElement('img');oimg.src=tab0.oppositeImg;
+      oimg.style.cssText='width:100%;max-height:120px;object-fit:contain;display:block';
+      oppBox.appendChild(oimg);
+      var oDel=mk('button','');oDel.type='button';oDel.textContent='✕';
+      oDel.style.cssText='position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.7);color:#fff;border:none;cursor:pointer;font-size:11px';
+      oDel.onclick=function(e){ e.stopPropagation(); tab0.oppositeImg=null; renderSB(); };
+      oppBox.appendChild(oDel);
+    } else {
+      oppBox.innerHTML='<div style="font-size:11px;color:var(--t2);padding:12px;text-align:center">탭해서 반대쪽 뷰 사진 선택 (예: 주방)</div>';
+    }
+  }
+  _renderOppBox();
+  oppBox.onclick=function(){ if(!tab0.oppositeImg) oppInp.click(); };
+  oppInp.onchange=function(){
+    var f=oppInp.files&&oppInp.files[0]; if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      _downscaleForMemorySafety(reader.result, function(resized){
+        tab0.oppositeImg=resized;
+        renderSB();
+      });
+    };
+    reader.readAsDataURL(f);
+  };
+  oppWrap.appendChild(oppBox); oppWrap.appendChild(oppInp);
+  p.appendChild(oppWrap);
+
   var panoWrap=dv('ss');
   var panoLabel=document.createElement('label');
   panoLabel.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);cursor:pointer;padding:8px 10px;background:var(--c2);border-radius:8px';
@@ -11528,73 +11572,11 @@ function sbWorld3d(p){
   multiWrap.innerHTML='<strong style="color:var(--ac)">✓ 사진에 없는 영역(옆면·뒷면 등)은 Marble이 자동으로 채워줘요.</strong>';
   p.appendChild(multiWrap);
 
-  var divider=dv('');divider.style.cssText='border-top:1px solid var(--bd2,rgba(255,255,255,.1));margin:16px 0 12px;padding-top:14px';
-  p.appendChild(divider);
-
-  var roomToggleBtn=mk('button','');roomToggleBtn.type='button';
-  roomToggleBtn.style.cssText='width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--bd2,rgba(255,255,255,.12));background:transparent;color:var(--t2);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;text-align:left';
-  roomToggleBtn.textContent='🧪 여러 공간 연결하기 (실험적 기능) ▾';
-  p.appendChild(roomToggleBtn);
-  var roomOuterDetail=dv('');roomOuterDetail.style.cssText='display:none;margin-top:8px';
-  p.appendChild(roomOuterDetail);
-  roomToggleBtn.onclick=function(){
-    var open=roomOuterDetail.style.display==='none';
-    roomOuterDetail.style.display=open?'block':'none';
-    roomToggleBtn.textContent=open?'🧪 여러 공간 연결하기 (실험적 기능) ▴':'🧪 여러 공간 연결하기 (실험적 기능) ▾';
-  };
-  var roomCaveat=dv('');roomCaveat.style.cssText='font-size:10.5px;color:#fbbf24;line-height:1.5;padding:8px 10px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:8px;margin-bottom:8px';
-  roomCaveat.textContent='⚠️ 여러 공간을 하나로 잇는 건 아직 결과가 고르지 않을 수 있어요. 안정적인 결과를 원하시면 위의 기본 방식(사진 1장)을 추천드려요.';
-  roomOuterDetail.appendChild(roomCaveat);
-
-  var roomWrap=dv('ss');
-  roomWrap.style.cssText='padding:10px;background:var(--c2);border-radius:8px';
-  roomWrap.innerHTML='<div style="font-size:12.5px;font-weight:700;color:var(--t2);margin-bottom:4px">🏠 여러 공간 연결하기</div>'+
-    '<div style="font-size:11px;color:var(--t2);line-height:1.5;margin-bottom:8px">거실·주방 등 다른 공간 사진 2~4장으로 온 집 VR 만들기</div>';
-  roomOuterDetail.appendChild(roomWrap);
-
-  var sameSpaceWrap=dv('');
-  sameSpaceWrap.style.cssText='display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:var(--c3,rgba(255,255,255,.04));border-radius:8px;margin-bottom:8px;cursor:pointer';
-  var sameSpaceCk=document.createElement('input');
-  sameSpaceCk.type='checkbox';sameSpaceCk.id='w3d-samespace-ck';
-  sameSpaceCk.style.cssText='width:16px;height:16px;accent-color:var(--ac);cursor:pointer;margin-top:1px;flex-shrink:0';
-  sameSpaceCk.checked=!!G.tabs.world3d.roomsSameSpace;
-  sameSpaceCk.onchange=function(){ G.tabs.world3d.roomsSameSpace=sameSpaceCk.checked; };
-  sameSpaceWrap.appendChild(sameSpaceCk);
-  var sameSpaceLabel=dv('');
-  sameSpaceLabel.style.cssText='font-size:11px;color:var(--t2);line-height:1.5';
-  sameSpaceLabel.innerHTML='<strong style="color:var(--t)">같은 공간을 다른 각도에서 찍었어요</strong> (거실 앞/뒤 등) — 체크 시 최대 8장, 더 정확하게 처리돼요.';
-  sameSpaceWrap.appendChild(sameSpaceLabel);
-  sameSpaceWrap.onclick=function(e){ if(e.target!==sameSpaceCk){ sameSpaceCk.checked=!sameSpaceCk.checked; sameSpaceCk.onchange(); } };
-  roomWrap.appendChild(sameSpaceWrap);
-
-  var roomListEl=dv('');roomListEl.id='w3d-room-list';roomListEl.style.cssText='display:flex;flex-direction:column;gap:6px;margin-bottom:8px';
-  roomWrap.appendChild(roomListEl);
-
-  var roomFileInput=document.createElement('input');
-  roomFileInput.type='file';roomFileInput.accept='image/*';roomFileInput.multiple=true;roomFileInput.style.display='none';
-  roomFileInput.onchange=function(e){ _addRoomFiles(e.target.files); roomFileInput.value=''; };
-  roomWrap.appendChild(roomFileInput);
-
-  var addRoomBtn=mk('button','');addRoomBtn.type='button';addRoomBtn.textContent='+ 공간 사진 추가';
-  addRoomBtn.style.cssText='width:100%;padding:9px;border-radius:8px;border:1px dashed rgba(110,231,183,.4);background:transparent;color:var(--ac);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:8px';
-  addRoomBtn.onclick=function(){ roomFileInput.click(); };
-  roomWrap.appendChild(addRoomBtn);
-
-  var floorPlanToggle=mk('button','');floorPlanToggle.type='button';
-  floorPlanToggle.style.cssText='width:100%;padding:9px;border-radius:8px;border:1px solid rgba(110,231,183,.3);background:rgba(110,231,183,.06);color:var(--ac);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:8px';
-  floorPlanToggle.onclick=function(){ var t=getTab('world3d'); t.showFloorPlan=!t.showFloorPlan; _renderRoomList(); };
-  roomWrap.appendChild(floorPlanToggle);
-  var floorPlanContainer=dv('');floorPlanContainer.id='w3d-floorplan-container';floorPlanContainer.style.cssText='margin-bottom:10px';
-  roomWrap.appendChild(floorPlanContainer);
-
-  var roomGoBtn=mk('button','');roomGoBtn.id='w3d-room-go';
-  roomGoBtn.style.cssText='width:100%;padding:12px;border-radius:10px;border:none;background:rgba(110,231,183,.9);color:#000;font-weight:800;font-size:13.5px;cursor:pointer;font-family:inherit';
-  roomGoBtn.innerHTML='🏠 마블1.1 플러스 · 여러 공간 연결 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+W3D_MULTIROOM_COST+'cr</span>';
-  roomGoBtn.onclick=_w3dRoomStart;
-  roomWrap.appendChild(roomGoBtn);
-  var roomStatusEl=dv('');roomStatusEl.id='w3d-room-status';roomStatusEl.style.cssText='margin-top:8px;font-size:11.5px;color:var(--t2);text-align:center;display:none';
-  roomWrap.appendChild(roomStatusEl);
-  _renderRoomList();
+  // ⚠️ 요청 반영: "여러 공간 연결하기"(실험적 기능)가 실제로는 방 위치가 이상하게 나오는 등
+  // 잘 안 됐다는 피드백 — 제대로 안정적으로 안 되는 기능을 화면에 남겨두느니 아예 빼는 게
+  // 낫다고 판단해서 삭제함. 대신 위에서 추가한 "반대쪽 뷰 사진" 기능(사진 딱 2장, 앞0도/뒤180도
+  // 고정)이 이 기능이 원래 하려던 것 중 실제로 자주 쓰이는 케이스(거실+주방 등 앞뒤 연결)를
+  // 훨씬 단순하고 예측 가능한 방식으로 커버함.
 
   var timeHint=dv('');timeHint.style.cssText='font-size:11px;color:var(--ac);margin-bottom:8px;padding:8px 10px;background:var(--acg);border-radius:8px;line-height:1.5;margin-top:14px';
   timeHint.innerHTML='⏱ 생성에 보통 <strong>7분</strong> 정도 걸려요 (서버가 혼잡하면 10분 이상 걸릴 수 있어요).<br>⚠️ 완료되기 전까지 <strong>새로고침하지 마세요</strong> — 크레딧이 차감된 작업을 잃어버릴 수 있어요.';
@@ -19158,9 +19140,23 @@ function _w3dTabStart(){
   //   Marble 자신에게 맡긴다. 사용자가 실제로 여러 각도의 진짜 사진을 갖고 있는 경우엔 기존 "여러 공간 업로드"
   //   기능(_addRoomFiles, reconstructImages:true)을 쓰면 됨 — 그건 진짜 사진이라 문제없음.
   var _multiAngleOn = false;
-  var _needsAutoPano = W3D_AUTOPANO_ENABLED && !tab.isPano && !_multiAngleOn;
+  // ⚠️ 요청 반영: 반대쪽 뷰의 "진짜 사진"(tab.oppositeImg)을 넣었으면, AI가 상상해서 만드는
+  // _w3dGenerateBackSide 경로를 아예 안 타고, 그 실제 사진을 azimuth 180으로 바로 World Labs에
+  // 넘김 — 진짜 사진이라 AI 예측보다 훨씬 정확하고 자연스럽게 이어짐. 이 경로에서는 자동
+  // 파노라마 보정(_needsAutoPano)도 건너뜀 — 이미 실제 사진 2장으로 구성이 확실해서 필요 없음.
+  var _hasRealOpposite = !!tab.oppositeImg;
+  var _needsAutoPano = W3D_AUTOPANO_ENABLED && !tab.isPano && !_multiAngleOn && !_hasRealOpposite;
 
   _w3dEnsurePublicUrl(srcImg).then(function(publicUrl){
+    if(_hasRealOpposite){
+      if(statusEl) statusEl.textContent='반대쪽 뷰 사진 업로드 중...';
+      return _w3dEnsurePublicUrl(tab.oppositeImg).then(function(oppositeUrl){
+        return {multi:true, front:publicUrl, opposite:oppositeUrl};
+      }).catch(function(err){
+        console.warn('[VR 투어] 반대쪽 뷰 업로드 실패, 원본 사진만 사용:', err);
+        return {url: publicUrl, isPano: !!tab.isPano};
+      });
+    }
     if(_multiAngleOn){
       if(statusEl) statusEl.textContent='좌측 각도 생성 중...';
       return new Promise(function(resolve){
@@ -19204,7 +19200,8 @@ function _w3dTabStart(){
         {url: imgResult.front, azimuth: 0}
       ].concat(imgResult.left ? [{url: imgResult.left, azimuth: -20}] : [])
         .concat(imgResult.right ? [{url: imgResult.right, azimuth: 20}] : [])
-        .concat(imgResult.back ? [{url: imgResult.back, azimuth: 180}] : []),
+        .concat(imgResult.back ? [{url: imgResult.back, azimuth: 180}] : [])
+        .concat(imgResult.opposite ? [{url: imgResult.opposite, azimuth: 180}] : []),
       model: _w3dModelForQuality(), // '기본'=marble-1.1(표준), '미니'=marble-1.0-draft(저가 초안)
       displayName:'CloverAI 3D Tour'
     } : {
