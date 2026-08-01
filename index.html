@@ -10671,6 +10671,10 @@ function _autoRoomPromptFor(basePrompt, typeName){
   var anchors=(spTab.autoRoomIntAnchors||[]).filter(function(a){return a.img;});
   var imgs=_autoRoomImagesFor(typeName);
   var prompt;
+  // ⚠️ 요청 반영: "이미지가 2~3장씩 콜라주로 합쳐져서 나온다"는 지적이 지시문을 끝에 넣어도
+  // 계속 재현돼서, 프롬프트 맨 앞에도 짧고 강하게 한 번 더 반복해서 넣음(끝에도 상세 버전이
+  // 또 있음 — 앞뒤로 두 번 강조).
+  prompt = 'Generate exactly ONE single photograph (not 2, not 3, not a grid or collage of multiple images) showing: ';
   // ⚠️ 방향 전환(요청 반영): "이름표가 일치하면 그 사진을 그대로 편집"하던 방식을 없앰 —
   // "거실 사진을 넣으면 거실 만들 때 참고하라는 거지, 그 사진을 그대로 쓰라는 게 아니다"는
   // 지적이 맞음. 이제 이름표가 일치하든 안 하든 상관없이 모든 뷰를 항상 새로 상상해서
@@ -10678,11 +10682,11 @@ function _autoRoomPromptFor(basePrompt, typeName){
   // _autoRoomBuildSingleAnchorPrompt(둘 다 "이 사진을 그대로 편집하지 말고 새로 상상해서
   // 그려라"는 지시가 이미 들어있음)로 통일.
   if(extAnchors.length && anchors.length){
-    prompt = _autoRoomBuildFusedPrompt(basePrompt, typeName);
+    prompt = prompt + _autoRoomBuildFusedPrompt(basePrompt, typeName);
   } else {
     var anchorIsExt = !!extAnchors.length;
     var anchorLabel = anchorIsExt ? '건물 외관' : '실내 공간';
-    prompt = _autoRoomBuildSingleAnchorPrompt(basePrompt, anchorIsExt, anchorLabel, typeName);
+    prompt = prompt + _autoRoomBuildSingleAnchorPrompt(basePrompt, anchorIsExt, anchorLabel, typeName);
   }
   var _fidelitySuffix = '';
   if(spTab.autoRoomFidelity==='loose'){
@@ -10713,17 +10717,31 @@ function _autoRoomGenerateStep(idx){
   var typeName=allTypes[idx];
   var basePrompt=spTab.autoRoomPrompt.trim() || '업로드한 사진에 보이는 현재 스타일(색감, 마감재, 조명 톤, 소재의 디자인 언어)을 자연스럽게 유지하면서 전체적인 완성도와 사실감을 높여줘.';
   var prompt = _autoRoomPromptFor(basePrompt, typeName);
-  var imgs = _autoRoomImagesFor(typeName);
-  // ⚠️ 요청 반영: "영감만 얻기를 골라도 색감·마감재·가구가 업로드한 참고 사진이랑 너무 똑같다"
-  // — 텍스트로 아무리 강하게 "따라하지 마라"고 해도, 실제로 그 참고 사진 자체를 이미지로 계속
-  // 같이 넣어주면 이미지 편집 모델은 텍스트보다 "실제로 보이는 이미지"에 훨씬 강하게 끌려가는
-  // 경향이 있음(이게 진짜 원인으로 보임). 그래서 "영감만 얻기"를 골랐을 때는 업로드한 원본
-  // 참고 사진 자체를 참고 이미지 목록에서 아예 빼고(주 이미지 하나만 구조 파악용으로 남김),
-  // 색감·스타일은 순수하게 텍스트 지시만으로 새로 창작하게 함 — 이러면 시각적으로 끌려갈
-  // 대상 자체가 없어져서 진짜 다르게 나올 가능성이 훨씬 높아짐.
-  if(spTab.autoRoomFidelity==='loose' && imgs.ref){
-    imgs = {primary: imgs.primary, ref: null};
+  // ⚠️ 요청 반영(핵심 수정): "영감만 얻기를 골라도 여전히 비슷하게 나온다"는 지적 — 참고 이미지를
+  // ref 목록에서 빼는 것만으론 부족했음, 왜냐하면 여전히 "주 이미지"(업로드한 사진 그 자체)를
+  // 이미지 편집 모델의 기준으로 쓰고 있어서, 편집 모델 특성상 원본의 색감·질감을 강하게
+  // 유지하려는 경향이 있었음. "영감만 얻기"는 아예 이미지 편집이 아니라 순수 텍스트만으로
+  // 새로 생성(text-to-image)하는 방식으로 완전히 분리함 — 참고할 이미지 자체가 없으니 시각적으로
+  // 끌려갈 대상이 원천적으로 사라짐.
+  if(spTab.autoRoomFidelity==='loose'){
+    var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
+    var _looseP = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
+    falRun('fal-ai/bytedance/seedream-v4.5', {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1}, function(d){
+      var resultUrl=falExtractImageUrl(d);
+      if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomGenerateStep(idx+1); return; }
+      st.results[idx]={url:resultUrl};
+      var isExtType0 = _isExteriorViewType(typeName);
+      if(isExtType0){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
+      else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
+      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'seedream', spTab.autoRoomResolution||'1K');
+      _autoRoomGenerateStep(idx+1);
+    }, function(err){
+      st.results[idx]={error:String(err).slice(0,120)};
+      _autoRoomGenerateStep(idx+1);
+    }, {wf:'space', resolution:spTab.autoRoomResolution||'1K'});
+    return;
   }
+  var imgs = _autoRoomImagesFor(typeName);
   var task={id:Date.now()+idx, img:imgs.primary, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
   // ⚠️ 요청 반영: "뷰마다 건물이 조금씩 다르게 나온다"는 지적 — 각 뷰가 원본 기준사진 하나만
   // 보고 매번 독립적으로 새로 상상하다 보니, 특히 기준사진에서 안 보이는 각도(측면·후면 등)는
@@ -10744,6 +10762,12 @@ function _autoRoomGenerateStep(idx){
     var _genRefsToUse = genPool.length>1 ? [genPool[0], genPool[genPool.length-1]] : genPool.slice(-2);
     chainedRefs = chainedRefs.concat(_genRefsToUse);
   }
+  // ⚠️ 버그 수정: "이미지 2~3장이 한 장에 콜라주로 합쳐져서 나온다"는 지적 — 확인해보니 주
+  // 이미지 1장 + 참고 이미지 최대 4장, 총 최대 5장까지 한꺼번에 넣어주고 있었음. 이미지를
+  // 한꺼번에 너무 많이 주면 AI가 "여러 장을 합쳐서 보여줘야 하나" 혼동해서 격자·콜라주로
+  // 만드는 경향이 있는 것으로 보임 — 참고 이미지는 최대 2장까지만(일관성 유지에 가장 중요한
+  // 것 우선) 줄임. 일관성 기록(genPool)이 있으면 그게 최우선, 없으면 원래 앵커 참고.
+  if(chainedRefs.length>2) chainedRefs = chainedRefs.slice(0,2);
   getTab('space').refs = chainedRefs;
   // ⚠️ 되돌림: "레퍼런스 비율 그대로 강제"가 오히려 컨셉확장 자체의 "출력 비율" 선택(mkAspectRatio,
   // 예: 9:16 쇼츠 비율)을 무시하게 만드는 버그였음 — 컨셉확장에도 자체 비율 선택 UI가 있으므로,
@@ -10778,6 +10802,28 @@ function _autoRoomRetryOne(idx){
   var typeName=allTypes[idx];
   var basePrompt=spTab.autoRoomPrompt.trim() || '업로드한 사진에 보이는 현재 스타일(색감, 마감재, 조명 톤, 소재의 디자인 언어)을 자연스럽게 유지하면서 전체적인 완성도와 사실감을 높여줘.';
   var prompt = _autoRoomPromptFor(basePrompt, typeName);
+  // ⚠️ "이 뷰만 다시 생성"에도 동일하게 적용 — 영감만 얻기는 순수 텍스트 생성으로 분리.
+  if(spTab.autoRoomFidelity==='loose'){
+    var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
+    var _looseP2 = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
+    falRun('fal-ai/bytedance/seedream-v4.5', {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1}, function(d){
+      var resultUrl=falExtractImageUrl(d);
+      if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; st.running=false; renderSB(); return; }
+      st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
+      st.running=false;
+      var isExtType0b = _isExteriorViewType(typeName);
+      if(isExtType0b){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
+      else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
+      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'seedream', spTab.autoRoomResolution||'1K');
+      _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, typeName);
+      renderSB();
+    }, function(err){
+      st.results[idx]={error:String(err).slice(0,120)};
+      st.running=false;
+      renderSB();
+    }, {wf:'space', resolution:spTab.autoRoomResolution||'1K'});
+    return;
+  }
   var imgs = _autoRoomImagesFor(typeName);
   var task={id:Date.now()+idx, img:imgs.primary, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
   var origRefs = getTab('space').refs;
@@ -10788,6 +10834,7 @@ function _autoRoomRetryOne(idx){
     var _genRefsToUse2 = genPool2.length>1 ? [genPool2[0], genPool2[genPool2.length-1]] : genPool2.slice(-2);
     chainedRefs2 = chainedRefs2.concat(_genRefsToUse2);
   }
+  if(chainedRefs2.length>2) chainedRefs2 = chainedRefs2.slice(0,2);
   getTab('space').refs = chainedRefs2;
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
