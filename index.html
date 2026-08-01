@@ -10628,16 +10628,16 @@ function _autoRoomImagesFor(typeName){
   var extAnchors=(spTab.autoRoomExtAnchors||[]).filter(function(a){return a.img;});
   var intAnchors=(spTab.autoRoomIntAnchors||[]).filter(function(a){return a.img;});
   var targetIsExt=_isExteriorViewType(typeName);
-  // ⚠️ 버그 수정: 건물 외관을 여러 장(이름표 포함)으로 확장했는데, 이 함수는 옛날 단일 필드
-  // (autoRoomExtImg)만 보고 있어서 새로 추가한 외관 앵커들이 실제로는 전혀 안 쓰이고 있었음 —
-  // 실내와 완전히 대칭되는 구조로 다시 씀: 이름표가 일치하는 앵커가 있으면(외관이든 실내든)
-  // 그 실제 사진을 그대로 쓰고, 나머지 앵커들(외관+실내 섞어서)은 스타일 참고 이미지로 붙임.
+  // ⚠️ 방향 전환(요청 반영): 이름표가 일치하는 앵커가 있으면(외관이든 실내든) 여전히 "가장
+  // 관련있는 사진"으로 주 이미지에 우선 배정하지만(더 정확한 참고가 됨), 이제 이 사진을 그대로
+  // 편집하는 게 아니라 어디까지나 "참고 자료"로만 씀 — 실제 반영 방식은 _autoRoomPromptFor에서
+  // 결정됨(이름표 일치 여부와 무관하게 항상 새로 상상해서 그림).
   var directMatch = targetIsExt
     ? extAnchors.find(function(a){return a.label===typeName;})
     : intAnchors.find(function(a){return a.label===typeName;});
   if(directMatch){
     var otherPool=extAnchors.concat(intAnchors).filter(function(a){return a!==directMatch;}).map(function(a){return a.img;}).slice(0,2);
-    return { primary: directMatch.img, ref: otherPool.length?otherPool:null, directMatch:true };
+    return { primary: directMatch.img, ref: otherPool.length?otherPool:null };
   }
   // 직접 일치하는 이름표가 없으면: 이 타겟과 같은 종류(외관이면 외관 앵커, 실내면 실내 앵커) 중
   // 첫 번째를 주 이미지로, 나머지 전부(외관+실내 섞어서, 최대 2장)를 스타일 참고로 붙여서
@@ -10655,15 +10655,13 @@ function _autoRoomPromptFor(basePrompt, typeName){
   var anchors=(spTab.autoRoomIntAnchors||[]).filter(function(a){return a.img;});
   var imgs=_autoRoomImagesFor(typeName);
   var prompt;
-  if(imgs.directMatch){
-    // ⚠️ 요청 반영: 이름표가 일치하는 실제 사진이 있는 방은 "상상"이 아니라 "이미 있는 진짜
-    // 사진을 리모델링"하는 거라, 현장사진세트/AI 견적과 같은 계열의 "실제 사진 편집" 프롬프트를
-    // 씀 — 벽·문·창문 등 구조는 원본 그대로 유지하고 스타일(재질·색감·가구)만 바꿈.
-    prompt = basePrompt + ' 첨부한 사진은 실제 "' + typeName + '" 사진입니다. 이 공간의 구조(벽·창문·문 위치)는 원본 사진 그대로 유지하고, 마감재·색감·가구·조명 등 스타일만 위 설명과 같은 방향으로 새로 디자인해주세요.';
-    if(imgs.ref && imgs.ref.length){
-      prompt += ' 추가로 첨부된 참고 이미지들은 같은 건물의 다른 부분(외관 또는 다른 방)이 이미 완성된 모습입니다 — 이 방의 스타일이 그 참고 이미지들과 같은 건물이라는 느낌이 들도록 재료·색감 계열을 통일해주세요.';
-    }
-  } else if(extAnchors.length && anchors.length){
+  // ⚠️ 방향 전환(요청 반영): "이름표가 일치하면 그 사진을 그대로 편집"하던 방식을 없앰 —
+  // "거실 사진을 넣으면 거실 만들 때 참고하라는 거지, 그 사진을 그대로 쓰라는 게 아니다"는
+  // 지적이 맞음. 이제 이름표가 일치하든 안 하든 상관없이 모든 뷰를 항상 새로 상상해서
+  // 만들고, 올려둔 사진들은 전부 "참고 자료"로만 씀 — 기존에 있던 _autoRoomBuildFusedPrompt/
+  // _autoRoomBuildSingleAnchorPrompt(둘 다 "이 사진을 그대로 편집하지 말고 새로 상상해서
+  // 그려라"는 지시가 이미 들어있음)로 통일.
+  if(extAnchors.length && anchors.length){
     prompt = _autoRoomBuildFusedPrompt(basePrompt, typeName);
   } else {
     var anchorIsExt = !!extAnchors.length;
@@ -10675,8 +10673,13 @@ function _autoRoomPromptFor(basePrompt, typeName){
     _fidelitySuffix = ' ⚠️ 반영도 설정(영감만 얻기) — 매우 중요: 위에서 뭐라고 했든, 참고 이미지를 살짝 참고만 하는 수준이 아니라 확실히 새로 창작해야 합니다. 컬러 톤(벽·바닥·가구의 색 조합)은 참고 이미지와 다른 새로운 팔레트로 완전히 바꾸세요. 마감재 종류(예: 참고 이미지가 우드면 이번엔 스톤이나 콘크리트, 참고 이미지가 밝은 톤이면 이번엔 어두운 톤 등)도 다른 것으로 바꾸세요. 가구는 같은 카테고리(예: 소파는 소파, 테이블은 테이블)로 기능은 유지하되, 구체적인 디자인·형태·색상은 참고 이미지와 분명히 다른 것으로 새로 창작하세요. 결과물을 참고 이미지 옆에 나란히 놓았을 때 "완전히 다른 디자인이네"라는 인상을 줘야 합니다 — 여전히 비슷해 보이면 실패입니다.';
   } else if(spTab.autoRoomFidelity==='medium'){
     _fidelitySuffix = ' ⚠️ 반영도 설정(비슷하게) — 중요: 참고 이미지와 분위기·색감 계열·스타일 장르는 비슷하게 만들되, 정확한 형태·구조·마감재의 세부 디테일까지 그대로 베끼지 마세요. 저작권이 있는 원본을 그대로 복제한 것처럼 보이면 안 됩니다 — 같은 스타일 계열의 다른 버전으로 창작한 느낌이어야 합니다.';
+  } else if(spTab.autoRoomFidelity==='tight'){
+    // ⚠️ 버그 수정: "최대한 동일하게"를 골라도 위 기본 프롬프트(_autoRoomBuildFusedPrompt 등)
+    // 자체에 "그대로 복사하지 말고 소품·가구는 매번 다르게 창작하라"는 지시가 이미 깔려있어서,
+    // tight 모드가 그 지시와 충돌해 사실상 아무 효과가 없었음(medium이랑 결과가 비슷했을 것).
+    // 위에서 뭐라고 했든 이 문구가 최종적으로 우선하도록 명확히 override함.
+    _fidelitySuffix = ' ⚠️ 반영도 설정(최대한 동일하게) — 최우선 지시, 위에서 "그대로 복사하지 말라"거나 "가구를 다르게 창작하라"고 했더라도 이 지시가 그것보다 우선합니다: 첨부된 참고 이미지(들)의 색감·마감재 종류·가구 디자인·소품 배치를 최대한 가깝게 재현하세요 — 벽·바닥·천장의 색상과 재질, 가구(소파·테이블·의자 등)의 구체적인 형태·소재·색상, 조명 기구의 디자인, 소품 구성까지 참고 이미지와 거의 동일한 수준으로 맞추는 게 목표입니다. 이 뷰가 보여주는 각도·구역에 맞게 구도만 새로 잡되, 그 안의 디자인 요소들은 참고 이미지를 최대한 충실히 따라가세요.';
   }
-  // 'tight'(최대한 동일하게)는 각 분기에 이미 있는 강한 지시를 그대로 두고 별도 문구를 안 붙임.
   var _spaceConsistencyRule = _isExteriorViewType(typeName) ? '' : INTERIOR_CONSISTENCY_RULE;
   var _disambig = ROOM_TYPE_DISAMBIGUATION[typeName] || '';
   return prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + NO_BRAND_TRADEMARK_RULE;
@@ -10713,18 +10716,11 @@ function _autoRoomGenerateStep(idx){
     chainedRefs = chainedRefs.concat(_genRefsToUse);
   }
   getTab('space').refs = chainedRefs;
-  // ⚠️ 버그 수정: "가로 비율 레퍼런스를 넣었는데 세로로 찌그러져 보인다" — 원인을 찾아보니,
-  // 이미지 생성 비율 결정 로직(runNanoBanana)이 getTab(G.wf).forcedAspect를 읽는데, 컨셉확장도
-  // G.wf==='spaceset'이라 "공간 컨셉 디자인" 수동 모드(현장사진세트)의 "고급 설정 > 출력 비율"에서
-  // 골라둔 값(예: 쇼츠용 9:16)을 그대로 물려받고 있었음 — 컨셉확장은 원래 이 설정 자체가 없었고
-  // "레퍼런스 사진 비율 그대로"가 맞는 동작인데, 두 모드가 같은 tab 객체(spTab.forcedAspect)를
-  // 공유해서 생긴 문제. 여기서만 잠깐 'auto'로 바꿔서(레퍼런스 원본 비율을 그대로 측정해서 쓰게)
-  // 호출하고 끝나면 원래 값으로 복원함 — 수동 모드에서 골라둔 값은 그대로 유지됨.
-  var origForcedAspect = spTab.forcedAspect;
-  spTab.forcedAspect = 'auto';
+  // ⚠️ 되돌림: "레퍼런스 비율 그대로 강제"가 오히려 컨셉확장 자체의 "출력 비율" 선택(mkAspectRatio,
+  // 예: 9:16 쇼츠 비율)을 무시하게 만드는 버그였음 — 컨셉확장에도 자체 비율 선택 UI가 있으므로,
+  // 사용자가 고른 값(getTab('spaceset').forcedAspect)을 그대로 존중해야 함. 강제 'auto' 덮어쓰기를 제거.
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
-    spTab.forcedAspect = origForcedAspect;
     st.results[idx]={url:resultUrl};
     if(isExtType){
       if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[];
@@ -10737,7 +10733,6 @@ function _autoRoomGenerateStep(idx){
     _autoRoomGenerateStep(idx+1);
   }, function(err){
     getTab('space').refs = origRefs;
-    spTab.forcedAspect = origForcedAspect;
     st.results[idx]={error:String(err).slice(0,120)};
     _autoRoomGenerateStep(idx+1);
   });
@@ -10765,11 +10760,8 @@ function _autoRoomRetryOne(idx){
     chainedRefs2 = chainedRefs2.concat(_genRefsToUse2);
   }
   getTab('space').refs = chainedRefs2;
-  var origForcedAspect2 = spTab.forcedAspect;
-  spTab.forcedAspect = 'auto';
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
-    spTab.forcedAspect = origForcedAspect2;
     st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
     st.running=false;
     if(isExtType2){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
@@ -10781,7 +10773,6 @@ function _autoRoomRetryOne(idx){
     renderSB();
   }, function(err){
     getTab('space').refs = origRefs;
-    spTab.forcedAspect = origForcedAspect2;
     st.results[idx]={error:String(err).slice(0,120)};
     st.running=false;
     renderSB();
