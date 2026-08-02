@@ -18941,6 +18941,16 @@ function falPoll(baseUrl, reqId, onDone, onErr, attempt) {
   })
   .catch(function(e){
     console.warn('[FAL poll error] attempt', attempt, ':', e.message);
+    // ⚠️ 버그 수정: "아무것도 안 해도 에러가 계속 뜬다" — attempt 500까지(최대 25분) 3초 간격으로
+    // 무한정 재시도하고 있어서, baseUrl 자체가 잘못됐거나 서버가 계속 죽어있는 경우엔 사용자가
+    // 아무것도 안 해도 콘솔에 에러가 계속 쌓이면서 화면은 "생성 중..."에 영원히 멈춰있었음.
+    // "Unexpected end of JSON input"처럼 매번 똑같은 파싱 에러가 10번 넘게 연속으로 나면(= 일시적
+    // 네트워크 문제가 아니라 구조적으로 안 되는 상황), 굳이 25분을 더 기다리지 말고 여기서
+    // 명확한 에러로 빨리 포기해서 사용자가 바로 재시도할 수 있게 함.
+    if(attempt > 12 && e.message.indexOf('JSON') > -1){
+      onErr('서버 응답 오류가 반복되고 있어요 (baseUrl: '+baseUrl+'). 새로고침 후 다시 시도해주세요.');
+      return;
+    }
     if(attempt > 3 && e.message.indexOf('failed') > -1) {
       // Status endpoint consistently failing - try result directly
       if(attempt === 10) {
@@ -19959,18 +19969,31 @@ function _resumeActiveJobs(){
 function falRun(modelId, input, onDone, onErr, billingCtx) {
   falSubmit(modelId, input, function(reqId, responseUrl){
     // Build base URL for status/result polling (strip subpath like /edit, /image-to-video)
-    // ⚠️ 버그 수정: "Path /seedream-v4.5 not found" 에러 발견 — 'fal-ai/bytedance/seedream-v4.5'처럼
-    // 경로가 3단(회사/모델) 구조인 모델에서, fal.ai가 돌려주는 response_url이 예상과 다른 형태라
-    // (예: ".../fal-ai/bytedance/requests/{id}", 뒤의 "/seedream-v4.5"가 빠짐) 정규식으로 잘라낸
-    // baseUrl이 실제 결과를 가져올 수 없는 잘못된 경로가 되는 문제가 있었음. response_url을
-    // 믿지 말고, 우리가 실제로 제출한 modelId로 baseUrl을 직접 만드는 걸 항상 우선하도록 바꿈 —
-    // 이게 우리가 호출한 그 경로 그대로이므로 항상 정확함.
+    // ⚠️ 버그 수정 2단계: 지난번에 "seedream 결과 못 가져오는 버그"(bytedance/seedream-v4.5,
+    // 3단 경로 모델)를 고친다고 response_url을 아예 안 믿게 바꿨는데, 그게 오히려 원래 잘 되던
+    // nano-banana-2/edit(2단 경로 모델, 대부분의 일반 렌더링이 여기 해당) 쪽에서 500 에러가
+    // 반복되게 만든 회귀 버그였음 — response_url이 실제로 필요한 케이스가 있었던 것으로 보임.
+    // 이제 둘 다 되게: modelId의 세그먼트 개수를 보고, 3단 이상(회사/모델명/버전처럼 나뉘는
+    // bytedance류)일 때만 modelId 직접 구성 방식을 쓰고, 그 외(대부분의 2단 모델)는 원래처럼
+    // response_url을 우선 신뢰함.
     var knownSubpaths = ['/edit', '/image-to-video', '/text-to-video', '/outpaint', '/kontext', ];
     var base = modelId;
     knownSubpaths.forEach(function(sp){
       if(base.endsWith(sp)) base = base.slice(0, base.length - sp.length);
     });
-    var baseUrl = FAL_QUEUE + '/' + base;
+    var _segCount = base.split('/').length;
+    var baseUrl;
+    if(_segCount >= 3){
+      // 3단 이상 경로(예: fal-ai/bytedance/seedream-v4.5) — response_url이 마지막 세그먼트를
+      // 빼먹는 경우가 있어서(확인된 버그), modelId로 직접 구성한 경로를 신뢰함.
+      baseUrl = FAL_QUEUE + '/' + base;
+    } else if(responseUrl) {
+      // 일반적인 2단 모델(예: fal-ai/nano-banana-2) — response_url이 실제 큐 경로를 정확히
+      // 반영하므로 이걸 우선 신뢰함(원래 동작으로 복원).
+      baseUrl = responseUrl.replace(/\/requests\/[^\/]+.*$/, '');
+    } else {
+      baseUrl = FAL_QUEUE + '/' + base;
+    }
     console.log('[FAL] baseUrl for polling:', baseUrl);
     var _modelLabel=(modelId.split('/')[1]||modelId);
     _saveActiveJob(reqId, baseUrl, _modelLabel);
