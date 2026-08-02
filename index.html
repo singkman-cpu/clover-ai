@@ -9807,6 +9807,24 @@ function mkMultiRoomSpace(p){
   subModeWrap.appendChild(subModeRow);
   p.appendChild(subModeWrap);
 
+  // ⚠️ 요청 반영: "전체 리셋 버튼 만들어주면 그때 다 업로드한 거 다 리셋되게 해줘" — 현장사진세트
+  // (방 목록·참고 디자인 이미지)와 컨셉확장(건물외관·실내 다중 앵커) 양쪽에 올려둔 모든 이미지를
+  // 한 번에 지우고, IndexedDB에 저장된 것도 같이 지움. 두 모드가 같은 화면 상단에 있으니 버튼도
+  // 공용으로 하나만 둠.
+  var resetAllBtn=mk('button','');resetAllBtn.type='button';resetAllBtn.textContent='🗑️ 전체 리셋 (업로드한 사진 모두 삭제)';
+  resetAllBtn.style.cssText='width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#f87171;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit';
+  resetAllBtn.onclick=function(){
+    if(!confirm('현장사진세트·컨셉확장에 올려둔 사진이 모두 삭제됩니다. 계속할까요?')) return;
+    spTab.multiRoomImages=[];
+    spTab.multiRoomRefDesignImg=null;
+    spTab.autoRoomExtAnchors=[{img:null,label:'파사드뷰(정면)'}];
+    spTab.autoRoomIntAnchors=[{img:null,label:SPACE_CATEGORIES[spTab.autoRoomCategory||'residential'].types[0]}];
+    idbSaveDraft(_multiRoomDraftKey, {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
+    idbSaveDraft(_autoRoomDraftKey, {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity}).catch(function(){});
+    renderSB();
+  };
+  p.appendChild(resetAllBtn);
+
   if(spTab.multiRoomSubMode==='auto'){ mkAutoRoomCamera(p); return; }
 
   mkNote(p,'<strong style="color:var(--ac)">🏢 공간 컨셉 디자인</strong><br>공간별 실제 사진을 올려주세요. <b style="color:var(--t)">벽·창문 구조는 그대로 유지</b>하고, 색감·마감재·소품·가구 톤만 아래 참고 디자인 이미지 하나로 통일해서 만들어요.<br>🏗️ "건축 외관"을 고르면 조감뷰·파사드뷰·측면뷰 등 여러 앵글의 외관도 같은 방식으로 만들 수 있어요.<br>💡 방마다 전용 참고 이미지를 추가하면 더 정확해져요 — 일부만 넣어도 괜찮아요.<br><span style="font-size:10px;color:var(--m2)">사진 없이 AI가 상상해서 만들어주길 원하면 "컨셉 확장" 모드를 써주세요.</span>');
@@ -10343,6 +10361,24 @@ function mkAutoRoomCamera(p){
   if(!spTab.autoRoomCategory || spTab.autoRoomCategory==='exterior') spTab.autoRoomCategory='residential';
   var currentTypes=_autoRoomTypesForCategory(spTab.autoRoomCategory);
   var currentIntTypes=SPACE_CATEGORIES[spTab.autoRoomCategory].types; // 건축외관 뷰 제외한 이 카테고리의 실내 타입만
+  // ⚠️ 버그 수정: "레퍼런스 이미지 올린 게 나갔다 들어오면 사라진다" — 현장사진세트(수동 모드)는
+  // 이미 IndexedDB에 저장하고 있었는데, 이번 세션에 새로 만든 컨셉확장의 다중 앵커(건물외관·
+  // 실내 사진)는 저장 로직 자체가 빠져있어서 새로고침·재접속하면 다 날아가고 있었음 — 똑같은
+  // 방식(IndexedDB, 디바운스 저장)으로 맞춤.
+  if(!spTab.autoRoomExtAnchors && !spTab._arDraftLoadedOnce){
+    spTab._arDraftLoadedOnce=true;
+    spTab.autoRoomExtAnchors=[{img:null,label:'파사드뷰(정면)'}];
+    spTab.autoRoomIntAnchors=[{img:null,label:currentIntTypes[0]}];
+    idbLoadDraft(_autoRoomDraftKey, 7*24*60*60*1000).then(function(data){
+      if(!data) return;
+      spTab.autoRoomExtAnchors = (data.autoRoomExtAnchors && data.autoRoomExtAnchors.length) ? data.autoRoomExtAnchors : spTab.autoRoomExtAnchors;
+      spTab.autoRoomIntAnchors = (data.autoRoomIntAnchors && data.autoRoomIntAnchors.length) ? data.autoRoomIntAnchors : spTab.autoRoomIntAnchors;
+      spTab.autoRoomPrompt = data.autoRoomPrompt || spTab.autoRoomPrompt || '';
+      spTab.autoRoomCategory = data.autoRoomCategory || spTab.autoRoomCategory;
+      spTab.autoRoomFidelity = data.autoRoomFidelity || spTab.autoRoomFidelity;
+      if(G.wf==='spaceset') renderSB();
+    }).catch(function(){});
+  }
   // ⚠️ 요청 반영: 건물 외관도 실내처럼 여러 장(뷰 이름표 포함)을 넣을 수 있게 확장 — 최대 4장,
   // 투시뷰·좌측면뷰·우측면뷰·파사드뷰처럼 이름표가 붙은 뷰는 AI가 상상 안 하고 그 실제 사진을
   // 그대로 기준으로 씀(실내 앵커와 완전히 동일한 방식).
@@ -10360,6 +10396,18 @@ function mkAutoRoomCamera(p){
 
   if(!spTab.autoRoomSelected) spTab.autoRoomSelected=currentTypes.slice();
   if(spTab.autoRoomPrompt==null) spTab.autoRoomPrompt='';
+
+  // 렌더될 때마다(=뭔가 바뀔 때마다) 자동 저장 — 디바운스 처리(연속 변경 중엔 마지막 것만 저장).
+  clearTimeout(window._autoRoomDraftSaveTimer);
+  window._autoRoomDraftSaveTimer = setTimeout(function(){
+    idbSaveDraft(_autoRoomDraftKey, {
+      autoRoomExtAnchors: spTab.autoRoomExtAnchors,
+      autoRoomIntAnchors: spTab.autoRoomIntAnchors,
+      autoRoomPrompt: spTab.autoRoomPrompt,
+      autoRoomCategory: spTab.autoRoomCategory,
+      autoRoomFidelity: spTab.autoRoomFidelity
+    }).catch(function(){});
+  }, 600);
 
   mkNote(p,'<strong style="color:var(--ac)">🎥 AI 카메라 자동</strong><br>건물 외관·실내 사진 둘 다 뷰 이름표를 붙여서 여러 장 올려주세요(최소 1장). 이름표 붙인 뷰는 그 실제 사진 기준으로, 사진 없는 나머지 뷰는 AI가 스타일에 맞춰 상상해서 만들어요.<br><span style="font-size:10px;color:#f59e0b">⚠️ 상상해서 만드는 부분은 실제 구조와 다를 수 있어요 — 홍보용 컨셉 이미지 용도예요.</span>');
 
@@ -12431,7 +12479,7 @@ function _draftLoad(key, maxAgeMs){
   }catch(e){ return null; }
 }
 function _draftClear(key){ try{ localStorage.removeItem(key); }catch(e){} }
-var _shortsDraftKey='clover_shorts_draft', _proposalDraftKey='clover_proposal_draft', _multiRoomDraftKey='clover_multiroom_draft';
+var _shortsDraftKey='clover_shorts_draft', _proposalDraftKey='clover_proposal_draft', _multiRoomDraftKey='clover_multiroom_draft', _autoRoomDraftKey='clover_autoroom_draft';
 
 // 쇼츠 이미지 중 blob: 주소(외부 파일 업로드 시 성능을 위해 쓰는 임시 주소, 새로고침하면 깨짐)를
 // 실제 이미지 데이터(base64)로 바꿔서 백업 저장 — 갤러리에서 가져온 이미지(실제 https 주소)는
