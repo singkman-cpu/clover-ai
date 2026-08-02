@@ -10820,14 +10820,18 @@ function _autoRoomGenerateStep(idx){
   if(spTab.autoRoomFidelity==='loose'){
     var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
     var _looseP = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
-    falRun('fal-ai/bytedance/seedream-v4.5', {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1}, function(d){
+    // ⚠️ 요청 반영: "영감만 얻기가 문제네" — bytedance/seedream-v4.5가 경로 관련 오류를 계속
+    // 일으켜서(404/405 등, 3단 경로 모델이라 큐 경로 추정이 자꾸 어긋남), 이미 이 앱 전체에서
+    // 안정적으로 잘 쓰이고 있는 nano-banana-2(2단 경로, 텍스트만으로도 생성 가능한 엔드포인트)로
+    // 바꿈 — 별도 이미지 없이 프롬프트만 넣으면 순수 텍스트 생성이 됨.
+    falRun('fal-ai/nano-banana-2', {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1}, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomGenerateStep(idx+1); return; }
       st.results[idx]={url:resultUrl};
       var isExtType0 = _isExteriorViewType(typeName);
       if(isExtType0){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
       else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
-      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'seedream', spTab.autoRoomResolution||'1K');
+      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'nano2', spTab.autoRoomResolution||'1K');
       _autoRoomGenerateStep(idx+1);
     }, function(err){
       st.results[idx]={error:String(err).slice(0,120)};
@@ -10900,7 +10904,7 @@ function _autoRoomRetryOne(idx){
   if(spTab.autoRoomFidelity==='loose'){
     var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
     var _looseP2 = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
-    falRun('fal-ai/bytedance/seedream-v4.5', {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1}, function(d){
+    falRun('fal-ai/nano-banana-2', {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1}, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; st.running=false; renderSB(); return; }
       st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
@@ -10908,7 +10912,7 @@ function _autoRoomRetryOne(idx){
       var isExtType0b = _isExteriorViewType(typeName);
       if(isExtType0b){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
       else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
-      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'seedream', spTab.autoRoomResolution||'1K');
+      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'nano2', spTab.autoRoomResolution||'1K');
       _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, typeName);
       renderSB();
     }, function(err){
@@ -18947,8 +18951,11 @@ function _falResultGet(baseUrl, reqId){
     _falProxyCall('result', {baseUrl:baseUrl, reqId:reqId}, resolve, function(e){ reject(new Error(e)); });
   });
 }
-function falPoll(baseUrl, reqId, onDone, onErr, attempt) {
+function falPoll(baseUrlOrCandidates, reqId, onDone, onErr, attempt, candidateIdx){
   if(G_CANCEL_IDS[reqId]){ console.log('[FAL] cancelled:', reqId); return; }
+  var candidates = Array.isArray(baseUrlOrCandidates) ? baseUrlOrCandidates : [baseUrlOrCandidates];
+  candidateIdx = candidateIdx || 0;
+  var baseUrl = candidates[candidateIdx];
   if(attempt > 500){ onErr('타임아웃 (장시간 미응답) - fal.ai Dashboard에서 상태 확인하세요'); return; }
   _falStatusGet(baseUrl, reqId)
   .then(function(d){
@@ -18984,35 +18991,39 @@ function falPoll(baseUrl, reqId, onDone, onErr, attempt) {
       }
     } else {
       var wait = attempt < 15 ? 300 : attempt < 30 ? 500 : 1000;
-      setTimeout(function(){ falPoll(baseUrl, reqId, onDone, onErr, attempt + 1); }, wait);
+      setTimeout(function(){ falPoll(candidates, reqId, onDone, onErr, attempt + 1, candidateIdx); }, wait);
     }
   })
   .catch(function(e){
-    console.warn('[FAL poll error] attempt', attempt, ':', e.message);
-    // ⚠️ 버그 수정: "아무것도 안 해도 에러가 계속 뜬다" — attempt 500까지(최대 25분) 3초 간격으로
-    // 무한정 재시도하고 있어서, baseUrl 자체가 잘못됐거나 서버가 계속 죽어있는 경우엔 사용자가
-    // 아무것도 안 해도 콘솔에 에러가 계속 쌓이면서 화면은 "생성 중..."에 영원히 멈춰있었음.
-    // "Unexpected end of JSON input"처럼 매번 똑같은 파싱 에러가 10번 넘게 연속으로 나면(= 일시적
-    // 네트워크 문제가 아니라 구조적으로 안 되는 상황), 굳이 25분을 더 기다리지 말고 여기서
-    // 명확한 에러로 빨리 포기해서 사용자가 바로 재시도할 수 있게 함.
-    if(attempt > 12 && (e.message.indexOf('JSON') > -1 || e.message.indexOf('타임아웃') > -1 || e.message.indexOf('네트워크') > -1 || e.message.indexOf('status GET failed') > -1)){
+    console.warn('[FAL poll error] attempt', attempt, 'candidate', candidateIdx, '(', baseUrl, '):', e.message);
+    // ⚠️ 버그 수정 3단계: 후보 경로 하나가 계속 실패하면(404/405처럼 구조적으로 안 되는
+    // 상황), 25분 더 붙잡고 있지 말고 남은 다른 후보 경로로 바로 넘어가서 시도함 — 두 후보를
+    // 다 시도해보고 그래도 안 되면 그때 포기.
+    var errStr = String(e.message||'');
+    var isStructuralFail = errStr.indexOf('JSON')>-1 || errStr.indexOf('타임아웃')>-1 || errStr.indexOf('네트워크')>-1 || errStr.indexOf('status GET failed')>-1 || errStr.indexOf('404')>-1 || errStr.indexOf('405')>-1;
+    if(attempt >= 3 && isStructuralFail){
+      if(candidateIdx < candidates.length-1){
+        console.log('[FAL] 후보 경로', candidateIdx, '실패 — 다음 후보로 전환:', candidates[candidateIdx+1]);
+        falPoll(candidates, reqId, onDone, onErr, 0, candidateIdx+1);
+        return;
+      }
       onErr('서버 응답 오류가 반복되고 있어요 (baseUrl: '+baseUrl+'). 새로고침 후 다시 시도해주세요.');
       return;
     }
-    if(attempt > 3 && e.message.indexOf('failed') > -1) {
+    if(attempt > 3 && errStr.indexOf('failed') > -1) {
       // Status endpoint consistently failing - try result directly
       if(attempt === 10) {
         console.log('[FAL] Trying result endpoint directly...');
         _falResultGet(baseUrl, reqId)
         .then(function(res){
           if(res.images || res.image || res.data) { console.log('[FAL] Got result directly!'); onDone(res); }
-          else { setTimeout(function(){ falPoll(baseUrl, reqId, onDone, onErr, attempt+1); }, 3000); }
+          else { setTimeout(function(){ falPoll(candidates, reqId, onDone, onErr, attempt+1, candidateIdx); }, 3000); }
         })
-        .catch(function(){ setTimeout(function(){ falPoll(baseUrl, reqId, onDone, onErr, attempt+1); }, 3000); });
+        .catch(function(){ setTimeout(function(){ falPoll(candidates, reqId, onDone, onErr, attempt+1, candidateIdx); }, 3000); });
         return;
       }
     }
-    setTimeout(function(){ falPoll(baseUrl, reqId, onDone, onErr, attempt + 1); }, 3000);
+    setTimeout(function(){ falPoll(candidates, reqId, onDone, onErr, attempt + 1, candidateIdx); }, 3000);
   });
 }
 
@@ -20016,36 +20027,25 @@ function _resumeActiveJobs(){
 
 function falRun(modelId, input, onDone, onErr, billingCtx) {
   falSubmit(modelId, input, function(reqId, responseUrl){
-    // Build base URL for status/result polling (strip subpath like /edit, /image-to-video)
-    // ⚠️ 버그 수정 2단계: 지난번에 "seedream 결과 못 가져오는 버그"(bytedance/seedream-v4.5,
-    // 3단 경로 모델)를 고친다고 response_url을 아예 안 믿게 바꿨는데, 그게 오히려 원래 잘 되던
-    // nano-banana-2/edit(2단 경로 모델, 대부분의 일반 렌더링이 여기 해당) 쪽에서 500 에러가
-    // 반복되게 만든 회귀 버그였음 — response_url이 실제로 필요한 케이스가 있었던 것으로 보임.
-    // 이제 둘 다 되게: modelId의 세그먼트 개수를 보고, 3단 이상(회사/모델명/버전처럼 나뉘는
-    // bytedance류)일 때만 modelId 직접 구성 방식을 쓰고, 그 외(대부분의 2단 모델)는 원래처럼
-    // response_url을 우선 신뢰함.
+    // ⚠️ 버그 수정 3단계: bytedance/seedream-v4.5가 두 방식(response_url 기반, modelId 기반) 다
+    // 다른 이유로 실패하는 걸 확인함(404 "path not found" 한 번, 405 "method not allowed" 한 번) —
+    // 어느 쪽이 맞는지 미리 알 방법이 없으니, 두 후보를 다 만들어서 falPoll에 넘기고 안 되는
+    // 쪽이면 자동으로 다른 후보로 넘어가게 함(추측 대신 실제로 되는 쪽을 찾아서 씀).
     var knownSubpaths = ['/edit', '/image-to-video', '/text-to-video', '/outpaint', '/kontext', ];
     var base = modelId;
     knownSubpaths.forEach(function(sp){
       if(base.endsWith(sp)) base = base.slice(0, base.length - sp.length);
     });
-    var _segCount = base.split('/').length;
-    var baseUrl;
-    if(_segCount >= 3){
-      // 3단 이상 경로(예: fal-ai/bytedance/seedream-v4.5) — response_url이 마지막 세그먼트를
-      // 빼먹는 경우가 있어서(확인된 버그), modelId로 직접 구성한 경로를 신뢰함.
-      baseUrl = FAL_QUEUE + '/' + base;
-    } else if(responseUrl) {
-      // 일반적인 2단 모델(예: fal-ai/nano-banana-2) — response_url이 실제 큐 경로를 정확히
-      // 반영하므로 이걸 우선 신뢰함(원래 동작으로 복원).
-      baseUrl = responseUrl.replace(/\/requests\/[^\/]+.*$/, '');
-    } else {
-      baseUrl = FAL_QUEUE + '/' + base;
-    }
-    console.log('[FAL] baseUrl for polling:', baseUrl);
+    var modelIdBaseUrl = FAL_QUEUE + '/' + base;
+    var responseUrlBaseUrl = responseUrl ? responseUrl.replace(/\/requests\/[^\/]+.*$/, '') : null;
+    var candidates = [];
+    if(responseUrlBaseUrl) candidates.push(responseUrlBaseUrl);
+    if(modelIdBaseUrl && candidates.indexOf(modelIdBaseUrl)===-1) candidates.push(modelIdBaseUrl);
+    console.log('[FAL] baseUrl candidates for polling:', candidates);
+    var baseUrl = candidates[0];
     var _modelLabel=(modelId.split('/')[1]||modelId);
     _saveActiveJob(reqId, baseUrl, _modelLabel);
-    falPoll(baseUrl, reqId, function(d){ _clearActiveJob(reqId); onDone(d); }, function(e){ _clearActiveJob(reqId); onErr(e); }, 0);
+    falPoll(candidates, reqId, function(d){ _clearActiveJob(reqId); onDone(d); }, function(e){ _clearActiveJob(reqId); onErr(e); }, 0);
   }, onErr, billingCtx);
 }
 
