@@ -325,6 +325,10 @@ select option{background:var(--c2)}
   /* 결과 이미지 */
   .cmpw img{max-height:50vh!important;width:100%!important;object-fit:contain!important}
   video{max-height:50vh!important}
+  /* ⚠️ 요청 반영: "렌더링 후 아래 여러 버튼이랑 픽셀 크기 표시랑 겹치네" — 픽셀 크기 배지가
+     이미지 하단(bottom:36px)에 있는데, 모바일에선 그 아래로 고정 액션바(.sb-btm)가 겹쳐서
+     붙어버림 — 배지를 하단이 아니라 상단으로 옮겨서 겹치는 위치 자체를 피함. */
+  .px-badge{top:8px!important;bottom:auto!important}
 
   /* 모달 */
   .mbg{align-items:flex-end!important}
@@ -334,6 +338,12 @@ select option{background:var(--c2)}
   /* 탭바 */
   .mob-tabbar{display:flex!important;position:fixed!important;bottom:0!important;left:0!important;right:0!important;z-index:9999!important}
   .mob-panel{display:none!important}
+  /* ⚠️ 버그 수정(중요): "AI 견적 상세 내용이 모바일에서 안 나온다"는 지적 — 위 규칙이 .mob-panel을
+     항상 display:none!important로 숨겨두는데, .open 클래스가 붙어도(패널 열기) transform만
+     바뀌고 display는 그대로 none이라 실제로는 절대 안 보이고 있었음(투명 상태로 화면 밖에
+     숨어있는 게 아니라 아예 렌더링 자체가 안 되는 상태). .open일 때만 명시적으로 다시 보이게 함.
+  */
+  .mob-panel.open{display:block!important}
 
   /* 홈그리드 */
   .hgrid{grid-template-columns:repeat(2,1fr)!important;gap:8px!important;padding:0!important;max-width:100%!important}
@@ -2633,7 +2643,7 @@ function getBaseCost(wf,scale,resolution){
     return Math.round(baseEdit*(editRes==='2K'?1.5:1.0));
   }
   var base=wf==='video'?60:wf==='upscale'?((SCR[scale||'2x']&&SCR[scale||'2x'][G_UPSCALE_ENG])||(scale==='4x'?30:20)):(({'space':20,'render':20})[wf]||20);
-  var mult=({'1K':1.0,'2K':1.5})[res]||1.0;
+  var mult=({'1K':1.0,'2K':1.5,'4K':2.0})[res]||1.0;
   base = Math.round(base*mult);
   return base;
 }
@@ -6963,8 +6973,8 @@ var ROOM_ITEM_BREAKDOWN = {
   // [2026 재검증] 욕실 개별 기구 실측 시세: 변기 15~40만원, 비데 30~40만원, 세면대 12~40만원,
   // 욕조 35~150만원(마블~월풀), 수전류 10~45만원, 액세서리일체 5~25만원 — 표준~프리미엄 등급
   // 욕실 총액(750~1000만원대)에 위 비중을 적용하면 이 가격대와 대체로 부합함 (blog.daum.net 풍악서당)
-  bath:   [['철거·폐기물처리',0.05,'c'],['타일(벽·바닥)',0.23,'c'],['세면대',0.11,'c'],['변기',0.09,'c'],['샤워부스·욕조',0.18,'c'],['조명',0.07,'c'],['수납장',0.11,'c'],['수전·액세서리',0.09,'f'],['예비비',0.07,'c']],
-  hall:   [['철거·폐기물처리',0.05,'c'],['바닥재',0.18,'c'],['조명',0.11,'c'],['신발장',0.28,'c'],['콘솔·거울',0.18,'f'],['소품',0.10,'f'],['예비비',0.10,'c']],
+  bath:   [['철거·폐기물처리',0.05,'c'],['방수공사',0.10,'c'],['타일(벽·바닥)',0.20,'c'],['세면대',0.10,'c'],['변기',0.08,'c'],['샤워부스·욕조',0.16,'c'],['조명',0.06,'c'],['수납장',0.10,'c'],['수전·액세서리',0.08,'f'],['예비비',0.07,'c']],
+  hall:   [['철거·폐기물처리',0.05,'c'],['바닥재',0.15,'c'],['조명',0.09,'c'],['신발장',0.23,'c'],['중문',0.13,'c'],['콘솔·거울',0.15,'f'],['소품',0.08,'f'],['예비비',0.12,'c']],
   etc:    [['철거·폐기물처리',0.05,'c'],['바닥재',0.13,'c'],['붙박이장·수납',0.24,'c'],['조명',0.09,'c'],['에어컨(시스템/천장형)',0.04,'c'],['책상·화장대',0.18,'f'],['의자',0.09,'f'],['소품',0.09,'f'],['예비비',0.09,'c']],
 };
 // ── 상업공간(카페·식당·바·리테일) 항목별 breakdown ──────────────────────
@@ -7100,12 +7110,12 @@ var COMMERCIAL_BIZ_LABELS = { biz_cafe:'☕ 카페', biz_restaurant:'🍽 식당
 // 만들어둠(AI 사진 분석 또는 직접 선택으로 뺄 수 있음).
 var EXT_ITEM_BREAKDOWN = {
   remodel:[['외벽 도장·마감재 교체',0.28,'c'],['창호 교체',0.20,'c'],['옥상 방수·단열',0.15,'c'],['지붕 공사',0.10,'c'],['파사드·사인·간판',0.08,'c'],['전기·통신 인입 정비',0.07,'c'],['조경·외부공간',0.06,'c'],['예비비',0.06,'c']],
-  new:[['기존 건물 철거(해당 시)',0.07,'c'],['토목·터파기공사(굴토)',0.05,'c'],['정화조 설치(해당 시)',0.02,'c'],['골조공사(구조체)',0.20,'c'],['외벽마감재',0.12,'c'],['지붕공사',0.06,'c'],['창호공사',0.08,'c'],['설비공사(전기·기계·배관)',0.12,'c'],['내부 기본공사(바닥·벽·천장)',0.08,'c'],['지하주차장 공사(포함 시)',0.10,'c'],['조경·외부공간',0.03,'c'],['인허가·설계비',0.04,'c'],['예비비',0.03,'c']],
-  // ⚠️ 요청 반영: 증축은 예전엔 별도 항목 목록이 없어서 조용히 'remodel'로 취급되고 있었음 —
-  // 그래서 "증축" 선택해도 층수 이야기 없이 리모델링용 항목(외벽 도장·창호 교체 등)만 나왔음.
-  // 증축은 "기존 건물 구조 보강 + 새로 올리는 층의 구조체 신축"이 핵심이라 완전히 다른 항목이
-  // 필요해서 별도로 만듦.
-  addition:[['기존 구조 내진보강·안전진단',0.10,'c'],['새 층 골조공사(구조체)',0.22,'c'],['새 층 지붕공사',0.06,'c'],['외벽마감재(기존+신규 전체 통일)',0.16,'c'],['창호공사(신규 층 포함)',0.12,'c'],['설비공사(전기·기계·배관 증설)',0.12,'c'],['내부 기본공사(새 층 바닥·벽·천장)',0.09,'c'],['인허가·구조계산·설계비',0.08,'c'],['예비비',0.05,'c']]
+  // ⚠️ 요청 반영: 신뢰도 점검용으로 실제 업계 견적서에서 흔히 빠지지 않는 항목들(가설공사,
+  // 폐기물 처리비, 측량비, 감리비, 담장·대문, 외부포장 등)을 참고해서 비교해봤더니, 신축·증축
+  // 둘 다 빠진 항목이 여러 개 있었음 — 비율은 기존 항목에서 조금씩 덜어와서 전체 합이 1.0을
+  // 유지하도록 재배분함(신축 100원 짜리 파이를 다시 나눈 것뿐, 총액은 안 바뀜).
+  new:[['가설공사(비계·가림막 등)',0.03,'c'],['토목·터파기공사(굴토)',0.05,'c'],['기존 건물 철거(해당 시)',0.06,'c'],['측량비',0.01,'c'],['정화조 설치(해당 시)',0.02,'c'],['골조공사(구조체)',0.16,'c'],['외벽마감재',0.11,'c'],['지붕공사',0.05,'c'],['창호공사',0.07,'c'],['설비공사(전기·기계·배관)',0.11,'c'],['내부 기본공사(바닥·벽·천장)',0.07,'c'],['지하주차장 공사(포함 시)',0.09,'c'],['조경·외부공간',0.03,'c'],['담장·대문',0.02,'c'],['외부포장(주차장·보도블럭·아스콘)',0.02,'c'],['인허가·설계비',0.03,'c'],['감리비',0.02,'c'],['폐기물 처리비',0.02,'c'],['예비비',0.03,'c']],
+  addition:[['가설공사(비계·가림막 등)',0.03,'c'],['기존 구조 내진보강·안전진단',0.08,'c'],['기초보강(증축 하중 대응)',0.06,'c'],['새 층 골조공사(구조체)',0.19,'c'],['새 층 지붕공사',0.05,'c'],['외벽마감재(기존+신규 전체 통일)',0.14,'c'],['창호공사(신규 층 포함)',0.10,'c'],['설비공사(전기·기계·배관 증설)',0.10,'c'],['내부 기본공사(새 층 바닥·벽·천장)',0.08,'c'],['인허가·구조계산·설계비',0.06,'c'],['감리비',0.03,'c'],['폐기물 처리비',0.03,'c'],['예비비',0.05,'c']]
 };
 // ── 항목별 세부 재질 옵션 ────────────────────────────────────────────
 // "바닥재" 같은 항목을 등급이 자동으로 정해주는 대로 두지 않고, 실제로 뭘로 시공할지 직접
@@ -8808,11 +8818,16 @@ function mkBudgetTier(p){
     procImgWithTask(_task, function(resultUrl){
       getTab('space').refs = _budgetOrigSpaceRefs;
       renderFromBudgetBtn.disabled=false; renderFromBudgetBtn.innerHTML='🎨 이 견적 구성 그대로 렌더링해보기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">20cr</span>';
-      _saveResultToCloudGallery('budget', _task.id, resultUrl, tab.inputImg, 'nano2', '1K');
-      if(!G.HIST.budget) G.HIST.budget=[];
-      G.HIST.budget = G.HIST.budget.filter(function(x){return !x.preview && x.id!==_budgetLoadingId;});
-      G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:tab.inputImg, result:resultUrl, origThumb:null, tags:['견적 렌더링 · '+_budgetTagRoom+_budgetTagAmt], ai:'', cx:50, fav:false, wf:'budget', preview:false, budgetSnapshot:_budgetSnapForRender});
-      if(G.wf==='budget') renderMain('budget');
+      // ⚠️ 요청 반영: "예전에 쇼츠에 예산 적혀있는 이미지 넣은 거 기억하지? 그렇게 해줘" —
+      // 결과 이미지 자체에 예산 금액을 캡션 배너로 새겨넣어서, 사이드 패널 없이 이미지 한 장만
+      // 봐도(다운로드·공유해도) 얼마짜리 견적인지 바로 알 수 있게 함(쇼츠 캡션 스타일 재사용).
+      _compositeBudgetCaption(resultUrl, _budgetTagRoom+_budgetTagAmt, function(finalUrl){
+        _saveResultToCloudGallery('budget', _task.id, finalUrl, tab.inputImg, 'nano2', '1K', _budgetSnapForRender);
+        if(!G.HIST.budget) G.HIST.budget=[];
+        G.HIST.budget = G.HIST.budget.filter(function(x){return !x.preview && x.id!==_budgetLoadingId;});
+        G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:tab.inputImg, result:finalUrl, origThumb:null, tags:['견적 렌더링 · '+_budgetTagRoom+_budgetTagAmt], ai:'', cx:50, fav:false, wf:'budget', preview:false, budgetSnapshot:_budgetSnapForRender});
+        if(G.wf==='budget') renderMain('budget');
+      });
     }, function(err){
       getTab('space').refs = _budgetOrigSpaceRefs;
       renderFromBudgetBtn.disabled=false; renderFromBudgetBtn.innerHTML='🎨 이 견적 구성 그대로 렌더링해보기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">20cr</span>';
@@ -9633,7 +9648,45 @@ function _previewImageInMain(url, wf){
 // 새로고침하거나 다른 기기에서 로그인하면 전부 사라지는 상태였음(갤러리에 중복으로 보이는 것보다
 // 훨씬 심각한 문제 — 데이터 유실). executeSingleRender의 저장 로직을 재사용 가능한 함수로 뽑아서
 // 새 기능들도 전부 이걸 호출하도록 연결함.
-function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution){
+// ⚠️ 요청 반영: AI 견적 렌더링 결과 이미지 하단에 예산 금액을 캡션 배너로 새겨넣는 함수 —
+// 쇼츠 제작의 텍스트 오버레이(_shortsDrawBlankText)와 비슷한 방식으로, 이미지 자체에 금액이
+// 남아있어야 다운로드·공유해도 얼마짜리 견적인지 바로 알 수 있음. 실패해도(이미지 로드 오류 등)
+// 원본 결과는 그대로 쓸 수 있게 안전하게 원본 URL로 폴백함.
+function _compositeBudgetCaption(imgUrl, captionText, cb){
+  try{
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function(){
+      try{
+        var cv = document.createElement('canvas');
+        var bannerH = Math.round(img.naturalHeight * 0.09);
+        cv.width = img.naturalWidth;
+        cv.height = img.naturalHeight + bannerH;
+        var ctx = cv.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        // 하단 캡션 배너 (진한 배경 + 밝은 텍스트, 쇼츠 캡션과 통일된 톤)
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, img.naturalHeight, cv.width, bannerH);
+        ctx.fillStyle = '#00e5cc';
+        var fs = Math.round(bannerH * 0.42);
+        ctx.font = '800 ' + fs + 'px -apple-system, "Malgun Gothic", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('💰 ' + captionText, cv.width/2, img.naturalHeight + bannerH/2);
+        cb(cv.toDataURL('image/jpeg', 0.92));
+      }catch(e){
+        console.warn('[예산 캡션 합성] 실패, 원본 사용:', e);
+        cb(imgUrl);
+      }
+    };
+    img.onerror = function(){ console.warn('[예산 캡션 합성] 이미지 로드 실패, 원본 사용'); cb(imgUrl); };
+    img.src = imgUrl;
+  }catch(e){
+    console.warn('[예산 캡션 합성] 전체 실패, 원본 사용:', e);
+    cb(imgUrl);
+  }
+}
+function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
     var galleryId=id+'';
@@ -9644,9 +9697,13 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
         if(uploadRes.error){ console.warn('[Gallery] 업로드 실패:', uploadRes.error.message); return; }
         var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
         function saveRow(origUrlFinal){
+          // ⚠️ 버그 수정: "AI 예산 정보가 계속 사라진다"는 지적 — budget_snapshot 칼럼이 있는데도
+          // 여기서 항상 null로 저장하고 있었음. 같은 세션에선 로컬 메모리(G.HIST.budget)에 진짜
+          // 값이 남아있어서 괜찮아 보였지만, 새로고침하거나 갤러리 클라우드 동기화가 일어나면
+          // 클라우드에서 다시 불러올 때 null로 덮어써져서 예산 패널이 통째로 사라지고 있었음.
           _supa.from('gallery').insert({
             user_id:_supaUser.id, wf:wf, storage_path:filePath, public_url:publicUrl,
-            orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:'', budget_snapshot:null
+            orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:'', budget_snapshot:budgetSnapshot||null
           }).select().single().then(function(){ console.log('[Gallery] 클라우드 저장 완료 ('+wf+')'); })
             .catch(function(e){ console.warn('[Gallery] DB 저장 실패:', e); });
         }
@@ -10041,7 +10098,7 @@ function mkMultiRoomSpace(p){
   var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">해상도</div>';
   var resRow=dv('');resRow.style.cssText='display:flex;gap:6px';
   if(!spTab.multiRoomResolution) spTab.multiRoomResolution='1K';
-  [['1K','1.0x'],['2K','1.5x']].forEach(function(pair){
+  [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
     var key=pair[0];
     var isOn=spTab.multiRoomResolution===key;
     var b=mk('button','');b.type='button';
@@ -10604,7 +10661,7 @@ function mkAutoRoomCamera(p){
   var resWrap2=dv('ss');resWrap2.innerHTML='<div class="lbl">해상도</div>';
   var resRow2=dv('');resRow2.style.cssText='display:flex;gap:6px';
   if(!spTab.autoRoomResolution) spTab.autoRoomResolution='1K';
-  [['1K','1.0x'],['2K','1.5x']].forEach(function(pair){
+  [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
     var key=pair[0];
     var isOn=spTab.autoRoomResolution===key;
     var b=mk('button','');b.type='button';
@@ -11519,7 +11576,7 @@ function sbAgent(p){
   if(!tab.agentResolution) tab.agentResolution='1K';
   var resWrap3=dv('ss');resWrap3.innerHTML='<div class="lbl">해상도</div>';
   var resRow3=dv('');resRow3.style.cssText='display:flex;gap:6px';
-  [['1K','1.0x'],['2K','1.5x']].forEach(function(pair){
+  [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
     var key=pair[0];
     var isOn=tab.agentResolution===key;
     var b=mk('button','');b.type='button';
@@ -18166,7 +18223,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
     }
 
     // AFTER 픽셀 정보
-    var pxAfter=dv('');pxAfter.id='pxa-'+item.id;
+    var pxAfter=dv('px-badge');pxAfter.id='pxa-'+item.id;
     pxAfter.style.cssText='position:absolute;right:8px;bottom:36px;background:rgba(0,229,204,.25);color:rgba(0,229,204,1);font-size:11px;font-weight:700;padding:3px 8px;border-radius:4px;z-index:3;pointer-events:none;letter-spacing:.3px;font-family:monospace';
     pxAfter.textContent='…';
     cw.appendChild(pxAfter);
@@ -21756,7 +21813,7 @@ function procImgWithTask(task, onDone, onErr){
   var eng     = task.eng || 'nano2';
   var scale   = task.scale || '2x';
   var resolution = task.resolution || '1K';
-  var apiRes  = ({'1K':'1K','2K':'2K'})[resolution] || '1K';
+  var apiRes  = ({'1K':'1K','2K':'2K','4K':'4K'})[resolution] || '1K';
 
   if(!img){ onErr('이미지가 없습니다.'); return; }
   // 이 작업의 과금 정보 — fal-proxy 서버가 여기 담긴 값으로 정확한 크레딧을 계산한다.
@@ -21955,7 +22012,7 @@ function procImgWithTask(task, onDone, onErr){
     // 사용자 선택 해상도 우선, 없으면 원본 크기 기반 자동
     function getEditRes(dataUrl, cb){
       var userRes = getTab('edit').resolution || '';
-      if(userRes==='1K'||userRes==='2K'){
+      if(userRes==='1K'||userRes==='2K'||userRes==='4K'){
         console.log('[edit] 사용자 선택 resolution:',userRes);
         cb(userRes, 0, 0); // 리사이즈 불필요
         return;
