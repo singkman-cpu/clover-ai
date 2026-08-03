@@ -7663,7 +7663,18 @@ function mkBudgetTier(p){
             // 결정론적 계산이 "부족하다"고 판단했는데 AI가 "여유있다"고 했으면, 결정론적 판단으로 덮어씀
             diffTxt = '<span style="color:#f87171">▲ 평당 실제 시공비 기준으로는 약 '+Math.abs(_detShortfall).toLocaleString()+'만원 부족해 보여요</span>';
           } else if(isExt){
-            diffTxt = (diff>15 ? '<span style="color:#f87171">▲ 이 상태로 이 예산이면 다소 빠듯할 수 있어요</span>' : diff<-15 ? '<span style="color:#4ade80">▼ 이 예산이면 여유있게 가능해 보여요</span>' : '<span style="color:var(--m2)">입력하신 예산과 현재 상태가 대체로 맞아 보여요</span>');
+            // ⚠️ 버그 수정(신뢰도 문제): "이 예산이면 여유있게 가능해 보여요"(건물 노후도 대비 기본
+            // 배정 비율 판단)와 "레퍼런스로는 55%밖에 구현 안 됨"(스타일 반영 가능 여부 판단)이
+            // 완전히 다른 질문에 대한 답인데도 화면에 나란히 붙어서 사용자한텐 대놓고 모순되는
+            // 말처럼 보였음 — "여유있다더니 왜 55%냐"는 신뢰도 문제. 두 가지 조치: (1) 라벨을
+            // "이 상태 대비"로 범위를 명확히 좁히고, (2) 실제로 레퍼런스-예산 불일치가 있으면
+            // (styleMismatch===true) 애초에 "여유있다"는 초록색 문구를 아예 안 보여주고 중립적인
+            // 문구로 대체함 — 모순처럼 보일 조합 자체를 없앰.
+            if(res.styleMismatch){
+              diffTxt = '<span style="color:var(--m2)">▬ 건물 노후도 기준 배분은 적정 — 단, 아래 레퍼런스 스타일 반영은 예산이 부족해요</span>';
+            } else {
+              diffTxt = (diff>15 ? '<span style="color:#f87171">▲ 건물 노후도 대비 이 예산은 다소 빠듯할 수 있어요</span>' : diff<-15 ? '<span style="color:#4ade80">▼ 건물 노후도 대비 이 예산은 여유있어 보여요</span>' : '<span style="color:var(--m2)">입력하신 예산과 건물 노후도가 대체로 맞아 보여요</span>');
+            }
           } else {
             diffTxt = (diff>0 ? ('<span style="color:#4ade80">▲ 기본보다 '+diff+'%p 더 배분</span>') : diff<0 ? ('<span style="color:#f87171">▼ 기본보다 '+Math.abs(diff)+'%p 덜 배분</span>') : '<span style="color:var(--m2)">기본 배분과 동일</span>');
           }
@@ -8756,7 +8767,7 @@ function mkBudgetTier(p){
     // 신축(완전 철거 후 새로 짓기)은 원본 창문·문·벽을 그대로 유지하라는 일반 규칙이 안 맞음 —
     // 메인 버튼과 동일하게 전면 재설계를 허용하는 예외 지시를 추가함.
     if(isExt && tab.extConstructionMode==='new'){
-      budgetPrompt = 'CRITICAL OVERRIDE — FULL DEMOLITION AND NEW CONSTRUCTION (신축): any instruction about preserving the exact original window/door count, position or wall shape does NOT apply — this is a complete teardown-and-rebuild. Freely design the new building\'s window layout, massing and roofline based on the style/budget described below, but keep everything OUTSIDE the subject building (neighboring buildings, street, sky) unchanged. --- ' + budgetPrompt;
+      budgetPrompt = 'CRITICAL OVERRIDE — FULL DEMOLITION AND NEW CONSTRUCTION (신축): any instruction about preserving the exact original window/door count, position or wall shape does NOT apply — this is a complete teardown-and-rebuild. Freely design the new building\'s window layout, massing and roofline based on the style/budget described below. IMPORTANT — THE PROPERTY\'S OWN BOUNDARY WALL/FENCE/GATE (담장) IS PART OF THIS REBUILD, NOT something to leave unchanged: if the original photo shows an old, worn concrete boundary wall or gate belonging to this property, that wall/gate must also be rebuilt to match the new building\'s finish and design language (new material, new color, consistent with the new facade) — it should NOT be left looking old/cracked/unrenovated while the building behind it is brand new, since that would look inconsistent and unfinished. Only things genuinely OUTSIDE this property\'s boundary (neighboring buildings, the street, the sky) should stay unchanged. --- ' + budgetPrompt;
     }
     // ⚠️ 버그 수정: "레퍼런스 이미지랑 완전히 다른 건물이 나온다"는 지적 — 원인을 찾아보니, 건축
     // (특히 신축/증축)일 때 "MOST IMPORTANT INSTRUCTION, READ THIS FIRST"(층수·카메라 관련, 매우
@@ -25689,11 +25700,15 @@ document.addEventListener('DOMContentLoaded',function(){try{
           'massing, roofline and overall architectural form using your own best architectural judgment, guided '+
           'entirely by the style/preset description below and the specified construction budget level — do NOT '+
           'feel constrained to match the original building\'s window positions, door positions, or facade layout '+
-          'at all. HOWEVER, everything else in the original photo OUTSIDE the subject building must stay exactly '+
+          'at all. IMPORTANT — THE PROPERTY\'S OWN BOUNDARY WALL/FENCE/GATE (담장) IS PART OF THIS REBUILD: if the '+
+          'original photo shows an old, worn boundary wall, fence or gate belonging to this property, that wall/gate '+
+          'must also be rebuilt to match the new building\'s finish and design language — it must NOT be left looking '+
+          'old, cracked or unrenovated while the building behind it is brand new, since that looks inconsistent and '+
+          'unfinished. HOWEVER, everything genuinely OUTSIDE this property\'s boundary must stay exactly '+
           'as shown: keep all neighboring/surrounding buildings, the street, sidewalk, parked cars, utility poles, '+
           'sky and overall setting completely unchanged — only the one subject building (the one being replaced) '+
-          'should be a newly designed structure occupying roughly the same site footprint, everything around it '+
-          'stays as in the original photo. --- ' + _finalPrompt;
+          'and its own boundary wall/fence/gate should be newly designed, occupying roughly the same site footprint, '+
+          'everything around it stays as in the original photo. --- ' + _finalPrompt;
       }
       // 예산 계획기의 "항목별 직접 지정" 입력도 추가 요청사항과 똑같이 최우선으로 반영 (예: "소파는 교체해줘")
       var _itemOv = (tab.budgetItemOverrideText||'').trim();
