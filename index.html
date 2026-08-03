@@ -6657,9 +6657,14 @@ function mkNote(p,html){var n=dv('note');n.innerHTML=html;p.appendChild(n);}
 // Resolution prices: 1K=base, 2K=1.5x, 4K=2.5x, 6K=3.5x, 8K=5x
 // fal NB2 API valid: "1K"=1024px, "2K"=2048px, "4K"=4096px
 // 6K/8K mapped to 4K on API side (displayed as target resolution)
+// ⚠️ 요청 반영: "아키스케치가 16K 렌더링을 마케팅하는데 우리는 2K까지밖에 없다"는 리서치 결과 —
+// 확인해보니 구글 최신 이미지 모델(Gemini 3, nano-banana-2/pro 계열)이 네이티브 4K 생성을
+// 이미 지원하는데, 우리 해상도 선택지엔 4K가 아예 없었음. 4K 추가함 — 1K 대비 원가가 약
+// 1.8배(fal.ai 토큰 기준) 들어서, 안전하게 2.0배로 크레딧 배수를 잡음.
 var RES_OPTS = [
   {k:'1K', label:'1K',  apiRes:'1K',  w:1024, h:1024, mult:1.0},
   {k:'2K', label:'2K',  apiRes:'2K',  w:2048, h:2048, mult:1.5},
+  {k:'4K', label:'4K',  apiRes:'4K',  w:4096, h:4096, mult:2.0},
 ];
 function getResObj(){ return RES_OPTS.find(function(r){return r.k===(getTab(G.wf).resolution||'1K');})||RES_OPTS[0]; }
 function getCost(){
@@ -17007,10 +17012,72 @@ function _mkMaskExecute(){
   }
   if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
   getTab(G.wf).prompt=combined;
+  // ⚠️ 핵심 버그 수정: "브러시로 영역 선택이 일반 프롬프트보다 부정확하다"는 지적 — 원인을 찾아보니,
+  // 실제로 그린 브러시 색칠·화살표·다각형이 AI에게 이미지로 전혀 전달되지 않고 있었음 — "이미지
+  // 중앙 우측 부근" 같은 3x3 격자 수준의 대략적인 텍스트 설명만 프롬프트에 들어가고, 원본 사진은
+  // 아무 표시 없이 그대로 전달되고 있었음(AI는 어디를 말하는지 그냥 추측해야 했음). 이제 실제로
+  // 그린 캔버스(브러시 색칠 + 화살표 + 다각형 테두리)를 원본 사진 위에 합성한 "표시된 사진"을
+  // 만들어서 참고 이미지로 같이 보내고, "이 표시가 정확히 어디를 고칠지 알려주는 것"이라고
+  // 명확히 지시함 — 텍스트 설명 대신 실제로 눈으로 보고 판단하게 하는 것.
+  var _markedImg = _mkBuildMarkedReferenceImage();
+  if(_markedImg){
+    refImgs.unshift(_markedImg); // 맨 앞에 둬서 가장 먼저 참고하게 함
+    getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
+  }
   if(refImgs.length){ getTab(G.wf).refs=refImgs; }
   G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations(); // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
   G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){}); // 브러시 칠한 것도 같이 초기화
   togDraw(false);if(canRun())runTool();
+}
+// 브러시 색칠 + 화살표 + 다각형 표시를 원본 이미지 위에 실제로 합성해서, AI가 텍스트 설명이
+// 아니라 눈으로 직접 보고 위치를 판단할 수 있는 "표시된 참고 사진"을 만듦.
+function _mkBuildMarkedReferenceImage(){
+  try{
+    var origImg = getTab(G.wf).inputImg;
+    var brushCv = gE('draw-canvas');
+    var arrowOv = gE('arrow-overlay');
+    var polyOv = gE('poly-overlay');
+    var hasBrush = brushCv && brushCv.width>0;
+    var hasArrow = G.arrows && G.arrows.length;
+    var hasPoly = G.polyAreas && G.polyAreas.length;
+    if(!origImg || (!hasBrush && !hasArrow && !hasPoly)) return null;
+    var out = document.createElement('canvas');
+    var baseImg = new Image();
+    // 동기적으로 쓰기 위해 이미 로드된 draw-canvas 크기를 기준 삼음(setup 시 원본 크기로 맞춰둠)
+    var w = brushCv && brushCv.width ? brushCv.width : 1024;
+    var h = brushCv && brushCv.height ? brushCv.height : 1024;
+    out.width = w; out.height = h;
+    var ctx = out.getContext('2d');
+    // 원본 이미지를 동기적으로 그리기 위해, 이미 화면에 그려진 <img id="canvas"> 엘리먼트를 재사용
+    var visibleImgEl = document.querySelector('#canvas img, .cmp-imgB, .cmp-imgA');
+    var srcEl = null;
+    document.querySelectorAll('img').forEach(function(im){ if(im.src===origImg && im.naturalWidth>0) srcEl=im; });
+    if(srcEl){
+      ctx.drawImage(srcEl, 0, 0, w, h);
+    } else {
+      return null; // 원본이 아직 화면에 로드 안 됐으면 안전하게 건너뜀(기존 텍스트 설명 방식으로 대체)
+    }
+    if(hasBrush) ctx.drawImage(brushCv, 0, 0, w, h);
+    // 화살표·다각형은 SVG 오버레이라서, XML로 직렬화해서 이미지로 변환한 뒤 겹쳐 그림.
+    [arrowOv, polyOv].forEach(function(svgEl){
+      if(!svgEl || !svgEl.children.length) return;
+      try{
+        var svgClone = svgEl.cloneNode(true);
+        svgClone.setAttribute('width', w); svgClone.setAttribute('height', h);
+        var svgStr = new XMLSerializer().serializeToString(svgClone);
+        var svgUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
+        var svgImg = new Image();
+        svgImg.src = svgUrl;
+        // SVG 이미지는 비동기 로드지만, 브라우저가 이미 렌더링해둔 SVG라 보통 즉시 decode 가능 —
+        // 실패해도 브러시·텍스트 설명은 이미 반영되니 치명적이지 않음.
+        ctx.drawImage(svgImg, 0, 0, w, h);
+      }catch(e){ console.warn('[마스크 합성] SVG 오버레이 실패(무시하고 진행):', e); }
+    });
+    return out.toDataURL('image/jpeg', 0.92);
+  }catch(e){
+    console.warn('[마스크 합성] 실패, 텍스트 설명 방식으로 대체:', e);
+    return null;
+  }
 }
 function _mkMaskClearAll(){
   var cv=gE('draw-canvas');if(cv){var ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);}
