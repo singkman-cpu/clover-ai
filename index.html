@@ -6806,6 +6806,17 @@ function mkResolution(p){
   var ro=getResObj();
   info.textContent=ro.w+'×'+ro.h+' px';
   w.appendChild(info);
+  // ⚠️ 요청 반영: "공간컨셉에서 렌더링된 걸 AI편집에서 1K로 수정했더니 화질이 많이 안 좋아서
+  // 2K로 다시 하니 괜찮았다 — 이런 내용을 미리 알려줘서 크레딧 낭비 안 되게 해달라" — AI 편집은
+  // 특히 "이미 디테일 있는 렌더링 이미지를 다시 수정"하는 경우가 많아서, 여기서만 이 안내를
+  // 보여줌(1K/2K는 결과 파일 크기가 아니라 AI가 실제로 그리는 픽셀 예산이라, 소스가 디테일
+  // 많은 이미지면 1K에서 뭉개지기 쉬움).
+  if(G.wf==='edit'){
+    var resNote=dv('');
+    resNote.style.cssText='font-size:10.5px;color:#f59e0b;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:7px;padding:7px 9px;margin-top:6px;line-height:1.55';
+    resNote.innerHTML='💡 1K/2K는 결과 "파일 크기"가 아니라 AI가 실제로 그리는 <b>해상도 자체</b>예요 — 이미 디테일이 많은 렌더링 이미지(가구 질감, 소품 등)를 수정할 땐 1K에서 뭉개질 수 있어요. <b>소스가 이미 고화질이면 2K로 편집하시는 걸 권장</b>드려요 — 1K로 했다가 마음에 안 들어서 2K로 다시 하면 크레딧이 두 번 나가니, 처음부터 2K로 시작하시는 게 나을 수 있어요.';
+    w.appendChild(resNote);
+  }
   p.appendChild(w);
 }
 
@@ -10824,11 +10835,18 @@ function _autoRoomGenerateStep(idx){
   if(spTab.autoRoomFidelity==='loose'){
     var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
     var _looseP = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
-    // ⚠️ 요청 반영: "영감만 얻기가 문제네" — bytedance/seedream-v4.5가 경로 관련 오류를 계속
-    // 일으켜서(404/405 등, 3단 경로 모델이라 큐 경로 추정이 자꾸 어긋남), 이미 이 앱 전체에서
-    // 안정적으로 잘 쓰이고 있는 nano-banana-2(2단 경로, 텍스트만으로도 생성 가능한 엔드포인트)로
-    // 바꿈 — 별도 이미지 없이 프롬프트만 넣으면 순수 텍스트 생성이 됨.
-    falRun('fal-ai/nano-banana-2', {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1}, function(d){
+    // ⚠️ 버그 수정: "선택 해제하고 다시 선택해서 렌더링하면 기존이랑 느낌이 다르다"는 지적 —
+    // "영감만 얻기"를 순수 텍스트 생성으로 바꾸면서 참고 이미지를 아예 다 뺐는데, 그 바람에
+    // "이 세트 안에서 이미 만든 것들과 같은 느낌 유지"에 필요한 참고까지 같이 사라졌음(텍스트
+    // 설명만으로는 일관성 유지가 약하다는 걸 이번 세션 내내 확인했었는데 여기서 놓쳤음). 사용자가
+    // 업로드한 원본 참고 사진은 여전히 안 쓰지만(그건 "영감만 얻기"의 목적과 반대), 이미 이
+    // 모드로 만들어둔 자기 자신의 결과물(genPool)은 참고로 붙여서 — "레퍼런스와는 다르게, 하지만
+    // 내가 방금 만든 새 디자인끼리는 통일감 있게" 되도록 함.
+    var _looseGenPool = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+    var _looseRefs = (_looseGenPool && _looseGenPool.length) ? [_looseGenPool[0], _looseGenPool[_looseGenPool.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1};
+    if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
+    falRun('fal-ai/nano-banana-2', _looseInput, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomGenerateStep(idx+1); return; }
       st.results[idx]={url:resultUrl};
@@ -10916,7 +10934,11 @@ function _autoRoomRetryOne(idx){
   if(spTab.autoRoomFidelity==='loose'){
     var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
     var _looseP2 = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
-    falRun('fal-ai/nano-banana-2', {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1}, function(d){
+    var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+    var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1};
+    if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
+    falRun('fal-ai/nano-banana-2', _looseInput2, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; st.running=false; renderSB(); return; }
       st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
