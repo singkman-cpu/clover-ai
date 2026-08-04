@@ -17017,6 +17017,70 @@ function mkMask(p){
 // ── "선택 영역 수정" 실행 — 브러시 색상별 지시 + 화살표 지시 + 영역선택(폴리곤) 지시를
 // 전부 합쳐서 하나의 최종 프롬프트로 만듦. 도구 버튼 3종 어디서 눌러도 항상 이 함수 하나로
 // 실행되므로, 여러 도구를 섞어 써도(예: 브러시로 칠하고 + 화살표도 몇 개 찍고) 전부 같이 반영됨.
+// VizMaker 스타일: 선택 영역만 잘라내서(crop) 그 작은 사진만 AI에게 통째로 편집시킨 뒤, 결과를
+// 원본 사진의 같은 위치에 다시 합성함. 전체 사진 속에서 "이 마스크만 정확히" 판단해야 하는
+// 어려운 일 대신, AI는 그냥 작게 잘린 사진 하나를 자연스럽게 고치기만 하면 되므로 훨씬 정확함.
+function _mkCropEditComposite(area, instrText, cb){
+  try{
+    var origImg = getTab(G.wf).inputImg;
+    if(!origImg || !area.points || area.points.length<3){ cb(null, '선택 영역 정보가 없습니다'); return; }
+    var freshImg = new Image();
+    freshImg.crossOrigin = 'anonymous';
+    freshImg.onload = function(){
+      var W = freshImg.naturalWidth, H = freshImg.naturalHeight;
+      var xs = area.points.map(function(p){return p[0];});
+      var ys = area.points.map(function(p){return p[1];});
+      var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+      var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+      // 선택 영역 주변에 여유 있게 패딩을 줘서 AI가 배경 맥락(주변 벽·천장 등)을 보고 자연스럽게
+      // 이어붙일 수 있게 함 — 너무 딱 맞게 자르면 채워 넣을 배경의 "결"을 알 수 없어서 부자연스러움.
+      var bw = maxX-minX, bh = maxY-minY;
+      var padX = Math.max(bw*0.6, 40), padY = Math.max(bh*0.6, 40);
+      var cropX = Math.max(0, Math.round(minX-padX));
+      var cropY = Math.max(0, Math.round(minY-padY));
+      var cropX2 = Math.min(W, Math.round(maxX+padX));
+      var cropY2 = Math.min(H, Math.round(maxY+padY));
+      var cropW = cropX2-cropX, cropH = cropY2-cropY;
+      if(cropW<10 || cropH<10){ cb(null, '선택 영역이 너무 작습니다'); return; }
+
+      var cropCv = document.createElement('canvas');
+      cropCv.width = cropW; cropCv.height = cropH;
+      var cctx = cropCv.getContext('2d');
+      cctx.drawImage(freshImg, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      var cropDataUrl;
+      try{ cropDataUrl = cropCv.toDataURL('image/jpeg', 0.95); }
+      catch(e){ cb(null, '이미지를 자르는 데 실패했습니다(CORS)'); return; }
+
+      var cropPrompt = instrText + '. Photorealistic architectural photography. This is a close-up crop of a larger interior photo — edit it naturally as a complete standalone photo; keep everything not explicitly mentioned in the instruction exactly as it is.';
+      var _origRefs0 = getTab(G.wf).refs;
+      getTab(G.wf).refs = [];
+      var task = {id:Date.now(), img:cropDataUrl, wf:G.wf, prompt:cropPrompt, selK:null, eng:'nano2', resolution: getTab(G.wf).resolution||'1K'};
+      procImgWithTask(task, function(resultUrl){
+        getTab(G.wf).refs = _origRefs0;
+        var resImg = new Image();
+        resImg.crossOrigin = 'anonymous';
+        resImg.onload = function(){
+          var outCv = document.createElement('canvas');
+          outCv.width = W; outCv.height = H;
+          var octx = outCv.getContext('2d');
+          octx.drawImage(freshImg, 0, 0, W, H);
+          octx.drawImage(resImg, cropX, cropY, cropW, cropH);
+          try{ cb(outCv.toDataURL('image/jpeg', 0.92)); }
+          catch(e){ console.warn('[crop 합성 실패, 잘린 사진만 결과로 사용]', e); cb(resultUrl); }
+        };
+        resImg.onerror = function(){ cb(resultUrl); };
+        resImg.src = resultUrl;
+      }, function(err){
+        getTab(G.wf).refs = _origRefs0;
+        cb(null, String(err));
+      });
+    };
+    freshImg.onerror = function(){ cb(null, '원본 이미지를 불러오지 못했습니다'); };
+    freshImg.src = origImg;
+  }catch(e){
+    cb(null, String(e));
+  }
+}
 function _mkMaskExecute(){
   var usedColors=MASK_COLORS.filter(function(c){
     return (G.maskColorPrompts&&(G.maskColorPrompts[c[0]]||'').trim()) || (G.maskColorRefImg&&G.maskColorRefImg[c[0]]);
@@ -17098,27 +17162,110 @@ function _mkMaskExecute(){
     }
   }
   if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
+  // ⚠️ 요청 반영(방향 전환): "VizMaker 보고 따라해봐, 엔진 문제가 아니야" — VizMaker(경쟁 서비스)도
+  // 똑같이 Nano Banana 2를 쓰는데 삭제가 잘 되는 걸 확인함. 화면 구조를 보니 VizMaker는 "선택
+  // 영역"을 전체 이미지에 마스크·표시로 얹어서 통째로 보내는 게 아니라, 그 영역만 잘라내서
+  // (crop) 작은 이미지만 AI에게 보내고, 결과를 다시 원본 위치에 합성하는 방식으로 보임 — AI가
+  // 전체 사진 속에서 "이 마스크 부분만 정확히" 판단해야 하는 어려운 일 대신, 그냥 작게 잘린
+  // 사진 하나를 통째로 자연스럽게 수정하기만 하면 되니 훨씬 쉽고 정확함. 다각형 영역이 정확히
+  // 1개뿐이고(가장 흔한 케이스, VizMaker 데모와 동일) 브러시·화살표를 안 섞어 썼을 때는, 이
+  // crop→편집→합성 방식을 우선 시도함 — 기존의 복잡한 마스크/표시 방식보다 훨씬 안정적일 것.
+  var _hasBrushPaint = false;
+  try{
+    var _chkCv=gE('draw-canvas');
+    if(_chkCv && _chkCv.width>0){
+      var _chkData=_chkCv.getContext('2d').getImageData(0,0,_chkCv.width,_chkCv.height).data;
+      for(var _ci=3; _ci<_chkData.length; _ci+=200){ if(_chkData[_ci]>10){ _hasBrushPaint=true; break; } }
+    }
+  }catch(e){}
+  if(G.polyAreas && G.polyAreas.length===1 && !(G.arrows&&G.arrows.length) && !_hasBrushPaint){
+    var _cropArea = G.polyAreas[0];
+    var _cropTxt = (_cropArea.label||'').trim() || combined;
+    var _stl0=gE('stl'); if(_stl0) _stl0.textContent='선택 영역만 잘라내서 수정 중...';
+    _mkCropEditComposite(_cropArea, _cropTxt, function(finalUrl, errMsg){
+      if(!finalUrl){
+        alert('영역 편집 실패: ' + (errMsg||'알 수 없는 오류') + ' — 다시 시도해주세요.');
+        var _stlE=gE('stl'); if(_stlE) _stlE.textContent='';
+        return;
+      }
+      G.maskColorPrompts={}; G.maskColorRefImg={};
+      G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
+      var _dcvC=gE('draw-canvas'); if(_dcvC){ try{ _dcvC.getContext('2d').clearRect(0,0,_dcvC.width,_dcvC.height); }catch(e){} }
+      togDraw(false);
+      // 편집 결과를 이 탭의 현재 이미지로 반영하고 히스토리에 추가 — runTool()을 거치지 않으므로 여기서 직접 처리.
+      var tab0=getTab(G.wf);
+      var origBefore = tab0.inputImg;
+      tab0.inputImg = finalUrl;
+      if(!G.HIST[G.wf]) G.HIST[G.wf]=[];
+      G.HIST[G.wf].unshift({id:Date.now()+Math.random(), orig:origBefore, result:finalUrl, origThumb:null, tags:['AI 편집 · 영역 수정'], ai:'', cx:50, fav:false, wf:G.wf, preview:false});
+      _saveResultToCloudGallery(G.wf, Date.now(), finalUrl, origBefore, 'nano2', tab0.resolution||'1K');
+      renderMain(G.wf);
+      updBtn();
+    });
+    return;
+  }
+  // ⚠️ 요청 반영: "수정할 때마다 엔진을 flux로 바꿔야 하는 거야?" — 매번 기억해서 손으로 바꾸는
+  // 건 번거로우니, "삭제·제거" 지시가 감지되고 화살표·영역선택 없이 브러시만 쓴 경우(=flux
+  // 인페인팅이 실제로 적용 가능한 케이스)라면 자동으로 flux 인페인팅으로 전환함. 사용자가
+  // 이미 나노바나나를 일부러 골랐어도, 삭제 작업은 flux가 훨씬 유리해서 이 경우엔 자동 전환이
+  // 더 도움이 된다고 판단함 — 대신 왜 바뀌었는지 화면에 표시해서 헷갈리지 않게 함.
+  var _isDeleteInstr = /삭제|제거|지워|없애/.test(combined);
+  // ⚠️ 다각형(영역선택)도 이제 진짜 픽셀 마스크로 변환되므로(위 근본 수정), flux 인페인팅 자동
+  // 전환 대상에 다각형도 포함시킴 — 화살표만 여전히 flux가 못 받는 방식(오브젝트 포인팅이라
+  // 채워진 영역으로 표현이 안 됨)이라 제외.
+  var _isPureBrush = !(G.arrows && G.arrows.length);
+  if(_isDeleteInstr && _isPureBrush && G.maskEngine!=='flux'){
+    G.maskEngine='flux';
+    var _stl=gE('stl'); if(_stl) _stl.textContent='삭제 작업이라 flux 인페인팅으로 자동 전환했어요';
+  }
   // ⚠️ 요청 반영: "삭제해달라고 했는데 삭제가 안 된다" — 화살표·영역선택엔 이미 삭제 보강 문구를
   // 넣었는데, 브러시 색 1개짜리 케이스(usedColors.length===1)는 원본 텍스트를 그대로만 써서
   // 이 보강이 빠져있었음 — 여기서 한 번 더, 도구 종류와 상관없이 안전하게 덧붙임.
-  if(/삭제|제거|지워|없애/.test(combined)){
+  if(_isDeleteInstr){
     combined += ' ⚠️ 삭제·제거 지시가 포함되어 있습니다 — 흐릿하게 남기거나 반투명하게 지우지 말고 완전히 100% 안 보이게 없애고, 그 자리를 뒤 배경(벽·천장·바닥 등)이 자연스럽게 이어지도록 채우세요(인페인팅). 지운 흔적·그림자·형태의 잔상이 조금이라도 남으면 실패입니다.';
   }
   getTab(G.wf).prompt=combined;
-  // ⚠️ 핵심 버그 수정(2차): "브러시만 썼는데도 삭제가 안 된다" — 알고 보니 브러시 전용으로는
-  // 이미 훨씬 정교한 시스템(진짜 픽셀 마스크로 flux 인페인팅까지 지원하는 window._maskAnnotatedRef,
-  // runTool 안에 있음)이 있었는데, 제가 화살표·영역선택 문제를 고치려고 넣은 이 합성 이미지를
-  // "모든 경우"에 무조건 refImgs에 추가해버려서, 브러시만 썼을 때도 참고 이미지가 생겨버리고
-  // (getTab(G.wf).refs가 채워짐 → hasMaskRefImgs===true) 그 결과 flux 인페인팅 자동 전환 조건
-  // (!hasMaskRefImgs)이 깨져서 브러시 전용 케이스까지 강제로 나노바나나로 밀려나고 있었음.
-  // 화살표·다각형이 실제로 있을 때만 이 합성을 적용하도록 범위를 좁힘(브러시 단독 케이스는
-  // 기존의 더 정교한 픽셀 마스크 시스템을 그대로 타게 둠).
-  var _needsMarkedRef = (G.arrows && G.arrows.length) || (G.polyAreas && G.polyAreas.length);
+  // ⚠️ 핵심 버그 수정(3차, 근본 해결): "영역선택(다각형)으로 삭제해도 flux로 자동전환도 안 되고
+  // 나노바나나에서도 계속 안 지워진다" — 알고 보니 다각형은 화면 표시용 SVG로만 존재하고, 실제
+  // 픽셀 마스크(브러시 캔버스)에는 전혀 반영이 안 되고 있었음 — 그래서 "진짜 픽셀 마스크 기반"인
+  // flux 인페인팅 자동전환 조건에도 안 걸리고, 기존에 잘 만들어져 있던 마스크 추출·annotated-ref
+  // 시스템도 다각형을 아예 못 봤음. 다각형 좌표가 이미 브러시 캔버스와 정확히 같은 좌표계(원본
+  // 해상도 기준)로 저장되어 있어서, 그대로 브러시 캔버스에 실제로 칠해 넣으면(rasterize) 진짜
+  // 픽셀 마스크가 됨 — 이러면 브러시랑 완전히 동일하게 취급되어 flux 인페인팅도, annotated-ref도
+  // 다 자동으로 정상 작동함.
+  if(G.polyAreas && G.polyAreas.length){
+    var _pcv=gE('draw-canvas');
+    if(_pcv){
+      try{
+        var _pctx=_pcv.getContext('2d');
+        _pctx.fillStyle = 'rgba(255,255,255,1)';
+        G.polyAreas.forEach(function(area){
+          if(!area.points || area.points.length<3) return;
+          _pctx.beginPath();
+          _pctx.moveTo(area.points[0][0], area.points[0][1]);
+          for(var _pi=1; _pi<area.points.length; _pi++){ _pctx.lineTo(area.points[_pi][0], area.points[_pi][1]); }
+          _pctx.closePath();
+          _pctx.fill();
+        });
+      }catch(e){ console.warn('[영역선택 → 픽셀 마스크 변환 실패]', e); }
+    }
+  }
+  // 화살표는 "특정 오브젝트를 가리키는 지시"라 채워진 영역(마스크)으로 표현이 안 되므로, 화살표가
+  // 있을 때만 예외적으로 표시용 합성 사진(참고 이미지) 방식을 계속 씀 — 다각형·브러시는 이제
+  // 진짜 픽셀 마스크만으로 충분해서 이 방식이 필요 없음(오히려 flux를 막았던 원인이었음).
+  var _needsMarkedRef = (G.arrows && G.arrows.length)>0;
   if(!_needsMarkedRef){
-    if(refImgs.length){ getTab(G.wf).refs=refImgs; }
+    // ⚠️ 버그 수정(4차, 진짜 원인일 가능성 높음): "다각형도 flux로 안 바뀌고 계속 안 지워진다" —
+    // 여기가 refImgs.length가 0일 때 getTab(G.wf).refs를 아예 안 건드리고 있었음. 예전에
+    // 화살표를 쓰거나 다른 참고 이미지를 넣었던 적이 있으면, 그 오래된 참고 이미지가 refs에
+    // 계속 남아있는 채로 다음 편집(참고 이미지 없는 순수 마스크)에도 그대로 쓰여서, 서버 쪽
+    // hasMaskRefImgs 판정이 계속 true로 남아 flux 인페인팅이 막혔을 가능성이 높음 — 참고
+    // 이미지가 없으면 명시적으로 빈 배열로 비워서 이 문제를 원천 차단함.
+    getTab(G.wf).refs = refImgs;
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
-    var _dcv3=null; // 브러시 단독 케이스는 캔버스를 지우면 안 됨 — runTool()이 그 캔버스에서 진짜 픽셀 마스크를 읽어가야 함
+    // ⚠️ 브러시·다각형(=진짜 픽셀 마스크) 케이스는 캔버스를 지우면 안 됨 — runTool()이 그
+    // 캔버스에서 진짜 픽셀 마스크를 읽어가야 하므로, 여기서는 캔버스를 그대로 남겨둠.
     togDraw(false);if(canRun())runTool();
     return;
   }
@@ -22375,6 +22522,7 @@ function procImg(onDone, onErr) {
     var drawCv2 = gE('draw-canvas');
     var editMask2 = null;
     var hasMask2 = false;
+    console.log('[마스크 추출 진단] draw-canvas:', drawCv2, drawCv2 ? (drawCv2.width+'x'+drawCv2.height) : '(캔버스 없음)');
     if(drawCv2 && drawCv2.width>0 && drawCv2.height>0){
       try{
         var mdata2 = drawCv2.getContext('2d').getImageData(0,0,drawCv2.width,drawCv2.height);
@@ -22424,6 +22572,16 @@ function procImg(onDone, onErr) {
     // 레퍼런스 이미지를 넣었으면 flux는 어차피 못 받으므로 나노바나나로 자동 전환,
     // 그게 아니면 사용자가 고른 엔진(G.maskEngine)을 그대로 따름.
     var useFluxMask = hasMask2 && editMask2 && !hasMaskRefImgs && G.maskEngine!=='nb2';
+    // ⚠️ 요청 반영: "계속 flux로 안 바뀐다"는 지적이 반복돼서, 더 이상 추측하지 않고 다음
+    // 테스트에서 콘솔에 정확한 원인이 바로 보이도록 각 조건을 전부 따로 찍어둠.
+    console.log('[flux 판정 진단]', {
+      hasMask2: hasMask2,
+      editMask2_있음: !!editMask2,
+      hasMaskRefImgs: hasMaskRefImgs,
+      'getTab(edit).refs': getTab('edit').refs,
+      'G.maskEngine': G.maskEngine,
+      결론_useFluxMask: useFluxMask
+    });
     if(useFluxMask){
       // ── flux-lora/inpainting으로 진짜 인페인팅(칠한 영역만 정확히 제한) ──────────
       console.log('[AI편집] 브러시 모드 감지 → 엔진 강제: fal-ai/flux-lora/inpainting');
