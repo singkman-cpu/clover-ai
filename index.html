@@ -17626,26 +17626,30 @@ function _redrawArrows(arrOv){
   if(!G.arrows) return;
   var cv=gE('draw-canvas'); if(!cv) return;
   var rect=cv.getBoundingClientRect();
-  var sx=rect.width/cv.width, sy=rect.height/cv.height;
+  // ⚠️ 버그 수정: 다각형과 동일한 letterbox 보정 필요 — a.x1/y1/x2/y2가 진짜 이미지 해상도
+  // 좌표로 저장되므로, 화면 표시용으로 되돌릴 때도 실제 이미지 영역 기준으로 계산해야 함.
+  var letterboxRectA = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  var offXA = letterboxRectA.left - rect.left, offYA = letterboxRectA.top - rect.top;
+  var sx=letterboxRectA.width/cv.width, sy=letterboxRectA.height/cv.height;
   G.arrows.forEach(function(a,i){
     var line=document.createElementNS('http://www.w3.org/2000/svg','line');
     line.setAttribute('stroke','#ff5757');line.setAttribute('stroke-width','3');
     line.setAttribute('marker-end','url(#arrowhead-marker)');
-    line.setAttribute('x1',a.x1*sx);line.setAttribute('y1',a.y1*sy);
-    line.setAttribute('x2',a.x2*sx);line.setAttribute('y2',a.y2*sy);
+    line.setAttribute('x1',a.x1*sx+offXA);line.setAttribute('y1',a.y1*sy+offYA);
+    line.setAttribute('x2',a.x2*sx+offXA);line.setAttribute('y2',a.y2*sy+offYA);
     arrOv.appendChild(line);
     var numBg=document.createElementNS('http://www.w3.org/2000/svg','circle');
-    numBg.setAttribute('cx',a.x1*sx);numBg.setAttribute('cy',a.y1*sy);numBg.setAttribute('r','10');
+    numBg.setAttribute('cx',a.x1*sx+offXA);numBg.setAttribute('cy',a.y1*sy+offYA);numBg.setAttribute('r','10');
     numBg.setAttribute('fill','#ff5757');arrOv.appendChild(numBg);
     var numTxt=document.createElementNS('http://www.w3.org/2000/svg','text');
-    numTxt.setAttribute('x',a.x1*sx);numTxt.setAttribute('y',a.y1*sy);
+    numTxt.setAttribute('x',a.x1*sx+offXA);numTxt.setAttribute('y',a.y1*sy+offYA);
     numTxt.setAttribute('text-anchor','middle');numTxt.setAttribute('dominant-baseline','central');
     numTxt.setAttribute('fill','#fff');numTxt.setAttribute('font-size','11');numTxt.setAttribute('font-weight','700');
     numTxt.textContent=(i+1);arrOv.appendChild(numTxt);
     // 화살표 "끝점"(머리, 실제 오브젝트를 가리키는 지점)을 드래그로 미세조정할 수 있는 핸들.
     // 처음 그릴 때 손으로 정확히 짚기 어려우니, 그린 뒤에도 이 원을 잡고 끌어서 정밀하게 맞출 수 있음.
     var headHandle=document.createElementNS('http://www.w3.org/2000/svg','circle');
-    headHandle.setAttribute('cx',a.x2*sx);headHandle.setAttribute('cy',a.y2*sy);headHandle.setAttribute('r','9');
+    headHandle.setAttribute('cx',a.x2*sx+offXA);headHandle.setAttribute('cy',a.y2*sy+offYA);headHandle.setAttribute('r','9');
     headHandle.setAttribute('fill','#fff');headHandle.setAttribute('stroke','#ff5757');headHandle.setAttribute('stroke-width','2.5');
     headHandle.style.cursor='grab'; headHandle.setAttribute('data-arrow-id', a.id);
     headHandle.onmousedown=function(evt){
@@ -17655,11 +17659,12 @@ function _redrawArrows(arrOv){
       function onMove(mv){
         if(!_dragging) return;
         var r2=cv.getBoundingClientRect();
+        var lb2=_getLetterboxCorrectedRect(r2, cv.width, cv.height);
         var nx=(mv.clientX-r2.left), ny=(mv.clientY-r2.top);
         headHandle.setAttribute('cx',nx); headHandle.setAttribute('cy',ny);
         line.setAttribute('x2',nx); line.setAttribute('y2',ny);
-        var sx2=cv.width/r2.width, sy2=cv.height/r2.height;
-        a.x2=nx*sx2; a.y2=ny*sy2;
+        var sx2=cv.width/lb2.width, sy2=cv.height/lb2.height;
+        a.x2=(nx-(lb2.left-r2.left))*sx2; a.y2=(ny-(lb2.top-r2.top))*sy2;
       }
       function onUp(){
         _dragging=false; headHandle.style.cursor='grab';
@@ -17674,11 +17679,12 @@ function _redrawArrows(arrOv){
       evt.stopPropagation(); evt.preventDefault();
       function onMove(mv){
         var t=mv.touches[0]; var r2=cv.getBoundingClientRect();
+        var lb2t=_getLetterboxCorrectedRect(r2, cv.width, cv.height);
         var nx=(t.clientX-r2.left), ny=(t.clientY-r2.top);
         headHandle.setAttribute('cx',nx); headHandle.setAttribute('cy',ny);
         line.setAttribute('x2',nx); line.setAttribute('y2',ny);
-        var sx2=cv.width/r2.width, sy2=cv.height/r2.height;
-        a.x2=nx*sx2; a.y2=ny*sy2;
+        var sx2t=cv.width/lb2t.width, sy2t=cv.height/lb2t.height;
+        a.x2=(nx-(lb2t.left-r2.left))*sx2t; a.y2=(ny-(lb2t.top-r2.top))*sy2t;
       }
       function onEnd(){
         window.removeEventListener('touchmove',onMove);
@@ -17907,10 +17913,17 @@ function _redrawPolyAreas(polyOv){
   if(!G.polyAreas || !G.polyAreas.length) return;
   var cv=gE('draw-canvas'); if(!cv) return;
   var rect=cv.getBoundingClientRect();
-  var sx=rect.width/cv.width, sy=rect.height/cv.height; // 캔버스 내부좌표 → 화면표시좌표
+  // ⚠️ 버그 수정: area.points가 이제 letterbox 보정된 "진짜 이미지 해상도" 좌표로 저장되는데
+  // (finishPolygon 수정), 여기서 화면 표시용으로 되돌려 그릴 땐 컨테이너 전체 크기 기준으로만
+  // 계산하고 있어서 반대 방향으로 어긋났음(마커가 이미지 밖 왼쪽 여백에 뜨는 증상) — finishPolygon
+  // 이랑 정확히 반대 방향의 동일한 letterbox 보정을 적용해야 함.
+  var letterboxRect = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  var offXinContainer = letterboxRect.left - rect.left;
+  var offYinContainer = letterboxRect.top - rect.top;
+  var sx=letterboxRect.width/cv.width, sy=letterboxRect.height/cv.height; // 캔버스 내부좌표 → 화면표시좌표
   G.polyAreas.forEach(function(area,i){
     var color=POLY_AREA_COLORS[i%POLY_AREA_COLORS.length];
-    var dispPts=area.points.map(function(pt){ return [pt[0]*sx, pt[1]*sy]; });
+    var dispPts=area.points.map(function(pt){ return [pt[0]*sx+offXinContainer, pt[1]*sy+offYinContainer]; });
     var poly=document.createElementNS('http://www.w3.org/2000/svg','polygon');
     poly.setAttribute('points', dispPts.map(function(p){return p.join(',');}).join(' '));
     poly.setAttribute('fill', color+'55');
