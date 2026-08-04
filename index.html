@@ -16772,6 +16772,10 @@ function mkMask(p){
   info.innerHTML='도구를 고르면 그 도구에 맞는 입력창만 아래에 나와요 — 브러시는 색상 팔레트, 화살표·영역선택은 각각의 목록이요.<br>'
     +'<span style="color:var(--ac);font-size:10px">AI가 오브젝트를 자동으로 인식합니다 · Ctrl+Z: 실행취소</span>';
   s.appendChild(info);
+  // ⚠️ 버그 수정: "여기는 왜 1K/2K/4K 선택하는 게 없냐" — 마스크 모드는 mkMask(p) 안에서 자체
+  // 완결형으로 끝나고 일반 흐름(mkResolution 포함)으로 안 내려가는 구조라, 해상도 선택 UI 자체가
+  // 통째로 빠져있었음 — 여기 안에도 직접 넣어줌.
+  mkResolution(p);
 
   // ⚠️ 요청 반영: 지우개는 "칠한 부분"만 지우지 업로드한 이미지나 프롬프트까지는 안 지워서,
   // 한 번 수정하고 다시 새로 수정하려 할 때 이전 내용이 계속 남아있어 헷갈렸음 — 브러시·영역
@@ -16875,7 +16879,7 @@ function mkMask(p){
   if(!isBrushTool){
     // 브러시 팔레트/텍스트칸은 브러시·지우개 도구일 때만 보이게 아래에서 건너뜀
     var mbrSkip=dv('');mbrSkip.style.cssText='display:flex;gap:6px;margin-top:6px';
-    var mapBtnSkip=mk('button','actbtn ok');mapBtnSkip.style.cssText='flex:1;font-size:12px;padding:9px';mapBtnSkip.textContent='선택 영역 수정';
+    var mapBtnSkip=mk('button','actbtn ok');mapBtnSkip.style.cssText='flex:1;font-size:12px;padding:9px';mapBtnSkip.innerHTML='선택 영역 수정 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+'cr</span>';
     mapBtnSkip.onclick=function(){ _mkMaskExecute(); };
     var mclrSkip=mk('button','');mclrSkip.style.cssText='padding:9px 11px;border-radius:7px;background:none;border:1px solid var(--bd2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
     mclrSkip.textContent='선택 지우기';
@@ -16987,7 +16991,7 @@ function mkMask(p){
   s.appendChild(noteMulti);
 
   var mbr=dv('');mbr.style.cssText='display:flex;gap:6px;margin-top:6px';
-  var mapBtn=mk('button','actbtn ok');mapBtn.style.cssText='flex:1;font-size:12px;padding:9px';mapBtn.textContent='선택 영역 수정';
+  var mapBtn=mk('button','actbtn ok');mapBtn.style.cssText='flex:1;font-size:12px;padding:9px';mapBtn.innerHTML='선택 영역 수정 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+'cr</span>';
   mapBtn.onclick=function(){ _mkMaskExecute(); };
   var mclr=mk('button','');mclr.style.cssText='padding:9px 11px;border-radius:7px;background:none;border:1px solid var(--bd2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
   mclr.textContent='선택 지우기';
@@ -17111,50 +17115,60 @@ function _mkBuildMarkedReferenceImage(cb){
     var hasPoly = G.polyAreas && G.polyAreas.length;
     if(!origImg || (!hasBrush && !hasArrow && !hasPoly)){ cb(null); return; }
     var out = document.createElement('canvas');
-    // 동기적으로 쓰기 위해 이미 로드된 draw-canvas 크기를 기준 삼음(setup 시 원본 크기로 맞춰둠)
     var w = brushCv && brushCv.width ? brushCv.width : 1024;
     var h = brushCv && brushCv.height ? brushCv.height : 1024;
     out.width = w; out.height = h;
     var ctx = out.getContext('2d');
-    // 원본 이미지를 동기적으로 그리기 위해, 이미 화면에 그려진 <img id="canvas"> 엘리먼트를 재사용
-    var srcEl = null;
-    document.querySelectorAll('img').forEach(function(im){ if(im.src===origImg && im.naturalWidth>0) srcEl=im; });
-    if(!srcEl){ cb(null); return; } // 원본이 아직 화면에 로드 안 됐으면 안전하게 건너뜀(기존 텍스트 설명 방식으로 대체)
-    ctx.drawImage(srcEl, 0, 0, w, h);
-    if(hasBrush) ctx.drawImage(brushCv, 0, 0, w, h);
-    // ⚠️ 버그 수정(핵심): 화살표·다각형은 화면에 "보이는 크기"(CSS 픽셀) 기준 좌표로 그려지는데,
-    // 여기서 그 SVG를 원본 해상도(w×h, 훨씬 큼)로 그대로 늘려버려서 좌표가 완전히 엉뚱한 위치로
-    // 밀려나 있었음(예: 뒤쪽 팬던트를 선택했는데 앞쪽이 지워짐) — SVG에 실제 표시 크기 기준
-    // viewBox를 명시해줘야 브라우저가 좌표를 비례에 맞게 다시 계산해서 그려줌.
-    // ⚠️ 추가 버그 수정: SVG를 이미지로 변환하는 건 비동기(onload)인데 동기적으로 바로
-    // drawImage하고 있어서, 로드되기 전에 그려서 화살표·다각형이 아예 안 나타났을 가능성도 있음
-    // — Promise로 각 오버레이의 로드를 제대로 기다린 뒤에 합성하도록 재작성함.
-    var overlayJobs = [arrowOv, polyOv].filter(function(svgEl){ return svgEl && svgEl.children.length; });
-    if(!overlayJobs.length){ cb(out.toDataURL('image/jpeg', 0.92)); return; }
-    var pending = overlayJobs.length;
-    function done(){
-      pending--;
-      if(pending<=0) cb(out.toDataURL('image/jpeg', 0.92));
+    function safeExport(){
+      // ⚠️ 버그 수정(치명적): "렌더링이 아예 안 된다" — 화면에 이미 떠있는 <img> 엘리먼트를
+      // 그대로 재사용해서 캔버스에 그렸는데, 그 이미지가 다른 도메인(fal.media 등)에서 온
+      // 거라 브라우저가 캔버스를 "오염됨(tainted)"으로 취급해서 toDataURL() 자체가 보안
+      // 에러로 막혀버리고 있었음 — 이 에러가 콜백(cb) 호출 전에 터지는 바람에 그 뒤 로직
+      // (렌더링 실행)까지 통째로 멈췄던 것. try/catch로 감싸서, 실패하면 조용히 표시용 사진
+      // 없이 원래 텍스트 설명 방식으로라도 렌더링은 반드시 계속 진행되게 함.
+      try{ return out.toDataURL('image/jpeg', 0.92); }
+      catch(e){ console.warn('[마스크 합성] 캔버스 내보내기 실패(CORS) — 표시용 사진 없이 진행:', e); return null; }
     }
-    overlayJobs.forEach(function(svgEl){
-      try{
-        var rect = svgEl.getBoundingClientRect();
-        var dispW = rect.width || w, dispH = rect.height || h;
-        var svgClone = svgEl.cloneNode(true);
-        svgClone.setAttribute('viewBox', '0 0 ' + dispW + ' ' + dispH);
-        svgClone.setAttribute('width', w); svgClone.setAttribute('height', h);
-        svgClone.removeAttribute('style');
-        var svgStr = new XMLSerializer().serializeToString(svgClone);
-        var svgUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
-        var svgImg = new Image();
-        svgImg.onload = function(){
-          try{ ctx.drawImage(svgImg, 0, 0, w, h); }catch(e){ console.warn('[마스크 합성] SVG 그리기 실패:', e); }
-          done();
-        };
-        svgImg.onerror = function(){ console.warn('[마스크 합성] SVG 이미지 로드 실패'); done(); };
-        svgImg.src = svgUrl;
-      }catch(e){ console.warn('[마스크 합성] SVG 오버레이 처리 실패(무시하고 진행):', e); done(); }
-    });
+    // ⚠️ CORS 원인 수정: 화면에 이미 로드된 <img> 대신, crossOrigin='anonymous'로 새로 이미지를
+    // 불러와서 그리면 캔버스가 오염되지 않음(서버가 CORS 허용 헤더를 주는 경우 — fal.media/
+    // Supabase Storage는 이미 다른 곳(fetch 다운로드 등)에서도 문제없이 쓰고 있어서 지원될 것).
+    var freshImg = new Image();
+    freshImg.crossOrigin = 'anonymous';
+    freshImg.onload = function(){
+      ctx.drawImage(freshImg, 0, 0, w, h);
+      if(hasBrush) ctx.drawImage(brushCv, 0, 0, w, h);
+      var overlayJobs = [arrowOv, polyOv].filter(function(svgEl){ return svgEl && svgEl.children.length; });
+      if(!overlayJobs.length){ cb(safeExport()); return; }
+      var pending = overlayJobs.length;
+      function done(){
+        pending--;
+        if(pending<=0) cb(safeExport());
+      }
+      overlayJobs.forEach(function(svgEl){
+        try{
+          var rect = svgEl.getBoundingClientRect();
+          var dispW = rect.width || w, dispH = rect.height || h;
+          var svgClone = svgEl.cloneNode(true);
+          svgClone.setAttribute('viewBox', '0 0 ' + dispW + ' ' + dispH);
+          svgClone.setAttribute('width', w); svgClone.setAttribute('height', h);
+          svgClone.removeAttribute('style');
+          var svgStr = new XMLSerializer().serializeToString(svgClone);
+          var svgUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
+          var svgImg = new Image();
+          svgImg.onload = function(){
+            try{ ctx.drawImage(svgImg, 0, 0, w, h); }catch(e){ console.warn('[마스크 합성] SVG 그리기 실패:', e); }
+            done();
+          };
+          svgImg.onerror = function(){ console.warn('[마스크 합성] SVG 이미지 로드 실패'); done(); };
+          svgImg.src = svgUrl;
+        }catch(e){ console.warn('[마스크 합성] SVG 오버레이 처리 실패(무시하고 진행):', e); done(); }
+      });
+    };
+    freshImg.onerror = function(){
+      console.warn('[마스크 합성] 원본 이미지를 CORS로 다시 불러오는 데 실패 — 표시용 사진 없이 진행');
+      cb(null);
+    };
+    freshImg.src = origImg;
   }catch(e){
     console.warn('[마스크 합성] 실패, 텍스트 설명 방식으로 대체:', e);
     cb(null);
