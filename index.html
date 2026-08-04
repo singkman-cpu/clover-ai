@@ -17087,19 +17087,20 @@ function _mkMaskExecute(){
   // 그린 캔버스(브러시 색칠 + 화살표 + 다각형 테두리)를 원본 사진 위에 합성한 "표시된 사진"을
   // 만들어서 참고 이미지로 같이 보내고, "이 표시가 정확히 어디를 고칠지 알려주는 것"이라고
   // 명확히 지시함 — 텍스트 설명 대신 실제로 눈으로 보고 판단하게 하는 것.
-  var _markedImg = _mkBuildMarkedReferenceImage();
-  if(_markedImg){
-    refImgs.unshift(_markedImg); // 맨 앞에 둬서 가장 먼저 참고하게 함
-    getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
-  }
-  if(refImgs.length){ getTab(G.wf).refs=refImgs; }
-  G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations(); // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
-  G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){}); // 브러시 칠한 것도 같이 초기화
-  togDraw(false);if(canRun())runTool();
+  _mkBuildMarkedReferenceImage(function(_markedImg){
+    if(_markedImg){
+      refImgs.unshift(_markedImg); // 맨 앞에 둬서 가장 먼저 참고하게 함
+      getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
+    }
+    if(refImgs.length){ getTab(G.wf).refs=refImgs; }
+    G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations(); // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
+    G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){}); // 브러시 칠한 것도 같이 초기화
+    togDraw(false);if(canRun())runTool();
+  });
 }
 // 브러시 색칠 + 화살표 + 다각형 표시를 원본 이미지 위에 실제로 합성해서, AI가 텍스트 설명이
 // 아니라 눈으로 직접 보고 위치를 판단할 수 있는 "표시된 참고 사진"을 만듦.
-function _mkBuildMarkedReferenceImage(){
+function _mkBuildMarkedReferenceImage(cb){
   try{
     var origImg = getTab(G.wf).inputImg;
     var brushCv = gE('draw-canvas');
@@ -17108,43 +17109,55 @@ function _mkBuildMarkedReferenceImage(){
     var hasBrush = brushCv && brushCv.width>0;
     var hasArrow = G.arrows && G.arrows.length;
     var hasPoly = G.polyAreas && G.polyAreas.length;
-    if(!origImg || (!hasBrush && !hasArrow && !hasPoly)) return null;
+    if(!origImg || (!hasBrush && !hasArrow && !hasPoly)){ cb(null); return; }
     var out = document.createElement('canvas');
-    var baseImg = new Image();
     // 동기적으로 쓰기 위해 이미 로드된 draw-canvas 크기를 기준 삼음(setup 시 원본 크기로 맞춰둠)
     var w = brushCv && brushCv.width ? brushCv.width : 1024;
     var h = brushCv && brushCv.height ? brushCv.height : 1024;
     out.width = w; out.height = h;
     var ctx = out.getContext('2d');
     // 원본 이미지를 동기적으로 그리기 위해, 이미 화면에 그려진 <img id="canvas"> 엘리먼트를 재사용
-    var visibleImgEl = document.querySelector('#canvas img, .cmp-imgB, .cmp-imgA');
     var srcEl = null;
     document.querySelectorAll('img').forEach(function(im){ if(im.src===origImg && im.naturalWidth>0) srcEl=im; });
-    if(srcEl){
-      ctx.drawImage(srcEl, 0, 0, w, h);
-    } else {
-      return null; // 원본이 아직 화면에 로드 안 됐으면 안전하게 건너뜀(기존 텍스트 설명 방식으로 대체)
-    }
+    if(!srcEl){ cb(null); return; } // 원본이 아직 화면에 로드 안 됐으면 안전하게 건너뜀(기존 텍스트 설명 방식으로 대체)
+    ctx.drawImage(srcEl, 0, 0, w, h);
     if(hasBrush) ctx.drawImage(brushCv, 0, 0, w, h);
-    // 화살표·다각형은 SVG 오버레이라서, XML로 직렬화해서 이미지로 변환한 뒤 겹쳐 그림.
-    [arrowOv, polyOv].forEach(function(svgEl){
-      if(!svgEl || !svgEl.children.length) return;
+    // ⚠️ 버그 수정(핵심): 화살표·다각형은 화면에 "보이는 크기"(CSS 픽셀) 기준 좌표로 그려지는데,
+    // 여기서 그 SVG를 원본 해상도(w×h, 훨씬 큼)로 그대로 늘려버려서 좌표가 완전히 엉뚱한 위치로
+    // 밀려나 있었음(예: 뒤쪽 팬던트를 선택했는데 앞쪽이 지워짐) — SVG에 실제 표시 크기 기준
+    // viewBox를 명시해줘야 브라우저가 좌표를 비례에 맞게 다시 계산해서 그려줌.
+    // ⚠️ 추가 버그 수정: SVG를 이미지로 변환하는 건 비동기(onload)인데 동기적으로 바로
+    // drawImage하고 있어서, 로드되기 전에 그려서 화살표·다각형이 아예 안 나타났을 가능성도 있음
+    // — Promise로 각 오버레이의 로드를 제대로 기다린 뒤에 합성하도록 재작성함.
+    var overlayJobs = [arrowOv, polyOv].filter(function(svgEl){ return svgEl && svgEl.children.length; });
+    if(!overlayJobs.length){ cb(out.toDataURL('image/jpeg', 0.92)); return; }
+    var pending = overlayJobs.length;
+    function done(){
+      pending--;
+      if(pending<=0) cb(out.toDataURL('image/jpeg', 0.92));
+    }
+    overlayJobs.forEach(function(svgEl){
       try{
+        var rect = svgEl.getBoundingClientRect();
+        var dispW = rect.width || w, dispH = rect.height || h;
         var svgClone = svgEl.cloneNode(true);
+        svgClone.setAttribute('viewBox', '0 0 ' + dispW + ' ' + dispH);
         svgClone.setAttribute('width', w); svgClone.setAttribute('height', h);
+        svgClone.removeAttribute('style');
         var svgStr = new XMLSerializer().serializeToString(svgClone);
         var svgUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
         var svgImg = new Image();
+        svgImg.onload = function(){
+          try{ ctx.drawImage(svgImg, 0, 0, w, h); }catch(e){ console.warn('[마스크 합성] SVG 그리기 실패:', e); }
+          done();
+        };
+        svgImg.onerror = function(){ console.warn('[마스크 합성] SVG 이미지 로드 실패'); done(); };
         svgImg.src = svgUrl;
-        // SVG 이미지는 비동기 로드지만, 브라우저가 이미 렌더링해둔 SVG라 보통 즉시 decode 가능 —
-        // 실패해도 브러시·텍스트 설명은 이미 반영되니 치명적이지 않음.
-        ctx.drawImage(svgImg, 0, 0, w, h);
-      }catch(e){ console.warn('[마스크 합성] SVG 오버레이 실패(무시하고 진행):', e); }
+      }catch(e){ console.warn('[마스크 합성] SVG 오버레이 처리 실패(무시하고 진행):', e); done(); }
     });
-    return out.toDataURL('image/jpeg', 0.92);
   }catch(e){
     console.warn('[마스크 합성] 실패, 텍스트 설명 방식으로 대체:', e);
-    return null;
+    cb(null);
   }
 }
 function _mkMaskClearAll(){
