@@ -10715,9 +10715,19 @@ function mkAutoRoomCamera(p){
   goBtn.style.cssText='width:100%;padding:13px;font-size:14px;font-weight:800';
   var isRunning=st&&st.running;
   goBtn.disabled=!!isRunning || !hasAnyAnchor || !spTab.autoRoomSelected.length;
-  goBtn.innerHTML=isRunning?'생성 중...':'🎥 '+spTab.autoRoomSelected.length+'컷 자동 생성 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCr+'cr</span>';
+  goBtn.innerHTML=isRunning?('생성 중... ('+(st.step+1)+'/'+spTab.autoRoomSelected.length+')'):'🎥 '+spTab.autoRoomSelected.length+'컷 자동 생성 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCr+'cr</span>';
   goBtn.onclick=_autoRoomRun;
   goWrap.appendChild(goBtn);
+  // ⚠️ 요청 반영: "10개 체크했는데 한두 개 보고 마음에 안 들면 멈추고 싶다, 정지 버튼 만들어줄
+  // 수 있냐" — 생성 중일 때만 나타나는 정지 버튼. 지금 만들고 있는 뷰는 끝까지 완성하고(크레딧
+  // 이미 쓴 거라 중간에 끊으면 손해), 그다음부터 멈춤.
+  if(isRunning){
+    var stopBtn=mk('button','');stopBtn.type='button';
+    stopBtn.innerHTML='⏹ 정지 (지금 뷰만 마저 만들고 멈춤)';
+    stopBtn.style.cssText='width:100%;margin-top:6px;padding:10px;border-radius:9px;border:1.5px solid #f87171;background:rgba(248,113,113,.08);color:#f87171;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    stopBtn.onclick=function(){ st.stopRequested=true; stopBtn.disabled=true; stopBtn.textContent='정지 요청됨...'; };
+    goWrap.appendChild(stopBtn);
+  }
   if(!hasAnyAnchor){
     var need1=dv('');need1.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';need1.textContent='건물 외관 또는 실내 사진을 최소 1장 올려주세요';
     goWrap.appendChild(need1);
@@ -10893,6 +10903,11 @@ function _autoRoomGenerateStep(idx){
   var spTab=getTab('spaceset');
   var st=spTab.autoRoomState;
   var allTypes=spTab.autoRoomSelected;
+  // ⚠️ 요청 반영: "10개 체크했는데 한두 개 보고 마음에 안 들면 멈추고 싶다" — 정지 버튼을
+  // 누르면 이 플래그가 서고, 다음 뷰로 넘어가기 전에 여기서 확인해서 멈춤(이미 진행 중인
+  // 현재 뷰는 끝까지 만들고, 그다음 뷰부터 정지 — 중간에 뚝 끊으면 크레딧만 날리고 결과도
+  // 못 받으니까).
+  if(st && st.stopRequested){ st.running=false; st.stopRequested=false; renderSB(); return; }
   if(idx>=allTypes.length){ st.running=false; renderSB(); return; }
   st.step=idx; st.running=true;
   renderSB();
@@ -17052,7 +17067,7 @@ function _mkMaskExecute(){
       return '화살표 '+(i+1)+'번 '+zone+'— '+txt;
     });
     if(arrParts.length){
-      var arrowInstr = arrParts.join('. ') + '. (화살표로 표시한 오브젝트들에 대한 개별 지시사항이며, 화살표 자체는 결과 이미지에 나타나면 안 됨.)';
+      var arrowInstr = arrParts.join('. ') + '. (화살표로 표시한 오브젝트들에 대한 개별 지시사항이며, 화살표 자체는 결과 이미지에 나타나면 안 됨.) ⚠️ "삭제·제거·지워줘"라고 지시한 것이 있다면, 흐릿하게 남기거나 반투명하게 지우지 말고 완전히 100% 안 보이게 없애고 그 자리를 뒤 배경이 자연스럽게 이어지도록 채우세요(인페인팅) — 지운 흔적이 남으면 실패입니다.';
       combined = combined ? (combined+' '+arrowInstr) : arrowInstr;
     }
   }
@@ -17078,11 +17093,17 @@ function _mkMaskExecute(){
       return '영역 '+(i+1)+'번 '+zone+'— '+txt;
     });
     if(polyParts.length){
-      var polyInstr = polyParts.join('. ') + '. (점으로 표시한 정확한 다각형 범위 안쪽만 지정된 대로 수정할 것 — 범위 밖은 건드리지 말 것. 다각형 테두리 자체는 결과 이미지에 나타나면 안 됨.)';
+      var polyInstr = polyParts.join('. ') + '. (점으로 표시한 정확한 다각형 범위 안쪽만 지정된 대로 수정할 것 — 범위 밖은 건드리지 말 것. 다각형 테두리 자체는 결과 이미지에 나타나면 안 됨.) ⚠️ "삭제·제거·지워줘"라고 지시한 영역이 있다면, 그 물체를 흐릿하게 남기거나 반투명하게 지우는 게 아니라 완전히 100% 안 보이게 없애고, 그 자리를 뒤에 있던 배경(벽·천장·바닥 등)이 자연스럽게 이어지는 것처럼 채워 넣으세요(인페인팅) — 지운 흔적이나 그림자, 형태의 잔상이 남으면 실패입니다.';
       combined = combined ? (combined+' '+polyInstr) : polyInstr;
     }
   }
   if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
+  // ⚠️ 요청 반영: "삭제해달라고 했는데 삭제가 안 된다" — 화살표·영역선택엔 이미 삭제 보강 문구를
+  // 넣었는데, 브러시 색 1개짜리 케이스(usedColors.length===1)는 원본 텍스트를 그대로만 써서
+  // 이 보강이 빠져있었음 — 여기서 한 번 더, 도구 종류와 상관없이 안전하게 덧붙임.
+  if(/삭제|제거|지워|없애/.test(combined)){
+    combined += ' ⚠️ 삭제·제거 지시가 포함되어 있습니다 — 흐릿하게 남기거나 반투명하게 지우지 말고 완전히 100% 안 보이게 없애고, 그 자리를 뒤 배경(벽·천장·바닥 등)이 자연스럽게 이어지도록 채우세요(인페인팅). 지운 흔적·그림자·형태의 잔상이 조금이라도 남으면 실패입니다.';
+  }
   getTab(G.wf).prompt=combined;
   // ⚠️ 핵심 버그 수정: "브러시로 영역 선택이 일반 프롬프트보다 부정확하다"는 지적 — 원인을 찾아보니,
   // 실제로 그린 브러시 색칠·화살표·다각형이 AI에게 이미지로 전혀 전달되지 않고 있었음 — "이미지
