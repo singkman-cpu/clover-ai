@@ -16894,7 +16894,7 @@ function mkMask(p){
   if(!isBrushTool){
     // 브러시 팔레트/텍스트칸은 브러시·지우개 도구일 때만 보이게 아래에서 건너뜀
     var mbrSkip=dv('');mbrSkip.style.cssText='display:flex;gap:6px;margin-top:6px';
-    var mapBtnSkip=mk('button','actbtn ok');mapBtnSkip.style.cssText='flex:1;font-size:12px;padding:9px';mapBtnSkip.innerHTML='선택 영역 수정 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+'cr</span>';
+    var mapBtnSkip=mk('button','actbtn ok');mapBtnSkip.style.cssText='flex:1;font-size:12px;padding:9px';mapBtnSkip.innerHTML='선택 영역 수정 <span class="accr" style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+' cr</span>';
     mapBtnSkip.onclick=function(){ _mkMaskExecute(); };
     var mclrSkip=mk('button','');mclrSkip.style.cssText='padding:9px 11px;border-radius:7px;background:none;border:1px solid var(--bd2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
     mclrSkip.textContent='선택 지우기';
@@ -17006,7 +17006,7 @@ function mkMask(p){
   s.appendChild(noteMulti);
 
   var mbr=dv('');mbr.style.cssText='display:flex;gap:6px;margin-top:6px';
-  var mapBtn=mk('button','actbtn ok');mapBtn.style.cssText='flex:1;font-size:12px;padding:9px';mapBtn.innerHTML='선택 영역 수정 <span style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+'cr</span>';
+  var mapBtn=mk('button','actbtn ok');mapBtn.style.cssText='flex:1;font-size:12px;padding:9px';mapBtn.innerHTML='선택 영역 수정 <span class="accr" style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+' cr</span>';
   mapBtn.onclick=function(){ _mkMaskExecute(); };
   var mclr=mk('button','');mclr.style.cssText='padding:9px 11px;border-radius:7px;background:none;border:1px solid var(--bd2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
   mclr.textContent='선택 지우기';
@@ -17105,8 +17105,25 @@ function _mkMaskExecute(){
     combined += ' ⚠️ 삭제·제거 지시가 포함되어 있습니다 — 흐릿하게 남기거나 반투명하게 지우지 말고 완전히 100% 안 보이게 없애고, 그 자리를 뒤 배경(벽·천장·바닥 등)이 자연스럽게 이어지도록 채우세요(인페인팅). 지운 흔적·그림자·형태의 잔상이 조금이라도 남으면 실패입니다.';
   }
   getTab(G.wf).prompt=combined;
-  // ⚠️ 핵심 버그 수정: "브러시로 영역 선택이 일반 프롬프트보다 부정확하다"는 지적 — 원인을 찾아보니,
-  // 실제로 그린 브러시 색칠·화살표·다각형이 AI에게 이미지로 전혀 전달되지 않고 있었음 — "이미지
+  // ⚠️ 핵심 버그 수정(2차): "브러시만 썼는데도 삭제가 안 된다" — 알고 보니 브러시 전용으로는
+  // 이미 훨씬 정교한 시스템(진짜 픽셀 마스크로 flux 인페인팅까지 지원하는 window._maskAnnotatedRef,
+  // runTool 안에 있음)이 있었는데, 제가 화살표·영역선택 문제를 고치려고 넣은 이 합성 이미지를
+  // "모든 경우"에 무조건 refImgs에 추가해버려서, 브러시만 썼을 때도 참고 이미지가 생겨버리고
+  // (getTab(G.wf).refs가 채워짐 → hasMaskRefImgs===true) 그 결과 flux 인페인팅 자동 전환 조건
+  // (!hasMaskRefImgs)이 깨져서 브러시 전용 케이스까지 강제로 나노바나나로 밀려나고 있었음.
+  // 화살표·다각형이 실제로 있을 때만 이 합성을 적용하도록 범위를 좁힘(브러시 단독 케이스는
+  // 기존의 더 정교한 픽셀 마스크 시스템을 그대로 타게 둠).
+  var _needsMarkedRef = (G.arrows && G.arrows.length) || (G.polyAreas && G.polyAreas.length);
+  if(!_needsMarkedRef){
+    if(refImgs.length){ getTab(G.wf).refs=refImgs; }
+    G.maskColorPrompts={}; G.maskColorRefImg={};
+    G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
+    var _dcv3=null; // 브러시 단독 케이스는 캔버스를 지우면 안 됨 — runTool()이 그 캔버스에서 진짜 픽셀 마스크를 읽어가야 함
+    togDraw(false);if(canRun())runTool();
+    return;
+  }
+  // ⚠️ 핵심 버그 수정(1차): "브러시로 영역 선택이 일반 프롬프트보다 부정확하다"는 지적 — 원인을 찾아보니,
+  // 실제로 그린 화살표·다각형이 AI에게 이미지로 전혀 전달되지 않고 있었음 — "이미지
   // 중앙 우측 부근" 같은 3x3 격자 수준의 대략적인 텍스트 설명만 프롬프트에 들어가고, 원본 사진은
   // 아무 표시 없이 그대로 전달되고 있었음(AI는 어디를 말하는지 그냥 추측해야 했음). 이제 실제로
   // 그린 캔버스(브러시 색칠 + 화살표 + 다각형 테두리)를 원본 사진 위에 합성한 "표시된 사진"을
@@ -17118,7 +17135,14 @@ function _mkMaskExecute(){
       getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
     }
     if(refImgs.length){ getTab(G.wf).refs=refImgs; }
+    // ⚠️ 버그 수정(진짜 원인): "예전에 브러시 칸에 적었던 지시(예: 문 삭제해줘)가 안 지워지고
+    // 남아있다가, 나중에 영역선택 도구만 새로 써서 완전히 다른 지시(팬던트 조명 삭제해줘)를
+    // 내려도 그 오래된 지시가 앞에 그대로 붙어서 AI가 헷갈렸음" — 화살표·영역만 초기화하고
+    // 브러시 색상별 지시(G.maskColorPrompts/maskColorRefImg)는 안 지우고 있었던 게 원인.
+    // 이제 실행할 때마다 3가지 도구(브러시·화살표·영역선택) 지시를 전부 같이 초기화함.
+    G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations(); // 실행 후 화살표/영역은 초기화 (다음 편집에 남아있지 않도록)
+    var _dcv2=gE('draw-canvas'); if(_dcv2){ try{ _dcv2.getContext('2d').clearRect(0,0,_dcv2.width,_dcv2.height); }catch(e){} }
     G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){}); // 브러시 칠한 것도 같이 초기화
     togDraw(false);if(canRun())runTool();
   });
