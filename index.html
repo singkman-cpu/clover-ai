@@ -2593,24 +2593,110 @@ function _imgLoadWithRetry(imgEl, src, maxRetries){
   tryLoad();
 }
 // 이미지를 화면 전체 크게 보여주는 라이트박스 — 레퍼런스 썸네일 등 어디서든 재사용
+// ⚠️ 요청 반영: "렌더링·업로드·갤러리·즐겨찾기 이미지 전체에 확대/축소를 쉽게 넣어달라" —
+// 라이트박스(_openImageLightbox)랑 갤러리 확대보기(_galleryZoomShow)가 서로 다른 함수라
+// 각자 따로 구현하면 두 배로 손이 가고 나중에 또 하나만 고쳐지는 실수가 나기 쉬움 — 확대/
+// 축소/팬/휠줌/핀치줌 로직을 여기 하나로 뽑아서 두 곳 다 이 함수를 불러 쓰게 함.
+// img: 확대할 이미지 엘리먼트, ov: 그 이미지를 담고 있는 오버레이 컨테이너(바깥 클릭 감지용).
+// 반환값: {zoomBar, onKey, getZoom} — zoomBar는 호출한 쪽에서 원하는 위치에 append하면 됨.
+function _wireZoomPanControls(img, ov){
+  img.style.cursor='grab';
+  img.style.transition='transform .12s ease-out';
+  img.style.transformOrigin='center center';
+  img.style.userSelect='none';
+  img.style.webkitUserDrag='none';
+  var _zoom=1, _panX=0, _panY=0, MIN_Z=1, MAX_Z=5;
+  function applyTransform(){
+    img.style.transform='translate('+_panX+'px,'+_panY+'px) scale('+_zoom+')';
+    img.style.cursor = _zoom>1 ? 'grab' : 'default';
+  }
+  function setZoom(z, clientX, clientY){
+    z = Math.max(MIN_Z, Math.min(MAX_Z, z));
+    if(z===_zoom) return;
+    // 확대 기준점을 마우스/터치 위치로 잡아서, 보고 있던 지점이 화면에서 안 튀도록 함
+    if(clientX!=null && clientY!=null){
+      var rect=img.getBoundingClientRect();
+      var cx=clientX-(rect.left+rect.width/2), cy=clientY-(rect.top+rect.height/2);
+      var ratio=z/_zoom;
+      _panX = cx - (cx-_panX)*ratio;
+      _panY = cy - (cy-_panY)*ratio;
+    }
+    _zoom=z;
+    if(_zoom<=1){ _panX=0; _panY=0; }
+    applyTransform();
+  }
+  var _origOnClick=img.onclick;
+  img.onclick=function(e){ e.stopPropagation(); if(_origOnClick) _origOnClick(e); };
+  img.onwheel=function(e){
+    e.preventDefault(); e.stopPropagation();
+    setZoom(_zoom + (e.deltaY<0 ? 0.35 : -0.35), e.clientX, e.clientY);
+  };
+  var _dragging=false, _dragStartX=0, _dragStartY=0, _panStartX=0, _panStartY=0;
+  img.onmousedown=function(e){
+    if(_zoom<=1) return;
+    e.preventDefault(); e.stopPropagation();
+    _dragging=true; _dragStartX=e.clientX; _dragStartY=e.clientY; _panStartX=_panX; _panStartY=_panY;
+    img.style.cursor='grabbing';
+  };
+  document.addEventListener('mousemove', function(e){
+    if(!_dragging) return;
+    _panX = _panStartX + (e.clientX-_dragStartX);
+    _panY = _panStartY + (e.clientY-_dragStartY);
+    applyTransform();
+  });
+  document.addEventListener('mouseup', function(){ if(_dragging){ _dragging=false; img.style.cursor='grab'; } });
+  img.ondblclick=function(e){ e.stopPropagation(); setZoom(_zoom>1 ? 1 : 2.2, e.clientX, e.clientY); };
+  var _pinchDist=null;
+  img.addEventListener('touchstart', function(e){
+    if(e.touches.length===2){
+      _pinchDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+    }
+  }, {passive:true});
+  img.addEventListener('touchmove', function(e){
+    if(e.touches.length===2 && _pinchDist){
+      e.preventDefault();
+      var d = Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+      var midX=(e.touches[0].clientX+e.touches[1].clientX)/2, midY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+      setZoom(_zoom * (d/_pinchDist), midX, midY);
+      _pinchDist = d;
+    }
+  }, {passive:false});
+  img.addEventListener('touchend', function(e){ if(e.touches.length<2) _pinchDist=null; });
+  var zoomBar=document.createElement('div');
+  zoomBar.style.cssText='position:absolute;bottom:24px;right:22px;display:flex;flex-direction:column;gap:8px;z-index:3';
+  function mkZoomBtn(label, onclick, title){
+    var b=document.createElement('button'); b.type='button'; b.textContent=label; b.title=title||'';
+    b.style.cssText='width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:19px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center';
+    b.onclick=function(e){ e.stopPropagation(); onclick(); };
+    return b;
+  }
+  zoomBar.appendChild(mkZoomBtn('+', function(){ setZoom(_zoom+0.5); }, '확대'));
+  zoomBar.appendChild(mkZoomBtn('⟲', function(){ setZoom(1); }, '원래 크기로'));
+  zoomBar.appendChild(mkZoomBtn('−', function(){ setZoom(_zoom-0.5); }, '축소'));
+  return {
+    zoomBar: zoomBar,
+    onKey: function(e){ if(e.key==='+'||e.key==='=') setZoom(_zoom+0.5); else if(e.key==='-') setZoom(_zoom-0.5); },
+    isZoomed: function(){ return _zoom>1; }
+  };
+}
 function _openImageLightbox(url){
   var old=document.getElementById('img-lightbox'); if(old) old.remove();
   var ov=document.createElement('div');
   ov.id='img-lightbox';
-  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out;overflow:hidden';
   var img=document.createElement('img');
   img.src=url;
-  img.style.cssText='max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5);cursor:default';
-  img.onclick=function(e){ e.stopPropagation(); };
+  img.style.cssText='max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5)';
+  var zoomCtl=_wireZoomPanControls(img, ov);
   var closeBtn=document.createElement('button');
   closeBtn.type='button'; closeBtn.innerHTML='&#10005;';
-  closeBtn.style.cssText='position:absolute;top:18px;right:22px;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center';
+  closeBtn.style.cssText='position:absolute;top:18px;right:22px;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
   function close(){ ov.remove(); document.removeEventListener('keydown', onKey); }
-  function onKey(e){ if(e.key==='Escape') close(); }
+  function onKey(e){ if(e.key==='Escape') close(); else zoomCtl.onKey(e); }
   closeBtn.onclick=close;
-  ov.onclick=close; // 바깥(어두운 배경) 클릭하면 닫힘
+  ov.onclick=function(){ if(!zoomCtl.isZoomed()) close(); }; // 확대 중엔 바깥 클릭으로 안 닫히게(드래그 실수 방지)
   document.addEventListener('keydown', onKey);
-  ov.appendChild(img); ov.appendChild(closeBtn);
+  ov.appendChild(img); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn);
   document.body.appendChild(ov);
 }
 function dv(cl){return mk('div',cl);}
@@ -24542,6 +24628,7 @@ function _galleryZoomShow(list, idx){
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
   var isVidItem=src.includes('.mp4')||src.includes('.webm')||it.wf==='video'||it.wf==='shorts';
   var mediaEl;
+  var zoomCtl=null;
   if(isVidItem){
     mediaEl=document.createElement('video');
     mediaEl.src=src;mediaEl.controls=true;mediaEl.autoplay=true;mediaEl.loop=true;
@@ -24549,7 +24636,9 @@ function _galleryZoomShow(list, idx){
   } else {
     mediaEl=document.createElement('img');
     mediaEl.src=src;
-    mediaEl.style.cssText='max-width:96%;max-height:75vh;object-fit:contain;border-radius:8px;cursor:zoom-out';
+    mediaEl.style.cssText='max-width:96%;max-height:75vh;object-fit:contain;border-radius:8px';
+    // ⚠️ 요청 반영: "갤러리·즐겨찾기 이미지도 확대/축소 넣어달라" — 공용 헬퍼 재사용.
+    zoomCtl=_wireZoomPanControls(mediaEl, ov);
   }
   // 이전/다음 이동 버튼
   var prevBtn=document.createElement('button');prevBtn.type='button';prevBtn.textContent='‹';
@@ -24642,7 +24731,8 @@ function _galleryZoomShow(list, idx){
     ov.appendChild(mediaEl);
   }
   ov.appendChild(btns);
-  ov.onclick=function(e){if(e.target===ov||e.target===mediaEl)ov.remove();};
+  ov.onclick=function(e){if(e.target===ov||(e.target===mediaEl && !(zoomCtl&&zoomCtl.isZoomed())))ov.remove();};
+  if(zoomCtl) ov.appendChild(zoomCtl.zoomBar);
   // 이전 팝업에서 등록된 키보드 리스너가 남아있지 않도록, 매번 새로 등록하기 전에 이전 걸 정리함
   if(window._galZoomKeyHandler) document.removeEventListener('keydown', window._galZoomKeyHandler);
   var _galZoomKeyHandler=function(ev){
