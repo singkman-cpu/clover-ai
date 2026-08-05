@@ -13054,9 +13054,13 @@ function _shortsRenderLivePreview(container){
   var canvas=document.createElement('canvas');
   canvas.id='shorts-live-preview-canvas';
   canvas.width=1080;canvas.height=1920; // 실제 렌더 해상도와 같은 비율로 그려야 글자 크기 등이 실제와 일치함
-  canvas.style.cssText='width:'+PW+'px;height:'+PH+'px;border-radius:14px;border:2px solid var(--bd2);box-shadow:0 6px 24px rgba(0,0,0,.4);background:#111;display:block';
+  canvas.style.cssText='width:'+PW+'px;height:'+PH+'px;border-radius:14px;border:2px solid var(--bd2);box-shadow:0 6px 24px rgba(0,0,0,.4);background:#111;display:block;cursor:zoom-in';
   wrap.appendChild(canvas);
   container.appendChild(wrap);
+  // ⚠️ 요청 반영: "쇼츠 작업할 때 화면을 크게 볼 수 있는 방법이 없다" — 더블클릭하면 지금 이
+  // 미리보기(텍스트·라벨까지 합성된 실제 화면 그대로)를 확대해서 볼 수 있게 함. 이미 만들어둔
+  // 확대/축소 가능한 라이트박스(_openImageLightbox)를 그대로 재사용.
+  canvas.ondblclick=function(){ _openImageLightbox(canvas.toDataURL('image/jpeg', 0.92)); };
   var ctx=canvas.getContext('2d');
   function paint(){
     _shortsDrawImage(ctx,1080,1920,window._shortsPreviewImg,G_SHORTS.opts.fitMode,firstSlide.zoom,firstSlide.offX,firstSlide.offY);
@@ -15191,6 +15195,18 @@ function _shortsRenderCanvas(ub){
       '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(usable?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px;pointer-events:none">'+badgeTxt+'</div>'+
       '<div style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:#2a1a0a;color:#f59e0b;font-size:11px;font-weight:700;text-align:center;padding:8px;pointer-events:none">⚠️ 이미지 깨짐<span style="font-size:9px;color:#ccc;font-weight:500">다시 업로드해주세요</span></div>'+
       (videoLost?'<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:rgba(42,26,10,.88);color:#f59e0b;font-size:10.5px;font-weight:700;text-align:center;padding:8px;pointer-events:none">⚠️ 영상 소스 유실<span style="font-size:9px;color:#ccc;font-weight:500">새로고침 후엔 다시 올려야 해요</span></div>':'');
+    // ⚠️ 요청 반영: "화면을 크게 볼 방법이 없다" — 이 타일은 더블클릭이 이미 "문구 수정"에 쓰이고
+    // 있어서 그것과 안 겹치게, 우측 상단에 작은 돋보기 아이콘을 따로 둬서 누르면 확대해서 볼 수
+    // 있게 함(기존에 만들어둔 확대/축소 가능한 라이트박스 재사용).
+    if(!im.isVideo){
+      var zoomIcon=document.createElement('button');
+      zoomIcon.type='button'; zoomIcon.innerHTML='🔍';
+      zoomIcon.title='크게 보기';
+      zoomIcon.style.cssText='position:absolute;top:6px;right:6px;z-index:2;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center';
+      zoomIcon.onclick=function(e){ e.stopPropagation(); _openImageLightbox(im.img); };
+      zoomIcon.onmousedown=function(e){ e.stopPropagation(); };
+      tile.appendChild(zoomIcon);
+    }
     tile.addEventListener('dragstart',function(e){
       _dragFromIdx=idx;
       tile.style.opacity='0.4';
@@ -16936,7 +16952,7 @@ function mkMask(p){
   // 다각형을 확정하면 마스크 색깔 팔레트의 "기본(민트)" 칸에 자동으로 채워지므로, 그 칸의 텍스트/
   // 참고이미지 입력을 그대로 재사용해서 "이 영역을 이렇게 바꿔줘"를 지정할 수 있음.
   var tr=dv('');tr.style.cssText='display:flex;gap:6px;margin-bottom:8px';
-  [['brush','✏️','브러시 (오브젝트 위에 칠하기)'],['erase','⌫','지우개'],['polygon','⬠','영역 선택 (점 찍어서 정확한 범위 지정)'],['arrow','➡️','화살표로 오브젝트 지목']].forEach(function(a){
+  [['brush','✏️','브러시 (오브젝트 위에 칠하기)'],['erase','⌫','지우개'],['polygon','⬠','다각형 (점 찍어서 정확한 범위 지정)'],['rect','▭','사각형 (드래그로 빠르게 범위 지정)'],['arrow','➡️','화살표로 오브젝트 지목']].forEach(function(a){
     var bt=mk('button','');
     var isOn=G.dm===a[0];
     bt.style.cssText='flex:1;height:38px;border-radius:7px;background:'+(isOn?'var(--acg)':'var(--card)')+';border:1px solid '+(isOn?'var(--acb)':'var(--bd2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';cursor:pointer;font-size:14px;font-family:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px';
@@ -16987,7 +17003,7 @@ function mkMask(p){
   // 있었음 — 이제 지금 고른 도구에 해당하는 UI만 보이게 함.
   var isBrushTool = (G.dm==='brush' || G.dm==='erase');
   var isArrowTool = (G.dm==='arrow');
-  var isPolyTool  = (G.dm==='polygon');
+  var isPolyTool  = (G.dm==='polygon' || G.dm==='rect');
 
   // 화살표로 지목한 오브젝트 목록 — 각각 라벨(무슨 수정을 할지)과 참고이미지를 넣을 수 있음
   // ⚠️ 예전엔 화살표/영역이 하나라도 있으면 다른 도구를 써도 목록이 계속 남아있었는데("영역 도구
@@ -17003,7 +17019,9 @@ function mkMask(p){
   if(!G.polyAreas) G.polyAreas=[];
   if(isPolyTool){
     var polyHint=dv('note');polyHint.style.cssText='font-size:10.5px;margin-bottom:8px';
-    polyHint.innerHTML='💡 점을 찍어 다각형을 그리세요. <b style="color:var(--t2)">닫기:</b> 시작점을 다시 클릭하거나 더블클릭 · <b style="color:var(--t2)">되돌리기:</b> 백스페이스로 마지막 점만 취소. 몇 개든 계속 그릴 수 있고, 확정할 때마다 아래 목록에 번호가 추가돼요.';
+    polyHint.innerHTML = (G.dm==='rect')
+      ? '💡 시작점에서 끝점까지 <b style="color:var(--t2)">드래그</b>하면 사각형 영역이 바로 만들어져요. 몇 개든 계속 그릴 수 있고, 그릴 때마다 아래 목록에 번호가 추가돼요.'
+      : '💡 점을 찍어 다각형을 그리세요. <b style="color:var(--t2)">닫기:</b> 시작점을 다시 클릭하거나 더블클릭 · <b style="color:var(--t2)">되돌리기:</b> 백스페이스로 마지막 점만 취소. 몇 개든 계속 그릴 수 있고, 확정할 때마다 아래 목록에 번호가 추가돼요.';
     s.appendChild(polyHint);
   }
   var polyAreaListWrap=dv('');polyAreaListWrap.id='poly-area-list-wrap';
@@ -17564,6 +17582,7 @@ function togDraw(on, mode){
         cv.classList.add('active');
         cv.classList.remove('brush-mode','eyedrop-mode','polygon-mode');
         if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
+      if(mode==='rect'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initRectMode(cv);}
         else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';}
         if(mode!=='arrow'){ var _aOv=gE('arrow-overlay'); if(_aOv) _aOv.style.display='none'; }
         if(mode!=='polygon'){ var _pOv=gE('poly-overlay'); if(_pOv){ _pOv.style.display='none'; _pOv.style.pointerEvents='none'; } }
@@ -17579,6 +17598,7 @@ function togDraw(on, mode){
       cv.classList.add('active');
       cv.classList.remove('brush-mode','eyedrop-mode','polygon-mode');
       if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
+      if(mode==='rect'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initRectMode(cv);}
       else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';}
       if(mode!=='arrow'){ var _aOv2=gE('arrow-overlay'); if(_aOv2) _aOv2.style.display='none'; }
       if(mode!=='polygon'){ var _pOv2=gE('poly-overlay'); if(_pOv2){ _pOv2.style.display='none'; _pOv2.style.pointerEvents='none'; } }
@@ -17815,6 +17835,67 @@ window.renderArrowList=renderArrowList;
 // → 화살표처럼 G.polyAreas 배열에 각 영역을 독립된 객체(포인트+라벨+참고이미지)로 저장하고,
 // 화면엔 번호가 매겨진 반투명 다각형으로 항상 보이게 하고, 바로 아래에 그 번호와 매칭되는
 // 입력칸이 나오게 해서 몇 개를 그리든 전부 따로 지시할 수 있게 함.
+// ⚠️ 요청 반영: "사각형 툴도 넣어달라(VizMaker에 있던 것처럼)" — 다각형(점 찍기)은 정교하지만
+// 느리고, 대부분의 "이 물건 하나만 바꿔줘" 케이스는 네모 박스로 대충 감싸는 것만으로 충분함.
+// 드래그 한 번으로 사각형을 그리면, 그 4개 모서리를 다각형 영역(G.polyAreas)으로 그대로 등록해서
+// — 다각형이 이미 갖고 있는 letterbox 보정, 픽셀 마스크 변환, crop 편집 등 모든 기능을 다 그대로
+// 재사용함(새로 구현할 필요 없이 "다각형의 특수한 경우"로 취급).
+function initRectMode(cv){
+  if(!G.polyAreas) G.polyAreas=[];
+  var polyOv=gE('poly-overlay');
+  if(!polyOv){
+    polyOv=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    polyOv.id='poly-overlay';
+    polyOv.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:all;z-index:31;cursor:crosshair';
+    cv.parentNode.appendChild(polyOv);
+  }
+  polyOv.style.display='block';
+  polyOv.style.pointerEvents='all';
+  _redrawPolyAreas(polyOv);
+  var oldDraft=polyOv.querySelector('#poly-draft-group'); if(oldDraft) oldDraft.remove();
+  var draftGroup=document.createElementNS('http://www.w3.org/2000/svg','g'); draftGroup.id='poly-draft-group';
+  polyOv.appendChild(draftGroup);
+  var rectEl=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  rectEl.setAttribute('fill','rgba(0,229,204,0.2)');
+  rectEl.setAttribute('stroke','#00e5cc');
+  rectEl.setAttribute('stroke-width','2');
+  rectEl.setAttribute('stroke-dasharray','6,3');
+  rectEl.style.display='none';
+  draftGroup.appendChild(rectEl);
+  var dragging=false, startX=0, startY=0;
+  polyOv.onmousedown=function(e){
+    if(e.detail>1) return; // 더블클릭 등은 무시
+    dragging=true;
+    var r=polyOv.getBoundingClientRect();
+    startX=e.clientX-r.left; startY=e.clientY-r.top;
+    rectEl.style.display='block';
+    rectEl.setAttribute('x',startX); rectEl.setAttribute('y',startY);
+    rectEl.setAttribute('width',0); rectEl.setAttribute('height',0);
+  };
+  polyOv.onmousemove=function(e){
+    if(!dragging) return;
+    var r=polyOv.getBoundingClientRect();
+    var curX=e.clientX-r.left, curY=e.clientY-r.top;
+    var x=Math.min(startX,curX), y=Math.min(startY,curY);
+    var w=Math.abs(curX-startX), h=Math.abs(curY-startY);
+    rectEl.setAttribute('x',x); rectEl.setAttribute('y',y);
+    rectEl.setAttribute('width',w); rectEl.setAttribute('height',h);
+  };
+  polyOv.onmouseup=function(e){
+    if(!dragging) return;
+    dragging=false;
+    var r=polyOv.getBoundingClientRect();
+    var curX=e.clientX-r.left, curY=e.clientY-r.top;
+    var x1=Math.min(startX,curX), y1=Math.min(startY,curY);
+    var x2=Math.max(startX,curX), y2=Math.max(startY,curY);
+    rectEl.style.display='none';
+    if(Math.abs(x2-x1)<8 || Math.abs(y2-y1)<8) return; // 너무 작은 드래그(실수 클릭)는 무시
+    // 사각형 4개 모서리를 다각형 점으로 등록하고, 기존 finishPolygon과 동일한 letterbox 보정
+    // 방식으로 원본 해상도 좌표로 변환해서 저장 — 다각형과 완전히 같은 데이터 형태로 취급됨.
+    G.polyPts=[[x1,y1],[x2,y1],[x2,y2],[x1,y2]];
+    finishPolygon(cv,polyOv);
+  };
+}
 function initPolygonMode(cv){
   G.polyPts=G.polyPts||[];
   if(!G.polyAreas) G.polyAreas=[];
