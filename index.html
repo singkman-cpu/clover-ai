@@ -9678,6 +9678,11 @@ var KOREA_STRUCTURE_OVERRIDE_RULE = ' ⚠️ 한국 공간 기준 적용(매우 
 // 공통)에 마지막에 한 번 더 못박는 공용 규칙. 간판이 필요한 장면(카페·식당 외관 등)에서도
 // 실제 브랜드명 대신 가상의 상호를 쓰게 유도함.
 var NO_BRAND_TRADEMARK_RULE = ' ⚠️ 상표·저작권 주의 (매우 중요, 항상 적용): 결과 이미지에 실제 존재하는 브랜드 로고, 상표, 특정 회사명이 적힌 간판·사인물, 유명 프랜차이즈의 트레이드 드레스(고유 색상 조합+로고 형태 조합), 유명 캐릭터, 스포츠팀 로고, 특정 자동차 브랜드 엠블럼을 넣지 마세요. 간판이 필요한 장면(카페·식당·상가 외관 등)이라도 실제 브랜드명 대신 일반적이고 가상의 상호를 쓰거나, 텍스트가 읽히지 않는 추상적인 사인물 형태로 처리하세요.';
+// ⚠️ 요청 반영: "AI 편집 렌더링하면 전체 톤이 살짝 붉은끼가 생긴다"는 지적이 반복됨 — 이미지
+// 편집 모델(nano-banana-2)이 편집할 때 전체 화이트밸런스를 살짝 따뜻한(붉은/주황) 쪽으로
+// 틀어버리는 경향이 있는 것으로 보임. AI 편집(마스크·화살표·일반프롬프트·대화형 수정 등) 모든
+// 경로에 공통으로 강하게 명시해서 이 색 편향을 막음.
+var NO_COLOR_CAST_RULE = ' ⚠️ 화이트밸런스 유지(매우 중요): 이 편집 작업 중에 이미지 전체의 화이트밸런스·색온도가 원본보다 붉거나 주황빛으로(따뜻하게) 틀어지면 안 됩니다 — 벽·천장·바닥의 흰색·회색 영역이 편집 후에도 원본과 똑같이 중립적인 흰색·회색으로 보여야 합니다. 수정하는 부분(마스크·화살표·영역으로 지정한 곳)의 색만 바뀌어야 하고, 나머지 전체 이미지의 색온도·노출·톤은 원본과 픽셀 단위로 동일하게 유지하세요 — 특히 붉은/주황 색조가 전체적으로 살짝 깔리는 현상을 절대 만들지 마세요.';
 // ⚠️ 요청 반영: "이미지 3장이 겹쳐서 나온다"는 지적 — NO_BRAND_TRADEMARK_RULE 안에 같이 묻혀있던
 // "단일 이미지" 지시가 잘 안 지켜지고 있어서, 훨씬 더 노골적이고 반복적인 문구로 별도 분리함.
 // 특히 오픈오피스처럼 "한 장에 다 담기 애매한" 넓은 공간에서 AI가 알아서 여러 컷을 이어붙여
@@ -9772,7 +9777,7 @@ function _compositeBudgetCaption(imgUrl, captionText, cb){
     cb(imgUrl);
   }
 }
-function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot){
+function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
     var galleryId=id+'';
@@ -9789,7 +9794,7 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
           // 클라우드에서 다시 불러올 때 null로 덮어써져서 예산 패널이 통째로 사라지고 있었음.
           _supa.from('gallery').insert({
             user_id:_supaUser.id, wf:wf, storage_path:filePath, public_url:publicUrl,
-            orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:'', budget_snapshot:budgetSnapshot||null
+            orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:roomLabel||'', budget_snapshot:budgetSnapshot||null
           }).select().single().then(function(){ console.log('[Gallery] 클라우드 저장 완료 ('+wf+')'); })
             .catch(function(e){ console.warn('[Gallery] DB 저장 실패:', e); });
         }
@@ -10419,7 +10424,7 @@ function _multiRoomGenerateStep(idx){
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
     st.results[idx]={url:resultUrl};
-    _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution);
+    _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution, null, room.label);
     // ⚠️ "내 집 사진(수동)" 모드는 진짜 원본 사진이 있으니, 첫 렌더링이 끝나면 바로
     // 원본 vs 결과 비교 슬라이더를 보여줘도 됨(비교할 게 실제로 있으니까) — "컨셉 확장(자동)"
     // 모드와 다른 점: 그쪽은 상상으로 만든 공간이라 비교 대상이 없어서 첫 렌더링엔 슬라이더를
@@ -10453,7 +10458,7 @@ function _multiRoomRetryOne(idx){
     getTab('space').refs=origRefs;
     st.results[idx]={url:resultUrl, prevUrl:prevResult&&prevResult.url};
     st.running=false;
-    _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution);
+    _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution, null, room.label);
     // 재생성 끝나면 바로 메인 화면에 "직전 버전 vs 새 버전" 비교로 보여줘서, 클릭 한 번 더
     // 안 해도 바로 비교하며 마음에 드는 쪽을 고를 수 있게 함.
     _showRoomResultInMain(prevResult&&prevResult.url, resultUrl, room.label);
@@ -10936,12 +10941,19 @@ function _autoRoomImagesFor(typeName){
   // 직접 일치하는 이름표가 없으면: 이 타겟과 같은 종류(외관이면 외관 앵커, 실내면 실내 앵커) 중
   // 첫 번째를 주 이미지로, 나머지 전부(외관+실내 섞어서, 최대 2장)를 스타일 참고로 붙여서
   // "상상"할 때도 실제 완성된 다른 부분들을 최대한 많이 참고하게 함.
+  // ⚠️ 요청 반영(근본 원인 수정): "욕실·아이방·서재가 거실로 나오는 경우가 많다" — 자기 앵커
+  // 사진이 없는 방 타입은 여기서 그냥 같은 종류 앵커 중 "첫 번째"(예: intAnchors[0]이 거실이면
+  // 거실 사진)를 편집 기준(주 이미지)으로 써왔음. 이미지 편집 모델은 기준 이미지의 구조·형태를
+  // 강하게 유지하려는 경향이 있어서(이 세션 내내 확인한 특성), 텍스트로 "새로 상상하라"고 해도
+  // 결국 거실 형태가 남은 결과가 나오기 쉬웠음 — noDirectMatch 플래그를 반환해서, 호출부
+  // (_autoRoomGenerateStep)가 이 경우엔 "편집"이 아니라 "순수 텍스트 생성 + 스타일 참고"로
+  // 분기하도록 함(영감만 얻기와 같은 방식 — 기준 이미지 자체가 없어야 엉뚱한 방 형태가 안 남음).
   var samePool = targetIsExt ? extAnchors : intAnchors;
   var oppositePool = targetIsExt ? intAnchors : extAnchors;
   var primaryImg = samePool.length ? samePool[0].img : (oppositePool.length ? oppositePool[0].img : null);
   var usedPrimary = samePool.length ? samePool[0] : (oppositePool.length ? oppositePool[0] : null);
   var refPool = extAnchors.concat(intAnchors).filter(function(a){return a!==usedPrimary;}).map(function(a){return a.img;}).slice(0,2);
-  return { primary: primaryImg, ref: refPool.length?refPool:null };
+  return { primary: primaryImg, ref: refPool.length?refPool:null, noDirectMatch: true };
 }
 function _autoRoomPromptFor(basePrompt, typeName){
   var spTab=getTab('spaceset');
@@ -11006,7 +11018,16 @@ function _autoRoomGenerateStep(idx){
   // 유지하려는 경향이 있었음. "영감만 얻기"는 아예 이미지 편집이 아니라 순수 텍스트만으로
   // 새로 생성(text-to-image)하는 방식으로 완전히 분리함 — 참고할 이미지 자체가 없으니 시각적으로
   // 끌려갈 대상이 원천적으로 사라짐.
-  if(spTab.autoRoomFidelity==='loose'){
+  var imgs0 = _autoRoomImagesFor(typeName);
+  // ⚠️ 요청 반영(근본 원인 수정): "욕실·아이방·서재가 거실로 나오는 경우가 많다" — 자기 앵커
+  // 사진이 없는 방 타입은 지금까지 "같은 종류 앵커 중 첫 번째"(흔히 거실)를 편집 기준(주 이미지)
+  // 으로 써왔는데, 이미지 편집 모델은 기준 이미지의 구조·형태를 강하게 유지하려는 경향이 있어서
+  // 결국 거실 형태가 남은 결과가 나오기 쉬웠음. "영감만 얻기"뿐 아니라, 자기 앵커가 없는 모든
+  // 경우에 이 문제가 똑같이 생기므로(반영도 설정과 무관하게), fidelity 설정과 상관없이 이 경우엔
+  // 편집이 아니라 순수 텍스트 생성 + 다른 방들을 스타일 참고 이미지로만 붙이는 방식으로 감 —
+  // "비슷하게/최대한 동일하게" 설정이면 그 참고 이미지들을 여전히 붙여서 스타일은 반영하되,
+  // 편집 기준(주 이미지)로 삼지는 않음.
+  if(spTab.autoRoomFidelity==='loose' || (imgs0.noDirectMatch && !_isExteriorViewType(typeName))){
     var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
     var _looseP = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
     // ⚠️ 버그 수정: "선택 해제하고 다시 선택해서 렌더링하면 기존이랑 느낌이 다르다"는 지적 —
@@ -11018,6 +11039,12 @@ function _autoRoomGenerateStep(idx){
     // 내가 방금 만든 새 디자인끼리는 통일감 있게" 되도록 함.
     var _looseGenPool = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs = (_looseGenPool && _looseGenPool.length) ? [_looseGenPool[0], _looseGenPool[_looseGenPool.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    // "비슷하게/최대한 동일하게"인데 자기 앵커가 없는 경우엔, 업로드한 다른 방 사진들을 여전히
+    // 스타일 참고(이미지)로 붙임 — 편집 기준으로 안 쓸 뿐, 시각적 스타일 참고는 그대로 유지.
+    if(spTab.autoRoomFidelity!=='loose' && imgs0.noDirectMatch && !_isExteriorViewType(typeName)){
+      var _otherAnchorRefs = [imgs0.primary].concat(imgs0.ref||[]).filter(Boolean).slice(0,2);
+      _looseRefs = _otherAnchorRefs.concat(_looseRefs).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
+    }
     var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1};
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
     falRun('fal-ai/nano-banana-2', _looseInput, function(d){
@@ -11027,7 +11054,7 @@ function _autoRoomGenerateStep(idx){
       var isExtType0 = _isExteriorViewType(typeName);
       if(isExtType0){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
       else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
-      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'nano2', spTab.autoRoomResolution||'1K');
+      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, typeName);
       _showRoomResultInMain(null, resultUrl, typeName);
       _autoRoomGenerateStep(idx+1);
     }, function(err){
@@ -11077,7 +11104,7 @@ function _autoRoomGenerateStep(idx){
       if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[];
       spTab.autoRoomGenIntUrls.push(resultUrl);
     }
-    _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution);
+    _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution, null, typeName);
     // ⚠️ 버그 수정: "왼쪽에 렌더링된 걸 클릭해서 오른쪽에 띄우지 않으면 갤러리에 안 보인다"는
     // 지적 — 클라우드 저장(_saveResultToCloudGallery) 자체는 클릭과 무관하게 항상 실행되고
     // 있었지만, 현장사진세트(_multiRoomGenerateStep)와 달리 컨셉확장은 이 함수가 결과를 로컬
@@ -11104,12 +11131,18 @@ function _autoRoomRetryOne(idx){
   var typeName=allTypes[idx];
   var basePrompt=spTab.autoRoomPrompt.trim() || '업로드한 사진에 보이는 현재 스타일(색감, 마감재, 조명 톤, 소재의 디자인 언어)을 자연스럽게 유지하면서 전체적인 완성도와 사실감을 높여줘.';
   var prompt = _autoRoomPromptFor(basePrompt, typeName);
-  // ⚠️ "이 뷰만 다시 생성"에도 동일하게 적용 — 영감만 얻기는 순수 텍스트 생성으로 분리.
-  if(spTab.autoRoomFidelity==='loose'){
+  var imgs0b = _autoRoomImagesFor(typeName);
+  // ⚠️ "이 뷰만 다시 생성"에도 동일하게 적용 — 영감만 얻기는 순수 텍스트 생성으로 분리, 자기
+  // 앵커가 없는 방(예: 욕실·아이방·서재가 거실 사진 기준으로 편집되던 버그)도 같은 방식으로 처리.
+  if(spTab.autoRoomFidelity==='loose' || (imgs0b.noDirectMatch && !_isExteriorViewType(typeName))){
     var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
     var _looseP2 = 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    if(spTab.autoRoomFidelity!=='loose' && imgs0b.noDirectMatch && !_isExteriorViewType(typeName)){
+      var _otherAnchorRefs2 = [imgs0b.primary].concat(imgs0b.ref||[]).filter(Boolean).slice(0,2);
+      _looseRefs2 = _otherAnchorRefs2.concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
+    }
     var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1};
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
     falRun('fal-ai/nano-banana-2', _looseInput2, function(d){
@@ -11120,7 +11153,7 @@ function _autoRoomRetryOne(idx){
       var isExtType0b = _isExteriorViewType(typeName);
       if(isExtType0b){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
       else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
-      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'nano2', spTab.autoRoomResolution||'1K');
+      _saveResultToCloudGallery('spaceset', Date.now()+idx, resultUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, typeName);
       _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, typeName);
       renderSB();
     }, function(err){
@@ -11148,7 +11181,7 @@ function _autoRoomRetryOne(idx){
     st.running=false;
     if(isExtType2){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
     else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
-    _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution);
+    _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution, null, typeName);
     // ⚠️ 요청 반영: "다시 생성"으로 재생성한 경우엔 직전 시도(prevResult2)가 있으니 그걸 "이전"으로
     // 넘겨서 슬라이더로 비교되게 함 — 첫 생성일 때만(prevResult2 없음) 단일 이미지로 보여줌.
     _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, typeName);
@@ -17456,9 +17489,17 @@ function _mkBuildMarkedReferenceImage(cb){
       overlayJobs.forEach(function(svgEl){
         try{
           var rect = svgEl.getBoundingClientRect();
-          var dispW = rect.width || w, dispH = rect.height || h;
+          // ⚠️ 버그 수정(진짜 마지막 원인): 화면 표시(SVG 내부 그림 위치)는 지난번에 고쳤지만,
+          // 여기서 AI에게 실제로 보낼 "표시된 사진"을 합성할 때는 여전히 SVG 전체(레터박스 여백
+          // 포함)를 원본 해상도 크기로 그대로 늘려서 그리고 있었음 — 화면에 보이는 위치는 맞아
+          // 보여도, 실제로 AI가 받는 합성 이미지 속 화살표 위치는 계속 어긋나 있었던 것. viewBox를
+          // 컨테이너 전체가 아니라, 실제 이미지가 그려지는 letterbox 보정된 영역만으로 좁혀서
+          // 잘라내야 함(여백 부분은 아예 안 씀).
+          var letterboxRectSvg = _getLetterboxCorrectedRect(rect, w, h);
+          var vbX = letterboxRectSvg.left - rect.left, vbY = letterboxRectSvg.top - rect.top;
+          var dispW = letterboxRectSvg.width || w, dispH = letterboxRectSvg.height || h;
           var svgClone = svgEl.cloneNode(true);
-          svgClone.setAttribute('viewBox', '0 0 ' + dispW + ' ' + dispH);
+          svgClone.setAttribute('viewBox', vbX + ' ' + vbY + ' ' + dispW + ' ' + dispH);
           svgClone.setAttribute('width', w); svgClone.setAttribute('height', h);
           svgClone.removeAttribute('style');
           var svgStr = new XMLSerializer().serializeToString(svgClone);
@@ -19320,8 +19361,12 @@ document.addEventListener('touchend',function(){G.dragId=-1;G._touchDragId=null;
 function drawMv(e){
   var cv=gE('draw-canvas');if(!cv||!cv.classList.contains('active'))return;
   var rect=cv.getBoundingClientRect();
-  var scaleX=cv.width/rect.width, scaleY=cv.height/rect.height;
-  var pt={x:(e.clientX-rect.left)*scaleX, y:(e.clientY-rect.top)*scaleY};
+  // ⚠️ 버그 수정: 다각형·화살표와 완전히 동일한 letterbox 버그가 브러시 그리기에도 있었음 —
+  // 드디어 브러시 그리는 함수(drawMv/drawDn)를 찾아서 같은 방식으로 고침.
+  var letterboxRectB = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  var offXB = letterboxRectB.left - rect.left, offYB = letterboxRectB.top - rect.top;
+  var scaleX=cv.width/letterboxRectB.width, scaleY=cv.height/letterboxRectB.height;
+  var pt={x:(e.clientX-rect.left-offXB)*scaleX, y:(e.clientY-rect.top-offYB)*scaleY};
   if(G.lastPt){
     var ctx=cv.getContext('2d');
     ctx.beginPath();
@@ -19349,8 +19394,10 @@ function drawDn(e){
   try{ G.drawHist.push(cv.toDataURL()); if(G.drawHist.length>20) G.drawHist.shift(); }catch(err){}
   G.drawing=true;
   var rect=cv.getBoundingClientRect();
-  var scaleX=cv.width/rect.width, scaleY=cv.height/rect.height;
-  var pt={x:(e.clientX-rect.left)*scaleX, y:(e.clientY-rect.top)*scaleY};
+  var letterboxRectB2 = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  var offXB2 = letterboxRectB2.left - rect.left, offYB2 = letterboxRectB2.top - rect.top;
+  var scaleX=cv.width/letterboxRectB2.width, scaleY=cv.height/letterboxRectB2.height;
+  var pt={x:(e.clientX-rect.left-offXB2)*scaleX, y:(e.clientY-rect.top-offYB2)*scaleY};
   G.lastPt=null; // 첫 점은 선을 안 긋고, 점 하나만 찍음(아래에서)
   // 첫 클릭만으로도 최소한 점 하나는 찍히게(드래그 없이 콕 찍기만 해도 반응하도록)
   var ctx=cv.getContext('2d');
@@ -24821,8 +24868,8 @@ function renderGalleryGrid(items){
     // 태그 (칩 스타일) — 엔진명·해상도 등은 왼쪽에, 프리셋 이름은 오른쪽에 별도로 표시함.
     // 예전엔 item.tags 배열의 앞 2개만 보여줘서, 배열 순서상 뒤에 있는 "preset:이름" 태그가
     // 잘려서 안 보이는 문제가 있었음 — 프리셋 이름은 이제 위치·존재와 상관없이 항상 찾아서 보여줌.
-    var _presetTagRaw = (item.tags||[]).find(function(t){ return t.indexOf('preset:')===0; });
-    var _nonPresetTags = (item.tags||[]).filter(function(t){ return t.indexOf('preset:')!==0; });
+    var _presetTagRaw = (item.tags||[]).find(function(t){ return t.indexOf('preset:')===0 || t.indexOf('room:')===0; });
+    var _nonPresetTags = (item.tags||[]).filter(function(t){ return t.indexOf('preset:')!==0 && t.indexOf('room:')!==0; });
     if(_nonPresetTags.length || _presetTagRaw){
       var tagRow=document.createElement('div');
       tagRow.style.cssText='position:absolute;bottom:8px;left:8px;right:8px;display:flex;justify-content:space-between;align-items:flex-end;gap:6px';
@@ -24837,9 +24884,11 @@ function renderGalleryGrid(items){
       tagRow.appendChild(tag);
       if(_presetTagRaw){
         var presetChip=document.createElement('span');
+        var _isRoomTag = _presetTagRaw.indexOf('room:')===0;
+        var _presetLabel = _presetTagRaw.slice(_isRoomTag ? 5 : 7);
         presetChip.style.cssText='background:rgba(0,229,204,.22);backdrop-filter:blur(6px);color:var(--ac,#00e5cc);font-size:9.5px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%;flex-shrink:0';
-        presetChip.textContent=_presetTagRaw.slice(7);
-        presetChip.title=_presetTagRaw.slice(7);
+        presetChip.textContent=(_isRoomTag?'📍 ':'')+_presetLabel;
+        presetChip.title=_presetLabel;
         tagRow.appendChild(presetChip);
       }
       card.appendChild(tagRow);
@@ -26416,6 +26465,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // 거쳤든 상관없이, 실제 생성 직전 이 마지막 지점에서 무조건 한 번 더 못박아서 실존
       // 브랜드/로고/상표가 결과물에 들어가지 않게 함(전체 파이프라인 공통 적용).
       _finalPrompt = (_finalPrompt||'') + NO_BRAND_TRADEMARK_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE;
+      if(G.wf==='edit') _finalPrompt += NO_COLOR_CAST_RULE;
       _runToolWithPrompt(_finalPrompt);
     }catch(e){ console.error('[actbtn]',e); alert('오류: '+e.message); }
   }
@@ -27410,6 +27460,13 @@ function loadCloudGallery(){
           var _allPS=[].concat(PS_SPACE||[],PS_RENDER||[],PS_EDIT||[],PS_VIDEO||[]);
           var _ps=_allPS.find(function(p){return p.k===row.style_key;});
           if(_ps) tags.push('preset:'+_ps.l);
+        }
+        // ⚠️ 요청 반영: "갤러리에 공간컨셉 결과가 엔진·사이즈만 나오고 어느 공간인지 안 나온다" —
+        // 공간컨셉(spaceset)은 style_key 칼럼을 프리셋 키가 아니라 방/뷰 이름(예: "오픈오피스",
+        // "거실")으로 저장해두므로, 프리셋 목록에서 못 찾으면(=프리셋이 아니라 방 이름이므로 당연히
+        // 못 찾음) 그 값을 그대로 방 이름 태그로 붙여줌.
+        if(wf==='spaceset' && row.style_key && !tags.some(function(t){return t.indexOf('preset:')===0;})){
+          tags.push('room:'+row.style_key);
         }
         // 예산 정보(budget_snapshot)도 복원 — jsonb 컬럼이라 문자열로 올 수도, 객체로 올 수도 있어서 둘 다 처리
         var _restoredBudgetSnap = null;
