@@ -9708,7 +9708,18 @@ var SINGLE_IMAGE_OUTPUT_RULE = ' ⚠️⚠️ 결과물 형식(절대 규칙): �
 var KOREA_BACKGROUND_RULE = ' ⚠️ 배경은 반드시 대한민국(중요, 항상 적용): 창밖으로 보이는 풍경, 건물 주변 배경, 조감뷰·항공뷰에 보이는 이웃 건물·동네, 야외 조경 등 이 사진에 등장하는 모든 배경 요소는 반드시 대한민국의 실제 도시·주거 환경처럼 보여야 합니다 — 미국식 교외 주택가, 일본식 거리, 유럽식 골목 등 다른 나라 느낌의 배경(건물 양식, 도로·표지판 스타일, 전신주, 간판 폰트·배치, 자동차 번호판 등)이 나오면 안 됩니다. 창밖 배경은 한국의 아파트 단지, 다세대·다가구 주택가, 도심 오피스 빌딩숲, 또는 이 공간이 있을 법한 한국의 실제 동네 풍경처럼 만드세요.';
 // 방/공간 라벨(예: '거실', '사무실', '카운터')이 어느 카테고리에 속하는지 찾아서, 그 카테고리에
 // 맞는 KOREA_LAYOUT_GUIDE 문구를 고를 때 씀. 못 찾으면 주거공간을 기본값으로 함.
-function _categoryForRoomLabel(label){
+// ⚠️ 버그 수정(치명적): "풀빌라 넣고 렌더링했는데 아파트 주거공간처럼 나온다" — 원인을 찾아보니,
+// "거실"·"침실" 같은 흔한 방 이름이 residential(주거공간)뿐 아니라 poolvilla·townhouse 등
+// 여러 카테고리에도 똑같이 존재하는데, 이 함수는 사용자가 실제로 어떤 카테고리를 골랐는지는
+// 전혀 모른 채 그냥 SPACE_CATEGORIES를 처음부터 순서대로 뒤져서 "제일 먼저 매칭되는 카테고리"를
+// 반환하고 있었음 — residential이 목록 맨 앞이라, 겹치는 이름이 있으면 사용자가 풀빌라를
+// 선택했어도 무조건 residential(아파트 기준 가이드)이 적용되고 있었음. 이제 사용자가 실제로
+// 고른 카테고리(preferredCat)를 우선 확인해서, 그 카테고리 안에 이 이름이 있으면 그걸 그대로
+// 쓰고, 없을 때만(예: 외관 뷰처럼 카테고리 밖의 공통 이름) 전체를 다시 뒤짐.
+function _categoryForRoomLabel(label, preferredCat){
+  if(preferredCat && SPACE_CATEGORIES[preferredCat] && SPACE_CATEGORIES[preferredCat].types.indexOf(label)!==-1){
+    return preferredCat;
+  }
   var found='residential';
   Object.keys(SPACE_CATEGORIES).some(function(catKey){
     if(SPACE_CATEGORIES[catKey].types.indexOf(label)!==-1){ found=catKey; return true; }
@@ -10353,7 +10364,7 @@ function _multiRoomBuildExteriorPrompt(userStyle, viewLabel, hasRoomRef){
     prompt += ' 첨부한 참고 이미지는 사용자가 원하는 목표 외관 스타일이며, 다음 항목을 최대한 똑같이 재현하세요: 외장 마감재의 정확한 종류(참고 이미지가 벽돌이면 반드시 벽돌로, 스타코면 스타코로, 세라믹 사이딩이면 세라믹 사이딩으로 — 절대 다른 재질로 바꾸지 마세요), 전체 컬러 팔레트, 창호 프레임 색상, 조경·외부 조명 스타일. 건물끼리(뷰끼리) 서로 참고하는 게 아니라, 전부 이 참고 이미지 하나를 기준으로 통일감 있게 만들어주세요.';
   }
   prompt += ' 참고 이미지에 사람이나 차량, 반려동물이 나온다고 해도 그대로 복사해서 넣지 마세요 — 참고 이미지는 오직 마감재·색감·조경 스타일만 참고하는 용도입니다.';
-  var cat = _categoryForRoomLabel(viewLabel);
+  var cat = _categoryForRoomLabel(viewLabel, getTab('spaceset').multiRoomCategory);
   prompt += ' ' + KOREA_LAYOUT_GUIDE[cat] + NO_BRAND_TRADEMARK_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE;
   return prompt;
 }
@@ -10363,7 +10374,7 @@ function _multiRoomBuildExteriorPrompt(userStyle, viewLabel, hasRoomRef){
 function _multiRoomBuildPrompt(userStyle, roomLabel, hasRoomRef){
   // ⚠️ 건축 외관 뷰(SPACE_CATEGORIES.exterior)는 완전히 다른 규칙(카메라 앵글 중심)을 쓰므로
   // 별도 함수로 분기 — 아래 실내 공간용 로직(벽·문·창문 100% 보존 등)을 타면 안 됨.
-  if(_categoryForRoomLabel(roomLabel)==='exterior'){
+  if(_categoryForRoomLabel(roomLabel, getTab('spaceset').multiRoomCategory)==='exterior'){
     return _multiRoomBuildExteriorPrompt(userStyle, roomLabel, hasRoomRef);
   }
   var prompt = '';
@@ -10419,7 +10430,7 @@ function _multiRoomBuildPrompt(userStyle, roomLabel, hasRoomRef){
   prompt += ' 가구·소품 배치는 참고 이미지를 적극적으로 따라가세요 — 원본 사진에 특정 가구가 없다고 해서 그 자리를 비워두지 말고, 참고 이미지에 있는 가구·소품 구성을 보고 이 공간에 자연스럽게 어울리도록 센스 있게 채워 넣으세요. 예를 들어 원본 사진의 벽이 밋밋하게 비어있는데 참고 이미지에 액자·그림이 걸려있다면 비슷한 느낌의 액자를 그 벽에 걸어주고, 원본 사진에 TV장이나 TV가 없는데 참고 이미지에 있다면 이 공간에 어울리는 위치에 TV장과 TV를 새로 넣어주세요. 목표는 "참고 이미지처럼 완성된 느낌"이지 "원본에 있던 것만 재질만 바꾼 느낌"이 아닙니다 — 참고 이미지의 전체적인 가구·소품 구성을 이 공간의 구조에 맞게 재배치해서 채워 넣으세요.';
   // 스타일(색감·소재·톤)은 참고 이미지가 정하고, 공간의 형태·비례·구조 관습은 한국 시장 기준을
   // 따르게 함 — 방 라벨(예: '거실','사무실','카운터')로 카테고리를 찾아서 그에 맞는 가이드를 붙임.
-  var cat = _categoryForRoomLabel(roomLabel);
+  var cat = _categoryForRoomLabel(roomLabel, getTab('spaceset').multiRoomCategory);
   prompt += ' ' + KOREA_LAYOUT_GUIDE[cat] + (ROOM_TYPE_DISAMBIGUATION[roomLabel]||'') + NO_BRAND_TRADEMARK_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE;
   return prompt;
 }
@@ -10866,7 +10877,7 @@ function mkAutoRoomCamera(p){
         rRow.appendChild(retryBtn);
         var estBtn=mk('button','');estBtn.type='button';estBtn.textContent='💰 이 공간 견적 보기';
         estBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.08);color:#fbbf24;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
-        estBtn.onclick=function(resUrl,lbl,cat){ return function(){ _sendToBudgetEstimate(resUrl, lbl, cat); }; }(result.url, typeName, _categoryForRoomLabel(typeName));
+        estBtn.onclick=function(resUrl,lbl,cat){ return function(){ _sendToBudgetEstimate(resUrl, lbl, cat); }; }(result.url, typeName, _categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory));
         rRow.appendChild(estBtn);
       } else if(result && result.error){
         var rErr=dv('');rErr.style.cssText='font-size:10.5px;color:#f87171';rErr.textContent='⚠️ 실패: '+result.error;
@@ -11009,7 +11020,7 @@ function _autoRoomPromptFor(basePrompt, typeName){
   // "최대한 동일하게"를 고른 경우엔 사용자가 구조까지 포함해서 참고 이미지를 최대한 따르길
   // 원하는 것으로 보고, 한국 구조 강제 규칙은 그 경우에만 건너뜀(스타일 반영도 설정과 충돌 방지).
   var _structOverride = spTab.autoRoomFidelity==='tight' ? '' : KOREA_STRUCTURE_OVERRIDE_RULE;
-  return prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE;
+  return prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE;
 }
 function _autoRoomGenerateStep(idx){
   var spTab=getTab('spaceset');
