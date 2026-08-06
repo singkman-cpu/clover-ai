@@ -10012,8 +10012,9 @@ function mkMultiRoomSpace(p){
     spTab.multiRoomRefDesignImg=null;
     spTab.autoRoomExtAnchors=[{img:null,label:'파사드뷰(정면)'}];
     spTab.autoRoomIntAnchors=[{img:null,label:SPACE_CATEGORIES[spTab.autoRoomCategory||'residential'].types[0]}];
+    spTab.autoRoomSelected = _autoRoomTypesForCategory(spTab.autoRoomCategory||'residential').slice();
     idbSaveDraft(_multiRoomDraftKey, {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
-    idbSaveDraft(_autoRoomDraftKey, {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity}).catch(function(){});
+    idbSaveDraft(_autoRoomDraftKey, {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity, autoRoomSelected:spTab.autoRoomSelected}).catch(function(){});
     renderSB();
   };
   p.appendChild(resetAllBtn);
@@ -10657,7 +10658,20 @@ function mkAutoRoomCamera(p){
       spTab.autoRoomExtAnchors = (data.autoRoomExtAnchors && data.autoRoomExtAnchors.length) ? data.autoRoomExtAnchors : spTab.autoRoomExtAnchors;
       spTab.autoRoomIntAnchors = (data.autoRoomIntAnchors && data.autoRoomIntAnchors.length) ? data.autoRoomIntAnchors : spTab.autoRoomIntAnchors;
       spTab.autoRoomPrompt = data.autoRoomPrompt || spTab.autoRoomPrompt || '';
-      spTab.autoRoomCategory = data.autoRoomCategory || spTab.autoRoomCategory;
+      // ⚠️ 버그 수정(중요): "상업공간(카페)인데 거실이 섞여 나온다, 11개 체크했는데 22컷으로
+      // 나온다" — 원인 발견: 카테고리는 저장된 값(예: 카페)으로 비동기로 바뀌는데, 그 전에 이미
+      // 기본 카테고리(주거공간) 기준으로 만들어져 있던 "선택된 뷰 목록"(autoRoomSelected)은 전혀
+      // 안 건드리고 있었음 — 그래서 화면 체크박스는 새 카테고리(카페) 걸로 다시 그려지는데, 실제
+      // 생성 목록(autoRoomSelected)엔 예전 카테고리(거실 등)가 몰래 남아서 개수도 안 맞고 엉뚱한
+      // 타입도 같이 생성되고 있었음. 카테고리가 실제로 바뀌면 선택 목록도 반드시 같이 맞춤 —
+      // 저장된 선택 목록이 있으면 그걸 복원하고, 없으면 새 카테고리의 전체 타입으로 리셋.
+      var _loadedCat = data.autoRoomCategory || spTab.autoRoomCategory;
+      if(_loadedCat !== spTab.autoRoomCategory){
+        spTab.autoRoomCategory = _loadedCat;
+        spTab.autoRoomSelected = (data.autoRoomSelected && data.autoRoomSelected.length) ? data.autoRoomSelected : _autoRoomTypesForCategory(_loadedCat).slice();
+      } else if(data.autoRoomSelected && data.autoRoomSelected.length){
+        spTab.autoRoomSelected = data.autoRoomSelected;
+      }
       spTab.autoRoomFidelity = data.autoRoomFidelity || spTab.autoRoomFidelity;
       if(G.wf==='spaceset') renderSB();
     }).catch(function(){});
@@ -10688,7 +10702,8 @@ function mkAutoRoomCamera(p){
       autoRoomIntAnchors: spTab.autoRoomIntAnchors,
       autoRoomPrompt: spTab.autoRoomPrompt,
       autoRoomCategory: spTab.autoRoomCategory,
-      autoRoomFidelity: spTab.autoRoomFidelity
+      autoRoomFidelity: spTab.autoRoomFidelity,
+      autoRoomSelected: spTab.autoRoomSelected
     }).catch(function(){});
   }, 600);
 
