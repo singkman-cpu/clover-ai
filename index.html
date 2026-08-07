@@ -18992,22 +18992,23 @@ function addHistEl(item, scroll, targetHs, atBottom){
         this.style.background='';
         var pxa=gE('pxa-'+item.id);
         if(pxa)pxa.textContent=this.naturalWidth+'×'+this.naturalHeight+'px';
-        // ⚠️ 버그 수정: CSS aspect-ratio를 max-height와 같이 쓰면, width는 100%(컨테이너 전체
-        // 너비)로 고정된 채 height만 max-height에 눌려서 실제로는 훨씬 넓적한 박스가 되어버리는
-        // 충돌이 있었음 — 그 결과 세로로 긴 결과물(3:4 등)일 때 박스가 오히려 가로로 넓어지면서
-        // 그 안의 좌우 여백에 엉뚱한 내용이 보이는 것처럼 어긋났음. CSS aspect-ratio 대신 JS로
-        // "이 컨테이너 폭과 화면 높이 안에서 실제 결과물 비율을 유지한 채 최대한 크게" 보여줄
-        // 정확한 px 크기를 직접 계산해서 넣음 — 다른 CSS 제약과 충돌할 여지가 없어 훨씬 안전함.
+        // ⚠️ 치명적 버그 수정: 이전 버전에서 여기서 cw의 너비(width)까지 결과물 비율에 맞춰
+        // 좁게 줄였는데 — 이게 AI편집의 브러시·다각형·사각형·화살표 좌표 계산(마스크 오버레이는
+        // "사진이 #canvas 전체 너비를 꽉 채운다"고 가정하고 계산함)과 어긋나서, 실제 사진은
+        // 좁아졌는데 오버레이는 여전히 전체 너비 기준으로 계산하니 클릭 위치가 완전히 엉뚱한
+        // 곳으로 찍히는 심각한 버그를 만들었음. 동시에 폭이 좁아진 카드가 중앙정렬되지 않고
+        // 왼쪽에 붙어버려서 "최근 결과가 왼쪽으로 밀려 보인다"는 문제도 같이 일으켰음.
+        // → 너비는 절대 건드리지 않고 항상 100%(컨테이너 전체) 그대로 두고, 높이만 그 너비
+        // 기준으로 실제 결과물 비율에 맞게 계산함 — 이러면 마스크 오버레이의 "전체 너비 기준"
+        // 가정과 항상 일치해서 좌표가 어긋나지 않고, 카드도 항상 컨테이너 폭 그대로라 밀리지 않음.
         if(this.naturalWidth && this.naturalHeight){
           var _parentEl = cw.parentElement;
           var _maxW = (_parentEl && _parentEl.clientWidth) ? _parentEl.clientWidth : this.naturalWidth;
-          var _maxH = window.innerHeight - 180;
           var _ratio = this.naturalWidth / this.naturalHeight;
-          var _w = _maxW, _h = _w / _ratio;
-          if(_h > _maxH){ _h = _maxH; _w = _h * _ratio; }
-          cw.style.width = Math.round(_w)+'px';
+          var _h = _maxW / _ratio;
+          cw.style.width = '100%';
           cw.style.height = Math.round(_h)+'px';
-          cw.style.maxWidth = '100%';
+          cw.style.maxHeight = 'calc(100vh - 180px)'; // 세로로 극단적으로 긴 결과물이면 스크롤로 처리(너비는 절대 안 줄임)
         }
       };
       _imgLoadWithRetry(imgA, item.result);
