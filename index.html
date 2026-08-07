@@ -17474,14 +17474,29 @@ function _getLetterboxCorrectedRect(containerRect, natW, natH){
 // 위치 그 자체이므로). 이미지 엘리먼트를 아직 못 찾는 경우(로딩 중 등)에만 기존 추측 방식으로 폴백.
 function _getMaskDrawRect(cv){
   try{
+    // ⚠️ 버그 수정(진짜 원인): "업로드만 하고 아직 결과물이 없는 상태"(AI편집을 시작할 때 가장
+    // 흔한 상황!)는 비교 슬라이더(.cmpw)가 아니라 완전히 다른 마크업(업로드 프리뷰용 img2)을
+    // 쓰고 있었는데, 예전 쿼리는 .cmpw 안의 <img>만 찾고 있어서 이 경우엔 아무것도 못 찾고
+    // 계속 예전의 틀린 추정 계산(폴백)으로 떨어지고 있었음 — 그래서 고쳤다고 했는데도 여전히
+    // 영역이 엉뚱한 곳(사진 바깥)에 찍히는 문제가 계속됐던 것. 이제 렌더링 경로가 뭐든 상관없이
+    // "지금 실제 편집 대상 이미지"에 직접 심어둔 [data-active-src-img] 마커로 통일해서 찾음
+    // (imgB·img2 둘 다 이 마커가 있음 — addHistEl 참고).
     var hs=document.querySelector('.hist-s');
     var img=null;
     if(hs){
-      // 맨 위(최신) 카드 — AI편집은 항상 이 카드 위에 마스크를 그림. BEFORE 이미지(비교 슬라이더의
-      // 기준 사진, class 없는 첫 <img>)를 우선 찾고, 없으면(비교 슬라이더가 아닌 단일 이미지) 그
-      // 카드 안의 아무 <img>나 찾음.
-      var firstCard=hs.querySelector('.h-item .cmpw')||hs.querySelector('.cmpw');
-      if(firstCard) img=firstCard.querySelector('img');
+      var candidates=hs.querySelectorAll('[data-active-src-img="1"]');
+      if(candidates.length){
+        // 여러 카드에 마커가 있을 수 있으니(히스토리가 쌓인 경우), 지금 편집 탭의 실제
+        // 입력 이미지(src)와 정확히 일치하는 걸 우선으로 찾음 — 못 찾으면 맨 위(최신,
+        // hist-s에 새 카드가 항상 prepend되므로 DOM상 첫 번째) 카드로 폴백.
+        try{
+          var curSrc=(getTab(G.wf)||{}).inputImg;
+          if(curSrc){
+            for(var ci=0; ci<candidates.length; ci++){ if(candidates[ci].src===curSrc){ img=candidates[ci]; break; } }
+          }
+        }catch(e2){}
+        if(!img) img=candidates[0];
+      }
     }
     if(img && img.naturalWidth && img.getBoundingClientRect){
       var r=img.getBoundingClientRect();
@@ -19023,6 +19038,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
 
       // BEFORE 이미지
       var imgB=mk('img','');
+      imgB.setAttribute('data-active-src-img','1'); // ⚠️ AI편집 마스크 오버레이가 "지금 실제 편집 대상 이미지"를 정확히 찾기 위한 마커(img2와 동일한 방식)
       imgB.loading='lazy';imgB.decoding='async';
       imgB.setAttribute('style',FILL_IMG_STYLE);
       imgB.onload=function(){
@@ -19384,6 +19400,8 @@ function addHistEl(item, scroll, targetHs, atBottom){
     if(typeof origSrc==='string' && origSrc.indexOf('marble.worldlabs.ai')!==-1) return;
     var pw=dv('');pw.style.cssText='position:relative;width:100%';
     var img2=mk('img','');
+    img2.id='src-img-'+item.id;
+    img2.setAttribute('data-active-src-img','1'); // ⚠️ AI편집 마스크 오버레이가 "지금 실제로 편집 대상인 이미지"를 정확히 찾기 위한 마커
     img2.loading='lazy';img2.decoding='async';
     img2.setAttribute('style','width:100%;min-height:300px;max-height:calc(100vh - 220px);object-fit:contain;display:block;background:#1a1a22;cursor:crosshair');
     img2.onload=function(){this.style.background='';};
