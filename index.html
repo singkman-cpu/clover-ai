@@ -227,7 +227,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 .hist-s::-webkit-scrollbar{width:4px}
 .hist-s::-webkit-scrollbar-thumb{background:var(--bd2)}
 .h-item{border-radius:9px;overflow:hidden;border:1px solid var(--bd2);background:var(--card);flex-shrink:0;min-height:200px}
-.cmpw{position:relative;user-select:none;min-height:200px;display:block;width:100%;cursor:ew-resize;-webkit-user-drag:none;background:#0a0a0a;overflow:hidden}
+.cmpw{position:relative;user-select:none;min-height:200px;display:block;width:100%;cursor:ew-resize;-webkit-user-drag:none;background:#0a0a0a}
 .cmpw img{display:block;width:100%;min-height:200px;max-height:calc(100vh - 220px);object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-select:none}
 .cmp-ov{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .cmp-ln{position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,.85);transform:translateX(-50%);pointer-events:none;display:block}
@@ -17494,30 +17494,27 @@ function _getLetterboxCorrectedRect(containerRect, natW, natH){
 // 위치 그 자체이므로). 이미지 엘리먼트를 아직 못 찾는 경우(로딩 중 등)에만 기존 추측 방식으로 폴백.
 function _getMaskDrawRect(cv){
   try{
-    // ⚠️ 버그 수정(진짜 원인): "업로드만 하고 아직 결과물이 없는 상태"(AI편집을 시작할 때 가장
-    // 흔한 상황!)는 비교 슬라이더(.cmpw)가 아니라 완전히 다른 마크업(업로드 프리뷰용 img2)을
-    // 쓰고 있었는데, 예전 쿼리는 .cmpw 안의 <img>만 찾고 있어서 이 경우엔 아무것도 못 찾고
-    // 계속 예전의 틀린 추정 계산(폴백)으로 떨어지고 있었음 — 그래서 고쳤다고 했는데도 여전히
-    // 영역이 엉뚱한 곳(사진 바깥)에 찍히는 문제가 계속됐던 것. 이제 렌더링 경로가 뭐든 상관없이
-    // "지금 실제 편집 대상 이미지"에 직접 심어둔 [data-active-src-img] 마커로 통일해서 찾음
-    // (imgB·img2 둘 다 이 마커가 있음 — addHistEl 참고).
-    var hs=document.querySelector('.hist-s');
-    var img=null;
-    if(hs){
-      var candidates=hs.querySelectorAll('[data-active-src-img="1"]');
-      if(candidates.length){
-        // 여러 카드에 마커가 있을 수 있으니(히스토리가 쌓인 경우), 지금 편집 탭의 실제
-        // 입력 이미지(src)와 정확히 일치하는 걸 우선으로 찾음 — 못 찾으면 맨 위(최신,
-        // hist-s에 새 카드가 항상 prepend되므로 DOM상 첫 번째) 카드로 폴백.
-        try{
-          var curSrc=(getTab(G.wf)||{}).inputImg;
-          if(curSrc){
-            for(var ci=0; ci<candidates.length; ci++){ if(candidates[ci].src===curSrc){ img=candidates[ci]; break; } }
-          }
-        }catch(e2){}
-        if(!img) img=candidates[0];
-      }
+    // ⚠️ 버그 수정(또 다른 진짜 원인): #canvas-upload-box/.hist-s가 데스크탑·모바일 레이아웃용으로
+    // 문서에 동시에 2개 존재하는데(반응형 레이아웃 대응), document.querySelector('.hist-s')는
+    // 그중 DOM 순서상 먼저 나오는 아무거나 하나만 잡아서 — 그게 하필 화면에 실제로 안 보이는
+    // (또는 다른 크기로 렌더링된) 쪽이면, 그 안의 마커 이미지 위치를 기준으로 좌표를 계산하게
+    // 되어 또 어긋났음. 이제 문서 전체에서 마커가 붙은 이미지를 전부 찾고, 그중 "실제로 화면에
+    // 표시되고 있는"(offsetParent가 있고, 가장 넓게 렌더링된) 것만 고르도록 함 — 숨겨진 레이아웃
+    // 사본에 속을 일이 없어짐.
+    var all=document.querySelectorAll('[data-active-src-img="1"]');
+    var img=null, bestArea=0;
+    var curSrc=null; try{ curSrc=(getTab(G.wf)||{}).inputImg; }catch(e2){}
+    var srcMatch=null;
+    for(var ai=0; ai<all.length; ai++){
+      var cand=all[ai];
+      if(!cand.offsetParent) continue; // 화면에 실제로 안 보이는(display:none 등) 사본은 제외
+      var cr=cand.getBoundingClientRect();
+      var area=cr.width*cr.height;
+      if(area<=0) continue;
+      if(curSrc && cand.src===curSrc && !srcMatch) srcMatch=cand; // 지금 편집 탭의 실제 이미지와 정확히 일치하면 최우선
+      if(area>bestArea){ bestArea=area; img=cand; } // 못 찾으면 화면에서 가장 크게 보이는(= 메인으로 표시 중인) 것으로 폴백
     }
+    if(srcMatch) img=srcMatch;
     if(img && img.naturalWidth && img.getBoundingClientRect){
       var r=img.getBoundingClientRect();
       if(r.width>0 && r.height>0) return r;
