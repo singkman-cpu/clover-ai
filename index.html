@@ -336,7 +336,8 @@ select option{background:var(--c2)}
      ⚠️ 참고: 실제 코드에서는 미리보기 유무와 상관없이 #canvas-upload-box가 항상
      active+hide-zone 상태로 쓰이므로, 아래 규칙으로 항상 보이게 해도 다른 탭(일반 업로드 존)의
      동작에는 영향이 없음(그쪽은 hide-zone 클래스를 안 씀). */
-  #canvas-upload-box.active.hide-zone{display:flex!important}
+  #canvas-upload-box.active.hide-zone{display:flex!important;position:relative!important;inset:auto!important;min-height:60vh!important}
+  #shorts-canvas-ui,#proposal-canvas-ui{height:auto!important;min-height:60vh!important}
   /* 홈화면 */
   .home-s{position:relative!important;min-height:40vh!important;padding:16px!important}
   /* 결과 이미지 */
@@ -11276,6 +11277,12 @@ function _autoRoomGenerateStep(idx){
       }
     }
     _looseP = '⚠️⚠️ 가장 먼저 지켜야 할 절대 규칙들(다른 무엇보다 우선): ' + SINGLE_IMAGE_OUTPUT_RULE + AC_CONSISTENCY_RULE + MAIN_LIGHT_CONSISTENCY_RULE + (_looseP.indexOf('사람')===-1 && _looseP.indexOf('한국인')===-1 ? NO_PEOPLE_ANIMALS_RULE : '') + ' --- ' + _looseP + 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.';
+    // ⚠️ 비-loose 경로(_autoRoomGenerateStep 아래쪽)와 동일한 이유로, "영감만 얻기" 모드에서도
+    // 세로로 긴 비율일 때 참고 이미지 수를 줄이고 맨 끝에 짧은 재강조 문구를 추가함.
+    if(_looseAspect==='9:16' || _looseAspect==='3:4'){
+      if(_looseRefs.length>1) _looseRefs = _looseRefs.slice(0,1);
+      _looseP += ' ⚠️ 마지막으로 다시 한번(가장 중요): 세로로 긴 이 비율(9:16/3:4)을 채우려고 같은 건물·같은 방을 여러 각도로 반복 촬영해서 위아래로 이어붙이지 마세요. 결과는 반드시 하나의 카메라 위치에서 찍은 사진 한 장이어야 하며, 그 안에 여러 장면이 나뉘어 보이면 실패입니다.';
+    }
     var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1};
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
     falRun('fal-ai/nano-banana-2', _looseInput, function(d){
@@ -11295,7 +11302,14 @@ function _autoRoomGenerateStep(idx){
     return;
   }
   var imgs = _autoRoomImagesFor(typeName);
-  var task={id:Date.now()+idx, img:imgs.primary, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
+  var _finalPrompt = prompt;
+  // ⚠️ 이 코드베이스에서 반복 확인된 패턴: 프롬프트 "맨 끝"에 다시 한번 짧고 강하게 못박은 지시를
+  // AI가 더 잘 따름(다른 지시들 사이에 묻히지 않음) — 위에서 이미 강하게 금지했지만, 세로로 아주
+  // 긴 비율(9:16/3:4)에서 유독 자주 재현되는 문제라 이 경우에만 맨 마지막에 한 번 더 짧게 강조.
+  if(spTab.forcedAspect==='9:16' || spTab.forcedAspect==='3:4'){
+    _finalPrompt += ' ⚠️ 마지막으로 다시 한번(가장 중요): 세로로 긴 이 비율(9:16/3:4)을 채우려고 같은 건물·같은 방을 여러 각도로 반복 촬영해서 위아래로 이어붙이지 마세요. 결과는 반드시 하나의 카메라 위치에서 찍은 사진 한 장이어야 하며, 그 안에 여러 장면이 나뉘어 보이면 실패입니다.';
+  }
+  var task={id:Date.now()+idx, img:imgs.primary, wf:'space', prompt:_finalPrompt, selK:null, eng:'nano2', resolution:spTab.autoRoomResolution||'1K'};
   // ⚠️ 요청 반영: "뷰마다 건물이 조금씩 다르게 나온다"는 지적 — 각 뷰가 원본 기준사진 하나만
   // 보고 매번 독립적으로 새로 상상하다 보니, 특히 기준사진에서 안 보이는 각도(측면·후면 등)는
   // AI가 자유롭게 지어내서 매번 달라지기 쉬웠음. 이미 완성된 다른 뷰가 있으면(외관이든 실내든),
@@ -11321,6 +11335,14 @@ function _autoRoomGenerateStep(idx){
   // 만드는 경향이 있는 것으로 보임 — 참고 이미지는 최대 2장까지만(일관성 유지에 가장 중요한
   // 것 우선) 줄임. 일관성 기록(genPool)이 있으면 그게 최우선, 없으면 원래 앵커 참고.
   if(chainedRefs.length>2) chainedRefs = chainedRefs.slice(0,2);
+  // ⚠️ 추가 수정: "9:16(쇼츠) 비율로 렌더링하면 한 장에 집 사진이 2~3개 붙어서 나온다"는 재현
+  // 리포트 — 위 SINGLE_IMAGE_OUTPUT_RULE로 이미 강하게 금지하고 있었는데도 세로로 아주 긴
+  // 비율(9:16/3:4)에서 유독 자주 재현됨. 참고 이미지가 여러 장(주 이미지 1장 + 참고 최대 2장,
+  // 총 3장) 한꺼번에 들어가는 게 그 캔버스 모양과 겹치면 "여러 장을 이어붙여 보여줘야 하나"로
+  // 더 헷갈리는 것으로 보여서, 세로로 아주 긴 비율일 때만 참고 이미지를 1장으로 더 줄임
+  // (일관성 유지에 가장 중요한 것 하나만 남김 — 완전히 없애면 다른 뷰들과의 통일감이 깨지므로).
+  var _tallAspect = (spTab.forcedAspect==='9:16' || spTab.forcedAspect==='3:4');
+  if(_tallAspect && chainedRefs.length>1) chainedRefs = chainedRefs.slice(0,1);
   getTab('space').refs = chainedRefs;
   // ⚠️ 되돌림: "레퍼런스 비율 그대로 강제"가 오히려 컨셉확장 자체의 "출력 비율" 선택(mkAspectRatio,
   // 예: 9:16 쇼츠 비율)을 무시하게 만드는 버그였음 — 컨셉확장에도 자체 비율 선택 UI가 있으므로,
@@ -28066,6 +28088,12 @@ function onSupaLogin(user){
     if(typeof renderMain==='function' && G.wf) renderMain(G.wf);
   }
   localStorage.setItem('clover_last_uid', user.id);
+  // ⚠️ 버그 수정(진짜 원인): 새로고침해도 업로드 이미지가 안 사라지게 한 지난번 수정이 로그인한
+  // 사용자에게는 실제로 전혀 동작하지 않고 있었음 — 페이지 열리자마자(DOMContentLoaded) 바로
+  // 복원을 시도하는데, 그 시점엔 Supabase 로그인 확인이 아직 비동기로 끝나기 전이라 "guest" 키로
+  // 찾아봤다가 못 찾고 끝나버림(실제 저장은 로그인 계정 uid 키로 되어 있어서 키가 서로 안 맞았음).
+  // 로그인 확인이 실제로 끝나는 이 시점에 다시 한번 복원을 시도해서, 이번엔 맞는 키로 찾게 함.
+  try{ _restoreMainTabImagesDraft(); }catch(e){}
   // 로딩 중 표시
   var crn=gE('cr-n');if(crn)crn.textContent='...';
   // profiles 테이블 조회/생성
