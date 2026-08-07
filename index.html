@@ -17520,7 +17520,35 @@ function _getMaskDrawRect(cv){
       if(r.width>0 && r.height>0) return r;
     }
   }catch(e){}
-  // 폴백: 실제 이미지 엘리먼트를 못 찾았을 때만(로딩 중 등) 예전 방식(추정 계산) 사용
+  // ⚠️ 버그 수정(추가 원인): 위의 마커([data-active-src-img="1"]) 탐색은 addHistEl()로 만들어지는
+  // 카드형 이미지에만 마커가 붙어있어서, 여러 장(캐러셀 형태로 좌우 화살표·점으로 넘기는) 사진 중
+  // 지금 편집 대상인 사진 쪽에 그 마커가 없는 화면(예: 여러 방 사진을 한 프로젝트에서 넘겨가며
+  // 편집하는 화면)에서는 못 찾고 아래의 "추정 계산" 폴백으로 떨어졌음 — 그 추정 계산은 이미지가
+  // 컨테이너 안에서 "정중앙 정렬"된다고 가정하는데, 실제로는 사진 아래에 화살표·점 네비게이션이
+  // 붙어서 위쪽으로 치우쳐 표시되는 등 가정과 다르면, 위쪽에서는 오차가 작다가 아래로 갈수록
+  // 오차가 커지는 형태로 나타남(사용자가 보고한 "아래로 갈수록 브러시 위치가 밑에서 그려진다"
+  // 현상과 정확히 일치). 마커를 못 찾았을 때도 "추정"하지 말고, 캔버스가 실제로 들어있는
+  // 컨테이너(#canvas) 안에서 지금 화면에 보이는 가장 큰 <img> 태그를 직접 찾아서 그 진짜 위치를
+  // 쓰도록 한 단계 더 보강함 — 마커 유무와 상관없이 항상 실측 위치를 우선 사용.
+  try{
+    var cont2 = cv.offsetParent || cv.parentNode;
+    if(cont2 && cont2.querySelectorAll){
+      var imgs2 = cont2.querySelectorAll('img');
+      var img2=null, bestArea2=0;
+      for(var bi=0; bi<imgs2.length; bi++){
+        var c2=imgs2[bi];
+        if(!c2.offsetParent || !c2.naturalWidth) continue;
+        var cr2=c2.getBoundingClientRect();
+        var area2=cr2.width*cr2.height;
+        if(area2>bestArea2){ bestArea2=area2; img2=c2; }
+      }
+      if(img2){
+        var r2=img2.getBoundingClientRect();
+        if(r2.width>0 && r2.height>0) return r2;
+      }
+    }
+  }catch(e3){}
+  // 최종 폴백: 진짜 이미지 엘리먼트를 전혀 못 찾았을 때만(로딩 중 등) 예전 방식(추정 계산) 사용
   var rect=cv.getBoundingClientRect();
   return _getLetterboxCorrectedRect(rect, cv.width, cv.height);
 }
@@ -17557,6 +17585,12 @@ function _syncDrawCanvasBox(cv){
     var _canvasEl = document.getElementById('canvas');
     if(_canvasEl && window.ResizeObserver){
       new ResizeObserver(_resyncIfActive).observe(_canvasEl);
+    }
+    // ⚠️ 캐러셀(화살표·점으로 여러 장 넘기는 화면)에서 사진을 넘기면 컨테이너 크기 자체는 안
+    // 바뀌지만 실제로 보이는 이미지(src, 위치)는 바뀌므로, ResizeObserver만으로는 못 잡음 —
+    // 이미지가 바뀔 때(속성 변경)도 캔버스 위치를 다시 맞추도록 함께 감시.
+    if(_canvasEl && window.MutationObserver){
+      new MutationObserver(_resyncIfActive).observe(_canvasEl,{attributes:true,attributeFilter:['src'],subtree:true,childList:true});
     }
   }catch(e){}
 })();
