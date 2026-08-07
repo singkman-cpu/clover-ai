@@ -327,6 +327,16 @@ select option{background:var(--c2)}
   .hist-s{position:relative!important;height:auto!important;min-height:0!important;display:flex!important}
   /* 업로드 박스: 숨김 (사이드바에서 처리) */
   #canvas-upload-box{display:none!important}
+  /* ⚠️ 버그 수정(진짜 원인): 위 규칙이 #canvas-upload-box를 모바일에서 무조건 숨기는데, 쇼츠
+     제작·제안서 제작 탭의 실시간 미리보기(#shorts-canvas-ui, #proposal-canvas-ui)가 바로 이
+     #canvas-upload-box 안에 그려지는 방식이라서, 정렬 순서를 아무리 바꿔도 이 규칙 때문에
+     통째로 화면에서 사라져 있었음(스크롤 문제가 아니라 그냥 숨겨져 있었던 것). 쇼츠·제안서
+     미리보기가 켜져 있을 때(active + hide-zone 두 클래스가 같이 붙음)는 이 숨김 규칙에서
+     제외해서 다시 보이게 함.
+     ⚠️ 참고: 실제 코드에서는 미리보기 유무와 상관없이 #canvas-upload-box가 항상
+     active+hide-zone 상태로 쓰이므로, 아래 규칙으로 항상 보이게 해도 다른 탭(일반 업로드 존)의
+     동작에는 영향이 없음(그쪽은 hide-zone 클래스를 안 씀). */
+  #canvas-upload-box.active.hide-zone{display:flex!important}
   /* 홈화면 */
   .home-s{position:relative!important;min-height:40vh!important;padding:16px!important}
   /* 결과 이미지 */
@@ -8901,6 +8911,17 @@ function mkBudgetTier(p){
     if(tab.refs && tab.refs.length){
       budgetPrompt += ' ⚠️ FINAL REMINDER (do not skip this, regardless of everything else above): the attached reference image(s) show the target style for this project — the final result\'s materials, color palette and overall design language must clearly and visibly resemble the attached reference image(s), not just the original photo\'s existing style. If your result looks nothing like the attached reference image, that is a failure even if every other instruction above was followed correctly.';
     }
+    // ⚠️ 버그 수정: "비율(가로/세로)을 다르게 고르면 카메라 각도까지 바뀐다(예: 측면 사진인데
+    // 비율만 바꿨더니 정면으로 나옴)"는 지적 — 원인 확인해봄. 층수를 늘리는 경우(위 CRITICAL
+    // CAMERA OVERRIDE)에는 이미 카메라 각도를 유지하라는 지시가 있었는데, 그 외 일반적인 경우
+    // (마감재만 바꾸는 리모델링 등)에는 이런 지시가 전혀 없었음 — 그래서 출력 비율(aspect_ratio)이
+    // 원본과 크게 다르면, AI가 새 캔버스 모양에 맞춰 스스로 "더 잘 어울리는" 각도(주로 정면)를
+    // 새로 골라버리는 것으로 보임. 층수 변경 케이스가 아니면(이미 자체적으로 카메라 지시가 있어서
+    // 중복될 수 있음), 비율이 달라져도 원본 사진과 똑같은 카메라 위치·각도·시점을 유지하고,
+    // 프레임에 안 맞는 부분은(잘리더라도) 자연스럽게 잘라내는 식으로 처리하라고 명시함.
+    if(budgetPrompt.indexOf('CRITICAL CAMERA OVERRIDE')===-1){
+      budgetPrompt += ' ⚠️ CAMERA ANGLE MUST STAY IDENTICAL: regardless of the output image\'s aspect ratio (width:height shape), the camera position, height, tilt, and viewing angle/direction must remain EXACTLY the same as the original photo — do not rotate the camera to a different side, do not switch from a side/corner view to a frontal view (or vice versa), and do not reposition it to a different spot. If the new aspect ratio does not perfectly match the original photo\'s proportions, simply crop naturally (show less of the edges) rather than changing the camera\'s angle or viewpoint to "better fit" the new shape. A result taken from a different angle or side than the original is a failure even if the materials/furniture are otherwise correct.';
+    }
     budgetPrompt += NO_BRAND_TRADEMARK_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE + AC_CONSISTENCY_RULE + MAIN_LIGHT_CONSISTENCY_RULE + (budgetPrompt.indexOf('사람')===-1 && budgetPrompt.indexOf('한국인')===-1 ? NO_PEOPLE_ANIMALS_RULE : '');
     renderFromBudgetBtn.disabled=true; renderFromBudgetBtn.textContent='⏳ 렌더링 중...';
     // ⚠️ 버그 수정: 다른 렌더링 경로들(executeSingleRender)은 시작하자마자 G.HIST에 loading:true
@@ -12956,6 +12977,41 @@ function _shortsDraftKey(){ return 'clover_shorts_draft_'+_draftKeyUid(); }
 function _proposalDraftKey(){ return 'clover_proposal_draft_'+_draftKeyUid(); }
 function _multiRoomDraftKey(){ return 'clover_multiroom_draft_'+_draftKeyUid(); }
 function _autoRoomDraftKey(){ return 'clover_autoroom_draft_'+_draftKeyUid(); }
+// ── "사진 하나만 올리는" 탭들(현장사진·렌더·편집·영상·업스케일·VR투어·견적·에이전트) 공용
+// 업로드 이미지 자동저장/자동복원 — 공간 컨셉 디자인의 multiRoomImages와 같은 방식(IndexedDB,
+// 디바운스 저장, 새로고침해도 확인창 없이 조용히 복원)을 그대로 재사용함.
+var _MAIN_IMG_PERSIST_WFS=['space','render','edit','video','upscale','world3d','budget','agent'];
+function _mainImgDraftKey(){ return 'clover_maintab_imgs_'+_draftKeyUid(); }
+function _saveMainTabImagesDraft(){
+  clearTimeout(window._mainImgDraftTimer);
+  window._mainImgDraftTimer=setTimeout(function(){
+    var snap={};
+    _MAIN_IMG_PERSIST_WFS.forEach(function(wf){
+      var t=G.tabs[wf];
+      if(t && t.inputImg) snap[wf]={inputImg:t.inputImg, inputImgName:t.inputImgName||'', endImg:t.endImg||null, refs:t.refs||null};
+    });
+    idbSaveDraft(_mainImgDraftKey(), snap).catch(function(){});
+  }, 600);
+}
+// 로그인 여부와 상관없이(게스트도 _draftKeyUid()가 'guest'로 동작) 새로고침 직후 한 번만 조용히
+// 복원 시도 — 이미 사진이 있는 탭(막 복원됐거나 이미 업로드된 경우)은 덮어쓰지 않음.
+function _restoreMainTabImagesDraft(){
+  idbLoadDraft(_mainImgDraftKey(), 7*24*60*60*1000).then(function(data){
+    if(!data) return;
+    var changed=false;
+    Object.keys(data).forEach(function(wf){
+      var t=G.tabs[wf]; var saved=data[wf];
+      if(t && saved && saved.inputImg && !t.inputImg){
+        t.inputImg=saved.inputImg;
+        t.inputImgName=saved.inputImgName||'';
+        if(saved.endImg) t.endImg=saved.endImg;
+        if(saved.refs) t.refs=saved.refs;
+        changed=true;
+      }
+    });
+    if(changed){ try{ renderSB(); renderMain(G.wf); }catch(e){} }
+  }).catch(function(){});
+}
 
 // 쇼츠 이미지 중 blob: 주소(외부 파일 업로드 시 성능을 위해 쓰는 임시 주소, 새로고침하면 깨짐)를
 // 실제 이미지 데이터(base64)로 바꿔서 백업 저장 — 갤러리에서 가져온 이미지(실제 https 주소)는
@@ -18694,6 +18750,13 @@ function _loadFApply(v, f, key){
       tab.inputImgName=f.name||'';
       tab.status='idle';
       tab.budgetManualLock=false; // 새 사진을 올리면 이전 사진에 걸어둔 금액 잠금은 해제(새로 분석 필요)
+      // ⚠️ 요청 반영: "새로고침하면 업로드한 사진들이 다 리셋된다" — 공간 컨셉 디자인(spaceset)은
+      // 이미 IndexedDB에 자동저장/자동복원이 되어 있었는데, 현장사진 디자인·3D 렌더·AI편집·영상·
+      // 업스케일·VR투어·AI견적·AI에이전트처럼 "사진 하나만 올리는" 나머지 탭들은 그런 게 전혀
+      // 없어서 새로고침하면 무조건 날아갔음. 업로드가 여기(공통 진입점) 한 곳으로 다 모이므로,
+      // 여기 한 군데에만 자동저장을 걸어서 위 탭들 전부를 한번에 커버함(디바운스로 타이핑처럼
+      // 잦은 변경에도 버벅이지 않게).
+      _saveMainTabImagesDraft();
       if(!G.HIST[G.wf])G.HIST[G.wf]=[];
       G.HIST[G.wf]=G.HIST[G.wf].filter(function(x){return !x.preview;});
       G.HIST[G.wf].unshift({id:Date.now(),orig:v,origName:f.name||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:G.wf,preview:true});
@@ -27621,6 +27684,8 @@ document.addEventListener('DOMContentLoaded',function(){try{
     var _lastWf=localStorage.getItem('clover_last_wf');
     if(_lastWf && WF_INFO[_lastWf]){ selectWF(_lastWf); }
   }catch(e){console.warn('[탭 복원]',e);}
+  // 새로고침해도 업로드해둔 사진들이 사라지지 않도록, 탭 복원 직후 조용히 시도(확인창 없음)
+  try{ _restoreMainTabImagesDraft(); }catch(e){console.warn('[이미지 복원]',e);}
 
 }catch(e){console.error('DOMContentLoaded error:',e);try{renderSB();updBtn();}catch(e2){}}});
   // ── 모바일 탭바 ───────────────────────────────────────────────
