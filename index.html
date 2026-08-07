@@ -17524,6 +17524,42 @@ function _getMaskDrawRect(cv){
   var rect=cv.getBoundingClientRect();
   return _getLetterboxCorrectedRect(rect, cv.width, cv.height);
 }
+// ⚠️ 버그 수정(브러시 위치 어긋남의 진짜 원인): #draw-canvas는 CSS로 position:absolute;inset:0라서
+// 항상 부모 컨테이너(#canvas) 전체 크기로 늘어나 있음. 다각형/화살표는 SVG라서 "화면에 보이는 대로"
+// 그리고 저장할 때만 이미지 좌표로 환산하니 문제가 안 보이지만, 브러시 캔버스는 내부 해상도가
+// 원본 이미지 크기(예: 896x1200)로 고정돼있는데 그걸 컨테이너 전체(예: 1993x1049, 비율이 다름)로
+// 브라우저가 "비율 안 맞게" 늘려서 그리기 때문에 — 클릭 좌표 계산 자체(_getMaskDrawRect)는 맞아도
+// 실제로 화면에 찍히는 위치가 어긋나 보였음. 캔버스 element 자체를 컨테이너 전체가 아니라 실제
+// 이미지가 표시되는 영역(레터박스 보정 영역)에 딱 맞게 배치하면, 내부 해상도와 화면 표시 크기의
+// 비율이 항상 똑같아져서(letterboxRectB 자체가 이미지와 같은 비율이므로) 더 이상 어긋나지 않음.
+function _syncDrawCanvasBox(cv){
+  if(!cv) return;
+  var cont = cv.offsetParent || cv.parentNode;
+  if(!cont || !cont.getBoundingClientRect){ cv.style.left='';cv.style.top='';cv.style.width='';cv.style.height=''; return; }
+  var contRect = cont.getBoundingClientRect();
+  var box = _getMaskDrawRect(cv);
+  if(!box || !box.width || !box.height){ cv.style.left='';cv.style.top='';cv.style.width='';cv.style.height=''; return; }
+  cv.style.left = (box.left - contRect.left) + 'px';
+  cv.style.top = (box.top - contRect.top) + 'px';
+  cv.style.width = box.width + 'px';
+  cv.style.height = box.height + 'px';
+}
+// 창 크기 변경·사이드바 폭 드래그·F12 개발자도구 열고 닫기 등으로 실제 이미지 표시 영역이
+// 바뀔 때마다, 브러시 도구가 켜져 있는 동안은 계속 캔버스 위치/크기를 실제 이미지에 맞춰 따라가게 함
+// (내부에 그려둔 브러시 자국은 원본 해상도 그대로라 화면 크기만 다시 맞추면 항상 정확히 유지됨).
+(function(){
+  function _resyncIfActive(){
+    var cv=gE('draw-canvas');
+    if(cv && cv.classList.contains('active')) _syncDrawCanvasBox(cv);
+  }
+  window.addEventListener('resize', _resyncIfActive);
+  try{
+    var _canvasEl = document.getElementById('canvas');
+    if(_canvasEl && window.ResizeObserver){
+      new ResizeObserver(_resyncIfActive).observe(_canvasEl);
+    }
+  }catch(e){}
+})();
 function _mkMaskExecute(){
   var usedColors=MASK_COLORS.filter(function(c){
     return (G.maskColorPrompts&&(G.maskColorPrompts[c[0]]||'').trim()) || (G.maskColorRefImg&&G.maskColorRefImg[c[0]]);
@@ -17955,8 +17991,7 @@ function togDraw(on, mode){
         // 크기 그대로 남고 poly-overlay/arrow-overlay는 계속 실시간으로 맞춰지는 불일치가 생겼음
         // — 그 결과 브러시로 그리면 클릭한 위치와 실제로 칠해지는 위치가 어긋나 보였음. 아래
         // 이미지 없는 폴백 분기가 이미 하던 것과 동일하게 인라인 크기를 비워서 CSS inset:0에 맡김.
-        cv.style.width='';
-        cv.style.height='';
+        _syncDrawCanvasBox(cv);
         cv.style.display='block';
         cv.classList.add('active');
         cv.classList.remove('brush-mode','eyedrop-mode','polygon-mode');
@@ -17977,7 +18012,7 @@ function togDraw(on, mode){
     } else {
       // 이미지 없으면 화면 크기로 폴백
       cv.width=ce.offsetWidth;cv.height=ce.offsetHeight;
-      cv.style.width='';cv.style.height='';
+      cv.style.left='';cv.style.top='';cv.style.width='';cv.style.height='';
       cv.style.display='block';
       cv.classList.add('active');
       cv.classList.remove('brush-mode','eyedrop-mode','polygon-mode');
@@ -17990,7 +18025,7 @@ function togDraw(on, mode){
   }else{
     cv.classList.remove('active','brush-mode','eyedrop-mode','polygon-mode');
     cv.style.display='none';
-    cv.style.width='';cv.style.height='';
+    cv.style.left='';cv.style.top='';cv.style.width='';cv.style.height='';
     var polyOv=gE('poly-overlay');if(polyOv){polyOv.innerHTML='';polyOv.style.display='none';}
     var arrOv=gE('arrow-overlay');if(arrOv){arrOv.style.display='none';}
     var bh=gE('brush-hint');if(bh)bh.style.display='none';
