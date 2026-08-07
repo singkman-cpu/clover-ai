@@ -17836,6 +17836,19 @@ function _resetPolyAreasByMode(mode){
 function togDraw(on, mode){
   var cv=gE('draw-canvas');if(!cv)return;
   if(on){
+    // ⚠️ 버그 수정(핵심 원인): Z키+마우스휠 확대 기능은 #hist-s(사진이 들어있는 요소)에만
+    // CSS transform:scale()을 걸고, 브러시·다각형·사각형·화살표가 그려지는 오버레이
+    // (#draw-canvas, #arrow-overlay, #poly-overlay)는 그 확대 대상과 별개인 형제 요소라 이
+    // 확대 효과를 전혀 안 받음. 그래서 한 번이라도 확대/축소를 한 상태로 편집 도구를 쓰면,
+    // 화면에 보이는 사진은 커지거나 작아진 채인데 오버레이는 원래(줌 1배) 크기 기준 좌표
+    // 그대로라서 클릭한 위치와 실제로 찍히는 위치가 어긋났음(사용자가 "다 이상한 곳에
+    // 선택된다"고 보고한 현상). 편집 도구를 켤 때마다 줌을 강제로 1배로 되돌려서, 오버레이와
+    // 실제 보이는 사진이 항상 정확히 같은 좌표계를 쓰도록 함.
+    if(G.zoom && G.zoom!==1){
+      G.zoom=1;
+      var _hsZoomReset=gE('hist-s');
+      if(_hsZoomReset){ _hsZoomReset.style.transform=''; _hsZoomReset.style.transformOrigin=''; }
+    }
     var ce=gE('canvas');
     // draw-canvas 내부 해상도 = 원본 이미지 크기로 설정 (마스크 정확도를 위해)
     // CSS로는 화면 크기에 맞게 표시
@@ -27337,6 +27350,12 @@ document.addEventListener('DOMContentLoaded',function(){try{
   if(cnvEl){
     cnvEl.addEventListener('wheel',function(e){
       if(!G.zKeyDown)return;
+      // ⚠️ 버그 수정: 브러시·다각형·사각형·화살표 같은 편집 도구가 켜져 있는 동안(#draw-canvas가
+      // .active 상태) 확대를 걸면, 그 확대는 #hist-s(사진)에만 적용되고 오버레이는 그대로라서
+      // 클릭 좌표가 다시 어긋나게 됨 — 편집 도구가 켜져 있을 땐 아예 확대를 막아서 이 문제가
+      // 재발하지 않게 함.
+      var _cvZoomCheck=gE('draw-canvas');
+      if(_cvZoomCheck && _cvZoomCheck.classList.contains('active')) return;
       e.preventDefault();
       var hs3=gE('hist-s');if(!hs3)return;
 
