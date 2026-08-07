@@ -2892,7 +2892,13 @@ function selectWF(wf){
   // togDraw(false)를 부르는 곳이 "일반 프롬프트로 되돌아갈 때"랑 "선택 영역 수정 실행 후"
   // 딱 2군데뿐이라 탭 자체를 벗어날 때는 아무도 안 꺼줘서, 그 오버레이(안내 문구 포함)가
   // 다른 탭 화면 위에 계속 떠 있는 채로 남아있던 버그가 있었음. 탭을 벗어나는 순간 확실히 정리함.
-  if(G.wf==='edit' && wf!=='edit'){ togDraw(false); }
+  // ⚠️ 버그 수정: 예전엔 "직전 탭이 edit였을 때만"(G.wf==='edit') 정리했는데, 새로고침 직후나
+  // 즐겨찾기/딥링크로 바로 다른 탭에 들어오는 경우처럼 이 함수의 "탭 전환 이력"을 거치지 않은
+  // 경로에서는 이 조건 자체가 성립 안 해서 이전 세션에 그려뒀던 영역이 다른 탭 화면 위에 계속
+  // 남아있는 문제가 있었음(사용자가 "현장사진 디자인 탭인데도 AI편집에서 그린 영역이 그대로
+  // 보인다"고 보고한 현상). "지금 가려는 탭이 edit가 아니면" 무조건 정리하도록 바꿔서, 어떤
+  // 경로로 들어왔든 edit가 아닌 모든 탭에서는 항상 깨끗한 상태를 보장함.
+  if(wf!=='edit'){ togDraw(false); }
   // AI편집 탭으로 "지금 막 들어왔을 때"만 화살표/영역 오버레이를 자동으로 복원하기 위한 1회성
   // 플래그 — mkMask()가 이 플래그를 보고 딱 한 번만 반응한 뒤 바로 꺼버림(매 렌더마다 켜지는
   // 것 방지, 실행 직후 슬라이더 조작을 막던 버그의 원인이었음).
@@ -3082,6 +3088,13 @@ function renderMain(callWf, preserveScroll){
   // 공유했는데, 그러면 세 탭의 메인화면이 전부 똑같이 보이는 문제가 있었음(다른 탭들은 전부
   // 독립적인데 이 셋만 안 그랬음) — 이제 각자 진짜 독립된 G.HIST를 쓰도록 별칭 처리를 없앰.
   var wf = callWf;
+  // ⚠️ 버그 수정(안전장치): selectWF()의 탭 전환 정리 로직을 거치지 않고 renderMain이 직접
+  // 호출되는 경로(새로고침 직후 상태 복원, 다른 함수에서 renderMain을 바로 부르는 경우 등)가
+  // 있어서, "AI편집에서 그려둔 영역이 다른 탭 화면에 그대로 남아있다"는 문제가 selectWF만
+  // 고쳐서는 완전히 안 없어졌음 — renderMain 자체에서도 매번, edit가 아닌 탭을 그릴 때는
+  // 무조건 마스크 편집 오버레이(브러시 캔버스·다각형/사각형 영역·화살표)를 정리해서, 어떤
+  // 경로로 이 함수가 호출되든 항상 깨끗한 상태를 보장함.
+  if(wf!=='edit' && typeof togDraw==='function'){ togDraw(false); }
   // canvas-upload-box / hist-s 가 데스크탑·모바일 레이아웃에 각각 존재(중복 id) → 전부 갱신
   var ubAll=document.querySelectorAll('#canvas-upload-box');
   var hsAll=document.querySelectorAll('.hist-s');
@@ -17126,8 +17139,14 @@ function mkMask(p){
   // ⚠️ 요청 반영: 지우개는 "칠한 부분"만 지우지 업로드한 이미지나 프롬프트까지는 안 지워서,
   // 한 번 수정하고 다시 새로 수정하려 할 때 이전 내용이 계속 남아있어 헷갈렸음 — 브러시·영역
   // 선택·화살표 전부 한 번에 확실하게 새로 시작할 수 있는 전체 리셋 버튼을 추가함.
+  // ⚠️ 버그 수정: "전체 리셋을 한 번 누르면 버튼이 다시 안 보인다" — 예전엔 이 버튼이
+  // inputImg(업로드한 이미지)가 있을 때만 보이도록 조건이 걸려있었는데, "전체 리셋"을 누르면
+  // 그 즉시 inputImg를 null로 비우기 때문에(바로 아래 onclick 참고), 화면(히스토리)에는 여전히
+  // 이전 사진과 그려둔 영역이 남아있는데도 이 조건만 거짓이 되어 버튼이 사라져버렸음 — 정작
+  // 계속 리셋이 필요한 상황인데 리셋 버튼이 없어지는 모순이었음. 마스크 편집 모드에서는 숨길
+  // 이유가 딱히 없으므로 조건 없이 항상 보이게 함.
   var maskResetTab=getTab(G.wf);
-  if(maskResetTab.inputImg || (maskResetTab.prompt&&maskResetTab.prompt.trim()) || (G.maskColorPrompts&&Object.keys(G.maskColorPrompts).length)){
+  {
     var maskResetBtn=mk('button','');maskResetBtn.type='button';
     maskResetBtn.innerHTML='🔄 전체 리셋 <span style="font-size:10px;font-weight:400;opacity:.8">(이미지·칠한 영역·프롬프트 전부 초기화)</span>';
     maskResetBtn.style.cssText='width:100%;padding:11px;border-radius:9px;border:1.5px solid #f87171;background:rgba(248,113,113,.08);color:#f87171;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;margin-bottom:10px';
