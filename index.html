@@ -227,7 +227,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 .hist-s::-webkit-scrollbar{width:4px}
 .hist-s::-webkit-scrollbar-thumb{background:var(--bd2)}
 .h-item{border-radius:9px;overflow:hidden;border:1px solid var(--bd2);background:var(--card);flex-shrink:0;min-height:200px}
-.cmpw{position:relative;user-select:none;min-height:200px;display:block;width:100%;cursor:ew-resize;-webkit-user-drag:none}
+.cmpw{position:relative;user-select:none;min-height:200px;display:block;width:100%;cursor:ew-resize;-webkit-user-drag:none;background:#0a0a0a;overflow:hidden}
 .cmpw img{display:block;width:100%;min-height:200px;max-height:calc(100vh - 220px);object-fit:contain;pointer-events:none;-webkit-user-drag:none;user-select:none}
 .cmp-ov{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .cmp-ln{position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,.85);transform:translateX(-50%);pointer-events:none;display:block}
@@ -17462,6 +17462,36 @@ function _getLetterboxCorrectedRect(containerRect, natW, natH){
   }
   return { left: containerRect.left+offX, top: containerRect.top+offY, width: dispW, height: dispH };
 }
+// ⚠️ 요청 반영(근본 원인 해결): "업로드한 이미지 비율이 16:9/4:3/1:1처럼 흔한 비율이 아니고
+// 14:8, 24:10, 9:4처럼 다양한데, 그 이미지에 맞게 영역이 안 잡힌다 — 계속 왼쪽으로 쏠린다" —
+// 지금까지 브러시·다각형·사각형·화살표 전부 "사진이 캔버스(#canvas) 전체 영역 안에서 정중앙
+// 정렬되어 letterbox/pillarbox가 생긴다"고 추측(계산)해서 좌표를 맞추는 방식(_getLetterboxCorrectedRect)
+// 을 써왔는데, 실제 화면 배치는 그 추측과 다를 수 있음(예: 이미지 카드가 컨테이너 상단에 붙어서
+// 세로로만 정렬되고 가로는 꽉 채우는 등, 비율에 따라 그 "추측"이 자꾸 어긋남) — 그래서 이미지
+// 비율이 흔치 않을수록 오차가 커졌던 것. 이제 "추측해서 계산"하는 대신 실제로 화면에 지금 보이는
+// 이미지 <img> 엘리먼트를 직접 찾아서 그 진짜 위치(getBoundingClientRect)를 그대로 씀 — 레이아웃이
+// 어떻게 되어있든, 이미지 비율이 뭐든 항상 정확함(어떤 계산도 필요 없이 브라우저가 실제로 그려낸
+// 위치 그 자체이므로). 이미지 엘리먼트를 아직 못 찾는 경우(로딩 중 등)에만 기존 추측 방식으로 폴백.
+function _getMaskDrawRect(cv){
+  try{
+    var hs=document.querySelector('.hist-s');
+    var img=null;
+    if(hs){
+      // 맨 위(최신) 카드 — AI편집은 항상 이 카드 위에 마스크를 그림. BEFORE 이미지(비교 슬라이더의
+      // 기준 사진, class 없는 첫 <img>)를 우선 찾고, 없으면(비교 슬라이더가 아닌 단일 이미지) 그
+      // 카드 안의 아무 <img>나 찾음.
+      var firstCard=hs.querySelector('.h-item .cmpw')||hs.querySelector('.cmpw');
+      if(firstCard) img=firstCard.querySelector('img');
+    }
+    if(img && img.naturalWidth && img.getBoundingClientRect){
+      var r=img.getBoundingClientRect();
+      if(r.width>0 && r.height>0) return r;
+    }
+  }catch(e){}
+  // 폴백: 실제 이미지 엘리먼트를 못 찾았을 때만(로딩 중 등) 예전 방식(추정 계산) 사용
+  var rect=cv.getBoundingClientRect();
+  return _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+}
 function _mkMaskExecute(){
   var usedColors=MASK_COLORS.filter(function(c){
     return (G.maskColorPrompts&&(G.maskColorPrompts[c[0]]||'').trim()) || (G.maskColorRefImg&&G.maskColorRefImg[c[0]]);
@@ -17777,7 +17807,7 @@ function _mkBuildMarkedReferenceImage(cb){
           // 보여도, 실제로 AI가 받는 합성 이미지 속 화살표 위치는 계속 어긋나 있었던 것. viewBox를
           // 컨테이너 전체가 아니라, 실제 이미지가 그려지는 letterbox 보정된 영역만으로 좁혀서
           // 잘라내야 함(여백 부분은 아예 안 씀).
-          var letterboxRectSvg = _getLetterboxCorrectedRect(rect, w, h);
+          var letterboxRectSvg = _getMaskDrawRect(brushCv);
           var vbX = letterboxRectSvg.left - rect.left, vbY = letterboxRectSvg.top - rect.top;
           var dispW = letterboxRectSvg.width || w, dispH = letterboxRectSvg.height || h;
           var svgClone = svgEl.cloneNode(true);
@@ -17983,18 +18013,22 @@ function initArrowMode(cv){
     var dist=Math.hypot(endPt[0]-startPt[0],endPt[1]-startPt[1]);
     if(dist<20){ previewLine.remove(); return; } // 너무 짧으면(실수 클릭) 무시
     // 화면 표시 좌표 → 캔버스(원본 이미지) 좌표로 변환해서 저장 (마스크 브러시와 같은 방식)
-    // ⚠️ 버그 수정(근본 원인): 컨테이너 전체 크기가 아니라, 실제 이미지가 letterbox/pillarbox
-    // 없이 그려지는 진짜 영역을 기준으로 스케일을 잡아야 함(다각형과 동일한 수정).
-    var letterboxRectA = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
-    var offXA = letterboxRectA.left - rect.left, offYA = letterboxRectA.top - rect.top;
+    // ⚠️ 버그 수정(근본 원인 해결): "추정 계산" 대신 실제로 화면에 보이는 이미지 엘리먼트의
+    // 진짜 위치를 직접 측정해서 사용(_getMaskDrawRect) — 어떤 이미지 비율·레이아웃이든 항상 정확함.
+    var letterboxRectA = _getMaskDrawRect(cv);
     var sx=cv.width/letterboxRectA.width, sy=cv.height/letterboxRectA.height;
+    // startPt/endPt는 arrOv 기준 상대좌표라서, 실제 이미지 rect(뷰포트 절대좌표) 기준으로
+    // 변환하려면 먼저 뷰포트 절대좌표로 되돌린 뒤 이미지 rect의 left/top을 빼야 함.
+    var absStartX=startPt[0]+rect.left, absStartY=startPt[1]+rect.top;
+    var absEndX=endPt[0]+rect.left, absEndY=endPt[1]+rect.top;
     // 실행취소(Ctrl+Z)용으로, 화살표 추가하기 전 상태를 저장해둠 (브러시와 같은 방식)
     if(!G.arrowsHist) G.arrowsHist=[];
     G.arrowsHist.push(JSON.parse(JSON.stringify(G.arrows||[])));
     if(G.arrowsHist.length>20) G.arrowsHist.shift();
     if(!G.arrows) G.arrows=[];
     G.arrows.push({
-      x1:(startPt[0]-offXA)*sx, y1:(startPt[1]-offYA)*sy, x2:(endPt[0]-offXA)*sx, y2:(endPt[1]-offYA)*sy,
+      x1:(absStartX-letterboxRectA.left)*sx, y1:(absStartY-letterboxRectA.top)*sy,
+      x2:(absEndX-letterboxRectA.left)*sx, y2:(absEndY-letterboxRectA.top)*sy,
       dispW:rect.width, dispH:rect.height, // 재렌더 시 비율 계산용
       label:'', refImg:null, id:Date.now()+Math.random()
     });
@@ -18009,9 +18043,10 @@ function _redrawArrows(arrOv){
   if(!G.arrows) return;
   var cv=gE('draw-canvas'); if(!cv) return;
   var rect=cv.getBoundingClientRect();
-  // ⚠️ 버그 수정: 다각형과 동일한 letterbox 보정 필요 — a.x1/y1/x2/y2가 진짜 이미지 해상도
-  // 좌표로 저장되므로, 화면 표시용으로 되돌릴 때도 실제 이미지 영역 기준으로 계산해야 함.
-  var letterboxRectA = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  // ⚠️ 버그 수정(근본 원인 해결): "추정 계산" 대신 실제 이미지 엘리먼트의 진짜 위치를 직접
+  // 측정해서 사용(_getMaskDrawRect) — a.x1/y1/x2/y2가 진짜 이미지 해상도 좌표로 저장되므로,
+  // 화면 표시용으로 되돌릴 때도 실제 이미지 영역 기준으로 계산해야 함.
+  var letterboxRectA = _getMaskDrawRect(cv);
   var offXA = letterboxRectA.left - rect.left, offYA = letterboxRectA.top - rect.top;
   var sx=letterboxRectA.width/cv.width, sy=letterboxRectA.height/cv.height;
   G.arrows.forEach(function(a,i){
@@ -18042,7 +18077,7 @@ function _redrawArrows(arrOv){
       function onMove(mv){
         if(!_dragging) return;
         var r2=cv.getBoundingClientRect();
-        var lb2=_getLetterboxCorrectedRect(r2, cv.width, cv.height);
+        var lb2=_getMaskDrawRect(cv);
         var nx=(mv.clientX-r2.left), ny=(mv.clientY-r2.top);
         headHandle.setAttribute('cx',nx); headHandle.setAttribute('cy',ny);
         line.setAttribute('x2',nx); line.setAttribute('y2',ny);
@@ -18062,7 +18097,7 @@ function _redrawArrows(arrOv){
       evt.stopPropagation(); evt.preventDefault();
       function onMove(mv){
         var t=mv.touches[0]; var r2=cv.getBoundingClientRect();
-        var lb2t=_getLetterboxCorrectedRect(r2, cv.width, cv.height);
+        var lb2t=_getMaskDrawRect(cv);
         var nx=(t.clientX-r2.left), ny=(t.clientY-r2.top);
         headHandle.setAttribute('cx',nx); headHandle.setAttribute('cy',ny);
         line.setAttribute('x2',nx); line.setAttribute('y2',ny);
@@ -18326,12 +18361,9 @@ var POLY_AREA_COLORS=['#00e5cc','#ff5757','#fbbf24','#a78bfa','#4ade80','#f472b6
 function finishPolygon(cv,polyOv){
   if(!G.polyPts||G.polyPts.length<3){alert('3개 이상의 점을 선택하세요.');return;}
   var rect=polyOv.getBoundingClientRect();
-  // ⚠️ 버그 수정(근본 원인): 점을 찍을 땐 화면(컨테이너) 기준 좌표 그대로 저장해서 SVG에 정확히
-  // 표시하고, 최종 변환(원본 해상도 좌표로) 시점에는 실제 이미지가 컨테이너 안에서 letterbox/
-  // pillarbox 없이 딱 어디부터 어디까지 그려지는지 보정해서 계산해야 함 — 지금까지는 컨테이너
-  // 전체 크기를 기준으로 스케일을 잡고 있어서, 이미지 비율과 컨테이너 비율이 다를 때(거의 항상)
-  // 생기는 여백만큼 매번 위치가 틀어지고 있었음.
-  var letterboxRect = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  // ⚠️ 버그 수정(근본 원인 해결): "추정 계산" 대신 실제 이미지 엘리먼트의 진짜 위치를 직접
+  // 측정해서 사용(_getMaskDrawRect) — 어떤 이미지 비율·레이아웃이든 항상 정확함.
+  var letterboxRect = _getMaskDrawRect(cv);
   var offXinContainer = letterboxRect.left - rect.left;
   var offYinContainer = letterboxRect.top - rect.top;
   var scaleX=cv.width/letterboxRect.width, scaleY=cv.height/letterboxRect.height;
@@ -18373,7 +18405,7 @@ function _redrawPolyAreas(polyOv){
   // (finishPolygon 수정), 여기서 화면 표시용으로 되돌려 그릴 땐 컨테이너 전체 크기 기준으로만
   // 계산하고 있어서 반대 방향으로 어긋났음(마커가 이미지 밖 왼쪽 여백에 뜨는 증상) — finishPolygon
   // 이랑 정확히 반대 방향의 동일한 letterbox 보정을 적용해야 함.
-  var letterboxRect = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  var letterboxRect = _getMaskDrawRect(cv);
   var offXinContainer = letterboxRect.left - rect.left;
   var offYinContainer = letterboxRect.top - rect.top;
   var sx=letterboxRect.width/cv.width, sy=letterboxRect.height/cv.height; // 캔버스 내부좌표 → 화면표시좌표
@@ -19803,7 +19835,7 @@ function drawMv(e){
   var rect=cv.getBoundingClientRect();
   // ⚠️ 버그 수정: 다각형·화살표와 완전히 동일한 letterbox 버그가 브러시 그리기에도 있었음 —
   // 드디어 브러시 그리는 함수(drawMv/drawDn)를 찾아서 같은 방식으로 고침.
-  var letterboxRectB = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  var letterboxRectB = _getMaskDrawRect(cv);
   var offXB = letterboxRectB.left - rect.left, offYB = letterboxRectB.top - rect.top;
   var scaleX=cv.width/letterboxRectB.width, scaleY=cv.height/letterboxRectB.height;
   var pt={x:(e.clientX-rect.left-offXB)*scaleX, y:(e.clientY-rect.top-offYB)*scaleY};
@@ -19834,7 +19866,7 @@ function drawDn(e){
   try{ G.drawHist.push(cv.toDataURL()); if(G.drawHist.length>20) G.drawHist.shift(); }catch(err){}
   G.drawing=true;
   var rect=cv.getBoundingClientRect();
-  var letterboxRectB2 = _getLetterboxCorrectedRect(rect, cv.width, cv.height);
+  var letterboxRectB2 = _getMaskDrawRect(cv);
   var offXB2 = letterboxRectB2.left - rect.left, offYB2 = letterboxRectB2.top - rect.top;
   var scaleX=cv.width/letterboxRectB2.width, scaleY=cv.height/letterboxRectB2.height;
   var pt={x:(e.clientX-rect.left-offXB2)*scaleX, y:(e.clientY-rect.top-offYB2)*scaleY};
