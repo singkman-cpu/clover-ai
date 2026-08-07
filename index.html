@@ -2483,7 +2483,7 @@ var G={
   vidMode:'image',vdur:5,vdurMax:15,vres:'1080p',
   cr:(localStorage.getItem('clover_plan')==='admin'?999999:parseInt(localStorage.getItem('clover_cr')||'0',10)),
   annual:false,faqO:-1,plan:localStorage.getItem('clover_plan')||'free',
-  dragId:-1,refIdx:0,dm:'brush',bsz:20,bc:'#00e5cc',
+  dragId:-1,refIdx:0,dm:null,bsz:20,bc:'#00e5cc',
   drawing:false,lastPt:null,drawHist:[],eOpen:false,zoom:1,polyPts:[],
   // ── 탭별 독립 상태 (Single Source Of Truth) ──────────────────────
   tabs:{
@@ -17219,6 +17219,26 @@ function mkMask(p){
   var isBrushTool = (G.dm==='brush' || G.dm==='erase');
   var isArrowTool = (G.dm==='arrow');
   var isPolyTool  = (G.dm==='polygon' || G.dm==='rect');
+  var hasAnyData = (G.arrows&&G.arrows.length) || (G.polyAreas&&G.polyAreas.length) || (function(){var _c=gE('draw-canvas');return _c&&_c.classList.contains('active');})();
+
+  // ⚠️ 요청 반영: "브러시로 영역 선택 클릭하자마자 브러시가 이미 선택돼있다 — 내가 고르기 전엔
+  // 아무 도구도 선택되어 있으면 안 된다" — G.dm 기본값을 null로 바꿨으니, 이제 정말 아무것도
+  // 안 고른 상태(G.dm이 null)를 별도로 처리해야 함. 예전 로직대로 두면 "다각형/사각형/화살표"
+  // 전용 UI(예: "다각형 초기화" 버튼)가 엉뚱하게 떠버리므로, 여기서 먼저 걸러서 깔끔한 안내
+  // 문구만 보여주고 끝냄(단, 이미 그려둔 게 있으면 계속 작업할 수 있게 실행 버튼은 남겨둠).
+  if(!G.dm){
+    var noToolNote=dv('note');noToolNote.style.cssText='font-size:11.5px;text-align:center;padding:14px;color:var(--m2)';
+    noToolNote.textContent='👆 위에서 브러시·다각형·사각형·화살표 중 하나를 먼저 선택하세요.';
+    s.appendChild(noToolNote);
+    if(hasAnyData){
+      var mbrNone=dv('');mbrNone.style.cssText='display:flex;gap:6px;margin-top:6px';
+      var mapBtnNone=mk('button','actbtn ok');mapBtnNone.style.cssText='flex:1;font-size:12px;padding:9px';mapBtnNone.innerHTML='선택 영역 수정 <span class="accr" style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+' cr</span>';
+      mapBtnNone.onclick=function(){ _mkMaskExecute(); };
+      mbrNone.appendChild(mapBtnNone);s.appendChild(mbrNone);
+    }
+    p.appendChild(s);
+    return;
+  }
 
   // 화살표로 지목한 오브젝트 목록 — 각각 라벨(무슨 수정을 할지)과 참고이미지를 넣을 수 있음
   // ⚠️ 예전엔 화살표/영역이 하나라도 있으면 다른 도구를 써도 목록이 계속 남아있었는데("영역 도구
