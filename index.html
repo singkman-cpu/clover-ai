@@ -2803,8 +2803,18 @@ function getBaseCost(wf,scale,resolution){
   var isPeople=['person_add','person_blur','people_walk','korean_person'].indexOf(selK)!==-1;
   if(wf==='edit'){
     var baseEdit=isPeople?50:20;
-    var editRes=getTab('edit').resolution||'1K';
-    return Math.round(baseEdit*(editRes==='2K'?1.5:1.0));
+    // ⚠️ 버그 수정(요금 관련, 실제로 발견함): 여기가 예전엔 getTab('edit').resolution을 다시
+    // 직접 읽어서, 이 함수를 호출할 때 넘겨준 resolution 매개변수(예: task.resolution)를 무시하고
+    // "지금 화면에 떠 있는 탭 상태"만 보고 있었음(비동기 대기열 상황에서 어긋날 수 있는 부분) —
+    // 위에서 이미 매개변수 우선으로 정리해둔 res 변수를 그대로 씀. 그리고 '2K'인지만 확인해서
+    // 1.5배를 매기고 나머지는 전부(4K 포함!) 1.0배로 계산하던 것도 고침 — 화면에 보여주는
+    // 가격(getCost, 아래쪽 별도 함수)은 RES_OPTS의 정확한 배율(1K=1.0/2K=1.5/4K=2.0)을 제대로
+    // 쓰고 있어서 4K를 고르면 화면엔 비싸게 표시되는데, 정작 실제로 차감/청구되는 이 함수는
+    // 4K를 1K랑 똑같이(더 싸게) 계산하고 있었던 것 — 4K로 AI 편집을 렌더링하면 실제로는 더
+    // 비싸야 하는데 저가로 청구되던 요금 누락 버그였음. RES_OPTS의 진짜 배율표를 그대로 써서
+    // 화면 표시와 실제 청구가 항상 일치하도록 고침.
+    var editMult = (RES_OPTS.find(function(r){return r.k===res;})||RES_OPTS[0]).mult;
+    return Math.round(baseEdit*editMult);
   }
   var base=wf==='video'?60:wf==='upscale'?((SCR[scale||'2x']&&SCR[scale||'2x'][G_UPSCALE_ENG])||(scale==='4x'?30:20)):(({'space':20,'render':20})[wf]||20);
   var mult=({'1K':1.0,'2K':1.5,'4K':2.0})[res]||1.0;
@@ -17126,6 +17136,13 @@ function mkChatEdit(p){
   var note=dv('note');
   note.innerHTML='<strong style="color:var(--ac)">💬 대화형 수정</strong><br>지시를 하나씩 보내면 직전 결과에 이어서 계속 수정해요. 예: "벽을 화이트로" → 완료 → "소파를 오른쪽으로" → 완료';
   p.appendChild(note);
+  // ⚠️ 버그 수정: "대화형 수정은 왜 항상 30cr이고 1K/2K/4K 선택하는 것도 없냐" — 마스크 모드와
+  // 똑같은 이유로 이 화면에 해상도 선택 UI 자체가 아예 없었음. 그런데 비용 계산(getBaseCost)은
+  // getTab('edit').resolution 값을 그대로 씀 — 화면엔 고를 데가 없으면서 예전에(다른 모드에서)
+  // 골라둔 값이 계속 조용히 적용되고 있었던 것(예: 마스크 모드에서 2K를 고른 적이 있으면 대화형
+  // 으로 와도 그 2K값이 그대로 남아서 30cr로 계산됨) — 여기도 직접 선택 UI를 넣어서 눈에 보이고,
+  // 원하는 대로 바꿀 수 있게 함.
+  mkResolution(p);
 
   if(!tab.inputImg){
     var warnBox=dv('note');warnBox.style.cssText='margin-top:8px;color:#f59e0b';
