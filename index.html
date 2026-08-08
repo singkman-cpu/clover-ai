@@ -17253,6 +17253,10 @@ var MASK_COLORS=[['#00e5cc','기본(민트)'],['#ef4444','빨강'],['#3b82f6','�
 // 다만 한 번에 요청하는 개수를 줄일수록 각각의 성공률은 확실히 올라가므로, 기존 3개에서 2개로
 // 더 낮춰서 안정성을 높임 — 그래도 한 번에 다 안 되면, 2개씩 나눠서 여러 번 실행해주시는 게
 // 지금 시점에서 가장 확실하게 100%에 가깝게 만드는 방법입니다.
+// ⚠️ 요청 반영: "브러시·다각형/사각형·화살표를 다 합쳐서 하나로 세지 말고, 각각 따로 세서 각자
+// 최대 개수만큼 되게 해달라" — 브러시는 색상 팔레트 자체가 3개뿐이라 자연스럽게 3개까지 가능
+// (별도 제한 코드 필요 없음). 다각형+사각형은 "영역 선택"이라는 같은 개념이라 한 세트로 묶어서
+// 세고, 화살표는 완전히 별개 도구라 독립적으로 셈 — 각 그룹마다 이 개수까지 허용함.
 var MAX_MASK_REGIONS = 2;
 function mkMask(p){
   var s=dv('ss');
@@ -17889,6 +17893,49 @@ function _mkMaskExecute(){
     }
   }
   if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
+  // ⚠️ 요청 반영(반복 지적, "여전히 붉은끼가 있다"): 원인을 다시 추적해서 찾음 — 이 코드베이스
+  // 어딘가에 "마스크 밖(칠 안 한 나머지)은 AI 결과를 안 쓰고 원본 픽셀을 강제로 그대로 써서
+  // 색 번짐을 원천 차단하는" 훨씬 확실한 보정 로직(_compositeMaskedResult)이 이미 있었는데, 그게
+  // 실제로 호출되는 코드 경로가 아니라 죽은(호출 안 되는) 함수 안에만 들어있었음 — 그래서 실제로는
+  // 훨씬 느슨한 보정(전체 이미지에 한 번 색온도만 살짝 보정)만 적용되고 있었던 것. 지금 칠해진
+  // 브러시·다각형·사각형 범위를 흑백 마스크로 지금(캔버스가 지워지기 전에) 미리 만들어서
+  // task에 실어 보내고, 실제 API 호출 결과를 받는 진짜 코드 경로에서 이 마스크로 "칠한 데만 AI
+  // 결과, 나머지는 원본 그대로 강제 합성"하도록 연결함 — 이러면 색 번짐이 구조적으로 불가능해짐.
+  var _maskCanvasForComposite = gE('draw-canvas');
+  var _compositeMaskDataUrl = null;
+  if(_maskCanvasForComposite && _maskCanvasForComposite.width>0){
+    try{
+      var _mcv=document.createElement('canvas');
+      _mcv.width=_maskCanvasForComposite.width; _mcv.height=_maskCanvasForComposite.height;
+      var _mctx=_mcv.getContext('2d');
+      // 브러시로 칠한 픽셀(어떤 색이든, 알파값 있는 곳)만 흰색, 나머지는 검정 — composite
+      // 연산 대신 픽셀 데이터를 직접 만들어서 확실하게 처리함(합성 모드 트릭은 배경까지 같이
+      // 지워지는 등 오작동 위험이 있어서 피함).
+      var _brushData=_maskCanvasForComposite.getContext('2d').getImageData(0,0,_maskCanvasForComposite.width,_maskCanvasForComposite.height).data;
+      var _hasBrushPx=false;
+      var _outImgData=_mctx.createImageData(_mcv.width,_mcv.height);
+      var _outD=_outImgData.data;
+      for(var _bi=0; _bi<_brushData.length; _bi+=4){
+        var _painted = _brushData[_bi+3]>10;
+        if(_painted) _hasBrushPx=true;
+        var _v = _painted ? 255 : 0;
+        _outD[_bi]=_v; _outD[_bi+1]=_v; _outD[_bi+2]=_v; _outD[_bi+3]=255;
+      }
+      _mctx.putImageData(_outImgData,0,0);
+      // 다각형·사각형으로 지정한 범위도 채워서 흰색으로 추가(브러시와 같은 좌표계 — 원본 해상도 기준)
+      _mctx.fillStyle='#fff';
+      (G.polyAreas||[]).forEach(function(a){
+        if(!a.points || a.points.length<3) return;
+        _mctx.beginPath();
+        _mctx.moveTo(a.points[0][0], a.points[0][1]);
+        for(var _pi=1; _pi<a.points.length; _pi++){ _mctx.lineTo(a.points[_pi][0], a.points[_pi][1]); }
+        _mctx.closePath(); _mctx.fill();
+      });
+      var _hasAnyMask = _hasBrushPx || (G.polyAreas && G.polyAreas.length>0);
+      if(_hasAnyMask) _compositeMaskDataUrl = _mcv.toDataURL('image/png');
+    }catch(e){ console.warn('[색 번짐 방지용 마스크 준비 실패]', e); }
+  }
+  getTab(G.wf)._pendingCompositeMask = _compositeMaskDataUrl; // procImgWithTask 쪽에서 1회성으로 읽어감
   // ⚠️ 요청 반영(긴급 되돌림): VizMaker 가이드대로 Nanobanana Pro로 강제 전환했더니 실제
   // 테스트에서 "렌더링이 안 된다"(에러/실패)는 게 확인됐고, 화면에 표시되는 엔진 배지는 여전히
   // "나노바나나2"인데 뒤에서만 몰래 Pro로 바뀌는 것도 "그럼 크레딧을 더 받아야 하는 거 아니냐"는
@@ -18229,10 +18276,12 @@ function initArrowMode(cv){
     // 있게 막아둠 — 안내 없이 4개째부터 조용히 무시되는 것보다, 딱 이만큼만 확실하게 되도록
     // 제한하는 게 낫다고 판단함. 더 많이 고치고 싶으면 한 번에 3개까지 실행하고, 결과를 다시
     // 불러와서 남은 부분을 이어서 지정하면 됨.
-    var _totalRegions0 = (G.arrows?G.arrows.length:0) + (G.polyAreas?G.polyAreas.length:0);
+    // ⚠️ 요청 반영: 화살표는 다각형·사각형과 합쳐서 세지 않고 독립적으로 개수를 셈(화살표만의
+    // 최대 개수까지 가능 — 다각형·사각형을 몇 개 그렸든 화살표 개수엔 영향 없음).
+    var _totalRegions0 = (G.arrows?G.arrows.length:0);
     if(_totalRegions0 >= MAX_MASK_REGIONS){
       previewLine.remove();
-      alert('한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요(브러시 색상·화살표·다각형·사각형 다 합쳐서) — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
+      alert('화살표는 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
       return;
     }
     // 화면 표시 좌표 → 캔버스(원본 이미지) 좌표로 변환해서 저장 (마스크 브러시와 같은 방식)
@@ -18593,9 +18642,10 @@ var POLY_AREA_COLORS=['#00e5cc','#ff5757','#fbbf24','#a78bfa','#4ade80','#f472b6
 
 function finishPolygon(cv,polyOv){
   if(!G.polyPts||G.polyPts.length<3){alert('3개 이상의 점을 선택하세요.');return;}
-  // ⚠️ 요청 반영: 화살표와 동일한 이유로, 다각형·사각형도 브러시 색상·화살표·다각형·사각형을
-  // 다 합쳐서 한 번에 최대 MAX_MASK_REGIONS개까지만 지정 가능하게 제한함.
-  var _totalRegions1 = (G.arrows?G.arrows.length:0) + (G.polyAreas?G.polyAreas.length:0);
+  // ⚠️ 요청 반영: 다각형·사각형은 "영역 선택"이라는 같은 개념이라 한 세트로 묶어서 세고(둘이
+  // 합쳐서 이 개수까지), 화살표는 완전히 별개 도구라 이 개수 계산에 포함하지 않음(화살표는
+  // 화살표끼리 따로 셈).
+  var _totalRegions1 = (G.polyAreas?G.polyAreas.length:0);
   if(_totalRegions1 >= MAX_MASK_REGIONS){
     G.polyPts=[];
     var _draftGroup1=polyOv.querySelector('#poly-draft-group');
@@ -18604,7 +18654,7 @@ function finishPolygon(cv,polyOv){
       var _dl1=_draftGroup1.querySelector('line'); if(_dl1){ ['x1','y1','x2','y2'].forEach(function(k){_dl1.removeAttribute(k);}); }
       var _dd1=_draftGroup1.querySelector('g'); if(_dd1) _dd1.innerHTML='';
     }
-    alert('한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요(브러시 색상·화살표·다각형·사각형 다 합쳐서) — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
+    alert('다각형+사각형은 합쳐서 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
     return;
   }
   var rect=polyOv.getBoundingClientRect();
@@ -22464,11 +22514,16 @@ function _runToolWithPromptActual(translatedPrompt){
     optimFor:  G.optimFor,
     vidMode:   tab.vidMode||G.tabs.video.vidMode||'image',
     vdur:      tab.vdur||G.tabs.video.vdur||5,
-    maskData:  null,
+    // ⚠️ 요청 반영: "여전히 붉은끼가 있다" — _mkMaskExecute에서 실행 직전에 만들어둔 흑백 마스크
+    // (칠한/지정한 부분만 흰색)를 여기로 실어 보내서, 실제 결과를 받는 procImgWithTask에서
+    // "마스크 밖은 원본 픽셀 그대로 강제, 마스크 안만 AI 결과" 합성을 할 수 있게 함 — 한 번
+    // 쓰고 나면 바로 비워서 다음 실행에 잘못 남지 않게 함.
+    maskData:  (G.wf==='edit' ? getTab('edit')._pendingCompositeMask : null) || null,
     status:    'queued',
     priority:  (G.plan==='agency' || G.plan==='admin'), // Business 플랜 전용 우선순위 처리 혜택
     budgetSnapshot: _budgetSnap
   };
+  if(G.wf==='edit') getTab('edit')._pendingCompositeMask = null;
   setTabStatus(G.wf,'queued');
   G.renderQueue.push(task);
   updateQueueUI();
@@ -23354,7 +23409,27 @@ function procImgWithTask(task, onDone, onErr){
         console.log('[API]',nb2Slug,'|',allUrls.length,'imgs | res:',editRes,'| orig:',origW+'x'+origH);
         _withExplicitAspect(img, function(_asp){
           falRun(nb2Slug,{prompt:rp,image_urls:allUrls,num_images:1,resolution:editRes,aspect_ratio:_asp,output_format:'jpeg'},
-            function(d){var u=falExtractImageUrl(d);if(u){_neutralizeEditColorCast(img,u,function(correctedUrl){finishWithResize(correctedUrl,onDone);});}else onErr('NB2 URL 없음');},onErr, _bill);
+            function(d){
+              var u=falExtractImageUrl(d);
+              if(!u){ onErr('NB2 URL 없음'); return; }
+              // ⚠️ 요청 반영(반복 지적, "여전히 붉은끼가 있다"): 브러시·다각형·사각형으로 실제
+              // 칠하거나 지정한 마스크가 있으면(task.maskData), AI가 리턴한 이미지를 통째로 쓰지
+              // 않고 마스크로 표시한 부분"만" AI 결과를 쓰고 나머지는 원본 픽셀을 그대로 강제로
+              // 합성함 — 이러면 AI가 전체 색감을 바꿔서 리턴해도 마스크 밖은 100% 원본 그대로라
+              // 색 번짐이 구조적으로 불가능해짐(예전엔 이 로직이 실제로 호출 안 되는 죽은 코드
+              // 안에만 있었음 — 이번에 진짜 실행 경로에 연결함). 마스크가 없는 일반 프롬프트
+              // 편집(화살표만 쓴 경우 포함, 화살표는 정확한 채워진 범위가 없어 이 마스크 대상이
+              // 아님)은 기존처럼 전체 이미지에 색온도만 살짝 보정하는 방식을 그대로 씀.
+              if(task.maskData){
+                urlToDataUrl(u, function(resDataUrl){
+                  _compositeMaskedResult(img, resDataUrl||u, task.maskData, function(finalUrl){
+                    finishWithResize(finalUrl || resDataUrl || u, onDone);
+                  });
+                });
+              } else {
+                _neutralizeEditColorCast(img,u,function(correctedUrl){finishWithResize(correctedUrl,onDone);});
+              }
+            },onErr, _bill);
         });
       }
       function handleError(e){
