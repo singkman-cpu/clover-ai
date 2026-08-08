@@ -17299,7 +17299,11 @@ var MASK_COLORS=[['#00e5cc','기본(민트)'],['#ef4444','빨강'],['#3b82f6','�
 // 브러시·다각형·화살표 전부 결국 "위치를 표시한 사진 + 통합 프롬프트를 한 번에 AI한테 보내는"
 // 똑같은 방식이라서, 도구마다 다르게 제한할 기술적 근거가 없었음(지난번 2개로 낮춘 건 그냥
 // 안전 마진이었지 실제 차이가 있어서가 아니었음) — 전부 3개로 통일함.
-var MAX_MASK_REGIONS = 3;
+// ⚠️ 요청 반영(최종): "3개는 실제로 정확하게 다 안 된다"는 반복된 실측 결과를 받음 — VizMaker
+// 공식 가이드를 다시 확인해봐도 몇 개까지 가능하다는 숫자 제한 자체가 명시돼 있지 않아서
+// ("3개씩 해도 문제없다"를 문서로 뒷받침할 근거를 못 찾음), 논리적 추론(브러시 3개가 되니
+// 다각형·화살표도 3개가 될 것)보다 직접 여러 번 테스트하신 실측 결과를 따라 다시 2개로 낮춤.
+var MAX_MASK_REGIONS = 2;
 function mkMask(p){
   var s=dv('ss');
   s.innerHTML='<div class="lbl" style="color:var(--ac)">AI 마스크 편집 <span class="lbl-en" style="color:var(--ac2)">Mask Edit</span></div>';
@@ -21918,26 +21922,27 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
       if(loaded<2) return;
       try{
         var W=64,H=64; // 색 통계용이라 작은 해상도로도 충분하고, 훨씬 빠름
-        // ⚠️ 요청 반영(반복 지적): "커튼 색만 바꿨는데 전체적으로 붉은끼가 생긴다" — 원인을 다시
-        // 보니, 이 색 온도 비교가 "이미지 가장자리(위·아래·좌·우 테두리 전부)"를 기준으로 삼고
-        // 있었는데, 실내 사진에서 좌우 테두리는 커튼·창문틀처럼 자주 편집되는 부분과 정확히
-        // 겹침 — 커튼 자체가 새 색으로 바뀌면 그 바뀐 색이 "기준값"에 섞여 들어가서, 정작 비교
-        // 기준이 오염되어 나머지 벽·천장까지 같이 물든 진짜 색 번짐을 제대로 못 잡아냈던 것으로
-        // 보임. 좌우 테두리는 빼고, 편집이 잘 안 일어나는 천장(맨 위)·바닥(맨 아래) 쪽 "가로
-        // 띠"만 기준 삼도록 좁혀서, 커튼·창문 등 실제로 자주 바뀌는 영역이 기준 색 계산에 섞여
-        // 들어가지 않게 함.
+        // ⚠️ 요청 반영(반복 지적, "일반 프롬프트·대화형 수정은 마스크가 없어서 사진 전체가
+        // 붉게 나온다"): 이 두 모드는 사진 전체를 AI가 다시 그리는 방식이라 "여기는 원본 유지"로
+        // 강제로 잘라낼 기준(마스크)이 아예 없음 — 그러니 이 보정 하나가 유일한 방어선인데, 지금
+        // 까지는 위/아래 12% 띠만 보고 있어서 표본이 너무 좁아 드리프트를 과소평가하기 쉬웠음.
+        // 표본을 훨씬 넓혀서(가장자리 전체 링 — 위/아래/좌/우 다, 다만 정중앙의 "아마 편집됐을"
+        // 큰 영역만 제외) 더 안정적으로 진짜 드리프트를 감지하고, 보정 폭도 더 넓힘.
         function sampleBorderAvg(img){
           var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
           var ctx=cv.getContext('2d');
           ctx.drawImage(img,0,0,W,H);
           var data=ctx.getImageData(0,0,W,H).data; // CORS 미허용이면 여기서 SecurityError
-          var band=Math.max(4,Math.round(H*0.12)); // 위/아래 12% 두께만
-          var sideMargin=Math.round(W*0.15); // 좌우 가장자리(커튼·창틀 있는 곳)는 통째로 제외
+          var margin=Math.round(W*0.10); // 가장자리 10% 링 전체(위/아래/좌/우 다 포함)
+          var cx0=Math.round(W*0.28), cx1=Math.round(W*0.72); // 정중앙 44% 정사각형(주로 편집 대상)은 제외
+          var cy0=Math.round(H*0.28), cy1=Math.round(H*0.72);
           var sr=0,sg=0,sb=0,n=0;
           for(var y=0;y<H;y++){
-            var inTopBand = y<band, inBottomBand = y>=H-band;
-            if(!inTopBand && !inBottomBand) continue; // 위/아래 띠가 아니면 건너뜀
-            for(var x=sideMargin;x<W-sideMargin;x++){ // 좌우 가장자리 제외한 가운데 부분만
+            for(var x=0;x<W;x++){
+              var inCenter = x>=cx0 && x<cx1 && y>=cy0 && y<cy1;
+              if(inCenter) continue; // 정중앙(주로 편집 대상)은 표본에서 제외
+              var inRing = x<margin || x>=W-margin || y<margin || y>=H-margin;
+              // 링이 아니어도(중앙 제외 영역 전체) 다 표본으로 씀 — 표본이 넓을수록 안정적임
               var i=(y*W+x)*4;
               sr+=data[i]; sg+=data[i+1]; sb+=data[i+2]; n++;
             }
@@ -21946,7 +21951,7 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
         }
         var avgO=sampleBorderAvg(oImg);
         var avgR=sampleBorderAvg(rImg);
-        function clampFactor(f){ return Math.max(0.75, Math.min(1.25, f)); } // 과보정 방지, ±25% 이내(기준 영역을 더 정확하게 좁혔으니 보정 여유도 좀 더 넓힘)
+        function clampFactor(f){ return Math.max(0.65, Math.min(1.35, f)); } // 표본이 훨씬 안정적으로 넓어졌으니 보정 여유도 ±35%까지 넓힘
         var fr=clampFactor(avgO.r/Math.max(1,avgR.r));
         var fg=clampFactor(avgO.g/Math.max(1,avgR.g));
         var fb=clampFactor(avgO.b/Math.max(1,avgR.b));
