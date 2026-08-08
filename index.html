@@ -17527,7 +17527,7 @@ function mkMask(p){
     var row=dv('');row.style.cssText='display:flex;align-items:flex-start;gap:8px;margin-bottom:6px';
     var dot=dv('');dot.style.cssText='width:16px;height:16px;border-radius:50%;background:'+c[0]+';flex-shrink:0;margin-top:10px;box-shadow:0 0 0 1px var(--bd2)';
     var mta=mk('textarea','ta');mta.rows=2;mta.style.cssText='flex:1;min-height:44px';
-    mta.placeholder=(c[1]+'로 칠한 영역 수정 내용 (예: 이 의자를 벨벳 암체어로, 또는 오른쪽에서 이미지 업로드)');
+    mta.placeholder=(c[1]+'로 칠한 영역 수정 내용 (예: 자동차 삭제해줘, 이 의자를 벨벳 암체어로 — 오브젝트 이름을 같이 적으면 더 정확해요)');
     mta.value=G.maskColorPrompts[c[0]]||'';
     mta.oninput=function(){ G.maskColorPrompts[c[0]]=mta.value; updBtn(); };
     var ralBtn=mk('button','');ralBtn.type='button';ralBtn.title='RAL 컬러 선택';ralBtn.textContent='🎨';
@@ -17566,6 +17566,13 @@ function mkMask(p){
   var noteMulti=dv('note');noteMulti.style.cssText='font-size:10px;margin-bottom:6px';
   noteMulti.innerHTML='💡 색 하나만 써도 되고, 여러 색으로 오브젝트를 구분해서 칠한 뒤 각각 다른 내용/이미지를 넣어도 돼요. 🖼️ 아이콘을 눌러 "이 사진처럼 바꿔줘" 이미지를 넣을 수 있어요.';
   s.appendChild(noteMulti);
+  // ⚠️ 요청 반영: "그냥 '삭제해줘'만 써도 되는지, 오브젝트 이름까지 써야 하는지 명확하게 공지가
+  // 필요하다"는 지적 — 맞는 말이라 바로 화면에 안내를 추가함. 필수는 아니지만(칠한 위치를 AI가
+  // 보고 판단은 함), "자동차 삭제해줘"처럼 오브젝트 이름을 같이 적어주면 위치가 살짝 어긋나도
+  // 텍스트만으로 보정이 되기 때문에 정확도가 확실히 올라감을 명시적으로 안내함.
+  var noteObjName=dv('note');noteObjName.style.cssText='font-size:10px;margin-bottom:6px;color:var(--ac,#00e5cc)';
+  noteObjName.innerHTML='✅ 정확도 팁: "삭제해줘"보다 "<b>자동차</b> 삭제해줘"처럼 오브젝트 이름을 같이 적어주면 훨씬 정확해져요 — 필수는 아니지만, 칠한 위치가 살짝 어긋나도 이름을 보고 AI가 스스로 보정할 수 있어서 훨씬 안전합니다.';
+  s.appendChild(noteObjName);
 
   var mbr=dv('');mbr.style.cssText='display:flex;gap:6px;margin-top:6px';
   var mapBtn=mk('button','actbtn ok');mapBtn.style.cssText='flex:1;font-size:12px;padding:9px';mapBtn.innerHTML='선택 영역 수정 <span class="accr" style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+' cr</span>';
@@ -17984,8 +17991,40 @@ function _mkMaskExecuteInner(){
         for(var _pi=1; _pi<a.points.length; _pi++){ _mctx.lineTo(a.points[_pi][0], a.points[_pi][1]); }
         _mctx.closePath(); _mctx.fill();
       });
-      var _hasAnyMask = _hasBrushPx || (G.polyAreas && G.polyAreas.length>0);
-      if(_hasAnyMask) _compositeMaskDataUrl = _mcv.toDataURL('image/png');
+      // ⚠️ 요청 반영: "화살표로 한 수정은 위치를 명확하게 못 잡는다" — 화살표는 지금까지 이 색
+      // 번짐 방지 마스크에서 아예 빠져있어서(정확한 채워진 범위가 없다는 이유로), 화살표로 한
+      // 편집은 "AI가 리턴한 이미지 전체"를 그대로 썼음 — 그러다 보니 화살표가 가리킨 오브젝트
+      // 딱 그 자리만 정확히 바뀌는 게 아니라 AI가 자기 판단으로 넓게 손대거나 엉뚱한 데를
+      // 건드려도 다 그대로 반영됐던 것. 이제 화살표 끝점(가리키는 지점) 주변에 넉넉한 원형
+      // 범위를 만들어서 마스크에 포함시킴 — 이러면 화살표도 "가리킨 자리 근처만" 확실하게
+      // 바뀌고, 엉뚱한 곳이 바뀌는 일이 원천 차단됨.
+      (G.arrows||[]).forEach(function(a){
+        if(typeof a.x2!=='number' || typeof a.y2!=='number') return;
+        var _r = Math.max(_mcv.width, _mcv.height) * 0.12; // 화살표가 가리키는 오브젝트가 대략 들어올 만한 넉넉한 반경
+        _mctx.beginPath();
+        _mctx.arc(a.x2, a.y2, _r, 0, Math.PI*2);
+        _mctx.fill();
+      });
+      var _hasAnyMask = _hasBrushPx || (G.polyAreas && G.polyAreas.length>0) || (G.arrows && G.arrows.length>0);
+      if(_hasAnyMask){
+        // ⚠️ 요청 반영: "브러시·화살표 수정이 위치를 명확하게 못 잡는다"(=칠한 모양 그대로 딱
+        // 잘려서, 손으로 대충 칠한 경계가 그대로 결과물 경계가 되어 오브젝트 일부만 바뀌거나
+        // 이가 빠진 것처럼 보임) — 마스크 가장자리를 살짝 부드럽게(블러) 처리해서, 대충 칠한
+        // 경계 밖으로 조금은 자연스럽게 번져 들어가고 안쪽 경계도 딱딱하게 잘리지 않게 함
+        // (완전히 딱 맞게 칠하지 않아도 오브젝트가 자연스럽게 다 바뀌도록 여유를 줌).
+        try{
+          var _featherPx = Math.max(6, Math.round(Math.min(_mcv.width,_mcv.height)*0.01));
+          // 캔버스를 자기 자신에 그리는 건 브라우저마다 동작이 다를 수 있어서, 별도의 임시
+          // 캔버스에 블러를 적용해서 그린 뒤 그 결과로 바꿔치기함(안전한 방식).
+          var _blurCv=document.createElement('canvas');
+          _blurCv.width=_mcv.width; _blurCv.height=_mcv.height;
+          var _blurCtx=_blurCv.getContext('2d');
+          _blurCtx.filter = 'blur('+_featherPx+'px)';
+          _blurCtx.drawImage(_mcv, 0, 0);
+          _mcv = _blurCv;
+        }catch(e){ console.warn('[마스크 경계 부드럽게 처리 실패, 딱딱한 경계로 진행]', e); }
+        _compositeMaskDataUrl = _mcv.toDataURL('image/png');
+      }
     }catch(e){ console.warn('[색 번짐 방지용 마스크 준비 실패]', e); }
   }
   getTab(G.wf)._pendingCompositeMask = _compositeMaskDataUrl; // procImgWithTask 쪽에서 1회성으로 읽어감
@@ -18461,7 +18500,7 @@ function renderArrowList(wrap){
     var numBadge=dv('');numBadge.style.cssText='width:22px;height:22px;border-radius:50%;background:#ff5757;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px';
     numBadge.textContent=idx+1;
     var ta=mk('textarea','ta');ta.rows=2;ta.style.cssText='flex:1;min-height:40px;font-size:12px';
-    ta.placeholder='이 오브젝트를 어떻게? (예: 이 의자 없애줘, 이 소파는 벨벳으로)';
+    ta.placeholder='이 오브젝트를 어떻게? (예: 이 의자 없애줘, 이 소파는 벨벳으로 — 오브젝트 이름을 같이 적으면 더 정확해요)';
     ta.value=a.label||'';
     ta.oninput=function(){ a.label=ta.value; _saveMaskAnnotations(); };
     var ralBtn=mk('button','');ralBtn.type='button';ralBtn.textContent='🎨';ralBtn.title='RAL 컬러';
@@ -18813,7 +18852,7 @@ function renderPolyAreaList(wrap){
     var numBadge=dv('');numBadge.style.cssText='width:22px;height:22px;border-radius:50%;background:'+color+';color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px';
     numBadge.textContent=idx+1;
     var ta=mk('textarea','ta');ta.rows=2;ta.style.cssText='flex:1;min-height:40px;font-size:12px';
-    ta.placeholder='이 영역을 어떻게? (예: 이 벽을 화이트로, 이 바닥을 원목으로)';
+    ta.placeholder='이 영역을 어떻게? (예: 이 벽을 화이트로, 이 바닥을 원목으로 — 오브젝트 이름을 같이 적으면 더 정확해요)';
     ta.value=area.label||'';
     ta.oninput=function(){ area.label=ta.value; _saveMaskAnnotations(); };
     var ralBtn=mk('button','');ralBtn.type='button';ralBtn.textContent='🎨';ralBtn.title='RAL 컬러';
@@ -23499,8 +23538,9 @@ function procImgWithTask(task, onDone, onErr){
               // 합성함 — 이러면 AI가 전체 색감을 바꿔서 리턴해도 마스크 밖은 100% 원본 그대로라
               // 색 번짐이 구조적으로 불가능해짐(예전엔 이 로직이 실제로 호출 안 되는 죽은 코드
               // 안에만 있었음 — 이번에 진짜 실행 경로에 연결함). 마스크가 없는 일반 프롬프트
-              // 편집(화살표만 쓴 경우 포함, 화살표는 정확한 채워진 범위가 없어 이 마스크 대상이
-              // 아님)은 기존처럼 전체 이미지에 색온도만 살짝 보정하는 방식을 그대로 씀.
+              // 편집(레퍼런스만으로 위치를 설명하는 등 마스크 자체가 아예 없는 극히 드문 경우)은
+              // 기존처럼 전체 이미지에 색온도만 살짝 보정하는 방식을 그대로 씀. (화살표는 이제
+              // 가리키는 지점 주변에 넉넉한 원형 마스크가 만들어져서 이 보호 대상에 포함됨.)
               if(task.maskData){
                 urlToDataUrl(u, function(resDataUrl){
                   _compositeMaskedResult(img, resDataUrl||u, task.maskData, function(finalUrl){
