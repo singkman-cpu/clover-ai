@@ -17796,73 +17796,115 @@ function _getBrushColorBBox(cv, hexColor){
   }catch(e){ console.warn('[브러시 색상 범위 스캔 실패]',e); return null; }
 }
 function _mkMaskExecute(){
-  // ⚠️ 요청 반영(근본적인 방향 전환, "VizMaker는 잘 되는데 왜 여기는 안 되냐"는 지적): 여러 영역을
-  // "한 사진 위에 색칠/표시해서 한 번에 통째로" AI에게 던지는 방식은, 사진 한 장 안에서 여러 색·
-  // 여러 영역을 AI가 동시에 정확히 구분해서 각각 다르게 처리해야 해서 실패율이 높았음. VizMaker
-  // 방식대로 — 영역 하나마다 그 부분만 잘라내서(crop) 독립된 작은 사진으로 편집하고 원래 자리에
-  // 합성하는 걸, 지정한 영역 개수만큼 순서대로 반복하는 방식으로 바꿈. "작게 잘린 사진 하나를
-  // 통째로 자연스럽게 바꿔라"는 AI가 원래 잘하는 일이라 훨씬 안정적임.
+  // ⚠️ 요청 반영: "네가 알아서 하지 말고 VizMaker가 실제로 어떻게 하는지 공부해서 그대로 반영해"
+  // — VizMaker 공식 사용 가이드를 실제로 찾아서 확인함(7. DRAWING AND REMOVING/ADDING OBJECTS
+  // 항목). 거기 적힌 방식은 제가 지난번에 추측했던 "영역별로 하나씩 잘라서 순서대로 처리"가
+  // 아니라 — 정확히 이거였음: "① 어떤 색으로 칠한 영역이 무엇을 지워야/바뀌어야/추가돼야 하는지
+  // 하나의 자세한 프롬프트에 다 적는다 → ② Nanobanana Pro 엔진을 쓴다(공식 문서에 '이게 제일
+  // 잘 됨'이라고 명시됨) → ③ 한 번에 실행한다." 즉 원래 저희가 하던 "색칠된 사진 하나 + 통합
+  // 프롬프트 한 번에 전송" 방식이 실제로 VizMaker가 하는 방식과 같았고, 다른 점은 딱 하나 —
+  // 저희는 일반 Nanobanana(Pro 아님)를 쓰고 있었던 것. 지난번의 "영역별로 잘라서 순서대로"
+  // 방식은 제가 임의로 판단한 것이었어서 원래대로 되돌리고, VizMaker 문서에 나온 대로 항상
+  // Nanobanana Pro 엔진을 쓰도록 명시적으로 고정함.
   if(!G.maskColorPrompts) G.maskColorPrompts={};
   if(!G.maskColorRefImg) G.maskColorRefImg={};
   var usedColors=MASK_COLORS.filter(function(c){
     return (G.maskColorPrompts[c[0]]||'').trim() || G.maskColorRefImg[c[0]];
   });
-  var regions=[];
-  var cvForScan=gE('draw-canvas');
-  usedColors.forEach(function(c){
-    var box = cvForScan ? _getBrushColorBBox(cvForScan, c[0]) : null;
-    if(!box) return; // 실제로 칠해진 픽셀을 못 찾으면(예외 상황) 건너뜀
-    var txt=(G.maskColorPrompts[c[0]]||'').trim();
-    var refImg=G.maskColorRefImg[c[0]]||null;
-    var instrText = refImg
-      ? ('첨부한 레퍼런스 이미지처럼 이 영역(사진 정중앙에 있는 오브젝트)을 바꿔줘'+(txt?(' — '+txt):''))
-      : txt;
-    if(!instrText) return;
-    regions.push({points:box, instrText:instrText, refImg:refImg});
-  });
-  (G.polyAreas||[]).forEach(function(a){
-    var txt=(a.label||'').trim();
-    if(!txt && !a.refImg) return;
-    var instrText = a.refImg ? ('첨부한 레퍼런스 이미지처럼 이 영역(사진 정중앙에 있는 오브젝트)을 바꿔줘'+(txt?(' — '+txt):'')) : txt;
-    regions.push({points:a.points, instrText:instrText, refImg:a.refImg||null});
-  });
-  (G.arrows||[]).forEach(function(a){
-    var txt=(a.label||'').trim();
-    if(!txt && !a.refImg) return;
-    var arrCv=gE('draw-canvas');
-    if(!arrCv || !arrCv.width) return;
-    // 화살표는 영역이 아니라 "점 하나"를 가리키므로, 그 점 주변에 넉넉한 정사각형 범위를 만들어서
-    // 크롭 대상으로 삼음(이미지 전체 크기의 18% 정도 — 너무 좁으면 가리키는 오브젝트가 잘릴 수 있음).
-    var pad = Math.max(arrCv.width, arrCv.height) * 0.18;
-    var bx1=Math.max(0,a.x2-pad), by1=Math.max(0,a.y2-pad), bx2=Math.min(arrCv.width,a.x2+pad), by2=Math.min(arrCv.height,a.y2+pad);
-    var instrText = a.refImg ? ('첨부한 레퍼런스 이미지처럼, 화살표가 가리키는 오브젝트를 바꿔줘'+(txt?(' — '+txt):'')) : ('화살표가 가리키는 오브젝트: '+txt);
-    regions.push({points:[[bx1,by1],[bx2,by1],[bx2,by2],[bx1,by2]], instrText:instrText, refImg:a.refImg||null});
-  });
-  if(!regions.length){ alert('수정할 내용을 입력해주세요.'); return; }
-  var _stlSeq=gE('stl');
-  if(_stlSeq) _stlSeq.textContent='영역 1/'+regions.length+' 처리 중...';
-  _mkSequentialRegionEdit(regions, function(done,total){
-    var _stlP=gE('stl'); if(_stlP) _stlP.textContent='영역 '+done+'/'+total+' 처리 중...';
-  }, function(finalUrl){
-    if(!finalUrl){
-      alert('편집에 실패했습니다. 다시 시도해주세요.');
-      var _stlE=gE('stl'); if(_stlE) _stlE.textContent='';
-      return;
+  var refImgs=[];
+  var combined='';
+  if(usedColors.length===1){
+    var c0=usedColors[0];
+    combined = (G.maskColorPrompts[c0[0]]||'').trim();
+    if(G.maskColorRefImg[c0[0]]){
+      refImgs.push(G.maskColorRefImg[c0[0]]);
+      combined += (combined?' ':'')+'첨부한 레퍼런스 이미지처럼 이 영역을 바꿔줘.';
     }
-    var tab0=getTab(G.wf);
-    var origBefore = tab0.inputImg;
-    tab0.inputImg = finalUrl;
-    // 이번 실행에 쓴 지시사항·영역은 전부 초기화 (다음 편집에 남아있지 않도록)
+    combined += ' ⚠️ 색칠된 영역과 그 영역이 가리키는 오브젝트만 수정하고, 그 외 이미지의 나머지 부분은 원본 사진과 완전히 동일하게 그대로 유지할 것 — "더 자연스럽게" 보이려고 주변을 같이 바꾸거나 정리하지 말 것.';
+  } else if(usedColors.length>1){
+    var parts=[];
+    usedColors.forEach(function(c){
+      var txt=(G.maskColorPrompts[c[0]]||'').trim();
+      var seg=c[1]+'색으로 칠한 영역: ';
+      if(G.maskColorRefImg[c[0]]){
+        refImgs.push(G.maskColorRefImg[c[0]]);
+        seg += '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
+      } else {
+        seg += txt;
+      }
+      parts.push(seg);
+    });
+    // ⚠️ VizMaker 가이드 원문 그대로 반영: "어떤 색으로 칠한 영역/오브젝트가 지워져야/바뀌어야/
+    // 추가돼야 하는지"를 하나의 자세한 프롬프트로 명확히 지정하라는 게 핵심이었음 — 색깔별
+    // 지시를 최대한 구체적이고 명확하게 구분해서 나열함.
+    combined = parts.join('. ') + '. (각 색으로 칠한 영역은 서로 다른 오브젝트를 가리킴 — 색 표시 자체는 결과물에 남기지 말고, 지정된 대로 각각 다르게 수정할 것. 레퍼런스 이미지가 있으면 그 이미지 속 디자인·형태·소재를 그대로 반영할 것. ⚠️ 색칠된 영역들과 그 영역이 가리키는 오브젝트만 수정하고, 그 외 나머지 부분은 원본 사진과 완전히 동일하게 그대로 유지할 것 — "더 자연스럽게" 보이려고 주변을 같이 바꾸거나 정리하지 말 것.)';
+  }
+  if(G.arrows && G.arrows.length){
+    var arrCv=gE('draw-canvas');
+    var arrParts=G.arrows.filter(function(a){return (a.label||'').trim() || a.refImg;}).map(function(a,i){
+      var zone='';
+      if(arrCv && arrCv.width>0 && arrCv.height>0){
+        var px=a.x2/arrCv.width, py=a.y2/arrCv.height;
+        var h = px<0.33?'좌측':px<0.66?'가운데':'우측';
+        var v = py<0.33?'상단':py<0.66?'중앙':'하단';
+        zone = '(이미지 '+v+' '+h+' 부근을 가리킴) ';
+      }
+      var txt=(a.label||'').trim();
+      if(a.refImg){
+        refImgs.push(a.refImg);
+        txt = '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
+      }
+      return '화살표 '+(i+1)+'번 '+zone+'— '+txt;
+    });
+    if(arrParts.length){
+      var arrowInstr = arrParts.join('. ') + '. (화살표로 표시한 오브젝트들에 대한 개별 지시사항이며, 화살표 자체는 결과 이미지에 나타나면 안 됨.) ⚠️ "삭제·제거·지워줘"라고 지시한 것이 있다면, 흐릿하게 남기거나 반투명하게 지우지 말고 완전히 100% 안 보이게 없애고 그 자리를 뒤 배경이 자연스럽게 이어지도록 채우세요(인페인팅) — 지운 흔적이 남으면 실패입니다.';
+      combined = combined ? (combined+' '+arrowInstr) : arrowInstr;
+    }
+  }
+  if(G.polyAreas && G.polyAreas.length){
+    var polyCv=gE('draw-canvas');
+    var polyParts=G.polyAreas.filter(function(a){return (a.label||'').trim() || a.refImg;}).map(function(a,i){
+      var zone='';
+      if(polyCv && polyCv.width>0 && polyCv.height>0 && a.points && a.points.length){
+        var cx=a.points.reduce(function(s,pt){return s+pt[0];},0)/a.points.length;
+        var cy=a.points.reduce(function(s,pt){return s+pt[1];},0)/a.points.length;
+        var px=cx/polyCv.width, py=cy/polyCv.height;
+        var h = px<0.33?'좌측':px<0.66?'가운데':'우측';
+        var v = py<0.33?'상단':py<0.66?'중앙':'하단';
+        zone = '(이미지 '+v+' '+h+' 부근의 지정한 범위) ';
+      }
+      var txt=(a.label||'').trim();
+      if(a.refImg){
+        refImgs.push(a.refImg);
+        txt = '첨부한 레퍼런스 이미지 '+refImgs.length+'번처럼 바꿔줘'+(txt?(' ('+txt+')'):'');
+      }
+      return '영역 '+(i+1)+'번 '+zone+'— '+txt;
+    });
+    if(polyParts.length){
+      var polyInstr = polyParts.join('. ') + '. (점으로 표시한 정확한 다각형 범위 안쪽만 지정된 대로 수정할 것 — 범위 밖은 건드리지 말 것. 다각형 테두리 자체는 결과 이미지에 나타나면 안 됨.) ⚠️ "삭제·제거·지워줘"라고 지시한 영역이 있다면, 그 물체를 흐릿하게 남기거나 반투명하게 지우는 게 아니라 완전히 100% 안 보이게 없애고, 그 자리를 뒤에 있던 배경(벽·천장·바닥 등)이 자연스럽게 이어지는 것처럼 채워 넣으세요(인페인팅) — 지운 흔적이나 그림자, 형태의 잔상이 남으면 실패입니다.';
+      combined = combined ? (combined+' '+polyInstr) : polyInstr;
+    }
+  }
+  if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
+  // ⚠️ VizMaker 가이드 그대로: 색칠·표시가 있는 편집은 항상 Nanobanana Pro 엔진으로 고정
+  // ("Select the Nanobanana Pro engine (it works the best!)" — 공식 가이드 원문).
+  G.maskEngine='nano_pro';
+  var _stlSeq=gE('stl');
+  if(_stlSeq) _stlSeq.textContent='처리 중...';
+  getTab(G.wf).prompt = combined;
+  _mkBuildMarkedReferenceImage(function(_markedImg){
+    if(_markedImg){
+      var _hadRealStyleRefs = refImgs.length>0;
+      refImgs.unshift(_markedImg);
+      getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
+      getTab(G.wf)._markedRefIsPositionOnly = !_hadRealStyleRefs;
+    }
+    if(refImgs.length){ getTab(G.wf).refs=refImgs; }
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
-    var _dcvClr=gE('draw-canvas'); if(_dcvClr){ try{ _dcvClr.getContext('2d').clearRect(0,0,_dcvClr.width,_dcvClr.height); }catch(e){} }
+    var _dcv2=gE('draw-canvas'); if(_dcv2){ try{ _dcv2.getContext('2d').clearRect(0,0,_dcv2.width,_dcv2.height); }catch(e){} }
     G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
-    togDraw(false);
-    if(!G.HIST[G.wf]) G.HIST[G.wf]=[];
-    G.HIST[G.wf].unshift({id:Date.now()+Math.random(), orig:origBefore, result:finalUrl, origThumb:null, tags:['AI 편집 · 영역 수정 ('+regions.length+'개)'], ai:'', cx:50, fav:false, wf:G.wf, preview:false});
-    _saveResultToCloudGallery(G.wf, Date.now(), finalUrl, origBefore, 'nano2', tab0.resolution||'1K');
-    renderMain(G.wf);
-    updBtn();
+    togDraw(false);if(canRun())runTool();
   });
 }
 
@@ -22410,8 +22452,11 @@ function _runToolWithPromptActual(translatedPrompt){
     // 참고이미지 기반 위치 지정을 전혀 이해 못 하는 일반 이미지 편집 모델이라, 마스크로 표시한
     // 위치·참고 이미지를 통째로 무시하고 프롬프트 텍스트만 보고 엉뚱하게(또는 비율이 틀어진 채)
     // 편집해버렸던 것. 마스크 모드일 때는 이 G.eng을 절대 쓰지 않고, 마스크 전용 라우팅
-    // (G.maskEngine 기반, 아래 useFluxMask 분기)에 맡기도록 무조건 nano2로 고정함.
-    eng:       (G.wf==='edit' && G.editMode==='mask') ? 'nano2' : G.eng,
+    // (G.maskEngine 기반, 아래 useFluxMask 분기)에 맡기도록 함. ⚠️ 추가: VizMaker 공식 가이드를
+    // 확인해보니 색칠·표시 기반 편집은 "Nanobanana Pro 엔진이 제일 잘 됨"이라고 명시돼 있어서,
+    // _mkMaskExecute에서 G.maskEngine='nano_pro'로 지정한 경우엔 그대로 nano_pro를 쓰게 함
+    // (Kontext 같은 무관한 엔진만 막고, 마스크 시스템이 의도적으로 고른 nano_pro는 허용).
+    eng:       (G.wf==='edit' && G.editMode==='mask') ? (G.maskEngine==='nano_pro' ? 'nano_pro' : 'nano2') : G.eng,
     vidEng:    G.vidEng,
     upscaleEng:G_UPSCALE_ENG||'clarity',
     scale:     tab.scale||G.tabs.upscale.scale||'2x',
