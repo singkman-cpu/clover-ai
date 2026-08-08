@@ -10855,7 +10855,7 @@ function mkAutoRoomCamera(p){
     b.onclick=function(){
       if(spTab.autoRoomCategory===catKey) return;
       spTab.autoRoomCategory=catKey;
-      spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenIntUrls=[]; spTab.autoRoomWindowAnchor=null; // 카테고리 바꾸면 완전히 다른 공간이니 일관성 기록(창호 기준 포함)도 초기화
+      spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenIntUrls=[]; spTab.autoRoomWindowAnchor=null; spTab.autoRoomStyleAnalysis=null; spTab.autoRoomStyleAnalysisSrc=null; // 카테고리 바꾸면 완전히 다른 공간이니 일관성 기록(창호 기준·스타일 분석 포함)도 초기화
       var newTypes=_autoRoomTypesForCategory(catKey);
       spTab.autoRoomSelected=newTypes.slice();
       // ⚠️ 버그 수정: 카테고리를 바꾸면 라벨(이름표)만 새 카테고리 타입으로 리셋되고 정작
@@ -11129,6 +11129,30 @@ function mkAutoRoomCamera(p){
   var styleTag=document.getElementById('agent-spin-style');
   if(!styleTag){ styleTag=document.createElement('style'); styleTag.id='agent-spin-style'; styleTag.textContent='@keyframes agentSpin{to{transform:rotate(360deg)}}'; document.head.appendChild(styleTag); }
 }
+// ⚠️ 요청 반영(구조 변경): "AI가 참고 이미지를 보고 스타일을 알아서 잘 읽어내길 기대하는" 지금까지의
+// 방식(프롬프트 문구만 계속 강화)이 반복적으로 실패함 — 벽 마감·천장·바닥까지 참고 이미지와 전혀
+// 다른 톤(예: 밝은 화이트 미니멀 참고인데 짙은 우드+노출콘크리트로)으로 나오는 게 계속 재현됨.
+// 이제 2단계 방식으로 바꿈: ① 참고 이미지를 텍스트 분석 모델에게 먼저 보여주고 "벽/천장/바닥
+// 마감재·색상, 전체 스타일 장르"를 명확한 문장으로 뽑아냄 → ② 그 분석 텍스트를 실제 생성
+// 프롬프트에 "이미 확정된 사실"로 박아넣음. AI가 이미지에서 스타일을 그때그때 "추측"하는 대신,
+// 이미 뽑아낸 명확한 설명을 "따라가기만" 하면 되므로 훨씬 안정적일 것으로 기대함.
+function _analyzeSpaceStyle(imgUrl, cb){
+  try{
+    fetch('https://fal.run/fal-ai/any-llm',{
+      method:'POST',
+      headers:{'Authorization':'Key '+FAL_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'google/gemini-flash-1.5-8b',
+        prompt:'이 인테리어 사진을 분석해서 아래 형식 그대로, 한국어로 간결하게 답해줘. 다른 설명 없이 이 형식만 정확히 지켜줘:\n벽마감: (재질과 색상, 예: 화이트 도장 마감)\n천장형태: (형태와 색상, 예: 평천장, 화이트, 매입등 5개)\n바닥마감: (재질과 색상, 예: 브라운 톤 원목마루)\n전체톤: (밝은지 어두운지, 예: 전체적으로 밝고 화이트톤 위주)\n스타일장르: (예: 미니멀 모던, 미드센추리 등)\n가구느낌: (구체적인 제품명 말고 전반적인 디자인 언어만, 예: 컬러감 있는 포인트 가구를 곳곳에 배치한 미니멀 스타일)',
+        image_url:imgUrl
+      })
+    }).then(function(r){ return r.json(); }).then(function(d){
+      var txt = (d && (d.output||d.text||d.response||d.message)) || '';
+      if(typeof txt!=='string' || !txt.trim()){ cb(null); return; }
+      cb(txt.trim());
+    }).catch(function(e){ console.warn('[스타일 분석 실패, 기존 방식으로 진행]', e); cb(null); });
+  }catch(e){ console.warn('[스타일 분석 호출 실패, 기존 방식으로 진행]', e); cb(null); }
+}
 function _autoRoomRun(){
   var spTab=getTab('spaceset');
   if(!(spTab.autoRoomExtAnchors && spTab.autoRoomExtAnchors.some(function(a){return a.img;})) && !(spTab.autoRoomIntAnchors && spTab.autoRoomIntAnchors.some(function(a){return a.img;}))){ alert('건물 외관 또는 실내 사진을 최소 1장 올려주세요.'); return; }
@@ -11169,7 +11193,31 @@ function _autoRoomRun(){
   }
   spTab.autoRoomState={running:true, step:0, results:[], error:null};
   renderSB();
-  _autoRoomGenerateStep(0);
+  // ⚠️ 요청 반영: 생성 시작 전에 참고 이미지 스타일을 먼저 분석해서(1회, 배치 전체가 재사용)
+  // 확정된 사실로 만들어둠 — 대표 참고 이미지(외관 있으면 외관 첫 장, 없으면 실내 첫 장) 기준.
+  // 이미 같은 이미지로 분석해둔 게 있으면(재실행 등) 재사용하고, 분석이 실패해도(네트워크 오류
+  // 등) 기존 방식으로 그대로 진행하도록 안전하게 처리함 — 절대 여기서 전체가 멈추지 않게 함.
+  var _repImgForAnalysis = (spTab.autoRoomExtAnchors||[]).map(function(a){return a.img;}).filter(Boolean)[0]
+    || (spTab.autoRoomIntAnchors||[]).map(function(a){return a.img;}).filter(Boolean)[0];
+  if(_repImgForAnalysis && spTab.autoRoomStyleAnalysisSrc===_repImgForAnalysis && spTab.autoRoomStyleAnalysis){
+    _autoRoomGenerateStep(0); // 이미 분석해둔 이미지와 같으면 재분석 없이 바로 진행
+    return;
+  }
+  if(!_repImgForAnalysis){ _autoRoomGenerateStep(0); return; }
+  var _stlAnalyze=gE('stl'); if(_stlAnalyze) _stlAnalyze.textContent='참고 이미지 스타일 분석 중...';
+  var _analysisDone=false;
+  var _analysisTimer=setTimeout(function(){ // 5초 안에 응답 없으면 그냥 진행(분석 없이도 기존 방식으로는 동작함)
+    if(_analysisDone) return; _analysisDone=true;
+    _autoRoomGenerateStep(0);
+  }, 5000);
+  _analyzeSpaceStyle(_repImgForAnalysis, function(analysisText){
+    if(_analysisDone) return; _analysisDone=true;
+    clearTimeout(_analysisTimer);
+    spTab.autoRoomStyleAnalysis = analysisText||null;
+    spTab.autoRoomStyleAnalysisSrc = _repImgForAnalysis;
+    _autoRoomGenerateStep(0);
+  });
+  return;
 }
 // ⚠️ 요청 반영: 기준 사진이 "건물 외관" 1장, "실내" 1장, 또는 둘 다일 수 있음.
 //  · 둘 다 있으면: 두 사진의 디자인 포인트(외관의 건축·재료 언어 + 실내의 공간·소재 감성)를
@@ -11289,7 +11337,14 @@ function _autoRoomPromptFor(basePrompt, typeName){
   // "최대한 동일하게"를 고른 경우엔 사용자가 구조까지 포함해서 참고 이미지를 최대한 따르길
   // 원하는 것으로 보고, 한국 구조 강제 규칙은 그 경우에만 건너뜀(스타일 반영도 설정과 충돌 방지).
   var _structOverride = spTab.autoRoomFidelity==='tight' ? '' : KOREA_STRUCTURE_OVERRIDE_RULE;
-  var _prependRules = '⚠️⚠️ 가장 먼저 지켜야 할 절대 규칙들(다른 무엇보다 우선): ' + SINGLE_IMAGE_OUTPUT_RULE + AC_CONSISTENCY_RULE + (prompt.indexOf('사람')===-1 && prompt.indexOf('한국인')===-1 ? NO_PEOPLE_ANIMALS_RULE : '') + ' --- 이제 아래 공간 설명을 반영하세요: ';
+  // ⚠️ 요청 반영(2단계 방식): 배치 시작 전에 미리 분석해둔 참고 이미지의 실제 마감재·톤·스타일
+  // 장르 설명이 있으면, "AI가 이미지 보고 추측"하는 대신 "이미 확정된 사실"로 맨 앞에 박아넣음 —
+  // 벽/천장/바닥 마감은 반영도 설정과 무관하게 이 분석 내용을 최대한 따라가야 하고, 가구는
+  // 반영도 설정(_fidelitySuffix)에 따라 이 스타일 장르 안에서 자유도가 달라짐.
+  var _styleAnalysisBlock = spTab.autoRoomStyleAnalysis
+    ? ('⚠️⚠️ 참고 이미지 실제 분석 결과(이미 확정된 사실 — AI가 다시 추측하지 말고 이 내용을 그대로 따르세요): ' + spTab.autoRoomStyleAnalysis + ' — 이 중 "벽마감·천장형태·바닥마감·전체톤"은 지금 만드는 이 공간에도 최대한 비슷한 느낌으로 반영하세요(공간의 구조·형태 자체는 이 공간 용도에 맞게 당연히 달라질 수 있지만, 마감재의 종류·색상·톤은 위 분석과 일치해야 합니다). "스타일장르·가구느낌"은 아래 반영도 설정에 따라 얼마나 비슷하게 할지가 정해집니다. --- ')
+    : '';
+  var _prependRules = '⚠️⚠️ 가장 먼저 지켜야 할 절대 규칙들(다른 무엇보다 우선): ' + SINGLE_IMAGE_OUTPUT_RULE + AC_CONSISTENCY_RULE + (prompt.indexOf('사람')===-1 && prompt.indexOf('한국인')===-1 ? NO_PEOPLE_ANIMALS_RULE : '') + ' --- ' + _styleAnalysisBlock + '이제 아래 공간 설명을 반영하세요: ';
   return _prependRules + prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + KOREA_BACKGROUND_RULE + MAIN_LIGHT_CONSISTENCY_RULE;
 }
 function _autoRoomGenerateStep(idx){
