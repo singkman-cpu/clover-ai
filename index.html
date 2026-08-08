@@ -837,6 +837,22 @@ function _loadKakaoSdk(){
   return _kakaoSdkLoading;
 }
 
+// 로컬(data:/blob:) 이미지를 클라우드에 올려서 공유 가능한 진짜 웹 URL(https://...)을 받아옴 —
+// 카카오톡 공유 카드처럼 "실제 웹 URL"이 반드시 있어야 하는 기능에서 씀. _saveResultToCloudGallery
+// 와 달리 갤러리 DB에 기록을 남기지 않고, 오직 "공유용 URL 하나"만 조용히 만들어서 돌려줌.
+function _uploadLocalImageForShare(dataUrl, cb){
+  if(!(_supa && _supaUser)){ cb(null); return; }
+  try{
+    fetch(dataUrl).then(function(r){return r.blob();}).then(function(blob){
+      var filePath=_supaUser.id+'/share/'+Date.now()+'.jpg';
+      _supa.storage.from('gallery').upload(filePath, blob, {contentType:'image/jpeg', upsert:true}).then(function(uploadRes){
+        if(uploadRes.error){ console.warn('[공유용 업로드 실패]', uploadRes.error.message); cb(null); return; }
+        var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
+        cb(publicUrl||null);
+      }).catch(function(e){ console.warn('[공유용 업로드 오류]', e); cb(null); });
+    }).catch(function(e){ console.warn('[공유용 이미지 변환 오류]', e); cb(null); });
+  }catch(e){ console.warn('[공유용 업로드 전체 오류]', e); cb(null); }
+}
 function cloverShare(src, fname){
   fname = fname || ('clover-ai-'+Date.now()+'.jpg');
   var ov=document.createElement('div');
@@ -857,8 +873,30 @@ function cloverShare(src, fname){
   kakaoBtn.innerHTML='💬 카카오톡으로 보내기';
   kakaoBtn.onclick=function(){
     if(!src.startsWith('http')){
-      // 카카오톡 공유 카드는 실제 웹 URL에서 이미지를 가져와서 만들기 때문에, 아직 웹에 없는(로컬)
-      // 이미지는 카톡 카드로 못 만든다 — 기기에 저장해서 수동으로 보내도록 안내.
+      // ⚠️ 버그 수정: "카카오톡 바로 공유가 원래 잘 됐었는데 안 된다" — 원인 확인함. 카카오톡
+      // 공유 카드는 실제 웹에 올라간 이미지 URL이 있어야 만들 수 있는데, 색 보정·마스크 합성처럼
+      // 브라우저 안에서 캔버스로 직접 처리한 결과물은 (재업로드하는 별도 코드가 없으면) 계속
+      // "로컬 데이터"로만 남아있어서 여기서 바로 "기기에 저장" 폴백으로 빠졌던 것 — 예전엔 이런
+      // 로컬 후처리가 없던 결과물만 공유해봐서 몰랐을 뿐, 원래 공유 자체가 "웹에 이미 올라간
+      // 이미지"만 지원하는 구조였음. 이제 로컬 이미지여도 공유를 누르는 순간 먼저 조용히
+      // 클라우드에 올려서 진짜 웹 URL을 받아온 뒤, 그걸로 카카오톡 공유를 시도하도록 고침 —
+      // 로그인 상태가 아니거나 업로드가 실패할 때만 기존처럼 기기 저장으로 대체함.
+      if(_supa && _supaUser){
+        kakaoBtn.disabled=true; kakaoBtn.textContent='업로드 중...';
+        _uploadLocalImageForShare(src, function(hostedUrl){
+          if(hostedUrl){
+            kakaoBtn.disabled=false; kakaoBtn.innerHTML='💬 카카오톡으로 보내기';
+            src = hostedUrl; // 이제부터는 진짜 웹 URL이니, 아래 정상 카카오 공유 로직을 그대로 다시 탐
+            kakaoBtn.onclick();
+          } else {
+            kakaoBtn.disabled=false; kakaoBtn.innerHTML='💬 카카오톡으로 보내기';
+            cloverDownload(src, fname);
+            note.style.color='#f59e0b';
+            note.textContent='이미지를 웹에 올리는 데 실패해서 기기에 저장했어요. 카카오톡에서 사진 첨부로 보내주세요.';
+          }
+        });
+        return;
+      }
       cloverDownload(src, fname);
       note.style.color='#f59e0b';
       note.textContent='이 이미지는 카톡 공유 카드로 바로 못 보내서 기기에 저장했어요. 카카오톡에서 사진 첨부로 보내주세요.';
