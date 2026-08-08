@@ -17247,10 +17247,13 @@ function _chatEditSend(promptText){
 // 마스크 색상 팔레트 — 브러시로 서로 다른 오브젝트를 구분해서 칠할 때 씀. mkMask()와
 // _mkMaskExecute()/_mkMaskClearAll() 양쪽에서 다 써서 전역으로 뺌.
 var MASK_COLORS=[['#00e5cc','기본(민트)'],['#ef4444','빨강'],['#3b82f6','파랑']];
-// ⚠️ 요청 반영: "한 번에 몇 개까지 수정되는지 확실하면 딱 그만큼만 지정하게 해달라" — AI가 한 번에
-// 동시에 정확히 처리할 수 있는 영역 개수에는 현실적인 한계가 있어서, 브러시 색상·화살표·다각형·
-// 사각형을 다 합쳐서 한 번에 최대 이 개수까지만 지정 가능하게 제한함(초과분은 안내 후 거부).
-var MAX_MASK_REGIONS = 3;
+// ⚠️ 요청 반영: "브러시 3개로 수정시켰는데 70%만 반영된다, 100% 안 되면 있으나 마나다" — 정직하게
+// 말씀드리면 생성형 AI가 한 번에 여러 군데를 동시에 정확히 처리하는 데는 실제로 한계가 있어서
+// 코드만으로 100%를 보장해드릴 수는 없습니다(이건 도구 문제가 아니라 AI 모델 자체의 한계입니다).
+// 다만 한 번에 요청하는 개수를 줄일수록 각각의 성공률은 확실히 올라가므로, 기존 3개에서 2개로
+// 더 낮춰서 안정성을 높임 — 그래도 한 번에 다 안 되면, 2개씩 나눠서 여러 번 실행해주시는 게
+// 지금 시점에서 가장 확실하게 100%에 가깝게 만드는 방법입니다.
+var MAX_MASK_REGIONS = 2;
 function mkMask(p){
   var s=dv('ss');
   s.innerHTML='<div class="lbl" style="color:var(--ac)">AI 마스크 편집 <span class="lbl-en" style="color:var(--ac2)">Mask Edit</span></div>';
@@ -17886,9 +17889,14 @@ function _mkMaskExecute(){
     }
   }
   if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
-  // ⚠️ VizMaker 가이드 그대로: 색칠·표시가 있는 편집은 항상 Nanobanana Pro 엔진으로 고정
-  // ("Select the Nanobanana Pro engine (it works the best!)" — 공식 가이드 원문).
-  G.maskEngine='nano_pro';
+  // ⚠️ 요청 반영(긴급 되돌림): VizMaker 가이드대로 Nanobanana Pro로 강제 전환했더니 실제
+  // 테스트에서 "렌더링이 안 된다"(에러/실패)는 게 확인됐고, 화면에 표시되는 엔진 배지는 여전히
+  // "나노바나나2"인데 뒤에서만 몰래 Pro로 바뀌는 것도 "그럼 크레딧을 더 받아야 하는 거 아니냐"는
+  // 정당한 지적이 있었음(화면 표시·크레딧 계산과 실제로 쓰는 엔진이 서로 다르면 안 됨). 곧
+  // 오픈인 상황에서 검증 안 된 채로 렌더링 자체가 실패하는 걸 그대로 둘 수 없어서, 확실히
+  // 작동이 확인된 나노바나나2로 다시 되돌림 — Pro 전환은 나중에 화면 표시·크레딧 계산까지
+  // 다 맞춰서 별도로 검증한 뒤 다시 시도하는 게 안전함.
+  // G.maskEngine='nano_pro'; ← 되돌림(nano2 그대로 유지)
   var _stlSeq=gE('stl');
   if(_stlSeq) _stlSeq.textContent='처리 중...';
   getTab(G.wf).prompt = combined;
@@ -22445,18 +22453,9 @@ function _runToolWithPromptActual(translatedPrompt){
     wf:        _realWf(G.wf),
     prompt:    translatedPrompt,
     selK:      tab.selK||null,
-    // ⚠️ 버그 수정(치명적): "flux 인페인팅으로 바꿨는데도 삭제가 안 되고 화질도 이상해진다"는
-    // 지적 — 알고 보니 "일반 프롬프트" 모드에서 카메라/시점 변경용으로 골라둔 엔진(예: Flux Pro
-    // Kontext)이 G.eng에 그대로 남아있다가, 나중에 완전히 다른 시스템인 "마스크 편집"(브러시·
-    // 영역선택 등)을 실행할 때도 아무 확인 없이 그대로 재사용되고 있었음 — Kontext는 마스크·
-    // 참고이미지 기반 위치 지정을 전혀 이해 못 하는 일반 이미지 편집 모델이라, 마스크로 표시한
-    // 위치·참고 이미지를 통째로 무시하고 프롬프트 텍스트만 보고 엉뚱하게(또는 비율이 틀어진 채)
-    // 편집해버렸던 것. 마스크 모드일 때는 이 G.eng을 절대 쓰지 않고, 마스크 전용 라우팅
-    // (G.maskEngine 기반, 아래 useFluxMask 분기)에 맡기도록 함. ⚠️ 추가: VizMaker 공식 가이드를
-    // 확인해보니 색칠·표시 기반 편집은 "Nanobanana Pro 엔진이 제일 잘 됨"이라고 명시돼 있어서,
-    // _mkMaskExecute에서 G.maskEngine='nano_pro'로 지정한 경우엔 그대로 nano_pro를 쓰게 함
-    // (Kontext 같은 무관한 엔진만 막고, 마스크 시스템이 의도적으로 고른 nano_pro는 허용).
-    eng:       (G.wf==='edit' && G.editMode==='mask') ? (G.maskEngine==='nano_pro' ? 'nano_pro' : 'nano2') : G.eng,
+    // ⚠️ 요청 반영(긴급 되돌림): Nanobanana Pro 강제 전환이 실제 렌더링 실패 + 화면 표시·크레딧
+    // 계산과 실제 사용 엔진이 다른 문제를 일으켜서, 검증된 나노바나나2로 되돌림.
+    eng:       (G.wf==='edit' && G.editMode==='mask') ? 'nano2' : G.eng,
     vidEng:    G.vidEng,
     upscaleEng:G_UPSCALE_ENG||'clarity',
     scale:     tab.scale||G.tabs.upscale.scale||'2x',
