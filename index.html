@@ -17247,6 +17247,10 @@ function _chatEditSend(promptText){
 // 마스크 색상 팔레트 — 브러시로 서로 다른 오브젝트를 구분해서 칠할 때 씀. mkMask()와
 // _mkMaskExecute()/_mkMaskClearAll() 양쪽에서 다 써서 전역으로 뺌.
 var MASK_COLORS=[['#00e5cc','기본(민트)'],['#ef4444','빨강'],['#3b82f6','파랑']];
+// ⚠️ 요청 반영: "한 번에 몇 개까지 수정되는지 확실하면 딱 그만큼만 지정하게 해달라" — AI가 한 번에
+// 동시에 정확히 처리할 수 있는 영역 개수에는 현실적인 한계가 있어서, 브러시 색상·화살표·다각형·
+// 사각형을 다 합쳐서 한 번에 최대 이 개수까지만 지정 가능하게 제한함(초과분은 안내 후 거부).
+var MAX_MASK_REGIONS = 3;
 function mkMask(p){
   var s=dv('ss');
   s.innerHTML='<div class="lbl" style="color:var(--ac)">AI 마스크 편집 <span class="lbl-en" style="color:var(--ac2)">Mask Edit</span></div>';
@@ -17296,7 +17300,10 @@ function mkMask(p){
   // 전용 버튼을 따로 둬서, 그냥 이거 하나 누르면 어떤 도구를 쓰고 있었든 상관없이 항상 그림 도구가
   // 꺼지고(=Before/After 슬라이더·일반 클릭 조작이 전혀 안 막힘) 눈으로 바로 "지금 도구 꺼짐" 상태를
   // 확인할 수 있게 함.
-  [['none','🖱️','선택 해제 (슬라이더 조작)'],['brush','✏️','브러시 (오브젝트 위에 칠하기)'],['polygon','⬠','다각형 (점 찍어서 정확한 범위 지정)'],['rect','▭','사각형 (드래그로 빠르게 범위 지정)'],['arrow','➡️','화살표로 오브젝트 지목']].forEach(function(a){
+  // ⚠️ 요청 반영: "선택 해제 아이콘이 마우스 기기 이모티콘(🖱️)이라 헷갈린다, 마우스 포인터
+  // (커서 화살표) 모양으로 해달라" — 이모티콘 대신 실제 커서 화살표 모양의 SVG 아이콘으로 교체함.
+  var _cursorPointerSvg='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>';
+  [['none',_cursorPointerSvg,'선택 해제 (슬라이더 조작)'],['brush','✏️','브러시 (오브젝트 위에 칠하기)'],['polygon','⬠','다각형 (점 찍어서 정확한 범위 지정)'],['rect','▭','사각형 (드래그로 빠르게 범위 지정)'],['arrow','➡️','화살표로 오브젝트 지목']].forEach(function(a){
     var bt=mk('button','');
     var cvForOn=gE('draw-canvas');
     var isOn = a[0]==='none' ? !(cvForOn && cvForOn.classList.contains('active')) : (G.dm===a[0] && cvForOn && cvForOn.classList.contains('active'));
@@ -17868,9 +17875,26 @@ function _mkMaskExecute(){
   // 전환 대상에 다각형도 포함시킴 — 화살표만 여전히 flux가 못 받는 방식(오브젝트 포인팅이라
   // 채워진 영역으로 표현이 안 됨)이라 제외.
   var _isPureBrush = !(G.arrows && G.arrows.length);
-  if(_isDeleteInstr && _isPureBrush && G.maskEngine!=='flux'){
+  // ⚠️ 버그 수정(치명적, "브러시 색 3개로 각각 다른 지시를 줬는데 하나만 반영된다"의 진짜 원인):
+  // flux 인페인팅은 "칠한 부분(흰색) vs 안 칠한 부분(검정)"만 구분하는 흑백 마스크 하나만 받을 수
+  // 있어서, 색깔별로 서로 다른 지시가 있어도 실제로 AI에게 전달되는 마스크에는 색 구분이 통째로
+  // 사라짐(민트든 빨강이든 파랑이든 다 그냥 "칠해진 영역") — 그러니 "민트=잔디, 빨강=콘크리트벽,
+  // 파랑=삭제"처럼 서로 다른 지시를 하나로 뭉쳐서 flux에게 던지면, 이걸 구분 못 하고 그중 하나만
+  // 대충 반영하거나 뒤섞인 결과가 나옴. 다각형 영역도 마찬가지 이유로 여러 개면 위험함 — 지정한
+  // 색·영역이 실질적으로 1개(=구분이 필요 없는 단일 지시)일 때만 flux로 자동 전환하고, 2개 이상
+  // 섞여있으면 색을 실제로 구분해서 보여주는 나노바나나(참고 이미지 방식)를 그대로 씀.
+  var _distinctRegionCount = usedColors.length + (G.polyAreas?G.polyAreas.length:0);
+  var _isSingleRegionOnly = _distinctRegionCount<=1;
+  if(_isDeleteInstr && _isPureBrush && _isSingleRegionOnly && G.maskEngine!=='flux'){
     G.maskEngine='flux';
     var _stl=gE('stl'); if(_stl) _stl.textContent='삭제 작업이라 flux 인페인팅으로 자동 전환했어요';
+  } else if(_isDeleteInstr && _isPureBrush && !_isSingleRegionOnly){
+    // 색깔·영역이 여러 개 섞여있으면 flux는 오히려 위험하므로, 실수로 flux가 켜져있었다면
+    // 나노바나나로 강제로 되돌림(색 구분이 안 되는 채로 삭제까지 섞이면 결과가 더 엉망이 됨).
+    if(G.maskEngine==='flux'){
+      G.maskEngine='nano2';
+      var _stl2=gE('stl'); if(_stl2) _stl2.textContent='여러 영역을 각각 다르게 지정하셔서, 색 구분이 되는 나노바나나로 처리해요';
+    }
   }
   // ⚠️ 요청 반영: "삭제해달라고 했는데 삭제가 안 된다" — 화살표·영역선택엔 이미 삭제 보강 문구를
   // 넣었는데, 브러시 색 1개짜리 케이스(usedColors.length===1)는 원본 텍스트를 그대로만 써서
@@ -18269,6 +18293,19 @@ function initArrowMode(cv){
     var endPt=[e.clientX-rect.left, e.clientY-rect.top];
     var dist=Math.hypot(endPt[0]-startPt[0],endPt[1]-startPt[1]);
     if(dist<20){ previewLine.remove(); return; } // 너무 짧으면(실수 클릭) 무시
+    // ⚠️ 요청 반영: "영역 3~4개 지정해도 실제로는 한두 개만 반영된다, 몇 개까지 되는 게 확실하면
+    // 딱 그만큼만 그리게 해달라" — AI가 한 번에 여러 군데를 동시에 정확히 구분해서 처리하는
+    // 능력에는 현실적인 한계가 있어서(모델 자체의 한계, 코드로 100% 해결이 안 되는 부분), 아예
+    // 처음부터 한 번에 최대 3개까지만(브러시 색상·화살표·다각형·사각형 다 합쳐서) 지정할 수
+    // 있게 막아둠 — 안내 없이 4개째부터 조용히 무시되는 것보다, 딱 이만큼만 확실하게 되도록
+    // 제한하는 게 낫다고 판단함. 더 많이 고치고 싶으면 한 번에 3개까지 실행하고, 결과를 다시
+    // 불러와서 남은 부분을 이어서 지정하면 됨.
+    var _totalRegions0 = (G.arrows?G.arrows.length:0) + (G.polyAreas?G.polyAreas.length:0);
+    if(_totalRegions0 >= MAX_MASK_REGIONS){
+      previewLine.remove();
+      alert('한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요(브러시 색상·화살표·다각형·사각형 다 합쳐서) — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
+      return;
+    }
     // 화면 표시 좌표 → 캔버스(원본 이미지) 좌표로 변환해서 저장 (마스크 브러시와 같은 방식)
     // ⚠️ 버그 수정(근본 원인 해결): "추정 계산" 대신 실제로 화면에 보이는 이미지 엘리먼트의
     // 진짜 위치를 직접 측정해서 사용(_getMaskDrawRect) — 어떤 이미지 비율·레이아웃이든 항상 정확함.
@@ -18627,6 +18664,20 @@ var POLY_AREA_COLORS=['#00e5cc','#ff5757','#fbbf24','#a78bfa','#4ade80','#f472b6
 
 function finishPolygon(cv,polyOv){
   if(!G.polyPts||G.polyPts.length<3){alert('3개 이상의 점을 선택하세요.');return;}
+  // ⚠️ 요청 반영: 화살표와 동일한 이유로, 다각형·사각형도 브러시 색상·화살표·다각형·사각형을
+  // 다 합쳐서 한 번에 최대 MAX_MASK_REGIONS개까지만 지정 가능하게 제한함.
+  var _totalRegions1 = (G.arrows?G.arrows.length:0) + (G.polyAreas?G.polyAreas.length:0);
+  if(_totalRegions1 >= MAX_MASK_REGIONS){
+    G.polyPts=[];
+    var _draftGroup1=polyOv.querySelector('#poly-draft-group');
+    if(_draftGroup1){
+      var _dp1=_draftGroup1.querySelector('polyline'); if(_dp1) _dp1.removeAttribute('points');
+      var _dl1=_draftGroup1.querySelector('line'); if(_dl1){ ['x1','y1','x2','y2'].forEach(function(k){_dl1.removeAttribute(k);}); }
+      var _dd1=_draftGroup1.querySelector('g'); if(_dd1) _dd1.innerHTML='';
+    }
+    alert('한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요(브러시 색상·화살표·다각형·사각형 다 합쳐서) — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
+    return;
+  }
   var rect=polyOv.getBoundingClientRect();
   // ⚠️ 버그 수정(근본 원인 해결): "추정 계산" 대신 실제 이미지 엘리먼트의 진짜 위치를 직접
   // 측정해서 사용(_getMaskDrawRect) — 어떤 이미지 비율·레이아웃이든 항상 정확함.
