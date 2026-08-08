@@ -17933,6 +17933,7 @@ function _mkMaskExecute(){
   // 명확히 지시함 — 텍스트 설명 대신 실제로 눈으로 보고 판단하게 하는 것.
   _mkBuildMarkedReferenceImage(function(_markedImg){
     if(_markedImg){
+      var _hadRealStyleRefs = refImgs.length>0; // 마커 이미지 넣기 전에 이미 있던 = 사용자가 진짜로 첨부한 스타일 참고 이미지
       refImgs.unshift(_markedImg); // 맨 앞에 둬서 가장 먼저 참고하게 함
       getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
       // ⚠️ 버그 수정(치명적, "화살표로 수정했는데 하나도 반영이 안 된다"의 진짜 원인): 실제로
@@ -17943,8 +17944,11 @@ function _mkMaskExecute(){
       // 사진(원본과 거의 똑같고 화살표만 그려진 사진)에 이 말을 붙이면 AI가 "이 사진과 비슷하게
       // (=거의 원본 그대로) 만들어라"로 오해해서, 실제 수정 지시가 무시되고 원본과 거의 똑같은
       // 결과가 나왔던 것. 이 표시용 사진이 있다는 걸 실제 호출 코드가 알아채고 그 문구를 안
-      // 붙이도록, 플래그를 남겨둠.
-      getTab(G.wf)._markedRefIsPositionOnly = true;
+      // 붙이도록, 플래그를 남겨둠. ⚠️ 단, 사용자가 특정 영역에 "이 사진처럼 바꿔줘" 식으로 진짜
+      // 스타일 참고 이미지를 같이 첨부한 경우엔(_hadRealStyleRefs) "스타일 반영해라" 문구가
+      // 여전히 필요하므로, 그 경우엔 플래그를 끄지 않고 그대로 둠(마커 사진은 맨 앞에 있고, 실제
+      // 스타일 참고 사진은 그 뒤에 있다는 걸 위의 프롬프트 문구가 이미 구분해서 설명해줌).
+      getTab(G.wf)._markedRefIsPositionOnly = !_hadRealStyleRefs;
     }
     if(refImgs.length){ getTab(G.wf).refs=refImgs; }
     // ⚠️ 버그 수정(진짜 원인): "예전에 브러시 칸에 적었던 지시(예: 문 삭제해줘)가 안 지워지고
@@ -21743,17 +21747,26 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
       if(loaded<2) return;
       try{
         var W=64,H=64; // 색 통계용이라 작은 해상도로도 충분하고, 훨씬 빠름
+        // ⚠️ 요청 반영(반복 지적): "커튼 색만 바꿨는데 전체적으로 붉은끼가 생긴다" — 원인을 다시
+        // 보니, 이 색 온도 비교가 "이미지 가장자리(위·아래·좌·우 테두리 전부)"를 기준으로 삼고
+        // 있었는데, 실내 사진에서 좌우 테두리는 커튼·창문틀처럼 자주 편집되는 부분과 정확히
+        // 겹침 — 커튼 자체가 새 색으로 바뀌면 그 바뀐 색이 "기준값"에 섞여 들어가서, 정작 비교
+        // 기준이 오염되어 나머지 벽·천장까지 같이 물든 진짜 색 번짐을 제대로 못 잡아냈던 것으로
+        // 보임. 좌우 테두리는 빼고, 편집이 잘 안 일어나는 천장(맨 위)·바닥(맨 아래) 쪽 "가로
+        // 띠"만 기준 삼도록 좁혀서, 커튼·창문 등 실제로 자주 바뀌는 영역이 기준 색 계산에 섞여
+        // 들어가지 않게 함.
         function sampleBorderAvg(img){
           var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
           var ctx=cv.getContext('2d');
           ctx.drawImage(img,0,0,W,H);
           var data=ctx.getImageData(0,0,W,H).data; // CORS 미허용이면 여기서 SecurityError
-          var margin=Math.round(W*0.12);
+          var band=Math.max(4,Math.round(H*0.12)); // 위/아래 12% 두께만
+          var sideMargin=Math.round(W*0.15); // 좌우 가장자리(커튼·창틀 있는 곳)는 통째로 제외
           var sr=0,sg=0,sb=0,n=0;
           for(var y=0;y<H;y++){
-            for(var x=0;x<W;x++){
-              var isBorder = x<margin||x>=W-margin||y<margin||y>=H-margin;
-              if(!isBorder) continue;
+            var inTopBand = y<band, inBottomBand = y>=H-band;
+            if(!inTopBand && !inBottomBand) continue; // 위/아래 띠가 아니면 건너뜀
+            for(var x=sideMargin;x<W-sideMargin;x++){ // 좌우 가장자리 제외한 가운데 부분만
               var i=(y*W+x)*4;
               sr+=data[i]; sg+=data[i+1]; sb+=data[i+2]; n++;
             }
@@ -21762,7 +21775,7 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
         }
         var avgO=sampleBorderAvg(oImg);
         var avgR=sampleBorderAvg(rImg);
-        function clampFactor(f){ return Math.max(0.85, Math.min(1.15, f)); } // 과보정 방지, ±15% 이내
+        function clampFactor(f){ return Math.max(0.75, Math.min(1.25, f)); } // 과보정 방지, ±25% 이내(기준 영역을 더 정확하게 좁혔으니 보정 여유도 좀 더 넓힘)
         var fr=clampFactor(avgO.r/Math.max(1,avgR.r));
         var fg=clampFactor(avgO.g/Math.max(1,avgR.g));
         var fb=clampFactor(avgO.b/Math.max(1,avgR.b));
