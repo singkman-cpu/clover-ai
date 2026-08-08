@@ -17290,28 +17290,40 @@ function mkMask(p){
   // 다각형을 확정하면 마스크 색깔 팔레트의 "기본(민트)" 칸에 자동으로 채워지므로, 그 칸의 텍스트/
   // 참고이미지 입력을 그대로 재사용해서 "이 영역을 이렇게 바꿔줘"를 지정할 수 있음.
   var tr=dv('');tr.style.cssText='display:flex;gap:6px;margin-bottom:8px';
-  [['brush','✏️','브러시 (오브젝트 위에 칠하기)'],['polygon','⬠','다각형 (점 찍어서 정확한 범위 지정)'],['rect','▭','사각형 (드래그로 빠르게 범위 지정)'],['arrow','➡️','화살표로 오브젝트 지목']].forEach(function(a){
+  // ⚠️ 요청 반영: "다각형 그리고 렌더링 끝난 뒤 슬라이더 움직이려는데 다각형이 다시 그려진다,
+  // 도구를 다시 눌러서 꺼야 하는데 그걸 아는 사람이 적다" — 이미 켜진 도구를 다시 누르면 꺼지는
+  // 기능 자체는 있었지만(요청으로 예전에 추가함) 눈에 안 띄어서 잘 안 씀. 아예 맨 앞에 "선택 해제"
+  // 전용 버튼을 따로 둬서, 그냥 이거 하나 누르면 어떤 도구를 쓰고 있었든 상관없이 항상 그림 도구가
+  // 꺼지고(=Before/After 슬라이더·일반 클릭 조작이 전혀 안 막힘) 눈으로 바로 "지금 도구 꺼짐" 상태를
+  // 확인할 수 있게 함.
+  [['none','🖱️','선택 해제 (슬라이더 조작)'],['brush','✏️','브러시 (오브젝트 위에 칠하기)'],['polygon','⬠','다각형 (점 찍어서 정확한 범위 지정)'],['rect','▭','사각형 (드래그로 빠르게 범위 지정)'],['arrow','➡️','화살표로 오브젝트 지목']].forEach(function(a){
     var bt=mk('button','');
-    var isOn=G.dm===a[0];
+    var cvForOn=gE('draw-canvas');
+    var isOn = a[0]==='none' ? !(cvForOn && cvForOn.classList.contains('active')) : (G.dm===a[0] && cvForOn && cvForOn.classList.contains('active'));
     bt.style.cssText='flex:1;height:38px;border-radius:7px;background:'+(isOn?'var(--acg)':'var(--card)')+';border:1px solid '+(isOn?'var(--acb)':'var(--bd2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';cursor:pointer;font-size:14px;font-family:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px';
     bt.innerHTML=a[1]+'<span style="font-size:9px;letter-spacing:0">'+a[2].split(' ')[0]+'</span>';
     bt.title=a[2];
     bt.onclick=function(){
+      if(a[0]==='none'){
+        // 항상 무조건 그림 도구를 끔 — 지금 뭘 쓰고 있었는지 몰라도 이 버튼 하나면 확실히 꺼짐.
+        G.dm=null;
+        togDraw(false);
+        renderSB();
+        return;
+      }
       var cv=gE('draw-canvas');
       var alreadyOn = (G.dm===a[0]) && cv && cv.classList.contains('active');
       if(alreadyOn){
         // ⚠️ 요청 반영: 이미 켜져있는 도구를 한 번 더 누르면 선택 해제 — 오버레이(브러시 캔버스·
         // 화살표·영역선택)가 화면을 덮고 있어서 Before/After 슬라이더 조작이 안 막히게, 도구를
-        // 끄고 싶을 때 명시적으로 끌 수 있게 함.
+        // 끄고 싶을 때 명시적으로 끌 수 있게 함. (위의 "선택 해제" 전용 버튼이 더 명확한 방법이지만,
+        // 기존에 이 동작에 익숙해진 사용자를 위해 계속 남겨둠)
         G.dm=null;
         togDraw(false);
-        tr.querySelectorAll('button').forEach(function(x){x.style.background='var(--card)';x.style.borderColor='var(--bd2)';x.style.color='var(--t2)';});
         renderSB();
         return;
       }
       G.dm=a[0];
-      tr.querySelectorAll('button').forEach(function(x){x.style.background='var(--card)';x.style.borderColor='var(--bd2)';x.style.color='var(--t2)';});
-      bt.style.background='var(--acg)';bt.style.borderColor='var(--acb)';bt.style.color='var(--ac)';
       if(a[0]==='arrow'){ togDraw(true,'arrow'); initArrowMode(gE('draw-canvas')); }
       else togDraw(true,a[0]);
       renderSB(); // ⚠️ 도구별로 아래 표시되는 입력 UI가 달라지므로(브러시 팔레트/화살표 목록/영역 목록
@@ -17733,6 +17745,11 @@ function _mkMaskExecute(){
       refImgs.push(G.maskColorRefImg[c0[0]]);
       combined += (combined?' ':'')+'첨부한 레퍼런스 이미지처럼 이 영역을 바꿔줘.';
     }
+    // ⚠️ 요청 반영: "칠한 부분만 바뀌어야 하는데 주변까지 같이 지워지거나 바뀐다" — 색칠 영역이
+    // "어디를 수정할지"는 알려주지만 "그 외엔 절대 손대지 말라"는 말이 없어서, AI가 결과를
+    // "더 자연스럽게" 만들려고 주변(같은 종류의 다른 나무·식물 등)까지 같이 손대는 경우가 있었음.
+    // 색칠 안 된 나머지 부분은 원본 그대로 유지하라고 명시함.
+    combined += ' ⚠️ 색칠된 영역과 그 영역이 가리키는 오브젝트만 수정하고, 그 외 이미지의 나머지 부분(색칠 안 된 다른 나무·식물·구조물 등 포함)은 원본 사진과 완전히 동일하게 그대로 유지할 것 — "더 자연스럽게" 보이려고 주변을 같이 바꾸거나 정리하지 말 것.';
   } else if(usedColors.length>1){
     var parts=[];
     usedColors.forEach(function(c){
@@ -17746,7 +17763,7 @@ function _mkMaskExecute(){
       }
       parts.push(seg);
     });
-    combined = parts.join('. ') + '. (각 색으로 칠한 영역은 서로 다른 오브젝트를 가리킴 — 색 표시 자체는 결과물에 남기지 말고, 지정된 대로 각각 다르게 수정할 것. 레퍼런스 이미지가 있으면 그 이미지 속 디자인·형태·소재를 그대로 반영할 것.)';
+    combined = parts.join('. ') + '. (각 색으로 칠한 영역은 서로 다른 오브젝트를 가리킴 — 색 표시 자체는 결과물에 남기지 말고, 지정된 대로 각각 다르게 수정할 것. 레퍼런스 이미지가 있으면 그 이미지 속 디자인·형태·소재를 그대로 반영할 것. ⚠️ 색칠된 영역들과 그 영역이 가리키는 오브젝트만 수정하고, 그 외 나머지 부분(색칠 안 된 다른 나무·식물·구조물·소품 등 포함)은 원본 사진과 완전히 동일하게 그대로 유지할 것 — "더 자연스럽게" 보이려고 주변을 같이 바꾸거나 정리하지 말 것. 예를 들어 나무 하나를 가을 단풍색으로 바꾸라고 했으면 딱 그 나무만 바뀌어야 하고, 주변의 다른 나무·화단·조경은 원본 그대로여야 함.)';
   }
   // 화살표로 지목한 오브젝트들도 색깔 마스크와 똑같이 최종 프롬프트에 합침 — 화살표 머리(끝점)가
   // 가리키는 위치를 "이미지의 어느 구역"인지로 설명해서 AI가 어떤 오브젝트를 말하는지 유추하게 함.
@@ -17899,6 +17916,7 @@ function _mkMaskExecute(){
     // hasMaskRefImgs 판정이 계속 true로 남아 flux 인페인팅이 막혔을 가능성이 높음 — 참고
     // 이미지가 없으면 명시적으로 빈 배열로 비워서 이 문제를 원천 차단함.
     getTab(G.wf).refs = refImgs;
+    getTab(G.wf)._markedRefIsPositionOnly = false; // 이 경로는 실제 스타일 참고 이미지만 있고, 위치 표시용 합성 사진은 없음
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
     // ⚠️ 브러시·다각형(=진짜 픽셀 마스크) 케이스는 캔버스를 지우면 안 됨 — runTool()이 그
@@ -17917,6 +17935,16 @@ function _mkMaskExecute(){
     if(_markedImg){
       refImgs.unshift(_markedImg); // 맨 앞에 둬서 가장 먼저 참고하게 함
       getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
+      // ⚠️ 버그 수정(치명적, "화살표로 수정했는데 하나도 반영이 안 된다"의 진짜 원인): 실제로
+      // API를 호출하는 코드(procImgWithTask)는 레퍼런스 이미지가 1장이라도 있으면 무조건
+      // "Blend the color, material and style from the reference image into this request"(참고
+      // 이미지의 색감·재질·스타일을 반영해라)라는 문구를 자동으로 덧붙임 — 이건 "이 사진처럼
+      // 꾸며줘" 같은 진짜 스타일 참고 사진에는 맞는 말이지만, 우리가 여기서 만든 "위치 표시용"
+      // 사진(원본과 거의 똑같고 화살표만 그려진 사진)에 이 말을 붙이면 AI가 "이 사진과 비슷하게
+      // (=거의 원본 그대로) 만들어라"로 오해해서, 실제 수정 지시가 무시되고 원본과 거의 똑같은
+      // 결과가 나왔던 것. 이 표시용 사진이 있다는 걸 실제 호출 코드가 알아채고 그 문구를 안
+      // 붙이도록, 플래그를 남겨둠.
+      getTab(G.wf)._markedRefIsPositionOnly = true;
     }
     if(refImgs.length){ getTab(G.wf).refs=refImgs; }
     // ⚠️ 버그 수정(진짜 원인): "예전에 브러시 칸에 적었던 지시(예: 문 삭제해줘)가 안 지워지고
@@ -20062,12 +20090,20 @@ document.addEventListener('mousemove',function(e){
 },{passive:false});
 // 브러시로 칠한 캔버스 내용을 IndexedDB에 저장(디바운스) — 스트로크가 끝날 때마다 호출됨
 function _saveMaskCanvasDebounced(){
+  var cv=gE('draw-canvas');
+  if(!cv || !cv.classList.contains('active')) return;
+  // ⚠️ 버그 수정: "브러시 칠하다가 다른 탭 갔다 오면 칠한 게 사라진다" — 다른 워크플로우 탭으로
+  // 이동하면 이 캔버스 엘리먼트 자체가 다시 그려지면서(renderMain) 사라지고, 다시 AI편집으로
+  // 돌아오면 새 캔버스가 만들어짐. 그때 복원 여부는 메모리 변수 G._pendingMaskCanvasRestore를
+  // 보고 판단하는데, 이 변수는 "페이지를 새로고침했을 때" IndexedDB에서 한 번 불러온 값만
+  // 담고 있었지 — 방금 그린 내용으로는 갱신되지 않고 있었음. 획을 그릴 때마다(디바운스 없이,
+  // 탭을 바로 옮겨도 놓치지 않게) 이 메모리 변수를 즉시 갱신함. IndexedDB 저장(더 무거운 작업)은
+  // 기존처럼 디바운스해서 너무 자주 쓰지 않게 함.
+  try{ G._pendingMaskCanvasRestore = cv.toDataURL(); }catch(e){}
   clearTimeout(window._maskCanvasSaveTimer);
   window._maskCanvasSaveTimer = setTimeout(function(){
-    var cv=gE('draw-canvas');
-    if(!cv || !cv.classList.contains('active')) return;
     try{
-      var dataUrl = cv.toDataURL();
+      var dataUrl = G._pendingMaskCanvasRestore || cv.toDataURL();
       idbSaveDraft('clover_edit_mask_canvas', dataUrl).catch(function(){});
     }catch(e){}
   }, 500);
@@ -23297,10 +23333,20 @@ function procImgWithTask(task, onDone, onErr){
         if(doneCount !== totalUploads) return;
         var allUrls = [uploadedMain].concat(refUrls.filter(Boolean));
         var refCount = refUrls.filter(Boolean).length;
-        var rp = editRefs2.length>0
+        // ⚠️ 버그 수정(핵심, "화살표/브러시로 위치 표시해서 수정했는데 하나도 반영 안 된다"의
+        // 진짜 원인): 참고 이미지가 있으면 무조건 "참고 이미지의 색감·재질·스타일을 반영해라"
+        // 라는 문구를 붙였는데, 그 참고 이미지가 "어디를 고칠지 알려주는 위치 표시용 사진"
+        // (원본과 거의 똑같고 화살표/색칠만 있음)일 땐 이 문구가 정반대로 작동함 — AI가 "이
+        // 사진과 비슷하게(=거의 원본 그대로) 만들어라"로 오해해서 실제 수정 지시를 무시하고
+        // 원본과 거의 같은 결과를 내놨음. 위치 표시용 사진만 있는 경우(진짜 스타일 참고 사진이
+        // 아닌 경우)엔 이 "스타일 반영" 문구를 붙이지 않고, 지시사항(editPrompt)을 그대로 씀.
+        var _tabForMarkedFlag = getTab('edit');
+        var _isPositionOnlyRef = !!_tabForMarkedFlag._markedRefIsPositionOnly;
+        var rp = (editRefs2.length>0 && !_isPositionOnlyRef)
           ? (userPrompt ? userPrompt + ' Blend the color, material and style from the reference image'+(refCount>1?'s':'')+' naturally into this specific request. Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions. IMPORTANT — REFERENCE IMAGES MUST NEVER OVERRIDE DOOR/WINDOW PRESERVATION: even when copying a reference image\'s furniture, cabinetry, or shelving layout, keep every original door and window completely unblocked and walkable-through — do NOT extend a reference image\'s continuous cabinet run or shelving across a wall segment that contains a door in the original photo; adapt the layout (shorten it, break it, leave a gap) so the door stays exactly where it was and remains fully open and usable.'
                         : 'Apply the style, material, color and texture from the reference image'+(refCount>1?' images':'')+' to the main image. Photorealistic result. Keep all other areas exactly unchanged. IMPORTANT — REFERENCE IMAGES MUST NEVER OVERRIDE DOOR/WINDOW PRESERVATION: even when copying a reference image\'s furniture, cabinetry, or shelving layout, keep every original door and window completely unblocked and walkable-through — do NOT extend a reference image\'s continuous cabinet run or shelving across a wall segment that contains a door in the original photo; adapt the layout (shorten it, break it, leave a gap) so the door stays exactly where it was and remains fully open and usable.')
           : editPrompt;
+        _tabForMarkedFlag._markedRefIsPositionOnly = false; // 한 번 쓰고 나면 초기화(다음 실행에 잘못 남지 않도록)
         console.log('[API]',nb2Slug,'|',allUrls.length,'imgs | res:',editRes,'| orig:',origW+'x'+origH);
         _withExplicitAspect(img, function(_asp){
           falRun(nb2Slug,{prompt:rp,image_urls:allUrls,num_images:1,resolution:editRes,aspect_ratio:_asp,output_format:'jpeg'},
@@ -27125,6 +27171,22 @@ document.addEventListener('DOMContentLoaded',function(){try{
   var _actbtnBusy=false;
   function _doActbtn(){
     if(_actbtnBusy)return; // 중복 클릭(터치+클릭 동시 발생) 방지
+    // ⚠️ 버그 수정(핵심 원인): "다각형/사각형/화살표/브러시로 영역까지 다 지정하고 라벨도
+    // 적었는데 전혀 반영이 안 된다" — 알고 보니 AI편집 화면엔 버튼이 두 개였음: 사이드바 안의
+    // "선택 영역 수정" 버튼은 _mkMaskExecute()를 불러서 그린 영역들을 실제 프롬프트로 조립하는데,
+    // 화면 맨 아래 공통 "AI 편집" 버튼(다른 모든 탭과 똑같이 생긴, 평소에 누르던 그 버튼)은
+    // 이 조립 과정을 전혀 모르고 그냥 tab.prompt(보통 비어있음)로 일반 실행을 해버렸음 — 그래서
+    // 그린 영역·라벨이 통째로 무시되고, "사실적으로 만들어라"는 공통 규칙만 달랑 붙어서 AI가
+    // 완전히 엉뚱하게(예: 건물 재질을 통째로 나무로) 바꿔버린 것. 이제 아래쪽 공통 버튼을
+    // 눌러도, AI편집 탭에서 브러시·다각형·사각형·화살표로 뭔가 그려둔 상태라면 자동으로
+    // "선택 영역 수정"과 똑같은 처리(_mkMaskExecute)로 넘겨서, 어느 버튼을 눌러도 항상 그린
+    // 내용이 반영되게 함.
+    if(G.wf==='edit'){
+      var _hasMaskState = (G.arrows && G.arrows.length) || (G.polyAreas && G.polyAreas.length) ||
+        (G.maskColorPrompts && Object.keys(G.maskColorPrompts).some(function(k){return (G.maskColorPrompts[k]||'').trim();})) ||
+        (G.maskColorRefImg && Object.keys(G.maskColorRefImg).some(function(k){return !!G.maskColorRefImg[k];}));
+      if(_hasMaskState){ _mkMaskExecute(); return; }
+    }
     _actbtnBusy=true;
     setTimeout(function(){_actbtnBusy=false;},800);
     try{
