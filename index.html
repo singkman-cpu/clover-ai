@@ -11141,32 +11141,22 @@ function mkAutoRoomCamera(p){
 // 프롬프트에 "이미 확정된 사실"로 박아넣음. AI가 이미지에서 스타일을 그때그때 "추측"하는 대신,
 // 이미 뽑아낸 명확한 설명을 "따라가기만" 하면 되므로 훨씬 안정적일 것으로 기대함.
 function _analyzeSpaceStyle(imgUrl, cb){
-  // ⚠️ 버그 수정(확인됨, 401 오류): 이 앱은 fal.ai API 키를 브라우저에 노출시키지 않으려고 항상
-  // 서버(fal-proxy Edge Function)를 거쳐서 호출하는 구조인데, 이 분석 함수만 그 서버를 안 거치고
-  // 브라우저에서 직접 fal.ai(any-llm)를 호출하려고 해서 인증 실패(401)가 났음 — 브라우저엔 실제
-  // fal.ai 키가 없으니 당연한 결과. 이 기능을 제대로 쓰려면 fal-proxy Edge Function 쪽에
-  // "텍스트 분석(any-llm)"용 액션을 새로 추가해야 하는데, 그건 이 파일(클라이언트) 수정만으로는
-  // 할 수 없는 서버 쪽 작업임 — 그때까지는 이 기능을 안전하게 꺼두고(항상 즉시 콜백만 실행),
-  // 실패한 네트워크 요청이 콘솔에 계속 에러로 찍히는 것도 막음. 렌더링 자체(2단계 분석 없이 기존
-  // 방식)는 정상적으로 계속 동작함.
-  cb(null);
-  return;
-}
-function _analyzeSpaceStyle_DISABLED_NEEDS_SERVER_PROXY(imgUrl, cb){
+  // ⚠️ 버그 수정: 서버 fal-proxy 코드를 실제로 확인함 — action:'llm'이 이미 서버에 있고,
+  // fal-ai/any-llm을 정확히 이 방식(model+prompt+추가 필드를 그대로 fal.ai에 전달)으로 호출하고
+  // 있었음. 브라우저에서 fal.ai를 직접 호출(FAL_KEY 필요)하려던 게 문제였을 뿐, 이 기존 서버
+  // 통로(_falProxyCall)를 쓰면 인증 문제 없이 작동함.
   try{
-    fetch('https://fal.run/fal-ai/any-llm',{
-      method:'POST',
-      headers:{'Authorization':'Key '+FAL_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({
+    _falProxyCall('llm', {
+      input: {
         model:'google/gemini-flash-1.5-8b',
         prompt:'이 인테리어 사진을 분석해서 아래 형식 그대로, 한국어로 간결하게 답해줘. 다른 설명 없이 이 형식만 정확히 지켜줘:\n벽마감: (재질과 색상, 예: 화이트 도장 마감)\n천장형태: (형태와 색상, 예: 평천장, 화이트, 매입등 5개)\n바닥마감: (재질과 색상, 예: 브라운 톤 원목마루)\n전체톤: (밝은지 어두운지, 예: 전체적으로 밝고 화이트톤 위주)\n스타일장르: (예: 미니멀 모던, 미드센추리 등)\n가구느낌: (구체적인 제품명 말고 전반적인 디자인 언어만, 예: 컬러감 있는 포인트 가구를 곳곳에 배치한 미니멀 스타일)',
         image_url:imgUrl
-      })
-    }).then(function(r){ return r.json(); }).then(function(d){
+      }
+    }, function(d){
       var txt = (d && (d.output||d.text||d.response||d.message)) || '';
-      if(typeof txt!=='string' || !txt.trim()){ cb(null); return; }
+      if(typeof txt!=='string' || !txt.trim()){ console.warn('[스타일 분석] 응답 형식이 예상과 다름:', d); cb(null); return; }
       cb(txt.trim());
-    }).catch(function(e){ console.warn('[스타일 분석 실패, 기존 방식으로 진행]', e); cb(null); });
+    }, function(err){ console.warn('[스타일 분석 실패, 기존 방식으로 진행]', err); cb(null); });
   }catch(e){ console.warn('[스타일 분석 호출 실패, 기존 방식으로 진행]', e); cb(null); }
 }
 function _autoRoomRun(){
