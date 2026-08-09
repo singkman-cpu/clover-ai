@@ -18114,10 +18114,22 @@ function _syncDrawCanvasBox(cv){
 // 바뀜) 화살표가 두 번 그려지는 등 부작용이 생겼음. 크기 변화 감지(ResizeObserver)만으로도 대부분의
 // 실제 필요한 경우(창 크기 변경, 사이드바 드래그, 개발자도구 토글)는 이미 커버되므로, 그리는 도중에도
 // 계속 반응하던 MutationObserver는 제거함.
+// ⚠️ 버그 수정(F12 개발자도구 열면 다각형·사각형 위치가 안 따라가던 문제): 이 리사이즈 감지가
+// 지금까지 브러시 캔버스(_syncDrawCanvasBox)만 다시 맞추고 있었음 — 다각형/사각형(poly-overlay)과
+// 화살표(arrow-overlay)는 이미 확정된 영역이면 자기 위치를 다시 계산해주는 함수(_redrawPolyAreas·
+// _redrawArrows)가 따로 있는데도, 리사이즈가 일어날 때 그 함수들을 불러주지 않아서 창 크기가
+// 바뀌어도(F12로 개발자도구를 열어 화면 폭이 줄어드는 것도 리사이즈임) 예전 위치에 그대로 멈춰
+// 있었음 — 그래서 실제 사진은 옆으로 밀리는데 그려둔 다각형·사각형은 안 따라가고 엉뚱한 곳(심지어
+// 사진 바깥)에 남아있던 것. 브러시뿐 아니라 다각형·사각형·화살표도 리사이즈될 때마다 같이 다시
+// 계산하도록 고침.
 (function(){
   function _resyncIfActive(){
     var cv=gE('draw-canvas');
-    if(cv && cv.classList.contains('active')) _syncDrawCanvasBox(cv);
+    if(cv && cv.classList.contains('active')){
+      _syncDrawCanvasBox(cv);
+      var polyOv=gE('poly-overlay'); if(polyOv) _redrawPolyAreas(polyOv);
+      var arrOv=gE('arrow-overlay'); if(arrOv) _redrawArrows(arrOv);
+    }
   }
   window.addEventListener('resize', _resyncIfActive);
   try{
