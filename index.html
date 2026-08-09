@@ -11137,6 +11137,18 @@ function mkAutoRoomCamera(p){
 // 프롬프트에 "이미 확정된 사실"로 박아넣음. AI가 이미지에서 스타일을 그때그때 "추측"하는 대신,
 // 이미 뽑아낸 명확한 설명을 "따라가기만" 하면 되므로 훨씬 안정적일 것으로 기대함.
 function _analyzeSpaceStyle(imgUrl, cb){
+  // ⚠️ 버그 수정(확인됨, 401 오류): 이 앱은 fal.ai API 키를 브라우저에 노출시키지 않으려고 항상
+  // 서버(fal-proxy Edge Function)를 거쳐서 호출하는 구조인데, 이 분석 함수만 그 서버를 안 거치고
+  // 브라우저에서 직접 fal.ai(any-llm)를 호출하려고 해서 인증 실패(401)가 났음 — 브라우저엔 실제
+  // fal.ai 키가 없으니 당연한 결과. 이 기능을 제대로 쓰려면 fal-proxy Edge Function 쪽에
+  // "텍스트 분석(any-llm)"용 액션을 새로 추가해야 하는데, 그건 이 파일(클라이언트) 수정만으로는
+  // 할 수 없는 서버 쪽 작업임 — 그때까지는 이 기능을 안전하게 꺼두고(항상 즉시 콜백만 실행),
+  // 실패한 네트워크 요청이 콘솔에 계속 에러로 찍히는 것도 막음. 렌더링 자체(2단계 분석 없이 기존
+  // 방식)는 정상적으로 계속 동작함.
+  cb(null);
+  return;
+}
+function _analyzeSpaceStyle_DISABLED_NEEDS_SERVER_PROXY(imgUrl, cb){
   try{
     fetch('https://fal.run/fal-ai/any-llm',{
       method:'POST',
@@ -11396,6 +11408,7 @@ function _autoRoomGenerateStep(idx){
   // 생성(편집 아님) 방식으로 감. 다만 지난번 순수 생성이 벽·퀄리티까지 같이 망가졌던 문제는
   // 아래 _fidelitySuffix에서 훨씬 강하게 방지함.
   if(spTab.autoRoomFidelity!=='tight' || (imgs0.noDirectMatch && !_isExteriorViewType(typeName))){
+    console.log('[컨셉확장 진단] 뷰="'+typeName+'" 반영도="'+spTab.autoRoomFidelity+'" noDirectMatch='+(!!imgs0.noDirectMatch)+' → 순수 생성(편집 아님) 경로로 감. primary 이미지: '+(imgs0.primary||'없음'));
     var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
     var _looseP = '';
     // ⚠️ 버그 수정: "선택 해제하고 다시 선택해서 렌더링하면 기존이랑 느낌이 다르다"는 지적 —
@@ -11495,6 +11508,7 @@ function _autoRoomGenerateStep(idx){
     return;
   }
   var imgs = _autoRoomImagesFor(typeName);
+  console.log('[컨셉확장 진단] 뷰="'+typeName+'" 반영도="'+spTab.autoRoomFidelity+'" → 실제 원본 사진 편집 경로로 감. 편집 기준(task.img) 이미지: '+(imgs.primary||'없음')+' | noDirectMatch='+(!!imgs.noDirectMatch));
   var _finalPrompt = prompt;
   // ⚠️ 이 코드베이스에서 반복 확인된 패턴: 프롬프트 "맨 끝"에 다시 한번 짧고 강하게 못박은 지시를
   // AI가 더 잘 따름(다른 지시들 사이에 묻히지 않음) — 위에서 이미 강하게 금지했지만, 세로로 아주
