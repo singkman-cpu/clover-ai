@@ -11519,7 +11519,16 @@ function _autoRoomGenerateStep(idx){
     }
     var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1};
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
-    falRun('fal-ai/nano-banana-2', _looseInput, function(d){
+    // ⚠️ 치명적 버그 수정(반영도 3단계가 전부 똑같이 나오던 진짜 원인): 'fal-ai/nano-banana-2'는
+    // (끝에 /edit이 안 붙은) 순수 텍스트→이미지 생성 전용 모델이라, 위에서 image_urls로 넣어준
+    // 참고 사진을 아예 안 보고 텍스트만으로 그림 — 그래서 "영감만 얻기·비슷하게·최대한 동일하게"를
+    // 뭘 골라도 결과가 참고 사진과 무관하게 나왔던 것(반영도 문구를 아무리 정교하게 다듬어도
+    // 애초에 모델이 사진 자체를 안 보니 절대 반영될 수 없었음). 참고 사진이 있을 때는 반드시
+    // 'fal-ai/nano-banana-2/edit'(이미지 최대 14장을 실제로 참고하는 모델)을 써야 함 — 이 코드베이스
+    // 다른 모든 곳(예: 24035줄 등)에서도 이미지 넣을 땐 전부 /edit을 쓰고 있었는데 이 두 곳(공간
+    // 컨셉 디자인의 "순수 생성" 경로)만 빠져있었음. 사진이 진짜 하나도 없는 경우(영감만 얻기인데
+    // 자기 앵커도 없는 극히 드문 경우)에는 어차피 image_urls를 안 보내므로 그대로 text-to-image로 감.
+    falRun(_looseRefs.length ? 'fal-ai/nano-banana-2/edit' : 'fal-ai/nano-banana-2', _looseInput, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomGenerateStep(idx+1); return; }
       st.results[idx]={url:resultUrl};
@@ -11677,7 +11686,9 @@ function _autoRoomRetryOne(idx){
     }
     var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1};
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
-    falRun('fal-ai/nano-banana-2', _looseInput2, function(d){
+    // ⚠️ 위 _autoRoomGenerateStep과 동일한 치명적 버그 수정: 참고 사진이 있으면 반드시 /edit
+    // 모델을 써야 실제로 그 사진을 참고함('/edit' 없는 순수 생성 모델은 image_urls를 무시함).
+    falRun(_looseRefs2.length ? 'fal-ai/nano-banana-2/edit' : 'fal-ai/nano-banana-2', _looseInput2, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; st.running=false; renderSB(); return; }
       st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
@@ -17540,23 +17551,33 @@ var MASK_COLORS=[['#00e5cc','기본(민트)'],['#ef4444','빨강']];
 // 공식 가이드를 다시 확인해봐도 몇 개까지 가능하다는 숫자 제한 자체가 명시돼 있지 않아서
 // ("3개씩 해도 문제없다"를 문서로 뒷받침할 근거를 못 찾음), 논리적 추론(브러시 3개가 되니
 // 다각형·화살표도 3개가 될 것)보다 직접 여러 번 테스트하신 실측 결과를 따라 다시 2개로 낮춤.
-// ⚠️ 요청 반영(최종 통일): "어떤 도구를 섞든 상관없이, 진짜 문제는 한 번에 몇 개의 서로 다른
-// 지시가 동시에 들어가느냐"라는 걸 확인함 — 브러시 색상·다각형·사각형·화살표를 도구 종류 안
-// 가리고 전부 합쳐서 한 번에 최대 이 개수까지만 되도록 통일함(전에는 브러시는 항상 3개 가능,
-// 다각형+사각형 2개, 화살표 2개로 따로따로였는데, 이제 다 합쳐서 이 숫자 하나로 통일).
-var MAX_MASK_REGIONS = 2;
-// 지금 활성화된 전체 "영역 지시" 개수(브러시 중 텍스트가 입력된 색상 + 다각형/사각형 + 화살표를
-// 도구 구분 없이 다 합침) — 여기저기서 이 개수를 기준으로 제한을 거는 데 공통으로 씀.
-function _mkTotalActiveRegions(){
+// ⚠️ 요청 반영(최종 되돌림): "도구를 다 합쳐서 한 번에 2개까지"로 묶어놨더니, 다각형을 하나
+// 그려놓고 화살표를 쓰려 해도(둘 다 아직 1개씩뿐인데) "총 2개 다 찼다"는 안내가 떠서 화살표를
+// 아예 못 쓰는 상황이 생김 — "합쳐서 총 N개"가 아니라 "화살표는 화살표대로 최대 2개, 다각형+
+// 사각형은 합쳐서 최대 2개(둘 다 '영역 선택'이라는 같은 개념이라 계속 하나로 묶음), 브러시는
+// 브러시대로 최대 2개"처럼 도구 종류별로 독립적인 한도를 두는 방식으로 되돌림.
+var MAX_MASK_REGIONS = 2; // 다각형+사각형(영역 선택) 묶음의 한도
+var MAX_ARROW_REGIONS = 2; // 화살표 전용 한도
+var MAX_BRUSH_REGIONS = 2; // 브러시 전용 한도(참고: MASK_COLORS 팔레트 자체도 2개라 자연히 이 이상 못 씀)
+function _mkBrushActiveCount(){
   var brushCount = 0;
   if(G.maskColorPrompts){
     MASK_COLORS.forEach(function(c){
       if((G.maskColorPrompts[c[0]]||'').trim() || (G.maskColorRefImg && G.maskColorRefImg[c[0]])) brushCount++;
     });
   }
-  var polyCount = (G.polyAreas ? G.polyAreas.length : 0);
-  var arrowCount = (G.arrows ? G.arrows.length : 0);
-  return brushCount + polyCount + arrowCount;
+  return brushCount;
+}
+function _mkPolyActiveCount(){ return (G.polyAreas ? G.polyAreas.length : 0); }
+function _mkArrowActiveCount(){ return (G.arrows ? G.arrows.length : 0); }
+// ⚠️ 하위 호환: 실행 직전 마지막 확인(_mkMaskExecute)에서는 "이 중 하나라도 자기 한도를
+// 넘었는지"만 보면 되므로, 세 종류 중 하나라도 초과했는지를 판단하는 용도로 남겨둠(이름은
+// 예전 그대로 유지해서 다른 곳에서 참조하는 코드가 깨지지 않게 함).
+function _mkTotalActiveRegions(){
+  return _mkBrushActiveCount() + _mkPolyActiveCount() + _mkArrowActiveCount();
+}
+function _mkAnyCategoryOverLimit(){
+  return _mkBrushActiveCount()>MAX_BRUSH_REGIONS || _mkPolyActiveCount()>MAX_MASK_REGIONS || _mkArrowActiveCount()>MAX_ARROW_REGIONS;
 }
 function mkMask(p){
   // ⚠️ 버그 수정: "다른 이미지 불러와서 수정하려니 이전 이미지에 칠했던 영역이 그대로 남아있다"
@@ -17566,11 +17587,18 @@ function mkMask(p){
   // 버튼을 직접 눌러야만 지워졌음). 여기서 "지금 편집 중인 이미지"가 마지막으로 마스크 도구를 썼을
   // 때의 이미지와 다르면, 새 이미지로 바뀐 것으로 보고 자동으로 지워서 새 이미지에서 새로 시작하게
   // 함(같은 이미지를 계속 편집 중일 때는 당연히 안 지워짐 — _mkMaskClearAll은 이미지 자체는 안 지움).
+  // ⚠️ 버그 수정(치명적, 방금 추가한 코드가 원인): _mkMaskClearAll()이 끝에서 renderSB()를 불러서
+  // mkMask()가 즉시 재귀 호출되는데, 그 재귀 호출 시점에 아직 G._maskAnnotImgKey를 새 값으로
+  // 갱신하기 "전"이면 재귀 호출도 또 다시 "이미지가 바뀌었다"고 착각해서 _mkMaskClearAll()을 또
+  // 부르고, 그게 다시 renderSB()를 불러서... 무한 재귀에 빠져 "Maximum call stack size exceeded"
+  // 콘솔 에러가 났었음. 반드시 _mkMaskClearAll()을 부르기 "전에" 키를 먼저 갱신해서, 재귀 호출
+  // 시점엔 이미 이미지가 같다고 정상 판단하게 함.
   var _mkTabNow=getTab(G.wf);
-  if(_mkTabNow.inputImg && G._maskAnnotImgKey && G._maskAnnotImgKey!==_mkTabNow.inputImg){
+  var _mkImgChanged = _mkTabNow.inputImg && G._maskAnnotImgKey && G._maskAnnotImgKey!==_mkTabNow.inputImg;
+  G._maskAnnotImgKey=_mkTabNow.inputImg||null;
+  if(_mkImgChanged){
     _mkMaskClearAll();
   }
-  G._maskAnnotImgKey=_mkTabNow.inputImg||null;
 
   var s=dv('ss');
   s.innerHTML='<div class="lbl" style="color:var(--ac)">AI 마스크 편집 <span class="lbl-en" style="color:var(--ac2)">Mask Edit</span></div>';
@@ -18125,13 +18153,17 @@ function _getBrushColorBBox(cv, hexColor){
 }
 function _mkMaskExecute(){
   console.log('[AI편집] 실행 버튼 클릭 → _mkMaskExecute 시작');
-  // ⚠️ 요청 반영(최종 통일): 브러시는 색상 팔레트가 항상 3개 다 보이는 입력창이라 "추가할 때"
-  // 막을 방법이 없어서(다각형·화살표처럼 "그리는 순간" 막을 수가 없음), 실행 버튼을 누르는
-  // 시점에 마지막으로 한 번 더 확인함 — 브러시·다각형·사각형·화살표를 도구 구분 없이 합쳐서
-  // MAX_MASK_REGIONS(2)개를 넘으면 실행을 막고 안내함.
-  var _totalActive = _mkTotalActiveRegions();
-  if(_totalActive > MAX_MASK_REGIONS){
-    alert('브러시·다각형·사각형·화살표를 다 합쳐서 지금 '+_totalActive+'개가 지정되어 있어요 — 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 정확하게 처리돼요. 일부를 지우고 '+MAX_MASK_REGIONS+'개 이하로 줄인 다음 다시 실행해주세요.');
+  // ⚠️ 요청 반영(도구별 독립 한도로 되돌림): 브러시는 색상 팔레트가 항상 다 보이는 입력창이라
+  // "추가할 때" 막을 방법이 없어서(다각형·화살표처럼 "그리는 순간" 막을 수가 없음), 실행 버튼을
+  // 누르는 시점에 마지막으로 한 번 더 확인함 — 이제 도구를 합쳐서 세지 않고, 브러시는 브러시끼리
+  // (최대 2), 다각형+사각형은 그 둘끼리(최대 2), 화살표는 화살표끼리(최대 2) 각자 따로 확인함.
+  if(_mkAnyCategoryOverLimit()){
+    var _bC=_mkBrushActiveCount(), _pC=_mkPolyActiveCount(), _aC=_mkArrowActiveCount();
+    var _overMsgs=[];
+    if(_bC>MAX_BRUSH_REGIONS) _overMsgs.push('브러시 '+_bC+'개(최대 '+MAX_BRUSH_REGIONS+'개)');
+    if(_pC>MAX_MASK_REGIONS) _overMsgs.push('다각형·사각형 합쳐서 '+_pC+'개(최대 '+MAX_MASK_REGIONS+'개)');
+    if(_aC>MAX_ARROW_REGIONS) _overMsgs.push('화살표 '+_aC+'개(최대 '+MAX_ARROW_REGIONS+'개)');
+    alert(_overMsgs.join(', ')+' 지정되어 있어요 — 한도를 넘은 도구만 일부 지우고 다시 실행해주세요.');
     return;
   }
   // ⚠️ 요청 반영: "삭제해줘"처럼 목적어(오브젝트 이름) 없이 짧게만 적으면 정확도가 떨어질 수
@@ -18742,13 +18774,13 @@ function initArrowMode(cv){
     // 있게 막아둠 — 안내 없이 4개째부터 조용히 무시되는 것보다, 딱 이만큼만 확실하게 되도록
     // 제한하는 게 낫다고 판단함. 더 많이 고치고 싶으면 한 번에 3개까지 실행하고, 결과를 다시
     // 불러와서 남은 부분을 이어서 지정하면 됨.
-    // ⚠️ 요청 반영(최종 통일): 브러시·다각형·사각형·화살표를 도구 구분 없이 전부 합쳐서 세도록
-    // 통일함 — "어떤 도구를 섞든 결국 한 번에 몇 개의 지시가 동시에 들어가느냐"가 진짜 문제라는
-    // 걸 확인했기 때문. 각 도구별로 따로 세던 것에서 이제 _mkTotalActiveRegions() 공용 카운트로 바꿈.
-    var _totalRegions0 = _mkTotalActiveRegions();
-    if(_totalRegions0 >= MAX_MASK_REGIONS){
+    // ⚠️ 요청 반영(도구별 독립 한도로 되돌림): "다각형 그려놓고 화살표 쓰려니 화살표가 아예
+    // 안 된다"는 지적 — 도구를 다 합쳐서 세지 않고, 화살표는 화살표 개수만 따로 셈(다각형·
+    // 사각형·브러시를 이미 몇 개 썼든 화살표 한도와는 무관함).
+    var _arrowRegions0 = _mkArrowActiveCount();
+    if(_arrowRegions0 >= MAX_ARROW_REGIONS){
       previewLine.remove();
-      alert('브러시·다각형·사각형·화살표를 다 합쳐서 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
+      alert('화살표는 한 번에 최대 '+MAX_ARROW_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
       return;
     }
     // 화면 표시 좌표 → 캔버스(원본 이미지) 좌표로 변환해서 저장 (마스크 브러시와 같은 방식)
@@ -19120,9 +19152,10 @@ var POLY_AREA_COLORS=['#00e5cc','#ff5757','#fbbf24','#a78bfa','#4ade80','#f472b6
 
 function finishPolygon(cv,polyOv){
   if(!G.polyPts||G.polyPts.length<3){alert('3개 이상의 점을 선택하세요.');return;}
-  // ⚠️ 요청 반영(최종 통일): 브러시·다각형·사각형·화살표를 도구 구분 없이 전부 합쳐서 세도록
-  // 통일함.
-  var _totalRegions1 = _mkTotalActiveRegions();
+  // ⚠️ 요청 반영(도구별 독립 한도로 되돌림): 다각형+사각형은 "영역 선택"이라는 같은 개념이라
+  // 계속 하나로 묶어서 세지만, 브러시·화살표와는 더 이상 합치지 않음(그쪽 도구를 몇 개 썼든
+  // 다각형·사각형 한도와는 무관함).
+  var _totalRegions1 = _mkPolyActiveCount();
   if(_totalRegions1 >= MAX_MASK_REGIONS){
     G.polyPts=[];
     var _draftGroup1=polyOv.querySelector('#poly-draft-group');
@@ -19131,7 +19164,7 @@ function finishPolygon(cv,polyOv){
       var _dl1=_draftGroup1.querySelector('line'); if(_dl1){ ['x1','y1','x2','y2'].forEach(function(k){_dl1.removeAttribute(k);}); }
       var _dd1=_draftGroup1.querySelector('g'); if(_dd1) _dd1.innerHTML='';
     }
-    alert('브러시·다각형·사각형·화살표를 다 합쳐서 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
+    alert('다각형·사각형은 합쳐서 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
     return;
   }
   var rect=polyOv.getBoundingClientRect();
