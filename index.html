@@ -11478,8 +11478,17 @@ function _autoRoomGenerateStep(idx){
     // 현상이 다시 재현된 것. 세로 비율 제한은 반드시 "모든 참고 이미지 추가가 끝난 다음" 마지막
     // 안전장치로 한 번 더 적용해서, 어떤 이유로 참고 이미지가 늘어나든 최종적으로는 항상 1장만
     // 남도록 확실히 함.
+    // ⚠️ 버그 수정(핵심 원인, "거실은 블랙 창호인데 주방은 우드로 나온다"): 위에서 세로 비율일 때
+    // 참고 이미지를 1장으로 줄이는 안전장치가, 창호 기준 이미지가 배열 "맨 뒤"에 추가된 뒤에
+    // slice(0,1)로 잘라서 정작 창호 기준 이미지가 아니라 다른 이미지가 남아버리고 있었음(창호
+    // 기준이 실제로는 AI에게 전달조차 안 됐던 것) — 창호 기준이 있으면 무조건 그것부터
+    // 우선해서 남기도록 고침.
     if(_looseAspect==='9:16' || _looseAspect==='3:4'){
-      if(_looseRefs.length>1) _looseRefs = _looseRefs.slice(0,1);
+      if(_looseRefs.length>1){
+        _looseRefs = spTab.autoRoomWindowAnchor && _looseRefs.indexOf(spTab.autoRoomWindowAnchor)!==-1
+          ? [spTab.autoRoomWindowAnchor]
+          : _looseRefs.slice(0,1);
+      }
     }
     var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1};
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
@@ -11550,6 +11559,14 @@ function _autoRoomGenerateStep(idx){
     chainedRefs = chainedRefs.concat([spTab.autoRoomWindowAnchor]).slice(0,3);
     task.prompt += ' ⚠️⚠️ 창호(창틀) 색상·형태 통일(매우 중요, 다른 스타일 지시보다 창호에 관해서는 우선): 첨부된 참고 이미지 중 하나는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에 실제로 보이는 창호(창틀)의 색상·소재·형태를 이 공간에도 정확히 동일하게 적용하세요. 세트 안의 모든 뷰(외관·실내 가리지 않고)는 안팎이 같은 창호를 쓰는 하나의 건물이어야 합니다.';
   }
+  // ⚠️ 버그 수정(핵심 원인, "거실은 블랙 창호인데 주방은 우드로 나온다"): 창호 기준 이미지를
+  // 여기서 다시 추가하면서(concat) 세로 비율용 "1장만" 제한이 풀려서 2장이 되고 있었음(콜라주
+  // 위험 재발) — 세로 비율이면 창호 기준 이미지를 우선해서 다시 1장으로 최종 정리함.
+  if(_tallAspect && chainedRefs.length>1){
+    chainedRefs = spTab.autoRoomWindowAnchor && chainedRefs.indexOf(spTab.autoRoomWindowAnchor)!==-1
+      ? [spTab.autoRoomWindowAnchor]
+      : chainedRefs.slice(0,1);
+  }
   getTab('space').refs = chainedRefs;
   // ⚠️ 되돌림: "레퍼런스 비율 그대로 강제"가 오히려 컨셉확장 자체의 "출력 비율" 선택(mkAspectRatio,
   // 예: 9:16 쇼츠 비율)을 무시하게 만드는 버그였음 — 컨셉확장에도 자체 비율 선택 UI가 있으므로,
@@ -11616,6 +11633,13 @@ function _autoRoomRetryOne(idx){
       _looseRefs2 = _looseRefs2.concat([spTab.autoRoomWindowAnchor]).slice(0,3);
       _looseP2 += ' ⚠️⚠️ 창호(창틀) 색상·형태 통일(매우 중요): 첨부된 참고 이미지 중 하나는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에 실제로 보이는 창호(창틀)의 색상·소재·형태를 이 공간에도 정확히 동일하게 적용하세요.';
     }
+    // ⚠️ 버그 수정(재시도 함수에도 동일하게 적용): 세로 비율에서 콜라주 방지를 위해 참고 이미지를
+    // 1장으로 최종 제한하되, 창호 기준 이미지가 있으면 그것을 우선해서 남김.
+    if((_looseAspect2==='9:16' || _looseAspect2==='3:4') && _looseRefs2.length>1){
+      _looseRefs2 = spTab.autoRoomWindowAnchor && _looseRefs2.indexOf(spTab.autoRoomWindowAnchor)!==-1
+        ? [spTab.autoRoomWindowAnchor]
+        : _looseRefs2.slice(0,1);
+    }
     var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1};
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
     falRun('fal-ai/nano-banana-2', _looseInput2, function(d){
@@ -11648,9 +11672,18 @@ function _autoRoomRetryOne(idx){
     chainedRefs2 = chainedRefs2.concat(_genRefsToUse2);
   }
   if(chainedRefs2.length>2) chainedRefs2 = chainedRefs2.slice(0,2);
+  var _tallAspect2b = (spTab.forcedAspect==='9:16' || spTab.forcedAspect==='3:4');
+  if(_tallAspect2b && chainedRefs2.length>1) chainedRefs2 = chainedRefs2.slice(0,1);
   if(spTab.autoRoomWindowAnchor && chainedRefs2.indexOf(spTab.autoRoomWindowAnchor)===-1){
     chainedRefs2 = chainedRefs2.concat([spTab.autoRoomWindowAnchor]).slice(0,3);
     task.prompt += ' ⚠️⚠️ 창호(창틀) 색상·형태 통일(매우 중요): 첨부된 참고 이미지 중 하나는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에 실제로 보이는 창호(창틀)의 색상·소재·형태를 이 공간에도 정확히 동일하게 적용하세요.';
+  }
+  // ⚠️ 버그 수정(재시도 함수에도 동일하게 적용): 세로 비율에서 콜라주 방지를 위해 참고 이미지를
+  // 1장으로 최종 제한하되, 창호 기준 이미지가 있으면 그것을 우선해서 남김.
+  if(_tallAspect2b && chainedRefs2.length>1){
+    chainedRefs2 = spTab.autoRoomWindowAnchor && chainedRefs2.indexOf(spTab.autoRoomWindowAnchor)!==-1
+      ? [spTab.autoRoomWindowAnchor]
+      : chainedRefs2.slice(0,1);
   }
   getTab('space').refs = chainedRefs2;
   procImgWithTask(task, function(resultUrl){
@@ -18190,7 +18223,7 @@ function _mkMaskExecuteInner(){
       // 브러시로 칠한 픽셀(어떤 색이든, 알파값 있는 곳)만 흰색, 나머지는 검정 — composite
       // 연산 대신 픽셀 데이터를 직접 만들어서 확실하게 처리함(합성 모드 트릭은 배경까지 같이
       // 지워지는 등 오작동 위험이 있어서 피함).
-      var _brushData=_maskCanvasForComposite.getContext('2d').getImageData(0,0,_maskCanvasForComposite.width,_maskCanvasForComposite.height).data;
+      var _brushData=_maskCanvasForComposite.getContext('2d',{willReadFrequently:true}).getImageData(0,0,_maskCanvasForComposite.width,_maskCanvasForComposite.height).data;
       var _hasBrushPx=false;
       var _outImgData=_mctx.createImageData(_mcv.width,_mcv.height);
       var _outD=_outImgData.data;
@@ -18267,7 +18300,15 @@ function _mkMaskExecuteInner(){
   // 것으로 보임 — 그래서 실제 수정(삭제·색 변경 등)이 잘 안 일어났던 것. 화살표가 있을 때만
   // (화살표는 정확한 채워진 범위가 없어서 위치 표시용 사진이 꼭 필요함) 이 사진을 만들고, 순수
   // 브러시·다각형·사각형만 쓴 경우엔 이 단계를 건너뛰고 곧바로 실행함(정확한 마스크만으로 충분).
-  var _needsMarkedRef = (G.arrows && G.arrows.length)>0;
+  // ⚠️ 버그 수정(재조정): "다각형으로 지정한 위치와 다른 곳에 결과가 나온다" — 다각형·사각형은
+  // 브러시와 달리 꽤 정교한 도형인데, 이걸 AI에게 "이미지 중앙 가운데 부근" 같은 대략적인 텍스트
+  // 설명만으로 알려주면 위치가 부정확해짐(이번에 실제로 재현됨: 싱크대 위에 그린 영역이 식탁
+  // 위로 감). 그래서 다각형·사각형도 표시용 사진을 다시 보내되, 브러시 때 문제였던("표시만
+  // 지우는 데 집중해서 실제 수정을 안 함") 문구는 아래에서 "위치 확인용이지 그 자체가 목적이
+  // 아니다, 지시사항을 실행하는 게 핵심"으로 균형을 맞춰서 재발을 막음. 순수 브러시만(다각형·
+  // 사각형·화살표 없이) 색칠했을 땐 이미 훨씬 정확한 실제 픽셀 마스크(task.maskData)가 있어서
+  // 표시용 사진이 여전히 필요 없음 — 그 경우만 계속 생략함.
+  var _needsMarkedRef = ((G.arrows && G.arrows.length)>0) || ((G.polyAreas && G.polyAreas.length)>0);
   if(!_needsMarkedRef){
     if(refImgs.length){ getTab(G.wf).refs=refImgs; } else { getTab(G.wf).refs=[]; }
     getTab(G.wf)._markedRefIsPositionOnly = false;
@@ -18282,7 +18323,7 @@ function _mkMaskExecuteInner(){
     if(_markedImg){
       var _hadRealStyleRefs = refImgs.length>0;
       refImgs.unshift(_markedImg);
-      getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·테두리로 표시를 남긴 "위치 안내용" 사진입니다 — 그 표시(색칠·화살표·테두리)가 가리키는 정확한 위치가 위에서 설명한 수정을 적용할 곳입니다. 이 표시용 사진을 보고 정확한 위치를 파악한 뒤, 실제 결과물은 그 표시가 전혀 없는 깨끗한 사진으로 만드세요 — 색칠·화살표·테두리 자체가 결과 이미지에 조금이라도 남으면 안 됩니다.';
+      getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·다각형 테두리로 표시를 남긴 "위치 확인용" 사진입니다. 이 표시용 사진의 유일한 목적은 "위에서 설명한 각 수정을 정확히 어느 위치에 적용해야 하는지" 알려주는 것입니다 — 표시된 위치를 정확히 확인한 다음, 위에서 설명한 수정 지시사항(삭제·교체·색상 변경 등)을 그 위치에 실제로 적용하는 게 핵심 목표입니다. 표시를 "지우고 깨끗하게 만드는 것" 자체는 목적이 아니라 부수 효과일 뿐입니다 — 실제 지시사항을 실행하지 않고 표시만 지운 원본에 가까운 결과를 내놓으면 완전한 실패입니다. 결과물에는 색칠·화살표·다각형 테두리 자체가 조금이라도 남으면 안 되지만, 그것과 별개로 지시사항은 반드시 실제로 실행되어야 합니다.';
       getTab(G.wf)._markedRefIsPositionOnly = !_hadRealStyleRefs;
     }
     if(refImgs.length){ getTab(G.wf).refs=refImgs; }
@@ -23812,7 +23853,22 @@ function procImgWithTask(task, onDone, onErr){
               if(task.maskData){
                 urlToDataUrl(u, function(resDataUrl){
                   _compositeMaskedResult(img, resDataUrl||u, task.maskData, function(finalUrl){
-                    finishWithResize(finalUrl || resDataUrl || u, onDone);
+                    if(finalUrl){
+                      finishWithResize(finalUrl, onDone);
+                    } else {
+                      // ⚠️ 버그 수정(핵심 원인, "이미지 전체가 붉게 나온다"): 지금까지 마스크 합성이
+                      // 실패하면(예: CORS로 원본 이미지를 캔버스에 못 읽어오는 경우 등) 아무 보호
+                      // 장치 없이 AI가 리턴한 원본 그대로(resDataUrl||u)를 그냥 썼음 — 이러면 "칠한
+                      // 부분만 AI 결과" 보장이 통째로 사라져서, AI가 전체적으로 색감을 바꿔 리턴하면
+                      // 그게 고스란히(마스크 밖까지 전부) 결과에 반영됐던 것. 이제 마스크 합성이
+                      // 실패하면 최소한 전체 이미지 색온도 보정(_neutralizeEditColorCast)이라도
+                      // 거치도록 해서, 최악의 경우에도 "아무 보정 없는 원본"보다는 나은 결과가
+                      // 나오게 하고, 콘솔에도 실패 사실을 명확히 남겨서 재현 시 바로 알 수 있게 함.
+                      console.warn('[색 번짐 방지] 마스크 합성 실패 — 전체 색온도 보정으로 대체함(원인: CORS 등 이미지 로드 문제일 가능성)');
+                      _neutralizeEditColorCast(img, resDataUrl||u, function(correctedUrl){
+                        finishWithResize(correctedUrl || resDataUrl || u, onDone);
+                      });
+                    }
                   });
                 });
               } else {
@@ -24033,7 +24089,7 @@ function procImg(onDone, onErr) {
     console.log('[마스크 추출 진단] draw-canvas:', drawCv2, drawCv2 ? (drawCv2.width+'x'+drawCv2.height) : '(캔버스 없음)');
     if(drawCv2 && drawCv2.width>0 && drawCv2.height>0){
       try{
-        var mdata2 = drawCv2.getContext('2d').getImageData(0,0,drawCv2.width,drawCv2.height);
+        var mdata2 = drawCv2.getContext('2d',{willReadFrequently:true}).getImageData(0,0,drawCv2.width,drawCv2.height);
         var mpx2   = mdata2.data;
         // 브러시 칠한 픽셀 있는지 확인
         for(var mi3=3; mi3<mpx2.length; mi3+=4){
@@ -28274,7 +28330,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
         if(arrOv){ arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:''; _redrawArrows(arrOv); }
         var awrap=gE('arrow-list-wrap'); if(awrap) renderArrowList(awrap);
         e.preventDefault();
-      } else if(_drawActive && G.dm==='polygon' && G.polyAreasHist && G.polyAreasHist.length>0){
+      } else if(_drawActive && (G.dm==='polygon'||G.dm==='rect') && G.polyAreasHist && G.polyAreasHist.length>0){
         G.polyAreas=G.polyAreasHist.pop();
         _saveMaskAnnotations();
         var polyOv=gE('poly-overlay');
