@@ -3048,6 +3048,16 @@ function selectWF(wf){
     var q=G.QUEUE.shift();
     G.tabs.edit.inputImg=q.img||null;
     G.tabs.edit.status='idle';
+    // ⚠️ sendEdit()/sendToWf()와 동일한 이유로 여기서도 이전 이미지의 영역 도구 데이터를 지움.
+    if(q.img){
+      G.arrows=[]; G.arrowsHist=[]; G.polyAreas=[]; G.polyAreasHist=[];
+      G.maskColorPrompts={}; G.maskColorRefImg={};
+      G.drawHist=[]; G.polyPts=[]; G.strokePoints=[];
+      G._pendingMaskCanvasRestore=null;
+      idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
+      _saveMaskAnnotations();
+      G._maskAnnotImgKey=q.img;
+    }
   }
   // 6. 탭 전환 시 done-badge 제거
   var prevBadge=document.querySelector('.wft[data-w="'+wf+'"] .done-badge');
@@ -10888,6 +10898,19 @@ function mkAutoRoomCamera(p){
   // 있게 공용 함수로 뽑음. 건물 외관은 최대 4장(뷰 종류가 한정적), 실내는 최대 10장(방이 많을
   // 수 있어서)까지.
   function mkAnchorSlotList(wrap, anchors, typeOptions, maxSlots, genKey){
+    // ⚠️ 버그 수정(치명적, "거실 사진 새로 올렸는데 예전 참고사진 형태가 계속 나온다"): 사진을
+    // 새로 올리거나(handleFile2)·갤러리에서 바꾸거나(galBtn3)·지울 때(delBtn2) 그 사진이 속한
+    // 풀(spTab[genKey])만 비우고 있었는데, 정작 "이전에 이 풀로 생성했던 결과물"을 계속 참고
+    // 이미지로 물고 다니는 spTab.autoRoomWindowAnchor(창호 기준 사진)·autoRoomStyleAnalysis(스타일
+    // 분석 캐시)는 그대로 남아있었음 — 이 둘은 이전(옛) 참고 사진을 보고 만들어진 결과라서, 사진을
+    // 바꾼 뒤에도 계속 새 생성에 강제로 첨부되면서 옛 사진의 방 형태·창호가 새 결과에 계속
+    // 섞여 들어왔던 것. 사진이 바뀌면 이 일관성 기록도 전부 같이 초기화해서, 새 사진부터
+    // 완전히 새로 시작하게 함.
+    function _resetConsistencyChain(){
+      spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenIntUrls=[];
+      spTab.autoRoomWindowAnchor=null;
+      spTab.autoRoomStyleAnalysis=null; spTab.autoRoomStyleAnalysisSrc=null;
+    }
     anchors.forEach(function(anchor, ai){
       var row=dv('');row.style.cssText='display:flex;gap:8px;align-items:center;margin-bottom:6px';
       var box2=dv('');box2.style.cssText='width:64px;height:64px;flex-shrink:0;border:1.5px dashed var(--bd2);border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;background:var(--c2)';
@@ -10909,7 +10932,7 @@ function mkAutoRoomCamera(p){
         if(!f) return;
         var reader=new FileReader();
         reader.onload=function(){
-          _downscaleForMemorySafety(reader.result, function(resized){ anchor.img=resized; spTab[genKey]=[]; renderSB(); });
+          _downscaleForMemorySafety(reader.result, function(resized){ anchor.img=resized; spTab[genKey]=[]; _resetConsistencyChain(); renderSB(); });
         };
         reader.readAsDataURL(f);
       }
@@ -10929,13 +10952,13 @@ function mkAutoRoomCamera(p){
       midCol.appendChild(sel);
       var galBtn3=mk('button','');galBtn3.type='button';galBtn3.textContent='🖼 갤러리에서 선택';
       galBtn3.style.cssText='padding:5px 8px;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:10px;font-weight:600;cursor:pointer;font-family:inherit;align-self:flex-start';
-      galBtn3.onclick=function(){ _openGalleryPickerForAnchor(function(v){ anchor.img=v; spTab[genKey]=[]; }); };
+      galBtn3.onclick=function(){ _openGalleryPickerForAnchor(function(v){ anchor.img=v; spTab[genKey]=[]; _resetConsistencyChain(); }); };
       midCol.appendChild(galBtn3);
       row.appendChild(midCol);
 
       var delBtn2=mk('button','');delBtn2.type='button';delBtn2.textContent='✕';
       delBtn2.style.cssText='width:22px;height:22px;border-radius:50%;background:var(--c2);color:var(--t2);border:1px solid var(--bd2);cursor:pointer;font-size:10px;flex-shrink:0;align-self:flex-start';
-      delBtn2.onclick=function(){ anchors.splice(ai,1); if(!anchors.length) anchors.push({img:null,label:typeOptions[0]}); renderSB(); };
+      delBtn2.onclick=function(){ anchors.splice(ai,1); if(!anchors.length) anchors.push({img:null,label:typeOptions[0]}); _resetConsistencyChain(); renderSB(); };
       row.appendChild(delBtn2);
 
       wrap.appendChild(row);
@@ -11452,20 +11475,24 @@ function _autoRoomGenerateStep(idx){
       // 유사도 퍼센트만 다르게 함 — 최대한 동일하게=90~100%, 비슷하게=가구 형태를 50~80% 다르게
       // (=20~50% 유사), 영감만 얻기=30~50% 유사. 벽·천장·바닥 마감재는 "최대한 동일하게"·
       // "비슷하게" 둘 다 참고 이미지와 동일하게(영감만 얻기만 예외, 원래대로 은은하게만 참고).
+      // ⚠️ 요청 반영(치명적, "비슷하게랑 최대한 동일하게가 거의 똑같이 나온다"): 기존 문구는 둘 다
+      // "가구 형태를 N%만큼 비슷/다르게"라는 추상적인 퍼센트 지시만 있어서, AI가 실제로는 두 단계를
+      // 거의 구분 없이 처리하는 경우가 많았음. 추상적인 퍼센트 대신 "무엇을 반드시 다르게 해야
+      // 하는지" 구체적인 항목을 명시적으로 나열해서, 결과물에서 실제로 눈에 띄게 달라지도록 강화함.
       if(spTab.autoRoomFidelity==='tight'){
-        _looseP += ' ⚠️⚠️⚠️ 매우 중요(참고 방식, 목표 유사도 90~100%) — 가장 중요한 지시, 반드시 정확히 지키세요: 첨부한 참고 이미지는 이 방의 실제 사진입니다.\n'+
-          '(1) 가구·소품·가전: 색상·소재·형태·디자인을 참고 이미지와 90~100% 동일하게 만드세요 — 거의 그대로 재현하는 수준입니다.\n'+
+        _looseP += ' ⚠️⚠️⚠️ 매우 중요(참고 방식, 목표 유사도 90~100% — "거의 같은 제품") — 가장 중요한 지시, 반드시 정확히 지키세요: 첨부한 참고 이미지는 이 방의 실제 사진입니다.\n'+
+          '(1) 가구·소품·가전: 색상·소재·형태·팔걸이/다리/등받이 같은 세부 조형까지 참고 이미지와 90~100% 동일하게 — 나란히 놓고 비교했을 때 "같은 매장에서 같은 제품을 산 것"처럼 보여야 합니다. 색상을 임의로 바꾸지 마세요.\n'+
           '(2) 공간 구조·배치: 다만 이 공간은 참고 이미지를 그대로 편집하는 게 아니라 완전히 새로운 공간(다른 구조, 다른 카메라 구도, 다른 가구 배치)입니다 — 위 (1)의 가구들을 이 새로운 공간에 새로운 배치로 놓으세요.\n'+
           '(3) ⚠️⚠️ 창호(창틀) — 다른 무엇보다 최우선: 형태는 참고 이미지와 동일하게, 색상은 참고 이미지의 그 색 하나로 이 세트의 모든 공간에 통일하세요(화이트면 전부 화이트, 블랙이면 전부 블랙).\n'+
           '(4) ⚠️ 공간 규모: 34평형 이상의 넓고 여유로운 공간처럼 보여야 합니다.\n'+
-          '(5) 벽·천장·바닥 마감재는 참고 이미지와 거의 동일하게 만드세요.';
+          '(5) 벽·천장·바닥 마감재: 종류·색상·패턴·질감까지 참고 이미지와 거의 동일하게 — 마루면 같은 톤의 마루, 타일이면 같은 패턴의 타일로.';
       } else if(spTab.autoRoomFidelity==='medium'){
-        _looseP += ' ⚠️⚠️⚠️ 매우 중요(참고 방식, 목표 유사도 50~80%) — 가장 중요한 지시, 반드시 정확히 지키세요: 첨부한 참고 이미지는 이 방의 실제 사진입니다.\n'+
-          '(1) 가구·소품·가전: 형태·디자인을 참고 이미지와 50~80%만 비슷하게(=팔걸이·다리·등받이 같은 세부 조형은 확실히 다르게) 만드세요 — 색상·소재는 유지하되 구체적인 디자인은 뚜렷하게 다른 제품으로 보여야 합니다.\n'+
+        _looseP += ' ⚠️⚠️⚠️ 매우 중요(참고 방식, 목표 유사도 50~80% — "같은 브랜드의 다른 모델") — 가장 중요한 지시, 반드시 정확히 지키세요: 첨부한 참고 이미지는 이 방의 실제 사진입니다.\n'+
+          '(1) 가구·소품·가전: "최대한 동일하게"와는 뚜렷하게 달라야 합니다 — 색상 계열(예: 베이지 계열, 우드톤 계열)과 전체적인 실루엣(예: 3인용 패브릭 소파라는 큰 틀)만 유지하고, 다음 중 최소 2가지 이상은 참고 이미지와 명백히 다르게 창작하세요: 팔걸이 형태(있음↔없음, 각짐↔둥긂), 다리 형태(우드 다리↔철제 다리↔다리 없이 바닥형), 쿠션·등받이 디테일, 정확한 색상 톤(예: 아이보리→라이트그레이), 원단 질감(패브릭↔니트↔벨벳). "참고 사진이랑 거의 똑같네"라는 인상을 주면 실패입니다 — 옆에 나란히 놓았을 때 "같은 브랜드의 다른 시즌 제품" 정도로 보여야 합니다.\n'+
           '(2) 공간 구조·배치: 이 공간은 참고 이미지를 그대로 편집하는 게 아니라 완전히 새로운 공간(다른 구조, 다른 카메라 구도, 다른 가구 배치)입니다.\n'+
           '(3) ⚠️⚠️ 창호(창틀) — 다른 무엇보다 최우선: 형태는 참고 이미지와 동일하게, 색상은 참고 이미지의 그 색 하나로 이 세트의 모든 공간에 통일하세요(화이트면 전부 화이트, 블랙이면 전부 블랙).\n'+
           '(4) ⚠️ 공간 규모: 34평형 이상의 넓고 여유로운 공간처럼 보여야 합니다 — 좁고 압축된 소형 평형처럼 보이면 실패입니다.\n'+
-          '(5) 벽·천장·바닥 마감재는 참고 이미지와 동일하게 만드세요 — "짙은 우드톤 벽면 + 노출콘크리트"처럼 흔한 스타일을 기본값처럼 그리지 마세요.';
+          '(5) 벽·천장·바닥 마감재: 종류(마루/타일/석재 등)와 큰 톤(밝은지 어두운지)은 참고 이미지와 동일하게 유지하되, "짙은 우드톤 벽면 + 노출콘크리트"처럼 흔한 스타일을 기본값처럼 그리지 마세요.';
       } else {
         _looseP += ' ⚠️ 매우 중요(영감 참고 방식, 목표 유사도 약 30~50%): 첨부한 참고 이미지는 이 방의 실제 사진입니다 — 하지만 이건 "그대로 편집"하는 게 아니라 "영감만 얻는" 모드입니다. 가구·소품·전자제품의 형태·색감을 약 30~50%만 참고해서 새로운 디자인을 창작하세요 — 가구의 정확한 형태·배치, 벽·창문의 정확한 위치·형태, 방의 정확한 비율·구조, 마감재의 구체적인 종류·질감은 그 사진을 따라하지 말고 자유롭게 새로 구성하세요. ⚠️ 단, 이건 색감·분위기 얘기이지 건물 종류·규모 얘기가 아닙니다 — 이 방은 원본 사진과 같은 건물, 같은 세대(즉 같은 집) 안에 있는 평범한 주거 공간이어야 합니다. 호텔 객실, 고급 리조트, 초고층 건물, 상업 공간처럼 완전히 다른 종류의 건물로 만들지 마세요.';
       }
@@ -11658,9 +11685,9 @@ function _autoRoomRetryOne(idx){
     if(!imgs0b.noDirectMatch && imgs0b.primary){
       _looseRefs2 = [imgs0b.primary].concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
       if(spTab.autoRoomFidelity==='tight'){
-        _looseP2 += ' ⚠️⚠️ 매우 중요(목표 유사도 90~100%): 첨부한 참고 이미지는 이 방의 실제 사진입니다. 가구·소품·가전의 색상·소재·형태·디자인을 참고 이미지와 90~100% 동일하게 만드세요. 다만 공간 자체(구조·배치·카메라 구도)는 완전히 새로운 공간입니다 — 그 안에 위 가구들을 새로운 배치로 놓으세요. 벽·천장·바닥 마감재는 참고 이미지와 거의 동일하게 유지하세요.';
+        _looseP2 += ' ⚠️⚠️ 매우 중요(목표 유사도 90~100%, "거의 같은 제품"): 첨부한 참고 이미지는 이 방의 실제 사진입니다. 가구·소품·가전의 색상·소재·형태·팔걸이/다리/등받이 같은 세부 조형까지 90~100% 동일하게 만드세요 — 나란히 놓으면 "같은 제품"처럼 보여야 합니다. 다만 공간 자체(구조·배치·카메라 구도)는 완전히 새로운 공간입니다 — 그 안에 위 가구들을 새로운 배치로 놓으세요. 벽·천장·바닥 마감재는 종류·색상·패턴까지 참고 이미지와 거의 동일하게 유지하세요.';
       } else if(spTab.autoRoomFidelity==='medium'){
-        _looseP2 += ' ⚠️⚠️ 매우 중요(목표 유사도 50~80%): 첨부한 참고 이미지는 이 방의 실제 사진입니다. 가구·소품·가전의 형태·디자인을 참고 이미지와 50~80%만 비슷하게(세부 조형은 확실히 다르게) 만드세요. 공간 자체는 완전히 새로운 공간입니다. 벽·천장·바닥 마감재는 참고 이미지와 동일하게 유지하세요.';
+        _looseP2 += ' ⚠️⚠️ 매우 중요(목표 유사도 50~80%, "같은 브랜드의 다른 모델"): 첨부한 참고 이미지는 이 방의 실제 사진입니다. "최대한 동일하게"와는 뚜렷하게 달라야 합니다 — 색상 계열·전체 실루엣만 유지하고, 팔걸이 형태·다리 형태·쿠션 디테일·정확한 색상 톤·원단 질감 중 최소 2가지 이상은 참고 이미지와 명백히 다르게 창작하세요. "거의 똑같네"라는 인상을 주면 실패입니다. 공간 자체는 완전히 새로운 공간입니다. 벽·천장·바닥 마감재는 종류·큰 톤만 참고 이미지와 동일하게 유지하세요.';
       } else {
         _looseP2 += ' ⚠️ 매우 중요(영감 참고 방식, 목표 유사도 약 30~50%): 첨부한 참고 이미지는 이 방의 실제 사진입니다 — 하지만 이건 "그대로 편집"하는 게 아니라 "영감만 얻는" 모드입니다. 그 사진을 보고 색감·마감재 질감·가구 스타일·전체적인 무드(분위기)만 참고해서 새로운 디자인을 창작하세요 — 가구의 정확한 배치, 벽·창문의 정확한 위치·형태, 방의 정확한 비율·구조는 그 사진을 그대로 따라하지 말고 자유롭게 새로 구성하세요. "이 사진에서 느껴지는 스타일의 다른 버전"을 만드는 것이지, "이 사진을 다시 그리는 것"이 아닙니다.';
       }
@@ -17838,6 +17865,7 @@ function mkMask(p){
     var row=dv('');row.style.cssText='display:flex;align-items:flex-start;gap:8px;margin-bottom:6px';
     var dot=dv('');dot.style.cssText='width:16px;height:16px;border-radius:50%;background:'+c[0]+';flex-shrink:0;margin-top:10px;box-shadow:0 0 0 1px var(--bd2)';
     var mta=mk('textarea','ta');mta.rows=2;mta.style.cssText='flex:1;min-height:44px';
+    mta.setAttribute('data-mask-color-ta', c[0]);
     mta.placeholder=(c[1]+'로 칠한 영역 수정 내용 (예: 자동차 삭제해줘, 이 의자를 벨벳 암체어로 — 오브젝트 이름을 같이 적으면 더 정확해요)');
     mta.value=G.maskColorPrompts[c[0]]||'';
     mta.oninput=function(){ G.maskColorPrompts[c[0]]=mta.value; updBtn(); };
@@ -18238,6 +18266,24 @@ function _mkFindVagueInstructions(){
   return found;
 }
 function _mkMaskExecuteInner(){
+  // ⚠️ 버그 수정(치명적, "분명히 텍스트 적었는데 '수정할 내용을 입력해주세요'가 뜬다"): 화면엔
+  // 분명히 글자가 보이는데 실행 시점엔 내용이 비어있던 것으로 재현됨 — 어떤 경로로 상태(G.
+  // maskColorPrompts / a.label / area.label)가 화면에 보이는 값과 어긋났는지 완전히 특정하진
+  // 못했지만(재현이 간헐적), 근본 원인을 못 찾았어도 결과가 틀리면 안 되므로, 실행 직전에 지금
+  // 화면에 실제로 렌더링되어 있는 입력창들의 값을 다시 한번 직접 읽어서 상태에 덮어씀 — 이러면
+  // 중간에 상태가 어떻게 어긋났든 상관없이, "사용자 눈에 지금 보이는 그대로"가 항상 실행됨.
+  if(!G.maskColorPrompts) G.maskColorPrompts={};
+  document.querySelectorAll('textarea[data-mask-color-ta]').forEach(function(el){
+    G.maskColorPrompts[el.getAttribute('data-mask-color-ta')] = el.value;
+  });
+  document.querySelectorAll('textarea[data-arrow-label-ta]').forEach(function(el){
+    var idx=+el.getAttribute('data-arrow-label-ta');
+    if(G.arrows && G.arrows[idx]) G.arrows[idx].label = el.value;
+  });
+  document.querySelectorAll('textarea[data-polyarea-label-ta]').forEach(function(el){
+    var idx=+el.getAttribute('data-polyarea-label-ta');
+    if(G.polyAreas && G.polyAreas[idx]) G.polyAreas[idx].label = el.value;
+  });
   // ⚠️ 요청 반영: "네가 알아서 하지 말고 VizMaker가 실제로 어떻게 하는지 공부해서 그대로 반영해"
   // — VizMaker 공식 사용 가이드를 실제로 찾아서 확인함(7. DRAWING AND REMOVING/ADDING OBJECTS
   // 항목). 거기 적힌 방식은 제가 지난번에 추측했던 "영역별로 하나씩 잘라서 순서대로 처리"가
@@ -18913,6 +18959,7 @@ function renderArrowList(wrap){
     var numBadge=dv('');numBadge.style.cssText='width:22px;height:22px;border-radius:50%;background:#ff5757;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px';
     numBadge.textContent=idx+1;
     var ta=mk('textarea','ta');ta.rows=2;ta.style.cssText='flex:1;min-height:40px;font-size:12px';
+    ta.setAttribute('data-arrow-label-ta', idx);
     ta.placeholder='이 오브젝트를 어떻게? (예: 이 의자 없애줘, 이 소파는 벨벳으로 — 오브젝트 이름을 같이 적으면 더 정확해요)';
     ta.value=a.label||'';
     ta.oninput=function(){ a.label=ta.value; _saveMaskAnnotations(); };
@@ -19265,6 +19312,7 @@ function renderPolyAreaList(wrap){
     var numBadge=dv('');numBadge.style.cssText='width:22px;height:22px;border-radius:50%;background:'+color+';color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px';
     numBadge.textContent=idx+1;
     var ta=mk('textarea','ta');ta.rows=2;ta.style.cssText='flex:1;min-height:40px;font-size:12px';
+    ta.setAttribute('data-polyarea-label-ta', idx);
     ta.placeholder='이 영역을 어떻게? (예: 이 벽을 화이트로, 이 바닥을 원목으로 — 오브젝트 이름을 같이 적으면 더 정확해요)';
     ta.value=area.label||'';
     ta.oninput=function(){ area.label=ta.value; _saveMaskAnnotations(); };
@@ -20445,6 +20493,19 @@ function sendEdit(item){
   if(!src)return;
   G.tabs.edit.inputImg=src;
   G.tabs.edit.status='idle';
+  // ⚠️ 버그 수정("갤러리에서 다른 이미지로 편집하러 오니 이전에 쓰던 영역 도구가 그대로 남아있다"):
+  // mkMask() 안에 이미지가 바뀌면 자동으로 지우는 로직이 있지만, 그건 "마스크 편집 화면이 실제로
+  // 한 번 그려질 때"만 비교하는 방식이라 타이밍에 따라 놓칠 수 있음 — 갤러리에서 새 이미지를 골라
+  // "AI편집으로 보내기"를 누르는 이 시점이야말로 "완전히 새로 시작"이 확실한 지점이므로, 여기서
+  // 직접·확실하게 이전 이미지의 브러시·다각형·사각형·화살표 데이터를 전부 지움(DOM에 의존하지 않는
+  // 안전한 버전 — 아직 AI편집 화면으로 전환되기 전이라 draw-canvas 등이 없을 수도 있어서).
+  G.arrows=[]; G.arrowsHist=[]; G.polyAreas=[]; G.polyAreasHist=[];
+  G.maskColorPrompts={}; G.maskColorRefImg={};
+  G.drawHist=[]; G.polyPts=[]; G.strokePoints=[];
+  G._pendingMaskCanvasRestore=null;
+  idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
+  _saveMaskAnnotations();
+  G._maskAnnotImgKey=src;
   if(!G.HIST.edit)G.HIST.edit=[];
   G.HIST.edit=G.HIST.edit.filter(function(x){return !x.preview;});
   G.HIST.edit.unshift({id:Date.now(),orig:src,result:null,origThumb:null,tags:['AI편집 준비'],ai:'',cx:50,fav:false,wf:'edit',preview:true});
@@ -20573,6 +20634,17 @@ function sendToWf(wf, item){
   var tab=getTab(wf);
   tab.inputImg=src;
   tab.status='idle';
+  // ⚠️ sendEdit()과 동일한 이유로: AI편집으로 보낼 때는 이전 이미지의 브러시·다각형·사각형·
+  // 화살표 데이터가 새 이미지에 남아 보이지 않도록 여기서도 확실히 지움.
+  if(wf==='edit'){
+    G.arrows=[]; G.arrowsHist=[]; G.polyAreas=[]; G.polyAreasHist=[];
+    G.maskColorPrompts={}; G.maskColorRefImg={};
+    G.drawHist=[]; G.polyPts=[]; G.strokePoints=[];
+    G._pendingMaskCanvasRestore=null;
+    idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
+    _saveMaskAnnotations();
+    G._maskAnnotImgKey=src;
+  }
   if(!G.HIST[wf])G.HIST[wf]=[];
   G.HIST[wf]=G.HIST[wf].filter(function(x){return !x.preview;});
   G.HIST[wf].unshift({id:Date.now(),orig:src,result:null,origThumb:null,tags:['전달됨'],ai:'',cx:50,fav:false,wf:wf,preview:true});
