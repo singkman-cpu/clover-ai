@@ -11158,8 +11158,8 @@ function mkAutoRoomCamera(p){
     var need2=dv('');need2.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';need2.textContent='만들어줄 뷰를 최소 1개는 선택해주세요';
     goWrap.appendChild(need2);
   } else {
-    var _aiLimitNote2=dv('');_aiLimitNote2.style.cssText='font-size:9.5px;color:var(--m2);text-align:center;margin-top:6px;line-height:1.5';
-    _aiLimitNote2.textContent='💡 AI 특성상 요청한 공간과 다르게 나오거나 원하는 결과가 한 번에 안 나올 수 있어요 — 그럴 땐 해당 뷰만 다시 생성해보세요.';
+    var _aiLimitNote2=dv('');_aiLimitNote2.style.cssText='font-size:9.5px;color:var(--m2);text-align:center;margin-top:6px;line-height:1.6';
+    _aiLimitNote2.textContent='💡 AI 특성상 요청한 공간과 다르게 나오거나 원하는 결과가 한 번에 안 나올 수 있어요 — 그럴 땐 해당 뷰만 다시 생성해보세요. 특히 "비슷하게"를 골라도 가구·소품이 참고 이미지와 꽤 닮게 나올 때가 있어요 — 실제 사진이 눈앞에 있으면 AI가 텍스트 지시보다 그 사진을 더 강하게 따라가려는 경향이 있어서 그렇습니다. 딱 원하는 만큼의 변형은 여러 번 재생성해보면서 마음에 드는 결과를 골라주시는 게 가장 확실해요 🎨';
     goWrap.appendChild(_aiLimitNote2);
   }
   p.appendChild(goWrap);
@@ -13274,6 +13274,33 @@ function _shortsRoleLabel(k){
 // 외부(Midjourney/ChatGPT/Flux/ComfyUI 등) 이미지는 메타데이터가 없으므로 null → 사용자가 직접 지정.
 // 확실한 단서가 없으면 함부로 추측하지 않는다 — 잘못 추측하면 다른 이미지와 역할이 겹쳐서
 // 조용히 한쪽이 사라지는(순서가 뒤죽박죽되는) 문제가 생기기 때문에, 애매하면 null(직접 선택)로 둔다.
+// ⚠️ 요청 반영: "거실·계단·주방·안방·작은방·아이방·드레스룸·복도·현관·욕실·발코니 같은 걸 매번
+// 직접 적기 힘드니 자동 감지해달라, 주거뿐 아니라 상업공간 등 다른 것도" — "공간 컨셉 디자인"·
+// "현장사진 디자인"에서 만든 이미지는 갤러리에 불러올 때 이미 tags에 'room:거실'처럼 실제 방/공간
+// 이름이 붙어있음(클라우드의 style_key를 room: 접두사로 저장해둠) — 이걸 읽어서 쇼츠의 "화면 문구"
+// 입력칸에 자동으로 채워줌. SPACE_CATEGORIES 전체(주거공간뿐 아니라 오피스·카페·병원·건축외관 등
+// 모든 업종)의 방/뷰 이름을 다 인식 대상으로 삼음 — 카테고리를 따로 안 가리고 그냥 이름이 일치하는지만 봄.
+var _SHORTS_ALL_ROOM_NAMES = null;
+function _shortsAllRoomNames(){
+  if(_SHORTS_ALL_ROOM_NAMES) return _SHORTS_ALL_ROOM_NAMES;
+  var set={};
+  Object.keys(SPACE_CATEGORIES).forEach(function(catKey){
+    (SPACE_CATEGORIES[catKey].types||[]).forEach(function(t){ set[t]=true; });
+  });
+  _SHORTS_ALL_ROOM_NAMES = Object.keys(set);
+  return _SHORTS_ALL_ROOM_NAMES;
+}
+function _shortsDetectRoomLabel(item){
+  if(!item) return null;
+  var tags = item.tags||[];
+  // 1순위: 'room:거실'처럼 명시적으로 붙어있는 태그
+  var roomTag = tags.find(function(t){ return typeof t==='string' && t.indexOf('room:')===0; });
+  if(roomTag) return roomTag.slice(5);
+  // 2순위: 태그 중에 알려진 방/공간 이름과 정확히 일치하는 게 있으면 그걸 씀
+  var known = _shortsAllRoomNames();
+  var hit = tags.find(function(t){ return known.indexOf(t)!==-1; });
+  return hit || null;
+}
 function _shortsAutoDetectRole(item){
   if(!item)return null;
   var hay=(((item.tags||[]).join(' '))+' '+(item.ai||'')+' '+(item.memo||'')).toLowerCase();
@@ -14113,6 +14140,27 @@ function sbShorts(p){
       lbToggleRow.appendChild(_makeLbToggle('전환에 슬라이더 쓰기', !item.noSlider, function(checked){ item.noSlider=!checked; renderMain('shorts'); }));
     })(im);
     info.appendChild(lbToggleRow);
+    // ⚠️ 요청 반영: "첫 번째만 문구 켜두고 나머지 14개는 다 꺼야 하는데 하나씩 끄려니 오래 걸린다"
+    // — 이 장면의 상단/하단 문구·슬라이더 설정을 "나머지 모든 장면"에 한 번에 복사하는 버튼.
+    // 예를 들어 2번 장면을 먼저 원하는 대로(다 끄기) 맞춰두고 이 버튼을 누르면, 1번은 그대로 두고
+    // 3~15번에도 2번과 같은 설정이 한 번에 적용됨(자기 자신은 이미 그 상태이므로 실질적으로
+    // "이거 빼고 나머지"와 같은 효과).
+    var applyAllBtn=document.createElement('button');
+    applyAllBtn.type='button';
+    applyAllBtn.textContent='↕ 이 설정 나머지 전체에 적용';
+    applyAllBtn.style.cssText='margin-top:5px;padding:4px 9px;border-radius:6px;border:1px dashed var(--bd2);background:transparent;color:var(--m2);font-size:10px;cursor:pointer;font-family:inherit';
+    (function(item){
+      applyAllBtn.onclick=function(){
+        G_SHORTS.images.forEach(function(other){
+          if(other===item || other.type==='blank') return;
+          other.skipTopText=item.skipTopText;
+          other.skipBottomText=item.skipBottomText;
+          other.noSlider=item.noSlider;
+        });
+        renderMain('shorts');
+      };
+    })(im);
+    info.appendChild(applyAllBtn);
     if(im.isVideo){
       // ── 영상 클립 길이 조절(트림): 전체 길이 중 시작~끝 구간만 잘라 쓸 수 있게 함 ──
       var fullDur = im._fullDuration || im.duration || 0;
@@ -16491,10 +16539,11 @@ function _shortsAddImageFlow(){
     var vidItems = selectedGalItems.filter(function(item){ return item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1); });
     imgItems.forEach(function(item){
       var autoRole=_shortsAutoDetectRole(item);
+      var _detectedRoom=_shortsDetectRoomLabel(item);
       G_SHORTS.images.push({
         id:Date.now()+Math.random(), img:item.result,
         orig:(autoRole!=='site' && item.orig) ? item.orig : null,
-        role:'auto', autoRole:autoRole, source:'clover'
+        role:'auto', autoRole:autoRole, customLabel:_detectedRoom||'', source:'clover'
       });
     });
     if(!vidItems.length){ ov.remove();renderSB();renderMain('shorts'); return; }
