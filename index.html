@@ -11521,6 +11521,7 @@ function _autoRoomImagesFor(typeName){
     var otherPool=extAnchors.concat(intAnchors).filter(function(a){
       if(a===directMatch || a.label===directMatch.label) return false;
       if(targetIsExt && _isExteriorViewType(a.label)) return false;
+      if(!targetIsExt && _isExteriorViewType(a.label)) return false; // 실내 방엔 외관 사진을 참고 이미지로도 절대 붙이지 않음(외장재 유입 원천 차단)
       return true;
     }).map(function(a){return a.img;}).slice(0,2);
     return { primary: directMatch.img, ref: otherPool.length?otherPool:null };
@@ -11535,13 +11536,24 @@ function _autoRoomImagesFor(typeName){
   // 결국 거실 형태가 남은 결과가 나오기 쉬웠음 — noDirectMatch 플래그를 반환해서, 호출부
   // (_autoRoomGenerateStep)가 이 경우엔 "편집"이 아니라 "순수 텍스트 생성 + 스타일 참고"로
   // 분기하도록 함(영감만 얻기와 같은 방식 — 기준 이미지 자체가 없어야 엉뚱한 방 형태가 안 남음).
+  // ⚠️ 버그 수정(치명적, "외부마감재를 실내에 적용시키지 말라고 했는데 서재·안방·드레스룸·현관
+  // 등 거의 모든 방에 돌·우드 외장재가 계속 새어나온다"): 위에서 텍스트로 "외장재는 실내에 쓰지
+  // 마라"고 아무리 강하게 지시해도, 실제로 그 외관 사진 자체를 이 방의 "기준 이미지"(primary)나
+  // "스타일 참고 이미지"(ref)로 계속 첨부하고 있었기 때문에, 모델이 텍스트 지시와 무관하게 그
+  // 사진에 보이는 돌·우드 마감을 시각적으로 그대로 따라 그리는 경우가 매우 많았음(사진 자체가
+  // 텍스트보다 훨씬 강한 신호). 근본적으로 막으려면 실내 방을 만들 때는 외관 사진 자체를 절대
+  // 첨부하지 않아야 함 — 이제 실내 방(targetIsExt=false)은 실내 앵커가 있을 때만 그 실내 앵커를
+  // 쓰고, 실내 앵커가 하나도 없으면 외관 사진으로 대체하지 않고 이미지 없이(primary:null) 순수
+  // 텍스트 생성 경로로 넘겨서(noDirectMatch:true), 스타일 분석 텍스트(색감·톤만, 외장재 설명은
+  // 이미 별도 규칙으로 제외됨)만으로 만들게 함.
   var samePool = targetIsExt ? extAnchors : intAnchors;
   var oppositePool = targetIsExt ? intAnchors : extAnchors;
-  var primaryImg = samePool.length ? samePool[0].img : (oppositePool.length ? oppositePool[0].img : null);
-  var usedPrimary = samePool.length ? samePool[0] : (oppositePool.length ? oppositePool[0] : null);
+  var primaryImg = samePool.length ? samePool[0].img : (targetIsExt && oppositePool.length ? oppositePool[0].img : null);
+  var usedPrimary = samePool.length ? samePool[0] : (targetIsExt && oppositePool.length ? oppositePool[0] : null);
   var refPool = extAnchors.concat(intAnchors).filter(function(a){
     if(a===usedPrimary) return false;
     if(targetIsExt && _isExteriorViewType(a.label)) return false;
+    if(!targetIsExt && _isExteriorViewType(a.label)) return false; // 실내 방엔 외관 사진을 참고 이미지로도 절대 붙이지 않음(외장재 유입 원천 차단)
     return true;
   }).map(function(a){return a.img;}).slice(0,2);
   return { primary: primaryImg, ref: refPool.length?refPool:null, noDirectMatch: true };
@@ -11577,7 +11589,21 @@ function _autoRoomPromptFor(basePrompt, typeName){
     prompt = prompt + _autoRoomBuildSingleAnchorPrompt(basePrompt, anchorIsExt, anchorLabel, typeName);
   }
   var _fidelitySuffix = '';
-  if(spTab.autoRoomFidelity==='medium'){
+  // ⚠️ 버그 수정(핵심, "방마다 소파·의자·테이블이 거의 똑같이 나온다"): 아래 medium/tight 문구는
+  // 원래 "이 방 이름으로 실제 사진을 직접 올린 경우"만 상정하고 "첨부한 참고 이미지는 이 방의
+  // 실제 사진입니다, 형태만 살짝 다르게"라고 강하게 지시하는데 — 이게 imgs.noDirectMatch(이
+  // 방 전용 사진이 없어서 다른 방 사진을 스타일 참고로만 쓰는 경우)에도 그대로 적용되고
+  // 있었음. 그 결과 _autoRoomBuildSingleAnchorPrompt가 이미 "가구는 다르게 창작하라"고 지시해도,
+  // 뒤에 붙는 이 문구가 "이건 이 방의 실제 사진이니 형태만 살짝 다르게"라고 정반대로 다시
+  // 지시해서(그리고 프롬프트 뒷부분이라 더 강하게 반영돼서) 결국 다른 방 가구를 거의 그대로
+  // 복제하는 결과가 나왔음 — 서재·안방·거실에 똑같은 의자·소파·테이블이 반복된 원인. 이제
+  // noDirectMatch일 땐 반영도 설정과 무관하게 "가구는 항상 새로 창작, 마감재 톤만 통일"로 분기함.
+  if(imgs.noDirectMatch){
+    _fidelitySuffix = ' ⚠️⚠️⚠️ 가구·소품(매우 중요, 반영도 설정과 무관하게 항상 적용): 지금 첨부한 참고 이미지는 이 방("' + typeName + '")의 사진이 아니라 같은 건물 안 다른 공간의 사진입니다 — 그 사진 속 소파·의자·테이블·조명·러그·액자·화병 같은 가구·소품을 그대로 복제하거나 다른 방에서 봤던 것과 똑같은 걸 또 넣지 마세요. 이 공간에 실제로 필요한 가구·소품을 새로 골라 창작하되, 참고 이미지와 같은 디자인 장르(예: 미드센추리, 미니멀 등)·색 계열 안에서 실루엣과 디테일은 방마다 다르게 만드세요 — 같은 세트 안의 다른 방들과 나란히 놓고 봤을 때 "또 이 의자, 또 이 소파"라는 느낌이 들면 명백한 실패입니다. 벽·천장·바닥 마감재의 종류·색상·톤만 참고 이미지와 통일감 있게 유지하세요(마감재는 반영도 설정과 무관하게 항상 참고 이미지 기준).';
+    if(spTab.autoRoomVarietyBoost){
+      _fidelitySuffix += ' ⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션): 위 지시를 더 강하게 지키세요 — 참고 이미지 속 가구의 실루엣·비례조차 참고하지 말고, 이 공간의 분위기·색감에만 어울리는 완전히 다른 제품을 새로 창작하세요.';
+    }
+  } else if(spTab.autoRoomFidelity==='medium'){
     // ⚠️ 요청 반영(최종 확정, 2단계 체계): "비슷하게"는 공간 구조가 바뀌는 방식은 "최대한
     // 동일하게"와 완전히 똑같이 가되(둘 다 새로운 구조), 가구·소품·전자제품만 재질·마감재·색상은
     // 그대로 유지하고 형태만 저작권에 안 걸릴 정도로 살짝만 다르게 바꾸라는 명확한 기준을 받음 —
