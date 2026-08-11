@@ -11475,7 +11475,7 @@ function _autoRoomBuildSingleAnchorPrompt(basePrompt, anchorIsExt, anchorLabel, 
     return basePrompt + ' ' + viewInstr + ' 첨부한 사진은 이 건물을 다른 각도(' + anchorLabel + ')에서 촬영한 완성된 사진입니다. 이건 정확히 같은 건물입니다 — 같은 층수, 같은 창문·발코니 배치 패턴, 같은 외장재, 같은 색감을 유지한 채, 오직 카메라 앵글만 위에서 지시한 뷰로 바꿔서 다시 그려주세요. 다른 건물처럼 보이면 절대 안 됩니다.' + EXTERIOR_CONSISTENCY_RULE;
   }
   if(anchorIsExt && !targetIsExt){
-    return basePrompt + ' 첨부한 사진은 이 건물의 외관(' + anchorLabel + ')이 이미 완성된 모습입니다. 이 외관 사진을 그대로 편집하지 말고, 이 건물 내부에 있을 법한 "' + typeName + '"을(를) 그 공간에 맞는 구조·배치·카메라 구도로 처음부터 새로 상상해서 그려주세요. 외관 사진에서 가져올 것은 전체적인 디자인 언어와 재료감·색감뿐입니다(예: 외관이 노출콘크리트+우드톤+미니멀 라인이면 실내도 그런 재료·색감·분위기로 자연스럽게 이어지게 하세요) — 외관 사진 속 형태나 요소를 실내에 그대로 복사하지 말고, "이런 외관을 가진 건물이라면 내부는 이런 느낌일 것이다"라는 자연스러운 건축적 추론으로 완성하세요. 이 실내 공간(' + typeName + ')에 어울리는 구조·창문 위치·동선으로 새로 구성하되, 재료·색감 계열은 외관과 반드시 통일해서 같은 건물 안에 있다는 느낌이 들게 하세요. ⚠️ 특히 창호(창틀) 프레임 색상은 반드시 이 외관 사진에 실제로 보이는 창호 프레임 색상과 정확히 동일하게 맞추세요(예: 외관이 검정 프레임이면 실내 창문도 검정 프레임, 흰색이면 흰색) — 안팎이 같은 창호를 쓰는 하나의 건물이어야 합니다.';
+    return basePrompt + ' 첨부한 사진은 이 건물의 외관(' + anchorLabel + ')이 이미 완성된 모습입니다. 이 외관 사진을 그대로 편집하지 말고, 이 건물 내부에 있을 법한 "' + typeName + '"을(를) 그 공간에 맞는 구조·배치·카메라 구도로 처음부터 새로 상상해서 그려주세요. ⚠️⚠️⚠️ 외장재를 실내로 가져오지 마세요(가장 중요한 제약): 외관 사진에 보이는 돌(스톤)·벽돌·노출콘크리트·목재 사이딩 같은 "건물 바깥 마감재"는 실외용 재료이므로, 이 실내 공간(' + typeName + ')의 벽·천장·바닥에는 절대 그대로 이어서 쓰지 마세요 — 벽은 페인트·벽지·목재 패널(내장재)·타일 같은 일반적인 한국 실내 마감재로, 이 방 용도에 맞는 톤으로 마감하세요. 외관 사진에서 가져올 것은 오직 전체적인 색감 계열과 분위기(예: 차분한 뉴트럴 톤, 미니멀한 라인감)뿐이며, 외관의 구체적인 마감 재질 자체를 실내 벽면에 그대로 재현하는 것은 명백한 실패입니다. 이 실내 공간에 어울리는 구조·창문 위치·동선으로 새로 구성하고, 색감 계열만 은은하게 통일해서 같은 건물 안에 있다는 느낌을 주세요. ⚠️ 특히 창호(창틀) 프레임 색상은 반드시 이 외관 사진에 실제로 보이는 창호 프레임 색상과 정확히 동일하게 맞추세요(예: 외관이 검정 프레임이면 실내 창문도 검정 프레임, 흰색이면 흰색) — 안팎이 같은 창호를 쓰는 하나의 건물이어야 합니다.';
   }
   if(!anchorIsExt && targetIsExt){
     var viewInstr2 = EXTERIOR_VIEW_PROMPTS[typeName] || ('이 사진은 "'+typeName+'" 앵글로 촬영된 건물 외관 사진이어야 합니다.');
@@ -11613,9 +11613,14 @@ function _autoRoomPromptFor(basePrompt, typeName){
   // 아닌 방에는 그 재질 설명 자체를 프롬프트에서 아예 빼버림 — "이런 재료가 있다"는 정보 자체를
   // 안 주면 모델이 그걸 끌어다 쓸 수가 없으므로, 문구 힘이 아니라 구조적으로 확실히 막음.
   var _isExtSourcedMaterial = !!spTab.autoRoomStyleAnalysisIsExterior;
-  var _roomAllowsExtAccent = (typeName==='거실' || typeName==='주방' || _isExteriorViewType(typeName));
+  // ⚠️ 요청 반영("거실·주방에만 액센트로"라고 해도 계속 새어나간다는 지적 확인): 기존엔 거실·주방만
+  // 예외로 외장재 느낌을 액센트로 허용했는데, 텍스트 지시만으로는 실제로 계속 새어나가는 걸 확인함
+  // (원인은 _autoRoomBuildSingleAnchorPrompt에서 외관 사진을 실내 생성의 기준 이미지로 붙일 때 재질
+  // 이관을 유도하는 문구가 별도로 있었기 때문 — 그 부분도 같이 수정함). 이제 거실·주방 예외 자체를
+  // 없애고, 외부마감재는 방 종류와 무관하게 실내 어디에도 적용하지 않음(외관 뷰를 만들 때만 허용).
+  var _roomAllowsExtAccent = _isExteriorViewType(typeName);
   var _styleAnalysisBlock = (spTab.autoRoomStyleAnalysis && (_roomAllowsExtAccent || !_isExtSourcedMaterial))
-    ? ('⚠️⚠️ 참고 이미지 실제 분석 결과(이미 확정된 사실 — AI가 다시 추측하지 말고 이 내용을 그대로 따르세요): ' + spTab.autoRoomStyleAnalysis + ' — 이 중 "벽마감·천장형태·바닥마감·전체톤"은 지금 만드는 이 공간에도 최대한 비슷한 느낌으로 반영하세요. 단, 공간의 구조·형태·가구 배치는 참고 이미지를 그대로 따라가지 말고, 한국에서 실제로 흔히 쓰이는 아파트 구조(타워형/판상형) 또는 단독주택·빌라 구조를 기준으로 이 공간 용도에 자연스럽게 새로 구성하세요. "스타일장르·가구느낌"은 아래 반영도 설정에 따라 얼마나 비슷하게 할지가 정해집니다.' + (_isExtSourcedMaterial ? ' ⚠️⚠️⚠️ 매우 중요 — 이 분석은 건물 외관(파사드) 사진에서 나온 것입니다(벽돌, 스톤, 노출콘크리트, 목재 사이딩 등 "건물 바깥 마감재"): 이런 무거운 외장재 느낌은 이 공간이 거실이나 주방일 때만, 그것도 벽 전체가 아니라 포인트 벽(TV벽, 아일랜드 옆벽 등) 정도의 액센트로만 소량 반영하세요.' : '') + ' --- ')
+    ? ('⚠️⚠️ 참고 이미지 실제 분석 결과(이미 확정된 사실 — AI가 다시 추측하지 말고 이 내용을 그대로 따르세요): ' + spTab.autoRoomStyleAnalysis + ' — 이 중 "벽마감·천장형태·바닥마감·전체톤"은 지금 만드는 이 공간에도 최대한 비슷한 느낌으로 반영하세요. 단, 공간의 구조·형태·가구 배치는 참고 이미지를 그대로 따라가지 말고, 한국에서 실제로 흔히 쓰이는 아파트 구조(타워형/판상형) 또는 단독주택·빌라 구조를 기준으로 이 공간 용도에 자연스럽게 새로 구성하세요. "스타일장르·가구느낌"은 아래 반영도 설정에 따라 얼마나 비슷하게 할지가 정해집니다.' + (_isExtSourcedMaterial ? ' ⚠️⚠️⚠️ 매우 중요 — 이 분석은 건물 외관(파사드) 사진에서 나온 것입니다(벽돌, 스톤, 노출콘크리트, 목재 사이딩 등 "건물 바깥 마감재"). 지금 만드는 뷰도 건물 외관이므로 이 외장재를 그대로 반영하되, 이 외장재는 오직 건물 외관에만 쓰는 것이고 실내 공간(거실·주방 포함)에는 절대 이어서 쓰지 않는다는 점을 항상 지키세요.' : '') + ' --- ')
     : (spTab.autoRoomStyleAnalysis && _isExtSourcedMaterial
         ? ('⚠️ 참고 이미지(건물 외관 사진)의 벽돌·스톤·노출콘크리트 같은 외장재는 이 공간(거실·주방이 아닌 일반 실내 공간)에는 전혀 해당하지 않습니다 — 이 방은 페인트·벽지·목재 패널·타일 같은 평범한 한국 실내 마감재로, 이 방 용도에 자연스러운 톤으로 마감하세요(단, 이 세트의 전반적인 색감·분위기 계열은 참고해도 좋습니다). --- ')
         : '');
@@ -16195,7 +16200,11 @@ function _shortsRenderCanvas(ub){
         zLbl.textContent='🔍 이 사진 확대/이동 (잘리는 부분 조절)';
         zc.appendChild(zLbl);
         var zRow=document.createElement('div');zRow.style.cssText='display:flex;align-items:center;gap:8px;width:203px';
-        var zSlider=document.createElement('input');zSlider.type='range';zSlider.min='1';zSlider.max='2.2';zSlider.step='0.05';
+        // ⚠️ 요청 반영("9:16보다 큰 이미지가 확대만 되고 축소가 안 된다"): min이 1(100%)로 고정돼있어서
+        // 사진이 프레임보다 훨씬 크거나 가로가 넓은 경우 더 줄여서 여백을 넣을 방법이 없었음 — min을
+        // 0.5(50%)까지 낮춰서 축소도 가능하게 함. 0.5 밑으로 더 축소하면 이미지가 너무 작아져서 위/아래
+        // 여백만 과하게 남고 사진 자체는 잘 안 보이게 되니 50%를 실용적인 하한선으로 둠.
+        var zSlider=document.createElement('input');zSlider.type='range';zSlider.min='0.5';zSlider.max='2.2';zSlider.step='0.05';
         zSlider.value=pim.coverZoom||1;zSlider.style.cssText='flex:1;accent-color:var(--ac)';
         var zVal=document.createElement('span');zVal.style.cssText='font-size:10.5px;color:var(--t);min-width:32px';
         zVal.textContent=Math.round((pim.coverZoom||1)*100)+'%';
@@ -17414,6 +17423,11 @@ function _shortsDrawCoverImage(ctx, W, H, img, extraZoom, offX, offY){
   if(!img)return;
   var iw=img.naturalWidth||img.videoWidth||img.width, ih=img.naturalHeight||img.videoHeight||img.height;
   if(!iw||!ih)return;
+  // ⚠️ 요청 반영(축소 허용에 따른 후속 처리): extraZoom이 1보다 작아지면(사용자가 직접 축소) 이미지가
+  // 프레임(W×H)보다 작게 그려져서 가장자리에 빈 공간이 남을 수 있음 — 이전엔 축소 자체가 불가능해서
+  // 신경 안 써도 됐지만, 이제 그 빈 공간을 검게 채워서 깨져 보이지 않게 함(레터박스 모드의 배경색과
+  // 통일해서 자연스럽게 보이도록 함).
+  if((extraZoom||1) < 1){ ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,W,H); }
   var scale=Math.max(W/iw, H/ih) * (extraZoom||1); // 사용자가 직접 확대/축소할 수 있게
   var dw=iw*scale, dh=ih*scale;
   // offX/offY(-1~1)로 어느 부분을 보여줄지 이동 — 확대해서 남는 여유 공간 안에서만 움직이게 clamp함
