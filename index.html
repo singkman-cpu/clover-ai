@@ -22842,6 +22842,17 @@ function _doUploadFile(file, onDone, onErr){
 // 이미지 전체에 반대 방향으로 역보정을 걸어 색 온도 드리프트(특히 붉은/주황 쪽으로 치우침)를
 // 중화시킴. fal.ai 결과 이미지는 다른 도메인(CORS)이라 픽셀을 못 읽을 수도 있는데, 그 경우엔
 // 조용히 원본 결과를 그대로 반환해서(보정 실패가 렌더링 자체를 막지 않도록) 안전하게 폴백함.
+// ⚠️ 버그 수정("미완성 공사중" 등 프리셋 적용 시 전체 사진에 탁한 필터가 낀 것처럼 보임):
+// _neutralizeEditColorCast는 "원본과 결과의 가장자리(배경) 색은 같아야 정상"이라는 전제로
+// 동작하는데, '미완성 공사중'/사계절/주야간 전환/비/조명 전체 on-off처럼 배경(하늘·나무·
+// 마감재)까지 의도적으로 통째로 다른 색감으로 바뀌는 "전체 장면 변형" 프리셋은 이 전제가
+// 아예 성립하지 않음. 그 결과 정상적인 스타일 변화를 "색온도 드리프트"로 오인해서 결과
+// 이미지 전체를 억지로 원본 색에 맞춰 되돌려버려(예: r:0.678 g:0.786 b:0.794 같은 과도한
+// 보정 배율) 사진 전체가 탁하고 필터 낀 것처럼 나옴. 이런 프리셋들은 보정을 아예 건너뜀.
+var FULL_SCENE_TRANSFORM_PRESETS = ['unfinished','autumn','winter','spring','summer','rain','day_to_night','night_to_day','lights_on','lights_off'];
+function _shouldSkipColorCastFix(selK){
+  return !!selK && FULL_SCENE_TRANSFORM_PRESETS.indexOf(selK)!==-1;
+}
 function _neutralizeEditColorCast(origUrl, resultUrl, cb){
   if(!origUrl || !resultUrl){ cb(resultUrl); return; }
   try{
@@ -24528,13 +24539,21 @@ function procImgWithTask(task, onDone, onErr){
                       // 실패하면 최소한 전체 이미지 색온도 보정(_neutralizeEditColorCast)이라도
                       // 거치도록 해서, 최악의 경우에도 "아무 보정 없는 원본"보다는 나은 결과가
                       // 나오게 하고, 콘솔에도 실패 사실을 명확히 남겨서 재현 시 바로 알 수 있게 함.
-                      console.warn('[색 번짐 방지] 마스크 합성 실패 — 전체 색온도 보정으로 대체함(원인: CORS 등 이미지 로드 문제일 가능성)');
-                      _neutralizeEditColorCast(img, resDataUrl||u, function(correctedUrl){
-                        finishWithResize(correctedUrl || resDataUrl || u, onDone);
-                      });
+                      if(_shouldSkipColorCastFix(task.selK)){
+                        console.warn('[색 번짐 방지] 마스크 합성 실패 — 단, 전체 장면 변형 프리셋('+task.selK+')이라 색온도 보정은 건너뛰고 원본 결과 사용');
+                        finishWithResize(resDataUrl || u, onDone);
+                      } else {
+                        console.warn('[색 번짐 방지] 마스크 합성 실패 — 전체 색온도 보정으로 대체함(원인: CORS 등 이미지 로드 문제일 가능성)');
+                        _neutralizeEditColorCast(img, resDataUrl||u, function(correctedUrl){
+                          finishWithResize(correctedUrl || resDataUrl || u, onDone);
+                        });
+                      }
                     }
                   });
                 });
+              } else if(_shouldSkipColorCastFix(task.selK)){
+                console.log('[edit] 전체 장면 변형 프리셋('+task.selK+') — 색온도 드리프트 보정 건너뜀');
+                finishWithResize(u, onDone);
               } else {
                 _neutralizeEditColorCast(img,u,function(correctedUrl){finishWithResize(correctedUrl,onDone);});
               }
