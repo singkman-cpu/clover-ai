@@ -9852,7 +9852,11 @@ function _categoryForRoomLabel(label, preferredCat){
   if(preferredCat && SPACE_CATEGORIES[preferredCat] && SPACE_CATEGORIES[preferredCat].types.indexOf(label)!==-1){
     return preferredCat;
   }
-  var found='residential';
+  // ⚠️ 요청 반영: "기타(직접 입력)"로 만든 커스텀 이름(예: "수영장뷰")은 어느 SPACE_CATEGORIES
+  // 목록에도 없어서 무조건 'residential'로 판정되고 있었음 — 지금 사용자가 실제로 골라둔
+  // 카테고리(preferredCat)가 있으면(예: 타운하우스인데 "수영장뷰"라는 커스텀 이름을 추가한 경우)
+  // 무작정 residential로 떨어뜨리지 말고 그 카테고리를 그대로 존중하는 게 더 정확함.
+  var found=preferredCat && SPACE_CATEGORIES[preferredCat] ? preferredCat : 'residential';
   Object.keys(SPACE_CATEGORIES).some(function(catKey){
     if(SPACE_CATEGORIES[catKey].types.indexOf(label)!==-1){ found=catKey; return true; }
     return false;
@@ -10817,6 +10821,14 @@ function _autoRoomTypesForCategory(catKey){
   var base = SPACE_CATEGORIES[catKey].types;
   var merged = base.slice();
   SPACE_CATEGORIES.exterior.types.forEach(function(t){ if(merged.indexOf(t)===-1) merged.push(t); });
+  // ⚠️ 요청 반영: "주거공간인데 수영장뷰처럼 목록에 없는 공간을 참고 이미지로 넣고 싶다" —
+  // 사용자가 "기타(직접 입력)"로 실제 사진에 직접 이름을 붙인 경우, 그 이름도 "AI가 만들어줄 뷰"
+  // 체크박스 목록에 자동으로 나타나야 실제로 생성 대상으로 고를 수 있음 — 미리 정해둔 목록에는
+  // 없지만 사용자가 실제로 앵커에 붙인 이름들을 여기 합쳐줌.
+  var spTab0=getTab('spaceset');
+  (spTab0.autoRoomExtAnchors||[]).concat(spTab0.autoRoomIntAnchors||[]).forEach(function(a){
+    if(a && a.img && a.label && merged.indexOf(a.label)===-1) merged.push(a.label);
+  });
   return merged;
 }
 // ⚠️ 버그 수정: "상업공간에 외관을 골랐는데 실내공간이 나온다" — 원인 발견: "외관"이 일부
@@ -11027,13 +11039,36 @@ function mkAutoRoomCamera(p){
       var midCol=dv('');midCol.style.cssText='flex:1;display:flex;flex-direction:column;gap:4px';
       var sel=document.createElement('select');
       sel.style.cssText='width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:11.5px;font-family:inherit';
+      // ⚠️ 요청 반영: "주거공간엔 수영장뷰 같은 항목이 없는데, 기타로 직접 이름 써서 넣고
+      // 싶다" — 목록 맨 끝에 "✏️ 기타(직접 입력)"를 추가하고, 이걸 고르면(또는 이미 목록에 없는
+      // 이름이 이 앵커에 저장돼 있으면) 아래에 직접 이름을 타이핑할 수 있는 입력창을 보여줌.
+      var CUSTOM_LABEL_KEY='__custom__';
+      var isCustomLabel = anchor.label && typeOptions.indexOf(anchor.label)===-1;
       typeOptions.forEach(function(t){
         var opt=document.createElement('option');opt.value=t;opt.textContent=t;
         if(t===anchor.label) opt.selected=true;
         sel.appendChild(opt);
       });
-      sel.onchange=function(){ anchor.label=sel.value; };
+      var customOpt=document.createElement('option');customOpt.value=CUSTOM_LABEL_KEY;customOpt.textContent='✏️ 기타(직접 입력)';
+      if(isCustomLabel) customOpt.selected=true;
+      sel.appendChild(customOpt);
+      var customInp=document.createElement('input');customInp.type='text';
+      customInp.placeholder='예: 수영장뷰, 루프탑 정원';
+      customInp.style.cssText='width:100%;padding:6px 8px;border-radius:6px;border:1px solid var(--acb);background:var(--c2);color:var(--t);font-size:11.5px;font-family:inherit;margin-top:4px;'+(isCustomLabel?'':'display:none');
+      if(isCustomLabel) customInp.value=anchor.label;
+      sel.onchange=function(){
+        if(sel.value===CUSTOM_LABEL_KEY){
+          customInp.style.display='';
+          customInp.focus();
+          if(customInp.value.trim()) anchor.label=customInp.value.trim();
+        } else {
+          customInp.style.display='none';
+          anchor.label=sel.value;
+        }
+      };
+      customInp.oninput=function(){ anchor.label=customInp.value.trim()||'기타'; };
       midCol.appendChild(sel);
+      midCol.appendChild(customInp);
       var galBtn3=mk('button','');galBtn3.type='button';galBtn3.textContent='🖼 갤러리에서 선택';
       galBtn3.style.cssText='padding:5px 8px;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:10px;font-weight:600;cursor:pointer;font-family:inherit;align-self:flex-start';
       galBtn3.onclick=function(){ _openGalleryPickerForAnchor(function(v){ anchor.img=v; spTab[genKey]=[]; _resetConsistencyChain(); }); };
@@ -11382,7 +11417,14 @@ function _autoRoomImagesFor(typeName){
     ? extAnchors.find(function(a){return a.label===typeName;})
     : intAnchors.find(function(a){return a.label===typeName;});
   if(directMatch){
-    var otherPool=extAnchors.concat(intAnchors).filter(function(a){return a!==directMatch;}).map(function(a){return a.img;}).slice(0,2);
+    // ⚠️ 버그 수정("건축 참고이미지 2개 넣었더니 2개가 겹쳐서(콜라주처럼) 나온다"): 같은 뷰
+    // 이름표(예: "투시뷰(스트리트뷰)")로 사진을 2장 넣으면, 첫 번째는 주 이미지(primary)로
+    // 쓰이는데 두 번째도 "다른 부분 스타일 참고"(ref) 풀에 그대로 딸려 들어가고 있었음 — 서로
+    // 다른 건물 사진 2장이 동시에 "이건 정확히 같은 건물이니 그대로 따라 그려라" 지시와 함께
+    // 첨부되면서, 모델이 두 사진을 하나로 합치려다 건물이 겹쳐 보이는 콜라주 결과가 나온 것으로
+    // 보임. 같은 이름표를 가진 다른 앵커는 "이 뷰의 또 다른 버전"이지 "참고할 다른 부분"이
+    // 아니므로, ref 풀에서 제외함(주 이미지 하나만 확실하게 씀).
+    var otherPool=extAnchors.concat(intAnchors).filter(function(a){return a!==directMatch && a.label!==directMatch.label;}).map(function(a){return a.img;}).slice(0,2);
     return { primary: directMatch.img, ref: otherPool.length?otherPool:null };
   }
   // 직접 일치하는 이름표가 없으면: 이 타겟과 같은 종류(외관이면 외관 앵커, 실내면 실내 앵커) 중
