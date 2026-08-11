@@ -11179,7 +11179,7 @@ function mkAutoRoomCamera(p){
     var varietyCb=document.createElement('input');varietyCb.type='checkbox';varietyCb.checked=!!spTab.autoRoomVarietyBoost;
     varietyCb.style.cssText='width:15px;height:15px;margin-top:1px;cursor:pointer;accent-color:var(--ac);flex-shrink:0';
     var varietyTextWrap=dv('');
-    varietyTextWrap.innerHTML='<div style="font-size:12px;font-weight:700;color:'+(spTab.autoRoomVarietyBoost?'var(--ac)':'var(--t)')+'">🎨 가구 다양성 강화 (저작권 안전)</div><div style="font-size:10px;color:var(--t2);margin-top:2px;line-height:1.5">체크하면 매번 프롬프트에 직접 안 적어도, "공간 분위기를 벗어나지 않는 선에서 더 다양한 가구·소품을 쓰고, 브랜드 가구는 색상·모델을 바꿔라"는 지시가 자동으로 강하게 추가돼요.</div>';
+    varietyTextWrap.innerHTML='<div style="font-size:12px;font-weight:700;color:'+(spTab.autoRoomVarietyBoost?'var(--ac)':'var(--t)')+'">🎨 가구 다양성 강화 — 완전히 다른 제품으로 (저작권 안전)</div><div style="font-size:10px;color:var(--t2);margin-top:2px;line-height:1.5">체크하면 "형태만 살짝 바꾸기"가 아니라, 참고 이미지 속 가구와 완전히 다른 제품(색감·분위기만 유지)으로 바꿔서 그려요 — 형태를 살짝만 바꿔도 결국 거의 똑같이 나오는 경우가 많아서, 아예 다른 제품을 고르는 방식으로 바꿨어요.</div>';
     varietyRow.appendChild(varietyCb);varietyRow.appendChild(varietyTextWrap);
     varietyRow.onclick=function(e){ if(e.target!==varietyCb) varietyCb.checked=!varietyCb.checked; spTab.autoRoomVarietyBoost=varietyCb.checked; renderSB(); };
     varietyCb.onclick=function(e){ e.stopPropagation(); spTab.autoRoomVarietyBoost=varietyCb.checked; renderSB(); };
@@ -11500,7 +11500,18 @@ function _autoRoomImagesFor(typeName){
     // 첨부되면서, 모델이 두 사진을 하나로 합치려다 건물이 겹쳐 보이는 콜라주 결과가 나온 것으로
     // 보임. 같은 이름표를 가진 다른 앵커는 "이 뷰의 또 다른 버전"이지 "참고할 다른 부분"이
     // 아니므로, ref 풀에서 제외함(주 이미지 하나만 확실하게 씀).
-    var otherPool=extAnchors.concat(intAnchors).filter(function(a){return a!==directMatch && a.label!==directMatch.label;}).map(function(a){return a.img;}).slice(0,2);
+    // ⚠️ 버그 수정(추가 발견, "건물이 2개가 나온다" 계속 재현됨): 위 수정은 "같은 이름표"만
+    // 걸러냈는데, "투시뷰"와 "좌측면뷰"처럼 이름표가 다른 외관 앵커 2장이 있으면 여전히 서로를
+    // ref 풀에 끌어다 썼음 — 그런데 외관 앵커는 전부 "이 건물을 다른 각도에서 찍은 같은 건물"
+    // 사진이라서, 다른 각도 사진을 "스타일 참고"로 같이 첨부하면 두 각도가 한 프레임에 섞여서
+    // 건물이 2개로 겹쳐 보이는 콜라주가 생김(실내 사진끼리 참고하는 것과 근본적으로 다른 위험).
+    // 지금 만드는 뷰가 외관이면, 외관 앵커는 전부 ref 풀에서 빼고(같은 건물 다른 각도 사진들은
+    // 서로 참고시키지 않음) 실내 앵커만 스타일 참고로 남김.
+    var otherPool=extAnchors.concat(intAnchors).filter(function(a){
+      if(a===directMatch || a.label===directMatch.label) return false;
+      if(targetIsExt && _isExteriorViewType(a.label)) return false;
+      return true;
+    }).map(function(a){return a.img;}).slice(0,2);
     return { primary: directMatch.img, ref: otherPool.length?otherPool:null };
   }
   // 직접 일치하는 이름표가 없으면: 이 타겟과 같은 종류(외관이면 외관 앵커, 실내면 실내 앵커) 중
@@ -11517,7 +11528,11 @@ function _autoRoomImagesFor(typeName){
   var oppositePool = targetIsExt ? intAnchors : extAnchors;
   var primaryImg = samePool.length ? samePool[0].img : (oppositePool.length ? oppositePool[0].img : null);
   var usedPrimary = samePool.length ? samePool[0] : (oppositePool.length ? oppositePool[0] : null);
-  var refPool = extAnchors.concat(intAnchors).filter(function(a){return a!==usedPrimary;}).map(function(a){return a.img;}).slice(0,2);
+  var refPool = extAnchors.concat(intAnchors).filter(function(a){
+    if(a===usedPrimary) return false;
+    if(targetIsExt && _isExteriorViewType(a.label)) return false;
+    return true;
+  }).map(function(a){return a.img;}).slice(0,2);
   return { primary: primaryImg, ref: refPool.length?refPool:null, noDirectMatch: true };
 }
 function _autoRoomPromptFor(basePrompt, typeName){
@@ -11690,7 +11705,7 @@ function _autoRoomGenerateStep(idx){
         // ⚠️ 요청 반영: "가구 다양성 강화" 토글을 켜면, 매번 프롬프트에 직접 안 적어도 이 강조
         // 문구가 자동으로 추가되도록 함.
         if(spTab.autoRoomVarietyBoost){
-          _looseP += ' ⚠️⚠️⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션, 매우 중요): 위 (1)에서 이미 형태를 살짝 바꾸라고 했지만, 실제로는 참고 이미지 속 가구와 거의 구분이 안 될 정도로 똑같이 나오는 경우가 많아서 저작권 문제가 우려됩니다 — 이번엔 훨씬 더 확실하게 다르게 만드세요. 소파·의자·테이블·조명·수납장 등 눈에 띄는 가구는 이 공간의 전체적인 분위기·컬러 팔레트에서 벗어나지 않는 선에서, 실루엣·팔걸이·다리·쿠션 구성이 참고 이미지와 확실히 구별되는 다른 형태로 그리세요. 브랜드가 알아볼 수 있는 제품이면 반드시 색상을 바꾸거나 같은 브랜드의 다른 모델로 바꿔서, "저 가구 어디 브랜드인지 알겠다"는 인상이 참고 이미지 속 그 정확한 제품으로 직결되지 않게 하세요. 재질(패브릭/가죽/우드 등)과 전체 톤은 유지해도 되지만, 형태만큼은 확실히 다른 가구여야 합니다.';
+          _looseP += ' ⚠️⚠️⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션, 매우 중요 — 지침이 바뀌었습니다): 위 (1)에서 "형태만 살짝 바꿔라"라고 했는데, 실제로는 그렇게 해도 참고 이미지 속 가구와 거의 구분이 안 될 정도로 똑같이 나오는 경우가 많았습니다 — 그러니 "살짝 다르게"는 그만두고, 이번엔 아예 완전히 다른 제품으로 바꾸세요. 소파·의자·테이블·조명·수납장 등 눈에 띄는 가구·소품은 참고 이미지 속 그 특정 제품의 실루엣·비례·디테일을 절대 따라 그리지 말고, 이 공간의 전체적인 분위기·톤·컬러 팔레트에만 어울리는 완전히 다른 실제 가구를 새로 골라서 그리세요 — "재질은 비슷한데 다른 제품"이 아니라 "아예 다른 브랜드·다른 디자인의 제품인데 이 방과는 잘 어울리는" 수준으로 바꾸는 게 목표입니다. 유지할 것은 딱 하나, 이 공간의 전체적인 색감·분위기 방향뿐입니다 — 구체적인 가구 형태·브랜드·디자인 언어는 참고 이미지와 무관하게 새로 창작하세요.';
         }
       }
     }
@@ -11943,7 +11958,7 @@ function _autoRoomRetryOne(idx){
       } else {
         _looseP2 += ' ⚠️⚠️ 매우 중요("재질·색상은 공간에 맞게, 형태도 살짝"): 첨부한 참고 이미지는 이 방의 실제 사진입니다. 가구·소품·가전의 재질·색상을 참고 이미지에 무조건 고정할 필요는 없습니다 — 이 공간의 분위기·톤에 더 잘 어울리면 재질·색상을 바꿔도 됩니다(단, 퀄리티가 떨어지면 안 되고 참고 이미지 수준의 완성도는 유지). 가구 전부를 바꿀 필요는 없고, 무엇을 바꾸고 무엇을 그대로 둘지는 이 공간에 가장 잘 어울리게 자유롭게 판단하세요. 형태(팔걸이·다리·쿠션·등받이 디테일 등)는 원래 디자인에서 크게 벗어나지 않는 선에서 저작권 문제가 안 생길 만큼만 살짝 다르게 바꾸세요 — 완전히 다른 제품이 아니라 "같은 제품의 다른 버전"이어야 합니다. ⚠️ 특히 USM 할러 모듈러 가구나 특정 디자이너 소파·의자처럼 형태만 봐도 브랜드가 떠오르는 제품이 보이면, 그 정확한 제품은 그대로 재현하지 말고 같은 브랜드의 다른 실제 제품(다른 모델·색상 조합)으로 바꿔 그리세요 — 브랜드·톤 느낌은 유지하되 그 하나의 제품만 베끼지 않으면 됩니다. 공간 구조가 새로 만들어지는 방식은 "최대한 동일하게"와 완전히 동일합니다(완전히 새로운 공간). 벽·천장·바닥 마감재는 종류·색상·패턴까지 참고 이미지와 동일하게 유지하세요.';
         if(spTab.autoRoomVarietyBoost){
-          _looseP2 += ' ⚠️⚠️⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션, 매우 중요): 이번엔 훨씬 더 확실하게 다르게 만드세요 — 소파·의자·테이블·조명·수납장 등 눈에 띄는 가구는 이 공간의 분위기·컬러 팔레트에서 벗어나지 않는 선에서, 실루엣·팔걸이·다리·쿠션 구성이 참고 이미지와 확실히 구별되는 다른 형태로 그리세요. 브랜드가 알아볼 수 있는 제품이면 반드시 색상을 바꾸거나 같은 브랜드의 다른 모델로 바꾸세요.';
+          _looseP2 += ' ⚠️⚠️⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션, 매우 중요 — 지침이 바뀌었습니다): "형태만 살짝 다르게"는 그만두고, 이번엔 아예 완전히 다른 제품으로 바꾸세요. 소파·의자·테이블·조명·수납장 등 눈에 띄는 가구·소품은 참고 이미지 속 그 특정 제품의 실루엣·비례·디테일을 절대 따라 그리지 말고, 이 공간의 전체적인 분위기·톤·컬러 팔레트에만 어울리는 완전히 다른 실제 가구를 새로 골라서 그리세요. 유지할 것은 딱 하나, 전체적인 색감·분위기 방향뿐입니다 — 구체적인 가구 형태·브랜드는 참고 이미지와 무관하게 새로 창작하세요.';
         }
       }
     }
