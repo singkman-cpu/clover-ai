@@ -14518,25 +14518,30 @@ function sbShorts(p){
     })(im);
     info.appendChild(lbToggleRow);
     // ⚠️ 요청 반영: "첫 번째만 문구 켜두고 나머지 14개는 다 꺼야 하는데 하나씩 끄려니 오래 걸린다"
-    // — 이 장면의 상단/하단 문구·슬라이더 설정을 "나머지 모든 장면"에 한 번에 복사하는 버튼.
-    // 예를 들어 2번 장면을 먼저 원하는 대로(다 끄기) 맞춰두고 이 버튼을 누르면, 1번은 그대로 두고
-    // 3~15번에도 2번과 같은 설정이 한 번에 적용됨(자기 자신은 이미 그 상태이므로 실질적으로
-    // "이거 빼고 나머지"와 같은 효과).
+    // — 이 장면의 상단/하단 문구·슬라이더 설정을 "이 장면보다 뒤(아래쪽 순서)에 있는 장면 전체"에
+    // 한 번에 복사하는 버튼. 예를 들어 2번 장면을 먼저 원하는 대로(다 끄기) 맞춰두고 이 버튼을
+    // 누르면, 1번은 그대로 두고 3~15번에만 2번과 같은 설정이 적용됨.
+    // ⚠️ 요청 반영(동작 변경): "2번부터 설정을 바꾸고 싶으면 2번에서 이 버튼을 눌렀을 때 1번은
+    // 그대로 두고 3번부터만 따라가게 해달라" — 기존엔 자기 자신 빼고 앞뒤 구분 없이 "전체"에
+    // 적용됐는데(그래서 이미 원하는 대로 맞춰둔 앞쪽 장면들까지 덮어써짐), 이제는 지금 이 장면
+    // "뒤에 있는(아래쪽 순서)" 장면에만 적용되고 앞쪽 장면은 절대 건드리지 않음 — 예: 3번에서
+    // 누르면 1·2번은 그대로, 4번부터 끝까지만 3번과 같은 설정을 따라감.
     var applyAllBtn=document.createElement('button');
     applyAllBtn.type='button';
-    applyAllBtn.textContent='↕ 이 설정 나머지 전체에 적용';
+    applyAllBtn.textContent='↓ 이 설정 아래(다음) 장면 전체에 적용';
+    applyAllBtn.title='이 장면보다 뒤에 있는 장면에만 적용돼요 — 앞쪽 장면은 그대로 유지됩니다';
     applyAllBtn.style.cssText='margin-top:5px;padding:4px 9px;border-radius:6px;border:1px dashed var(--bd2);background:transparent;color:var(--m2);font-size:10px;cursor:pointer;font-family:inherit';
-    (function(item){
+    (function(item,myIdx){
       applyAllBtn.onclick=function(){
-        G_SHORTS.images.forEach(function(other){
-          if(other===item || other.type==='blank') return;
+        G_SHORTS.images.forEach(function(other,otherIdx){
+          if(otherIdx<=myIdx || other.type==='blank') return; // 자기 자신 포함 앞쪽(otherIdx<=myIdx)은 건드리지 않음 — 뒤쪽만
           other.skipTopText=item.skipTopText;
           other.skipBottomText=item.skipBottomText;
           other.noSlider=item.noSlider;
         });
         renderMain('shorts');
       };
-    })(im);
+    })(im,idx);
     info.appendChild(applyAllBtn);
     if(im.isVideo){
       // ── 영상 클립 길이 조절(트림): 전체 길이 중 시작~끝 구간만 잘라 쓸 수 있게 함 ──
@@ -16279,6 +16284,28 @@ function _shortsRenderCanvas(ub){
     }
   }
 
+  // ⚠️ 요청 반영: "왼쪽 사이드바 X 버튼 말고, 여기(메인 그리드)에서 클릭해서 Del 키로도 지우고
+  // 싶다" — 타일을 클릭하면 이미 G._shortsPreviewIdx가 그 인덱스로 설정되고 테두리가 강조되는
+  // "선택" 상태가 되니(아래 클릭 핸들러 참고), 이 상태에서 Delete/Backspace를 누르면 그 이미지를
+  // 사이드바 X 버튼과 완전히 동일한 방식으로 제거함. renderMain('shorts')가 이 함수를 여러 번
+  // 다시 실행하므로, 리스너가 매번 중복으로 쌓이지 않도록 한 번만 등록되게 플래그로 막음.
+  if(!window._shortsDelKeyBound){
+    window._shortsDelKeyBound = true;
+    document.addEventListener('keydown', function(e){
+      if(e.key!=='Delete' && e.key!=='Backspace') return;
+      if(G.wf!=='shorts') return; // 쇼츠 화면에 있을 때만 동작(다른 화면에서 Backspace 눌렀다고 지워지면 안 됨)
+      var ae=document.activeElement;
+      if(ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.isContentEditable)) return; // 입력창 편집 중엔 글자 지우기와 충돌하지 않게 무시
+      var idx = G._shortsPreviewIdx;
+      if(idx==null || idx<0 || !G_SHORTS.images || !G_SHORTS.images[idx]) return;
+      e.preventDefault();
+      var item = G_SHORTS.images[idx];
+      G_SHORTS.images = G_SHORTS.images.filter(function(x){ return x!==item; });
+      if(item.img && item.img.indexOf('blob:')===0){ try{ URL.revokeObjectURL(item.img); }catch(err){} }
+      G._shortsPreviewIdx = null;
+      renderSB(); renderMain('shorts');
+    });
+  }
   var grid=document.createElement('div');
   grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:16px;max-width:640px';
   var _dragFromIdx=null;
@@ -16336,7 +16363,7 @@ function _shortsRenderCanvas(ub){
       renderMain('shorts');
     });
     // 메인 화면에서 더블클릭하면 바로 이 이미지의 문구를 수정할 수 있게 — 사이드바까지 안 가도 됨
-    tile.title='클릭하면 위 미리보기에서 이 장면을 볼 수 있어요 · 더블클릭하면 문구 수정';
+    tile.title='클릭하면 위 미리보기에서 이 장면을 볼 수 있어요(선택된 채로 Delete/Backspace 키를 누르면 삭제) · 더블클릭하면 문구 수정';
     // 클릭(짧게 눌렀다 뗌)하면 위 미리보기 캔버스가 이 장면으로 바뀜 — 드래그로 순서 바꾸는 것과
     // 헷갈리지 않게, 실제로 드래그가 일어나지 않은(포인터가 거의 안 움직인) 클릭만 인정함.
     var _clickStart=null;
