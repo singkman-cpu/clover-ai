@@ -22915,6 +22915,26 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
       if(failed) return; failed=true;
       cb(resultUrl); // 로드 실패 시 원본 결과 그대로
     }
+    // ⚠️ 버그 수정("창문프레임만 바꿔달라고 했는데 사진 전체가 뿌옇게/필터 낀 것처럼 나온다"):
+    // 기존엔 sRGB(감마 인코딩된) 픽셀값에 보정 배율을 그냥 곱했는데, 이건 물리적으로 틀린 방식임 —
+    // sRGB 픽셀값은 이미 감마 곡선이 적용된 상태라서 여기에 선형 배율을 그대로 곱하면 밝은 영역
+    // (하늘처럼 값이 255에 가까운 부분)에서 하이라이트가 뭉개지면서 사진 전체가 뿌옇고 탁하게
+    // 보이는 부작용이 생김 — 특히 이번처럼 창문프레임 하나만 바꾼 "작은 편집"에서 하늘이 표본의
+    // 큰 비중을 차지할 때 이 왜곡이 두드러짐. 이제 sRGB→선형광으로 변환한 뒤 그 공간에서 평균을
+    // 내고 보정 배율을 곱하고, 다시 sRGB로 변환해서 적용함(실제 카메라·포토샵 화이트밸런스 보정과
+    // 같은 방식) — 하이라이트가 뭉개지지 않아 뿌옇게 보이는 부작용이 크게 줄어듦.
+    var _srgbToLinearLUT = (function(){
+      var t = new Float32Array(256);
+      for(var i=0;i<256;i++){
+        var v = i/255;
+        t[i] = v<=0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4);
+      }
+      return t;
+    })();
+    function linearToSrgb255(v){
+      v = v<=0.0031308 ? v*12.92 : 1.055*Math.pow(v,1/2.4)-0.055;
+      return Math.max(0, Math.min(255, v*255));
+    }
     function bothLoaded(){
       if(failed) return;
       loaded++;
@@ -22927,7 +22947,7 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
         // 까지는 위/아래 12% 띠만 보고 있어서 표본이 너무 좁아 드리프트를 과소평가하기 쉬웠음.
         // 표본을 훨씬 넓혀서(가장자리 전체 링 — 위/아래/좌/우 다, 다만 정중앙의 "아마 편집됐을"
         // 큰 영역만 제외) 더 안정적으로 진짜 드리프트를 감지하고, 보정 폭도 더 넓힘.
-        function sampleBorderAvg(img){
+        function sampleBorderAvgLinear(img){
           var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
           var ctx=cv.getContext('2d');
           ctx.drawImage(img,0,0,W,H);
@@ -22940,24 +22960,23 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
             for(var x=0;x<W;x++){
               var inCenter = x>=cx0 && x<cx1 && y>=cy0 && y<cy1;
               if(inCenter) continue; // 정중앙(주로 편집 대상)은 표본에서 제외
-              var inRing = x<margin || x>=W-margin || y<margin || y>=H-margin;
               // 링이 아니어도(중앙 제외 영역 전체) 다 표본으로 씀 — 표본이 넓을수록 안정적임
               var i=(y*W+x)*4;
-              sr+=data[i]; sg+=data[i+1]; sb+=data[i+2]; n++;
+              sr+=_srgbToLinearLUT[data[i]]; sg+=_srgbToLinearLUT[data[i+1]]; sb+=_srgbToLinearLUT[data[i+2]]; n++;
             }
           }
-          return n ? {r:sr/n, g:sg/n, b:sb/n} : {r:128,g:128,b:128};
+          return n ? {r:sr/n, g:sg/n, b:sb/n} : {r:0.2,g:0.2,b:0.2};
         }
-        var avgO=sampleBorderAvg(oImg);
-        var avgR=sampleBorderAvg(rImg);
+        var avgO=sampleBorderAvgLinear(oImg);
+        var avgR=sampleBorderAvgLinear(rImg);
         function clampFactor(f){ return Math.max(0.65, Math.min(1.35, f)); } // 표본이 훨씬 안정적으로 넓어졌으니 보정 여유도 ±35%까지 넓힘
-        var fr=clampFactor(avgO.r/Math.max(1,avgR.r));
-        var fg=clampFactor(avgO.g/Math.max(1,avgR.g));
-        var fb=clampFactor(avgO.b/Math.max(1,avgR.b));
+        var fr=clampFactor(avgO.r/Math.max(0.0005,avgR.r));
+        var fg=clampFactor(avgO.g/Math.max(0.0005,avgR.g));
+        var fb=clampFactor(avgO.b/Math.max(0.0005,avgR.b));
         if(Math.abs(fr-1)<0.01 && Math.abs(fg-1)<0.01 && Math.abs(fb-1)<0.01){
           cb(resultUrl); return; // 드리프트가 미미하면 보정 없이 그대로
         }
-        console.log('[edit] 색 온도 드리프트 감지 → 보정 배율 r:'+fr.toFixed(3)+' g:'+fg.toFixed(3)+' b:'+fb.toFixed(3));
+        console.log('[edit] 색 온도 드리프트 감지(선형광 기준) → 보정 배율 r:'+fr.toFixed(3)+' g:'+fg.toFixed(3)+' b:'+fb.toFixed(3));
         var fullCv=document.createElement('canvas');
         fullCv.width=rImg.naturalWidth||W; fullCv.height=rImg.naturalHeight||H;
         var fctx=fullCv.getContext('2d');
@@ -22965,9 +22984,9 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
         var full=fctx.getImageData(0,0,fullCv.width,fullCv.height);
         var d=full.data;
         for(var p=0;p<d.length;p+=4){
-          d[p]  =Math.max(0,Math.min(255,d[p]*fr));
-          d[p+1]=Math.max(0,Math.min(255,d[p+1]*fg));
-          d[p+2]=Math.max(0,Math.min(255,d[p+2]*fb));
+          d[p]  =linearToSrgb255(_srgbToLinearLUT[d[p]]  *fr);
+          d[p+1]=linearToSrgb255(_srgbToLinearLUT[d[p+1]]*fg);
+          d[p+2]=linearToSrgb255(_srgbToLinearLUT[d[p+2]]*fb);
         }
         fctx.putImageData(full,0,0);
         cb(fullCv.toDataURL('image/jpeg',0.95));
