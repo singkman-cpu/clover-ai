@@ -13971,6 +13971,33 @@ var G_PROPOSAL = {
 };
 
 // 이미지의 최종 역할 결정: role이 명시적으로 지정되어 있으면 그 값, 'auto'면 자동감지값(없으면 null=미지정)
+// ⚠️ 요청 반영("Del로 지웠는데 Ctrl+Z가 안 먹는다"): 쇼츠 이미지 삭제(X 버튼이든 Delete/Backspace
+// 키든)는 항상 이 함수를 거치게 해서, 지우기 전에 원래 위치(index)와 함께 undo 스택에 저장해둠 —
+// blob 이미지도 스택에 남아있는 동안은 URL을 해제하지 않고 있다가, 스택이 꽉 차서(10개) 더 이상
+// 되돌릴 수 없게 된 가장 오래된 항목만 그때 메모리 해제함.
+function _shortsDeleteImageWithUndo(item){
+  var idx = G_SHORTS.images.indexOf(item);
+  if(idx===-1) return;
+  window._shortsDeleteUndoStack = window._shortsDeleteUndoStack || [];
+  window._shortsDeleteUndoStack.push({item:item, index:idx});
+  if(window._shortsDeleteUndoStack.length>10){
+    var dropped = window._shortsDeleteUndoStack.shift();
+    if(dropped.item.img && dropped.item.img.indexOf('blob:')===0){ try{ URL.revokeObjectURL(dropped.item.img); }catch(e){} }
+  }
+  G_SHORTS.images = G_SHORTS.images.filter(function(x){ return x!==item; });
+  renderSB(); renderMain('shorts');
+}
+// Ctrl+Z(맥은 Cmd+Z)로 호출 — 가장 최근에 지운 이미지를 원래 있던 순서 그대로 되돌림. 여러 번
+// 누르면 최근 10개까지 순서대로 계속 되돌아감.
+function _shortsUndoDelete(){
+  if(!window._shortsDeleteUndoStack || !window._shortsDeleteUndoStack.length) return false;
+  var entry = window._shortsDeleteUndoStack.pop();
+  var idx = Math.min(entry.index, G_SHORTS.images.length);
+  G_SHORTS.images.splice(idx, 0, entry.item);
+  G._shortsPreviewIdx = idx;
+  renderSB(); renderMain('shorts');
+  return true;
+}
 function _shortsResolvedRole(im){
   if(im.role && im.role!=='auto')return im.role;
   return im.autoRole||null;
@@ -14645,9 +14672,7 @@ function sbShorts(p){
     delBtn.innerHTML='&#10005;';
     (function(item){
       delBtn.onclick=function(){
-        G_SHORTS.images=G_SHORTS.images.filter(function(x){return x!==item;});
-        if(item.img&&item.img.startsWith('blob:')){try{URL.revokeObjectURL(item.img);}catch(e){}}
-        renderSB();renderMain('shorts');
+        _shortsDeleteImageWithUndo(item);
       };
     })(im);
     row.appendChild(delBtn);
@@ -16244,9 +16269,18 @@ function _shortsRenderCanvas(ub){
     _shortsRenderLivePreview(box);
     // 꽉채우기 모드는 사진을 프레임에 맞춰 자동으로 크롭하는데, 원치 않는 부분이 잘릴 수 있어서
     // 지금 미리보고 있는 사진에 한해 확대/축소·이동을 직접 조절할 수 있게 함(레터박스는 안 잘리니 해당없음).
-    if((G_SHORTS.opts.fitMode||'cover')!=='contain'){
-      var previewImgIdx = (G._shortsPreviewIdx!=null && G_SHORTS.images[G._shortsPreviewIdx]) ? G._shortsPreviewIdx : 0;
-      var pim = G_SHORTS.images[previewImgIdx];
+    // ⚠️ 요청 반영("확대/이동 슬라이더가 안 보인다"): 기존엔 전역 G_SHORTS.opts.fitMode만 보고
+    // 슬라이더 표시 여부를 정했는데, 이 장면의 상단·하단 문구가 둘 다 꺼져 있으면 실제 렌더링은
+    // (앞서 추가한 오버라이드로) 전역 설정과 무관하게 이 장면만 cover(꽉채우기, 크롭됨)로 그려짐 —
+    // 그런데 슬라이더는 전역 설정만 보고 숨어있어서, 실제로는 크롭되고 있는데 조절할 방법이 없는
+    // 장면이 생겼음. 이 장면 자체의 실제(유효) fitMode를 계산해서 판단하도록 수정.
+    var _previewIdxForZoom = (G._shortsPreviewIdx!=null && G_SHORTS.images[G._shortsPreviewIdx]) ? G._shortsPreviewIdx : 0;
+    var _pimForZoom = G_SHORTS.images[_previewIdxForZoom];
+    var _pimBothTextOff = !!(_pimForZoom && _pimForZoom.skipTopText && _pimForZoom.skipBottomText);
+    var _effFitModeForZoom = ((G_SHORTS.opts.fitMode||'cover')==='contain' && _pimBothTextOff) ? 'cover' : (G_SHORTS.opts.fitMode||'cover');
+    if(_effFitModeForZoom!=='contain'){
+      var previewImgIdx = _previewIdxForZoom;
+      var pim = _pimForZoom;
       if(pim && !pim.isVideo){
         var zc=document.createElement('div');
         zc.style.cssText='display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:-4px';
@@ -16296,25 +16330,28 @@ function _shortsRenderCanvas(ub){
   }
 
   // ⚠️ 요청 반영: "왼쪽 사이드바 X 버튼 말고, 여기(메인 그리드)에서 클릭해서 Del 키로도 지우고
-  // 싶다" — 타일을 클릭하면 이미 G._shortsPreviewIdx가 그 인덱스로 설정되고 테두리가 강조되는
-  // "선택" 상태가 되니(아래 클릭 핸들러 참고), 이 상태에서 Delete/Backspace를 누르면 그 이미지를
-  // 사이드바 X 버튼과 완전히 동일한 방식으로 제거함. renderMain('shorts')가 이 함수를 여러 번
+  // 싶다" + "Del로 지웠는데 Ctrl+Z로 복구가 안 된다" — 타일을 클릭하면 이미 G._shortsPreviewIdx가
+  // 그 인덱스로 설정되고 테두리가 강조되는 "선택" 상태가 되니(아래 클릭 핸들러 참고), 이 상태에서
+  // Delete/Backspace를 누르면 그 이미지를 사이드바 X 버튼과 완전히 동일한 방식(undo 가능한 공용
+  // 함수)으로 제거함. 같은 리스너에서 Ctrl+Z(맥은 Cmd+Z)를 누르면 방금 지운 이미지를 원래 순서
+  // 그대로 되돌림 — 최근 10개까지 다단계로 undo 가능. renderMain('shorts')가 이 함수를 여러 번
   // 다시 실행하므로, 리스너가 매번 중복으로 쌓이지 않도록 한 번만 등록되게 플래그로 막음.
   if(!window._shortsDelKeyBound){
     window._shortsDelKeyBound = true;
     document.addEventListener('keydown', function(e){
-      if(e.key!=='Delete' && e.key!=='Backspace') return;
-      if(G.wf!=='shorts') return; // 쇼츠 화면에 있을 때만 동작(다른 화면에서 Backspace 눌렀다고 지워지면 안 됨)
+      if(G.wf!=='shorts') return; // 쇼츠 화면에 있을 때만 동작(다른 화면에서 눌렀다고 반응하면 안 됨)
       var ae=document.activeElement;
-      if(ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.isContentEditable)) return; // 입력창 편집 중엔 글자 지우기와 충돌하지 않게 무시
+      if(ae && (ae.tagName==='INPUT' || ae.tagName==='TEXTAREA' || ae.isContentEditable)) return; // 입력창 편집 중엔 글자 지우기/되돌리기와 충돌하지 않게 무시
+      if((e.ctrlKey||e.metaKey) && !e.shiftKey && (e.key==='z' || e.key==='Z')){
+        if(_shortsUndoDelete()) e.preventDefault();
+        return;
+      }
+      if(e.key!=='Delete' && e.key!=='Backspace') return;
       var idx = G._shortsPreviewIdx;
       if(idx==null || idx<0 || !G_SHORTS.images || !G_SHORTS.images[idx]) return;
       e.preventDefault();
-      var item = G_SHORTS.images[idx];
-      G_SHORTS.images = G_SHORTS.images.filter(function(x){ return x!==item; });
-      if(item.img && item.img.indexOf('blob:')===0){ try{ URL.revokeObjectURL(item.img); }catch(err){} }
+      _shortsDeleteImageWithUndo(G_SHORTS.images[idx]);
       G._shortsPreviewIdx = null;
-      renderSB(); renderMain('shorts');
     });
   }
   var grid=document.createElement('div');
