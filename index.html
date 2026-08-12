@@ -22905,6 +22905,16 @@ var FULL_SCENE_TRANSFORM_PRESETS = ['unfinished','autumn','winter','spring','sum
 function _shouldSkipColorCastFix(selK){
   return !!selK && FULL_SCENE_TRANSFORM_PRESETS.indexOf(selK)!==-1;
 }
+// ⚠️ 방식 전면 교체(요청 반영, "창문이 너무 많아서 브러시로 일일이 칠할 시간이 없다" + "예전엔
+// 전체 수정해도 톤이 안 바뀌었다"): 기존엔 "원본과 결과가 얼마나 다른지"를 색 평균으로만 재서
+// 전체 이미지에 보정 배율을 곱하는 방식이었음 — 이러면 편집 안 된 부분(하늘·나무·벽 등)도
+// 항상 재계산된 색으로 다시 칠해지기 때문에, 아무리 정교하게 계산해도 원본과 미세하게라도
+// 달라질 수밖에 없었음(그게 "필터 낀 느낌"의 근본 원인). 이제 발상을 바꿔서 — 사용자가 마스크를
+// 안 그렸어도, 원본과 AI 결과를 픽셀 단위로 직접 비교해서 "실제로 눈에 띄게 달라진 부분"만 자동
+// 으로 마스크로 잡고(예: 창문프레임 전부가 자동으로 잡힘, 개수가 몇 개든 브러시 작업 불필요),
+// 그 외 나머지 전체는 원본 픽셀을 그대로 복원해서 덮어씀. 즉 "AI가 실제로 고친 부분"만 결과를
+// 쓰고 "AI가 안 건드리려고 한 부분"은 원본과 100% 동일한 픽셀로 강제 복원 — 톤이 달라질 여지
+// 자체가 없어짐(사용자가 직접 마스크를 그린 경우와 원리적으로 동일).
 function _neutralizeEditColorCast(origUrl, resultUrl, cb){
   if(!origUrl || !resultUrl){ cb(resultUrl); return; }
   try{
@@ -22915,83 +22925,60 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
       if(failed) return; failed=true;
       cb(resultUrl); // 로드 실패 시 원본 결과 그대로
     }
-    // ⚠️ 버그 수정("창문프레임만 바꿔달라고 했는데 사진 전체가 뿌옇게/필터 낀 것처럼 나온다"):
-    // 기존엔 sRGB(감마 인코딩된) 픽셀값에 보정 배율을 그냥 곱했는데, 이건 물리적으로 틀린 방식임 —
-    // sRGB 픽셀값은 이미 감마 곡선이 적용된 상태라서 여기에 선형 배율을 그대로 곱하면 밝은 영역
-    // (하늘처럼 값이 255에 가까운 부분)에서 하이라이트가 뭉개지면서 사진 전체가 뿌옇고 탁하게
-    // 보이는 부작용이 생김 — 특히 이번처럼 창문프레임 하나만 바꾼 "작은 편집"에서 하늘이 표본의
-    // 큰 비중을 차지할 때 이 왜곡이 두드러짐. 이제 sRGB→선형광으로 변환한 뒤 그 공간에서 평균을
-    // 내고 보정 배율을 곱하고, 다시 sRGB로 변환해서 적용함(실제 카메라·포토샵 화이트밸런스 보정과
-    // 같은 방식) — 하이라이트가 뭉개지지 않아 뿌옇게 보이는 부작용이 크게 줄어듦.
-    var _srgbToLinearLUT = (function(){
-      var t = new Float32Array(256);
-      for(var i=0;i<256;i++){
-        var v = i/255;
-        t[i] = v<=0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4);
-      }
-      return t;
-    })();
-    function linearToSrgb255(v){
-      v = v<=0.0031308 ? v*12.92 : 1.055*Math.pow(v,1/2.4)-0.055;
-      return Math.max(0, Math.min(255, v*255));
-    }
     function bothLoaded(){
       if(failed) return;
       loaded++;
       if(loaded<2) return;
       try{
-        var W=64,H=64; // 색 통계용이라 작은 해상도로도 충분하고, 훨씬 빠름
-        // ⚠️ 요청 반영(반복 지적, "일반 프롬프트·대화형 수정은 마스크가 없어서 사진 전체가
-        // 붉게 나온다"): 이 두 모드는 사진 전체를 AI가 다시 그리는 방식이라 "여기는 원본 유지"로
-        // 강제로 잘라낼 기준(마스크)이 아예 없음 — 그러니 이 보정 하나가 유일한 방어선인데, 지금
-        // 까지는 위/아래 12% 띠만 보고 있어서 표본이 너무 좁아 드리프트를 과소평가하기 쉬웠음.
-        // 표본을 훨씬 넓혀서(가장자리 전체 링 — 위/아래/좌/우 다, 다만 정중앙의 "아마 편집됐을"
-        // 큰 영역만 제외) 더 안정적으로 진짜 드리프트를 감지하고, 보정 폭도 더 넓힘.
-        function sampleBorderAvgLinear(img){
-          var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
-          var ctx=cv.getContext('2d');
-          ctx.drawImage(img,0,0,W,H);
-          var data=ctx.getImageData(0,0,W,H).data; // CORS 미허용이면 여기서 SecurityError
-          var margin=Math.round(W*0.10); // 가장자리 10% 링 전체(위/아래/좌/우 다 포함)
-          var cx0=Math.round(W*0.28), cx1=Math.round(W*0.72); // 정중앙 44% 정사각형(주로 편집 대상)은 제외
-          var cy0=Math.round(H*0.28), cy1=Math.round(H*0.72);
-          var sr=0,sg=0,sb=0,n=0;
-          for(var y=0;y<H;y++){
-            for(var x=0;x<W;x++){
-              var inCenter = x>=cx0 && x<cx1 && y>=cy0 && y<cy1;
-              if(inCenter) continue; // 정중앙(주로 편집 대상)은 표본에서 제외
-              // 링이 아니어도(중앙 제외 영역 전체) 다 표본으로 씀 — 표본이 넓을수록 안정적임
-              var i=(y*W+x)*4;
-              sr+=_srgbToLinearLUT[data[i]]; sg+=_srgbToLinearLUT[data[i+1]]; sb+=_srgbToLinearLUT[data[i+2]]; n++;
-            }
-          }
-          return n ? {r:sr/n, g:sg/n, b:sb/n} : {r:0.2,g:0.2,b:0.2};
+        var W=rImg.naturalWidth||oImg.naturalWidth, H=rImg.naturalHeight||oImg.naturalHeight;
+        if(!W||!H){ cb(resultUrl); return; }
+        var oCv=document.createElement('canvas'); oCv.width=W; oCv.height=H;
+        var octx=oCv.getContext('2d'); octx.drawImage(oImg,0,0,W,H);
+        var rCv=document.createElement('canvas'); rCv.width=W; rCv.height=H;
+        var rctx=rCv.getContext('2d'); rctx.drawImage(rImg,0,0,W,H);
+        var oData=octx.getImageData(0,0,W,H).data;
+        var rData=rctx.getImageData(0,0,W,H).data;
+        // 1) 픽셀별로 원본↔결과 색 차이를 합산해서, 눈에 띄게 달라진 픽셀만 "편집된 부분"(알파
+        // 255)으로 표시하는 마스크를 만듦. 임계값은 재렌더링 특유의 미세한 노이즈(JPEG 압축,
+        // 그림자 미세 변화 등)는 무시하면서 실제 편집(창틀 색 변경처럼 확실한 변화)은 확실히
+        // 잡도록 설정.
+        var THRESH = 40; // 채널 합 차이(0~765 범위) 임계값
+        var maskCv=document.createElement('canvas'); maskCv.width=W; maskCv.height=H;
+        var mctx=maskCv.getContext('2d');
+        var maskImgData=mctx.createImageData(W,H);
+        var md=maskImgData.data;
+        var changedCount=0;
+        for(var p=0;p<oData.length;p+=4){
+          var diff = Math.abs(oData[p]-rData[p]) + Math.abs(oData[p+1]-rData[p+1]) + Math.abs(oData[p+2]-rData[p+2]);
+          var a = diff>THRESH ? 255 : 0;
+          if(a) changedCount++;
+          md[p]=255; md[p+1]=255; md[p+2]=255; md[p+3]=a;
         }
-        var avgO=sampleBorderAvgLinear(oImg);
-        var avgR=sampleBorderAvgLinear(rImg);
-        function clampFactor(f){ return Math.max(0.65, Math.min(1.35, f)); } // 표본이 훨씬 안정적으로 넓어졌으니 보정 여유도 ±35%까지 넓힘
-        var fr=clampFactor(avgO.r/Math.max(0.0005,avgR.r));
-        var fg=clampFactor(avgO.g/Math.max(0.0005,avgR.g));
-        var fb=clampFactor(avgO.b/Math.max(0.0005,avgR.b));
-        if(Math.abs(fr-1)<0.01 && Math.abs(fg-1)<0.01 && Math.abs(fb-1)<0.01){
-          cb(resultUrl); return; // 드리프트가 미미하면 보정 없이 그대로
+        mctx.putImageData(maskImgData,0,0);
+        var totalPx = oData.length/4;
+        if(changedCount<10){
+          // 사실상 아무것도 안 바뀐 경우(AI가 요청한 편집조차 감지 안 될 만큼 미세) — 그냥 원본 결과 사용
+          cb(resultUrl); return;
         }
-        console.log('[edit] 색 온도 드리프트 감지(선형광 기준) → 보정 배율 r:'+fr.toFixed(3)+' g:'+fg.toFixed(3)+' b:'+fb.toFixed(3));
-        var fullCv=document.createElement('canvas');
-        fullCv.width=rImg.naturalWidth||W; fullCv.height=rImg.naturalHeight||H;
-        var fctx=fullCv.getContext('2d');
-        fctx.drawImage(rImg,0,0,fullCv.width,fullCv.height);
-        var full=fctx.getImageData(0,0,fullCv.width,fullCv.height);
-        var d=full.data;
-        for(var p=0;p<d.length;p+=4){
-          d[p]  =linearToSrgb255(_srgbToLinearLUT[d[p]]  *fr);
-          d[p+1]=linearToSrgb255(_srgbToLinearLUT[d[p+1]]*fg);
-          d[p+2]=linearToSrgb255(_srgbToLinearLUT[d[p+2]]*fb);
-        }
-        fctx.putImageData(full,0,0);
-        cb(fullCv.toDataURL('image/jpeg',0.95));
+        // 2) 마스크 경계를 부드럽게(feather) — 캔버스 blur 필터로 알파 경계를 자연스럽게 만들어서
+        // 잘라낸 티가 안 나게 함(사용자가 직접 브러시로 칠했을 때와 비슷한 결과).
+        var blurCv=document.createElement('canvas'); blurCv.width=W; blurCv.height=H;
+        var bctx=blurCv.getContext('2d');
+        bctx.filter='blur(6px)';
+        bctx.drawImage(maskCv,0,0);
+        // 3) 결과 이미지를 이 블러 마스크로 잘라내서(편집된 부분만 남기고), 원본 위에 겹침 —
+        // 마스크 밖(대부분의 사진)은 원본 픽셀 그대로, 마스크 안(실제 편집된 부분)만 AI 결과.
+        rctx.globalCompositeOperation='destination-in';
+        rctx.drawImage(blurCv,0,0);
+        rctx.globalCompositeOperation='source-over';
+        var outCv=document.createElement('canvas'); outCv.width=W; outCv.height=H;
+        var octx2=outCv.getContext('2d');
+        octx2.drawImage(oImg,0,0,W,H);
+        octx2.drawImage(rCv,0,0);
+        console.log('[edit] 자동 변경 영역 감지: '+changedCount+'/'+totalPx+'px('+(changedCount/totalPx*100).toFixed(1)+'%) — 편집 안 된 나머지는 원본 픽셀로 복원(톤 변화 원천 차단)');
+        cb(outCv.toDataURL('image/jpeg',0.95));
       }catch(e){
-        console.warn('[edit] 색 온도 보정 실패(CORS 등) — 원본 결과 그대로 사용:', e.message);
+        console.warn('[edit] 자동 변경영역 마스크 복원 실패(CORS 등) — 원본 결과 그대로 사용:', e.message);
         cb(resultUrl);
       }
     }
