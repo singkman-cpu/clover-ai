@@ -22932,42 +22932,59 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
       try{
         var W=rImg.naturalWidth||oImg.naturalWidth, H=rImg.naturalHeight||oImg.naturalHeight;
         if(!W||!H){ cb(resultUrl); return; }
-        var oCv=document.createElement('canvas'); oCv.width=W; oCv.height=H;
-        var octx=oCv.getContext('2d'); octx.drawImage(oImg,0,0,W,H);
-        var rCv=document.createElement('canvas'); rCv.width=W; rCv.height=H;
-        var rctx=rCv.getContext('2d'); rctx.drawImage(rImg,0,0,W,H);
-        var oData=octx.getImageData(0,0,W,H).data;
-        var rData=rctx.getImageData(0,0,W,H).data;
-        // 1) 픽셀별로 원본↔결과 색 차이를 합산해서, 눈에 띄게 달라진 픽셀만 "편집된 부분"(알파
-        // 255)으로 표시하는 마스크를 만듦. 임계값은 재렌더링 특유의 미세한 노이즈(JPEG 압축,
-        // 그림자 미세 변화 등)는 무시하면서 실제 편집(창틀 색 변경처럼 확실한 변화)은 확실히
-        // 잡도록 설정.
-        var THRESH = 40; // 채널 합 차이(0~765 범위) 임계값
-        var maskCv=document.createElement('canvas'); maskCv.width=W; maskCv.height=H;
-        var mctx=maskCv.getContext('2d');
-        var maskImgData=mctx.createImageData(W,H);
+        // ⚠️ 버그 수정("2K로 했는데 원본보다 화질이 더 안 좋다", 실측 61.5%가 "변경됨"으로 잡힘):
+        // 화소 단위(픽셀 하나하나)로 diff를 재면, 나무 잎사귀·돌벽 그라우트 같은 "고주파 텍스처"
+        // 영역은 AI가 다시 그릴 때마다 결이 미세하게 달라지는데(같은 돌벽이라도 조약돌 하나하나
+        // 위치·질감이 살짝 다르게 재생성됨) 이 미세한 차이만으로도 화소 단위 임계값을 쉽게 넘어서,
+        // 실제로는 안 바뀐 거나 다름없는 나무·돌벽 같은 큰 영역까지 "변경됨"으로 잘못 잡혀서 AI
+        // 재생성본(원본 사진보다 디테일이 무른 경우가 많음)으로 대체돼버림 — 그래서 픽셀 수(해상도)
+        // 는 늘었는데 체감 화질(선명도)은 오히려 떨어지는 부작용이 생김. 이제 원본 해상도가 아니라
+        // 훨씬 작게 축소한 버전끼리 diff를 재서(다운샘플링 자체가 저주파 필터 역할을 해서 이런
+        // 화소 단위 노이즈는 자연히 뭉개짐), 창틀 색처럼 "공간적으로 뭉쳐서 나타나는 진짜 변화"만
+        // 잡히게 함 — 그만큼 원본의 선명한 디테일이 더 많이 보존됨.
+        var DS = 160; // diff 계산용 축소 크기(짧은 변 기준) — 화소 단위 노이즈를 걸러내기에 충분히 작으면서, 창틀 정도 크기의 변화는 여전히 잡을 만큼 큼
+        var dsScale = DS / Math.min(W,H);
+        var dsW = Math.max(8, Math.round(W*dsScale)), dsH = Math.max(8, Math.round(H*dsScale));
+        var oSmallCv=document.createElement('canvas'); oSmallCv.width=dsW; oSmallCv.height=dsH;
+        var osctx=oSmallCv.getContext('2d'); osctx.drawImage(oImg,0,0,dsW,dsH);
+        var rSmallCv=document.createElement('canvas'); rSmallCv.width=dsW; rSmallCv.height=dsH;
+        var rsctx=rSmallCv.getContext('2d'); rsctx.drawImage(rImg,0,0,dsW,dsH);
+        var oSData=osctx.getImageData(0,0,dsW,dsH).data;
+        var rSData=rsctx.getImageData(0,0,dsW,dsH).data;
+        // 다운샘플 단계에서 이미 화소 단위 노이즈가 평균으로 뭉개졌으니, 임계값은 원래보다
+        // 조금 더 엄격하게(작게) 잡아도 노이즈 오탐이 안 생김 — 대신 진짜 변화는 더 뚜렷하게 잡힘.
+        var THRESH = 26; // 채널 합 차이(0~765 범위) 임계값 — 다운샘플된 값 기준
+        var maskSmallCv=document.createElement('canvas'); maskSmallCv.width=dsW; maskSmallCv.height=dsH;
+        var mctx=maskSmallCv.getContext('2d');
+        var maskImgData=mctx.createImageData(dsW,dsH);
         var md=maskImgData.data;
         var changedCount=0;
-        for(var p=0;p<oData.length;p+=4){
-          var diff = Math.abs(oData[p]-rData[p]) + Math.abs(oData[p+1]-rData[p+1]) + Math.abs(oData[p+2]-rData[p+2]);
+        for(var p=0;p<oSData.length;p+=4){
+          var diff = Math.abs(oSData[p]-rSData[p]) + Math.abs(oSData[p+1]-rSData[p+1]) + Math.abs(oSData[p+2]-rSData[p+2]);
           var a = diff>THRESH ? 255 : 0;
           if(a) changedCount++;
           md[p]=255; md[p+1]=255; md[p+2]=255; md[p+3]=a;
         }
         mctx.putImageData(maskImgData,0,0);
-        var totalPx = oData.length/4;
-        if(changedCount<10){
+        var totalSmallPx = oSData.length/4;
+        if(changedCount<3){
           // 사실상 아무것도 안 바뀐 경우(AI가 요청한 편집조차 감지 안 될 만큼 미세) — 그냥 원본 결과 사용
+          console.warn('[edit] 자동 변경 영역이 거의 감지되지 않음('+changedCount+'/'+totalSmallPx+') — 요청한 편집이 실제로 적용됐는지 확인이 필요할 수 있음. 원본 결과 그대로 사용.');
           cb(resultUrl); return;
         }
-        // 2) 마스크 경계를 부드럽게(feather) — 캔버스 blur 필터로 알파 경계를 자연스럽게 만들어서
-        // 잘라낸 티가 안 나게 함(사용자가 직접 브러시로 칠했을 때와 비슷한 결과).
+        // 마스크를 원본 해상도(W×H)로 확대(자연스러운 보간으로 1차 페더링) + 살짝 더 블러(경계 매끈하게)
+        var fullMaskCv=document.createElement('canvas'); fullMaskCv.width=W; fullMaskCv.height=H;
+        var fmctx=fullMaskCv.getContext('2d');
+        fmctx.imageSmoothingEnabled=true;
+        fmctx.drawImage(maskSmallCv,0,0,W,H);
         var blurCv=document.createElement('canvas'); blurCv.width=W; blurCv.height=H;
         var bctx=blurCv.getContext('2d');
-        bctx.filter='blur(6px)';
-        bctx.drawImage(maskCv,0,0);
-        // 3) 결과 이미지를 이 블러 마스크로 잘라내서(편집된 부분만 남기고), 원본 위에 겹침 —
+        bctx.filter='blur(4px)';
+        bctx.drawImage(fullMaskCv,0,0);
+        // 결과 이미지를 이 블러 마스크로 잘라내서(편집된 부분만 남기고), 원본 위에 겹침 —
         // 마스크 밖(대부분의 사진)은 원본 픽셀 그대로, 마스크 안(실제 편집된 부분)만 AI 결과.
+        var rCv=document.createElement('canvas'); rCv.width=W; rCv.height=H;
+        var rctx=rCv.getContext('2d'); rctx.drawImage(rImg,0,0,W,H);
         rctx.globalCompositeOperation='destination-in';
         rctx.drawImage(blurCv,0,0);
         rctx.globalCompositeOperation='source-over';
@@ -22975,7 +22992,7 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
         var octx2=outCv.getContext('2d');
         octx2.drawImage(oImg,0,0,W,H);
         octx2.drawImage(rCv,0,0);
-        console.log('[edit] 자동 변경 영역 감지: '+changedCount+'/'+totalPx+'px('+(changedCount/totalPx*100).toFixed(1)+'%) — 편집 안 된 나머지는 원본 픽셀로 복원(톤 변화 원천 차단)');
+        console.log('[edit] 자동 변경 영역 감지(다운샘플 '+dsW+'x'+dsH+' 기준): '+changedCount+'/'+totalSmallPx+'블록('+(changedCount/totalSmallPx*100).toFixed(1)+'%) — 편집 안 된 나머지는 원본 픽셀로 복원(톤 변화·화질 저하 원천 차단)');
         cb(outCv.toDataURL('image/jpeg',0.95));
       }catch(e){
         console.warn('[edit] 자동 변경영역 마스크 복원 실패(CORS 등) — 원본 결과 그대로 사용:', e.message);
