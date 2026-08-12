@@ -11723,16 +11723,11 @@ function _autoRoomGenerateStep(idx){
   {
     console.log('[컨셉확장 진단] 뷰="'+typeName+'" 반영도="'+spTab.autoRoomFidelity+'" noDirectMatch='+(!!imgs0.noDirectMatch)+' → 순수 생성(편집 아님) 경로로 감. primary 이미지: '+(imgs0.primary||'없음'));
     var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
-    // ⚠️ 버그 수정(반복 재현되는 "건물이 2개로 나온다"의 실제 근본 원인 발견): 건축 외관은
-    // 원래 가로로 넓은 피사체인데, 세트 전체 비율이 9:16(쇼츠용 세로)으로 맞춰져 있으면 그
-    // 좁고 긴 세로 프레임 안에 건물을 자연스럽게 한 장으로 채우기가 구조적으로 어려워서, 모델이
-    // 위아래로 빈 공간을 채우려고 건물을 살짝 다른 각도로 두 번 그려서 이어붙이는 경우가
-    // 반복됨(프롬프트로 아무리 금지해도 완전히 안 막힘) — 9:16처럼 극단적으로 긴 비율은 건축
-    // 외관에서만 한 단계 덜 극단적인 3:4로 낮춰서(그래도 세로형이라 쇼츠에 쓰기엔 무리 없음),
-    // 모델이 한 장에 자연스럽게 담기 훨씬 쉽게 함.
-    if(_isExteriorViewType(typeName) && _looseAspect==='9:16'){
-      _looseAspect = '3:4';
-    }
+    // ⚠️ 요청 반영(되돌림): 예전엔 "건물이 2개로 겹쳐 나오는" 버그 때문에 건축 외관 뷰일 땐 9:16을
+    // 자동으로 3:4로 낮췄는데, 사용자가 선택한 비율과 실제 출력 비율이 달라서 오히려 "비율이
+    // 이상하다"는 혼란을 줬음. 사용자가 위험을 감수하고 진짜 9:16을 시도해보길 원해서, 이 강제
+    // 다운그레이드를 제거함 — 대신 아래에서 9:16+건축외관 조합일 때 겹침 방지 문구를 한 번 더
+    // 강하게 추가해서 프롬프트만으로 최대한 막아봄(_looseP 뒤쪽에서 처리).
     var _looseP = '';
     // ⚠️ 버그 수정: "선택 해제하고 다시 선택해서 렌더링하면 기존이랑 느낌이 다르다"는 지적 —
     // "영감만 얻기"를 순수 텍스트 생성으로 바꾸면서 참고 이미지를 아예 다 뺐는데, 그 바람에
@@ -11836,6 +11831,12 @@ function _autoRoomGenerateStep(idx){
     if(_looseAspect==='9:16' || _looseAspect==='3:4'){
       if(_looseRefs.length>1) _looseRefs = _looseRefs.slice(0,1);
       _looseP += ' ⚠️ 마지막으로 다시 한번(가장 중요): 세로로 긴 이 비율(9:16/3:4)을 채우려고 같은 건물·같은 방을 여러 각도로 반복 촬영해서 위아래로 이어붙이지 마세요. 결과는 반드시 하나의 카메라 위치에서 찍은 사진 한 장이어야 하며, 그 안에 여러 장면이 나뉘어 보이면 실패입니다.';
+    }
+    // ⚠️ 요청 반영: 건축 외관 + 9:16 조합은 특히 "건물이 2개로 겹쳐 나오는" 실패가 잦았던
+    // 조합이라, 이 경우에만 훨씬 더 구체적이고 강한 경고를 한 번 더 추가함(사용자가 자동
+    // 3:4 다운그레이드 대신 프롬프트만으로 막아보길 원해서 이렇게 강화함).
+    if(_isExteriorViewType(typeName) && _looseAspect==='9:16'){
+      _looseP += ' ⚠️⚠️⚠️ 9:16 세로 비율 건축 외관 전용 경고(가장 흔한 실패 패턴): 건물은 원래 가로로 넓은 피사체인데 이 좁고 긴 세로 프레임에 억지로 다 담으려다가, 위쪽 절반엔 건물 상단부를, 아래쪽 절반엔 건물 하단부를(또는 다른 각도로 찍은 같은 건물을) 따로따로 그려서 수평선으로 이어붙이는 실수가 매우 흔합니다 — 이건 절대 금지입니다. 대신 카메라를 하나로 고정한 채 뒤로 충분히 물러난 것처럼(건물과의 거리를 늘려서) 촬영해서, 건물 전체(맨 위 지붕부터 맨 아래 지면까지)와 그 위아래로 남는 여백(하늘, 마당, 도로)이 왜곡 없이 자연스러운 세로 사진 한 장에 다 들어오게 하세요. 건물을 억지로 눌러 찌그러뜨리거나 잘라내지 말고, 촬영 거리로 프레임을 채우세요.';
     }
     // 이미 확정된 "창호 기준 이미지"가 있으면(외관·실내 구분 없이) 실제로 참고 이미지로 첨부하고
     // 창호(창틀) 색상·형태만큼은 최우선으로 맞추라고 명시함 — 세트 전체가 "같은 건물"처럼 보이게 함.
@@ -12051,9 +12052,7 @@ function _autoRoomRetryOne(idx){
   // 생성 경로를 씀(전에는 loose만 이 경로였음).
   {
     var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
-    if(_isExteriorViewType(typeName) && _looseAspect2==='9:16'){
-      _looseAspect2 = '3:4';
-    }
+    // (위 _looseAspect와 동일한 이유로 9:16→3:4 강제 다운그레이드 제거함)
     var _looseP2 = '';
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
@@ -12120,6 +12119,10 @@ function _autoRoomRetryOne(idx){
       _looseRefs2 = imgs0b.primary && _looseRefs2.indexOf(imgs0b.primary)!==-1
         ? [imgs0b.primary]
         : _looseRefs2.slice(0,1);
+    }
+    // (위 _looseP와 동일한 이유로 추가) 건축 외관 + 9:16 조합 전용 강한 경고
+    if(_isExteriorViewType(typeName) && _looseAspect2==='9:16'){
+      _looseP2 += ' ⚠️⚠️⚠️ 9:16 세로 비율 건축 외관 전용 경고(가장 흔한 실패 패턴): 건물은 원래 가로로 넓은 피사체인데 이 좁고 긴 세로 프레임에 억지로 다 담으려다가, 위쪽 절반엔 건물 상단부를, 아래쪽 절반엔 건물 하단부를(또는 다른 각도로 찍은 같은 건물을) 따로따로 그려서 수평선으로 이어붙이는 실수가 매우 흔합니다 — 이건 절대 금지입니다. 대신 카메라를 하나로 고정한 채 뒤로 충분히 물러난 것처럼(건물과의 거리를 늘려서) 촬영해서, 건물 전체(맨 위 지붕부터 맨 아래 지면까지)와 그 위아래로 남는 여백(하늘, 마당, 도로)이 왜곡 없이 자연스러운 세로 사진 한 장에 다 들어오게 하세요. 건물을 억지로 눌러 찌그러뜨리거나 잘라내지 말고, 촬영 거리로 프레임을 채우세요.';
     }
     var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1};
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
