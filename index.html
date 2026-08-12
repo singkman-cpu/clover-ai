@@ -22905,106 +22905,22 @@ var FULL_SCENE_TRANSFORM_PRESETS = ['unfinished','autumn','winter','spring','sum
 function _shouldSkipColorCastFix(selK){
   return !!selK && FULL_SCENE_TRANSFORM_PRESETS.indexOf(selK)!==-1;
 }
-// ⚠️ 방식 전면 교체(요청 반영, "창문이 너무 많아서 브러시로 일일이 칠할 시간이 없다" + "예전엔
-// 전체 수정해도 톤이 안 바뀌었다"): 기존엔 "원본과 결과가 얼마나 다른지"를 색 평균으로만 재서
-// 전체 이미지에 보정 배율을 곱하는 방식이었음 — 이러면 편집 안 된 부분(하늘·나무·벽 등)도
-// 항상 재계산된 색으로 다시 칠해지기 때문에, 아무리 정교하게 계산해도 원본과 미세하게라도
-// 달라질 수밖에 없었음(그게 "필터 낀 느낌"의 근본 원인). 이제 발상을 바꿔서 — 사용자가 마스크를
-// 안 그렸어도, 원본과 AI 결과를 픽셀 단위로 직접 비교해서 "실제로 눈에 띄게 달라진 부분"만 자동
-// 으로 마스크로 잡고(예: 창문프레임 전부가 자동으로 잡힘, 개수가 몇 개든 브러시 작업 불필요),
-// 그 외 나머지 전체는 원본 픽셀을 그대로 복원해서 덮어씀. 즉 "AI가 실제로 고친 부분"만 결과를
-// 쓰고 "AI가 안 건드리려고 한 부분"은 원본과 100% 동일한 픽셀로 강제 복원 — 톤이 달라질 여지
-// 자체가 없어짐(사용자가 직접 마스크를 그린 경우와 원리적으로 동일).
+// ⚠️ 요청 반영(되돌림, 중요): 이 자리에 있던 "픽셀 단위 비교로 바뀐 부분만 자동으로 마스크
+// 잡기"(다운샘플 버전 포함 총 2차례 시도)를 완전히 제거하고 원래대로(보정 없음)로 되돌림.
+// 두 버전 다 실사용에서 실패했음 — 실측 로그 기준 변경 감지 비율이 61.5%, 다운샘플 버전도
+// 67.7%로 나왔는데, 이건 노이즈가 아니라 "이 edit API는 마스크가 없으면 매번 사진 전체를
+// 실제로 다시 그리면서 전체적인 톤·노출 자체가 광범위하게(하지만 보통 눈에 크게 거슬리지
+// 않을 정도로 미묘하게) 달라진다"는 뜻이었음. 이 상태에서 "바뀐 부분만 오려서 원본 위에
+// 덮어씌우는" 합성을 하면, 원본 그대로 남은 영역과 AI가 다시 그린 영역의 경계에서 톤 차이가
+// 만나 검은 그림자/줄처럼 보이는 이음새 아티팩트가 새로 생겨버림(사용자가 실제로 발견) — 즉
+// 원래 있던 "약한 톤 변화" 문제보다 "뚜렷한 이음새" 문제가 더 눈에 띄는, 개악이었음. 마스크
+// 없는 편집에서 "특정 부분만 보호"하려는 시도 자체가 이 API의 동작 방식과 근본적으로 안 맞고,
+// 이 문제를 코드로 완전히 해결하려면 실제 마스크(사용자가 브러시로 그리거나, 자동 객체 인식
+// 같은 훨씬 큰 작업)가 필요함 — 지금은 보정을 아예 하지 않고 AI 결과를 그대로 쓰는 게 가장
+// 부작용이 적은 선택. (마스크를 실제로 그린 편집은 이 함수를 안 거치고 _compositeMaskedResult
+// 로 여전히 정확하게 보호됨 — 이 함수는 마스크가 없는 경우의 최후 폴백일 뿐임.)
 function _neutralizeEditColorCast(origUrl, resultUrl, cb){
-  if(!origUrl || !resultUrl){ cb(resultUrl); return; }
-  try{
-    var oImg=new Image(), rImg=new Image();
-    oImg.crossOrigin='anonymous'; rImg.crossOrigin='anonymous';
-    var loaded=0, failed=false;
-    function onFail(){
-      if(failed) return; failed=true;
-      cb(resultUrl); // 로드 실패 시 원본 결과 그대로
-    }
-    function bothLoaded(){
-      if(failed) return;
-      loaded++;
-      if(loaded<2) return;
-      try{
-        var W=rImg.naturalWidth||oImg.naturalWidth, H=rImg.naturalHeight||oImg.naturalHeight;
-        if(!W||!H){ cb(resultUrl); return; }
-        // ⚠️ 버그 수정("2K로 했는데 원본보다 화질이 더 안 좋다", 실측 61.5%가 "변경됨"으로 잡힘):
-        // 화소 단위(픽셀 하나하나)로 diff를 재면, 나무 잎사귀·돌벽 그라우트 같은 "고주파 텍스처"
-        // 영역은 AI가 다시 그릴 때마다 결이 미세하게 달라지는데(같은 돌벽이라도 조약돌 하나하나
-        // 위치·질감이 살짝 다르게 재생성됨) 이 미세한 차이만으로도 화소 단위 임계값을 쉽게 넘어서,
-        // 실제로는 안 바뀐 거나 다름없는 나무·돌벽 같은 큰 영역까지 "변경됨"으로 잘못 잡혀서 AI
-        // 재생성본(원본 사진보다 디테일이 무른 경우가 많음)으로 대체돼버림 — 그래서 픽셀 수(해상도)
-        // 는 늘었는데 체감 화질(선명도)은 오히려 떨어지는 부작용이 생김. 이제 원본 해상도가 아니라
-        // 훨씬 작게 축소한 버전끼리 diff를 재서(다운샘플링 자체가 저주파 필터 역할을 해서 이런
-        // 화소 단위 노이즈는 자연히 뭉개짐), 창틀 색처럼 "공간적으로 뭉쳐서 나타나는 진짜 변화"만
-        // 잡히게 함 — 그만큼 원본의 선명한 디테일이 더 많이 보존됨.
-        var DS = 160; // diff 계산용 축소 크기(짧은 변 기준) — 화소 단위 노이즈를 걸러내기에 충분히 작으면서, 창틀 정도 크기의 변화는 여전히 잡을 만큼 큼
-        var dsScale = DS / Math.min(W,H);
-        var dsW = Math.max(8, Math.round(W*dsScale)), dsH = Math.max(8, Math.round(H*dsScale));
-        var oSmallCv=document.createElement('canvas'); oSmallCv.width=dsW; oSmallCv.height=dsH;
-        var osctx=oSmallCv.getContext('2d'); osctx.drawImage(oImg,0,0,dsW,dsH);
-        var rSmallCv=document.createElement('canvas'); rSmallCv.width=dsW; rSmallCv.height=dsH;
-        var rsctx=rSmallCv.getContext('2d'); rsctx.drawImage(rImg,0,0,dsW,dsH);
-        var oSData=osctx.getImageData(0,0,dsW,dsH).data;
-        var rSData=rsctx.getImageData(0,0,dsW,dsH).data;
-        // 다운샘플 단계에서 이미 화소 단위 노이즈가 평균으로 뭉개졌으니, 임계값은 원래보다
-        // 조금 더 엄격하게(작게) 잡아도 노이즈 오탐이 안 생김 — 대신 진짜 변화는 더 뚜렷하게 잡힘.
-        var THRESH = 26; // 채널 합 차이(0~765 범위) 임계값 — 다운샘플된 값 기준
-        var maskSmallCv=document.createElement('canvas'); maskSmallCv.width=dsW; maskSmallCv.height=dsH;
-        var mctx=maskSmallCv.getContext('2d');
-        var maskImgData=mctx.createImageData(dsW,dsH);
-        var md=maskImgData.data;
-        var changedCount=0;
-        for(var p=0;p<oSData.length;p+=4){
-          var diff = Math.abs(oSData[p]-rSData[p]) + Math.abs(oSData[p+1]-rSData[p+1]) + Math.abs(oSData[p+2]-rSData[p+2]);
-          var a = diff>THRESH ? 255 : 0;
-          if(a) changedCount++;
-          md[p]=255; md[p+1]=255; md[p+2]=255; md[p+3]=a;
-        }
-        mctx.putImageData(maskImgData,0,0);
-        var totalSmallPx = oSData.length/4;
-        if(changedCount<3){
-          // 사실상 아무것도 안 바뀐 경우(AI가 요청한 편집조차 감지 안 될 만큼 미세) — 그냥 원본 결과 사용
-          console.warn('[edit] 자동 변경 영역이 거의 감지되지 않음('+changedCount+'/'+totalSmallPx+') — 요청한 편집이 실제로 적용됐는지 확인이 필요할 수 있음. 원본 결과 그대로 사용.');
-          cb(resultUrl); return;
-        }
-        // 마스크를 원본 해상도(W×H)로 확대(자연스러운 보간으로 1차 페더링) + 살짝 더 블러(경계 매끈하게)
-        var fullMaskCv=document.createElement('canvas'); fullMaskCv.width=W; fullMaskCv.height=H;
-        var fmctx=fullMaskCv.getContext('2d');
-        fmctx.imageSmoothingEnabled=true;
-        fmctx.drawImage(maskSmallCv,0,0,W,H);
-        var blurCv=document.createElement('canvas'); blurCv.width=W; blurCv.height=H;
-        var bctx=blurCv.getContext('2d');
-        bctx.filter='blur(4px)';
-        bctx.drawImage(fullMaskCv,0,0);
-        // 결과 이미지를 이 블러 마스크로 잘라내서(편집된 부분만 남기고), 원본 위에 겹침 —
-        // 마스크 밖(대부분의 사진)은 원본 픽셀 그대로, 마스크 안(실제 편집된 부분)만 AI 결과.
-        var rCv=document.createElement('canvas'); rCv.width=W; rCv.height=H;
-        var rctx=rCv.getContext('2d'); rctx.drawImage(rImg,0,0,W,H);
-        rctx.globalCompositeOperation='destination-in';
-        rctx.drawImage(blurCv,0,0);
-        rctx.globalCompositeOperation='source-over';
-        var outCv=document.createElement('canvas'); outCv.width=W; outCv.height=H;
-        var octx2=outCv.getContext('2d');
-        octx2.drawImage(oImg,0,0,W,H);
-        octx2.drawImage(rCv,0,0);
-        console.log('[edit] 자동 변경 영역 감지(다운샘플 '+dsW+'x'+dsH+' 기준): '+changedCount+'/'+totalSmallPx+'블록('+(changedCount/totalSmallPx*100).toFixed(1)+'%) — 편집 안 된 나머지는 원본 픽셀로 복원(톤 변화·화질 저하 원천 차단)');
-        cb(outCv.toDataURL('image/jpeg',0.95));
-      }catch(e){
-        console.warn('[edit] 자동 변경영역 마스크 복원 실패(CORS 등) — 원본 결과 그대로 사용:', e.message);
-        cb(resultUrl);
-      }
-    }
-    oImg.onload=bothLoaded; rImg.onload=bothLoaded;
-    oImg.onerror=onFail; rImg.onerror=onFail;
-    oImg.src=origUrl; rImg.src=resultUrl;
-  }catch(e){
-    cb(resultUrl);
-  }
+  cb(resultUrl);
 }
 function urlToDataUrl(url, cb) {
   // fal.ai CDN URL: img src로 직접 표시 가능 → canvas 변환 불필요
