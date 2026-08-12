@@ -22744,8 +22744,15 @@ function _doUploadFile(file, onDone, onErr){
 // 이미지 전체에 반대 방향으로 역보정을 걸어 색 온도 드리프트(특히 붉은/주황 쪽으로 치우침)를
 // 중화시킴. fal.ai 결과 이미지는 다른 도메인(CORS)이라 픽셀을 못 읽을 수도 있는데, 그 경우엔
 // 조용히 원본 결과를 그대로 반환해서(보정 실패가 렌더링 자체를 막지 않도록) 안전하게 폴백함.
-function _neutralizeEditColorCast(origUrl, resultUrl, cb){
+function _neutralizeEditColorCast(origUrl, resultUrl, cb, promptText){
   if(!origUrl || !resultUrl){ cb(resultUrl); return; }
+  // ⚠️ 요청 반영("창문 프레임 색만 바꿔달라고 했는데 사진 전체 톤이 바뀐다"): 이 보정은 "가장자리는
+  // 편집 안 됐을 것"이라고 가정하고 그 부분 색을 기준으로 삼는데, "모든 창문을 우드컬러로"처럼
+  // 사진 곳곳(가장자리 포함)에 넓게 퍼진 요소를 바꾸는 요청이면 가장자리도 이미 편집된 상태라
+  // 그 가정이 깨짐 — 편집된 픽셀을 "원본 기준"으로 잘못 표본삼아 오히려 과한 보정을 걸고 있었음.
+  // 프롬프트에 "모든/전체/다/전부"처럼 넓은 범위를 가리키는 표현이 있으면 보정 폭을 훨씬 보수적으로
+  // (오작동 위험을 줄이는 쪽으로) 좁힘.
+  var _isBroadEdit = !!(promptText && /(모든|전체|다\s|전부|사방|이곳저곳)/.test(promptText));
   try{
     var oImg=new Image(), rImg=new Image();
     oImg.crossOrigin='anonymous'; rImg.crossOrigin='anonymous';
@@ -22789,7 +22796,7 @@ function _neutralizeEditColorCast(origUrl, resultUrl, cb){
         }
         var avgO=sampleBorderAvg(oImg);
         var avgR=sampleBorderAvg(rImg);
-        function clampFactor(f){ return Math.max(0.65, Math.min(1.35, f)); } // 표본이 훨씬 안정적으로 넓어졌으니 보정 여유도 ±35%까지 넓힘
+        function clampFactor(f){ var lim=_isBroadEdit?0.90:0.65, lim2=_isBroadEdit?1.10:1.35; return Math.max(lim, Math.min(lim2, f)); }
         var fr=clampFactor(avgO.r/Math.max(1,avgR.r));
         var fg=clampFactor(avgO.g/Math.max(1,avgR.g));
         var fb=clampFactor(avgO.b/Math.max(1,avgR.b));
@@ -24433,12 +24440,12 @@ function procImgWithTask(task, onDone, onErr){
                       console.warn('[색 번짐 방지] 마스크 합성 실패 — 전체 색온도 보정으로 대체함(원인: CORS 등 이미지 로드 문제일 가능성)');
                       _neutralizeEditColorCast(img, resDataUrl||u, function(correctedUrl){
                         finishWithResize(correctedUrl || resDataUrl || u, onDone);
-                      });
+                      }, rp);
                     }
                   });
                 });
               } else {
-                _neutralizeEditColorCast(img,u,function(correctedUrl){finishWithResize(correctedUrl,onDone);});
+                _neutralizeEditColorCast(img,u,function(correctedUrl){finishWithResize(correctedUrl,onDone);}, rp);
               }
             },onErr, _bill);
         });
