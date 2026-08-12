@@ -17352,7 +17352,16 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed)
     return;
   }
   var img=imgCache[slide.img];
-  if(img)_shortsDrawImage(ctx,W,H,img,opts&&opts.fitMode,slide.zoom,slide.offX,slide.offY);
+  // ⚠️ 요청 반영("문구는 다 껐는데 레터박스 검은 띠는 왜 남아있냐"): 기존엔 레터박스(꽉 안 채우고
+  // 위아래 검은 여백을 두는 방식)가 "이 장면에 문구가 있냐 없냐"와 무관하게 opts.fitMode 설정
+  // 하나로만 정해져서, 문구를 완전히 꺼도(상단·하단 둘 다) 사진 자체의 원래 비율 때문에 생기는
+  // 검은 여백은 그대로 남아있었음 — 그런데 애초에 이 검은 여백은 "문구 넣을 자리"로 필요했던
+  // 거라, 문구가 아예 없는 장면이라면 그 자리도 필요 없음. 이제 이 장면의 상단·하단 문구가 둘 다
+  // 꺼져 있으면, 이 장면만 레터박스 대신 꽉채우기(cover, 여백 없이 프레임 전체를 사진으로 채움)로
+  // 자동 전환함 — 문구가 하나라도 켜져 있는 장면은 기존처럼 레터박스 그대로 유지됨.
+  var _bothTextOff = !!slide.skipTopText && !!slide.skipBottomText;
+  var _effFitMode = (opts && opts.fitMode==='contain' && _bothTextOff) ? 'cover' : (opts&&opts.fitMode);
+  if(img)_shortsDrawImage(ctx,W,H,img,_effFitMode,slide.zoom,slide.offX,slide.offY);
   // 레터박스에서 "레터박스 문구"(상단/하단 공통칸)를 실제로 채워뒀을 때만 그 전용 시스템을 쓰고,
   // 그게 비어있으면(꽉채우기이거나, 레터박스인데 이 공통칸을 안 쓰는 경우) 예전 "화면 문구 위치"
   // 선택 시스템으로 감 — 그 시스템도 레터박스일 땐 검은 여백을 자동으로 피해서 그려줌.
@@ -17362,11 +17371,11 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed)
   // 보이고 하단 브랜드 문구는 이미 이미지 안에 정보가 있어서 끄고 싶을 때).
   var _effTop = slide.skipTopText ? '' : (opts&&opts.topText);
   var _effBottom = slide.skipBottomText ? '' : (opts&&opts.bottomText);
-  if(opts&&opts.fitMode==='contain'&&(_effTop||_effBottom)){
+  if(_effFitMode==='contain'&&(_effTop||_effBottom)){
     _shortsDrawLetterboxText(ctx,W,H,img,_effTop,_effBottom,opts&&opts.fontFamily,opts.topTextColor,opts.bottomTextColor,opts.topCharColors,opts.bottomCharColors,opts.topTextScale,opts.bottomTextScale,revealCount);
     if(slide.label && opts.showSlideLabels!==false) _shortsDrawSlideLabelBadge(ctx,W,H,img,slide.label,opts&&opts.fontFamily,opts&&opts.textPos,!!_effTop,!!_effBottom);
   } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
-    _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,img,opts&&opts.fitMode);
+    _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,img,_effFitMode);
   }
 }
 
