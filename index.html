@@ -6585,6 +6585,27 @@ function makePi(q, g){
         var ok=_searchItemMatch(lbl?lbl.textContent:'', terms);
         if(ok){ pi.style.display=''; searchResultsGrid.appendChild(pi); totalMatch++; }
       });
+      // ⚠️ 요청 반영("현장사진 디자인에서 검색해도 가구 제거 같은 게 나오게 해줘, 프리셋 다
+      // 합쳐있게 해줘"): 지금까지는 검색이 지금 이 탭에 표시된 목록(list) 안에서만 이뤄져서,
+      // 예를 들어 "가구 제거"(furniture_remove)는 PS_EDIT(AI 편집)에만 있어서 현장사진
+      // 디자인(PS_SPACE)에서는 검색해도 안 나왔음 — 이제 다른 세 목록도 같이 뒤져서, 지금 이
+      // 목록에 없는 프리셋이어도 검색되면 카드로 즉석에서 만들어 같이 보여줌. 클릭하면 원래
+      // makePi 로직 그대로(_tab.selK에 그 키를 저장) 동작하고, 실제 생성 시점에는 이미 여러
+      // 곳에서 [].concat(PS_SPACE,PS_RENDER,PS_EDIT,PS_VIDEO)로 키를 찾고 있어서 탭이 달라도
+      // 정상적으로 그 프리셋 프롬프트가 적용됨.
+      var _seenKeys={};
+      _piHome.forEach(function(h){ if(h.el.dataset.k) _seenKeys[h.el.dataset.k]=true; });
+      [PS_SPACE,PS_RENDER,PS_EDIT,PS_VIDEO].forEach(function(arr){
+        if(arr===list) return; // 이미 위에서 처리됨
+        arr.forEach(function(q){
+          if(_seenKeys[q.k]) return;
+          if(_searchItemMatch(q.l, terms)){
+            _seenKeys[q.k]=true;
+            makePi(q, searchResultsGrid);
+            totalMatch++;
+          }
+        });
+      });
       searchResultsGrid.style.display = totalMatch>0 ? 'grid' : 'none';
       searchCount.style.display='block';
       searchCount.textContent = totalMatch>0 ? ('\u2713 '+totalMatch+'\uAC1C \uD504\uB9AC\uC14B\uC744 \uCC3E\uC558\uC5B4\uC694') : '\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC5B4\uC694. \uB2E4\uB978 \uB2E8\uC5B4\uB85C \uCC3E\uC544\uBCF4\uC138\uC694.';
@@ -9748,6 +9769,21 @@ function sbSpace(p){
     rjBtn.onclick=function(){ _startRenovationJourneyShorts(); };
     rjWrap.appendChild(rjTitle);rjWrap.appendChild(rjDesc);rjWrap.appendChild(rjBtn);
     p.appendChild(rjWrap);
+    // ⚠️ 요청 반영("인테리어 업체 찾아가기 전에 10~20가지 컨셉을 훑어보고 싶다"): 사진 한 장으로
+    // 미리 만들어둔 트렌드 스타일 10종을 한꺼번에(저해상도로 빠르게) 보여주는 "스타일북" 갤러리.
+    // 각 카드에서 "이 스타일로 자세히 만들기"를 누르면 그 프리셋이 선택된 채로 사이드바로
+    // 돌아와서, 사용자가 직접 고해상도로 다시 실행하고 AI 편집으로 더 다듬을 수 있음.
+    var sbWrap=dv('');sbWrap.style.cssText='margin:14px 0;padding:12px;border-radius:12px;border:1px dashed var(--acb);background:rgba(110,231,183,.06)';
+    var sbTitle=dv('');sbTitle.style.cssText='font-size:12.5px;font-weight:700;color:var(--ac);margin-bottom:4px';
+    sbTitle.textContent='🎨 스타일북 (베타)';
+    var sbDesc=dv('');sbDesc.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.5;margin-bottom:8px';
+    sbDesc.textContent='이 사진으로 요즘 트렌드 10가지 스타일을 한 번에 빠르게 미리보기로 만들어드려요. 인테리어 업체를 찾아가기 전, 혹은 셀프 인테리어 방향을 정하기 전에 컨셉을 훑어보는 용도예요. 마음에 드는 걸 고르면 그 스타일로 고해상도로 다시 만들 수 있어요. (미리보기 10장 = 요약 해상도로 진행, 시간이 좀 걸려요)';
+    var sbBtn=mk('button','');sbBtn.type='button';sbBtn.id='stylebook-btn';
+    sbBtn.textContent='🎨 스타일북 10가지 미리보기 만들기';
+    sbBtn.style.cssText='width:100%;padding:10px;border-radius:10px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    sbBtn.onclick=function(){ _startStyleBook(); };
+    sbWrap.appendChild(sbTitle);sbWrap.appendChild(sbDesc);sbWrap.appendChild(sbBtn);
+    p.appendChild(sbWrap);
   }
 }
 // ⚠️ "리모델링 여정 쇼츠" 오케스트레이션: 업로드된 사진 하나로 노후→공사중→완공 3장을 순서대로
@@ -9770,8 +9806,14 @@ function _startRenovationJourneyShorts(){
   var STAGE2_PROMPT = (stage2Preset ? stage2Preset.pt : 'Transform the scene into a realistic unfinished construction state, exposing raw concrete and unpainted materials, while maintaining original architecture and camera angle.') + NO_BLUR_RULE;
 
   var selectedPreset = spTab.selK ? [].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===spTab.selK;}) : null;
-  var hqRealPreset = PS_RENDER.find(function(x){return x.k==='hq_real';});
-  var STAGE3_PROMPT = (selectedPreset ? selectedPreset.pt : (hqRealPreset ? hqRealPreset.pt : 'Redesign this space with a modern, high-quality renovation.'));
+  // ⚠️ 버그 수정("실사화는 3D 스케치를 사진처럼 보여주기만 하는 거지 재디자인이 아닌데 왜
+  // 기본값으로 썼냐"): 맞는 지적 — hq_real(실사화)은 프롬프트 안에 "Do NOT redesign. Do NOT
+  // modify materials. Do NOT change colors. Do NOT replace furniture."가 명시된, 원본을 거의
+  // 그대로 유지하는 프리셋임. 프리셋을 안 고르고 이 버튼을 누르면 "완공" 단계가 "노후" 단계랑
+  // 거의 똑같이 나왔을 것 — 완전히 잘못된 기본값이었음. 실제로 새로 디자인하는 범용 리모델링
+  // 문구로 교체함(구조는 유지하되 벽·바닥·가구·조명은 전부 새 것으로 바꾸는 지시).
+  var GENERIC_REDESIGN_PROMPT = 'Fully redesign this space with a clean, modern, high-quality full renovation — replace the wall finish, floor finish, ceiling/lighting fixtures, and all furniture with fresh, current, well-designed materials and pieces (a tasteful modern-minimal or contemporary Korean interior/exterior style), so it reads as a completely finished, freshly renovated space, not the same dated materials with a filter. Keep the exact same wall structure, ceiling, floor boundaries, room/building dimensions, and the exact number/position/size of all windows and doors as the original photo — only the finishes, fixtures and furnishings change. CRITICAL — PRESERVE EXACT CAMERA ANGLE AND COMPOSITION: the camera viewpoint, focal length, perspective angle, framing, and composition must remain absolutely identical to the original photo.';
+  var STAGE3_PROMPT = selectedPreset ? selectedPreset.pt : GENERIC_REDESIGN_PROMPT;
   if(spTab.prompt && !selectedPreset) STAGE3_PROMPT += ' ' + spTab.prompt;
   STAGE3_PROMPT += NO_BLUR_RULE + NO_BRAND_TRADEMARK_RULE + PREMIUM_QUALITY_RULE;
 
@@ -9804,7 +9846,108 @@ function _startRenovationJourneyShorts(){
     });
   });
 }
-// ── 여러 공간 세트로 디자인 — "참조 이미지 유지" 기능 ────────────────────
+// ── 스타일북: 사진 한 장으로 트렌드 스타일 10종을 한 번에 미리보기 ──────────
+var STYLEBOOK_PRESET_KEYS = ['trend_warm_minimalism','trend_collected_interior','trend_neo_deco','trend_color_drenching','trend_high_gloss','trend_sculptural_furniture','trend_craft_revival','trend_biophilic2','trend_afrohemian','trend_playful_interior'];
+function _startStyleBook(){
+  var spTab = getTab('space');
+  var srcImg = spTab.inputImg;
+  if(!srcImg){ alert('먼저 현장사진을 업로드해주세요.'); return; }
+  var btn = gE('stylebook-btn');
+  function setBtnText(t){ if(btn){ btn.disabled=true; btn.textContent=t; } }
+  var allPS=[].concat(PS_SPACE,PS_RENDER,PS_EDIT,PS_VIDEO);
+  var jobs = STYLEBOOK_PRESET_KEYS.map(function(k){
+    var preset = allPS.find(function(x){return x.k===k;});
+    return {k:k, l:preset?preset.l:k, pt:preset?preset.pt:''};
+  }).filter(function(j){ return j.pt; });
+  var results = new Array(jobs.length);
+  var doneCount = 0, failCount = 0;
+  setBtnText('⏳ 0/'+jobs.length+' 스타일 생성 중...');
+  // ⚠️ 10개를 전부 동시에 쏘면 브라우저·API 양쪽에 부담이 크니, 3개씩 묶어서 진행(속도와
+  // 안정성의 절충) — 하나 끝날 때마다 다음 걸 새로 채워 넣는 간단한 큐 방식.
+  var CONCURRENCY = 3;
+  var nextIdx = 0;
+  function launchNext(){
+    if(nextIdx>=jobs.length) return;
+    var i = nextIdx++;
+    var job = jobs[i];
+    falRun('fal-ai/nano-banana-2/edit', {prompt: job.pt, image_urls:[srcImg], aspect_ratio:'3:4', num_images:1}, function(d){
+      var url = falExtractImageUrl(d);
+      results[i] = url ? {k:job.k, l:job.l, url:url} : {k:job.k, l:job.l, url:null, error:true};
+      if(!url) failCount++;
+      afterOne();
+    }, function(err){
+      results[i] = {k:job.k, l:job.l, url:null, error:true};
+      failCount++;
+      afterOne();
+    }, {wf:'space', resolution:'1K'});
+  }
+  function afterOne(){
+    doneCount++;
+    setBtnText('⏳ '+doneCount+'/'+jobs.length+' 스타일 생성 중...');
+    if(doneCount>=jobs.length){
+      setBtnText('🎨 스타일북 10가지 미리보기 만들기');
+      if(btn) btn.disabled=false;
+      _showStyleBookGallery(results.filter(function(r){return r;}));
+      return;
+    }
+    launchNext();
+  }
+  for(var c=0;c<Math.min(CONCURRENCY,jobs.length);c++) launchNext();
+}
+function _showStyleBookGallery(results){
+  var overlay=dv('');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  var panel=dv('');
+  panel.style.cssText='background:var(--card,#161616);border-radius:16px;max-width:1000px;width:100%;max-height:90vh;overflow-y:auto;padding:20px';
+  var head=dv('');head.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:14px';
+  var htitle=dv('');htitle.style.cssText='font-size:16px;font-weight:800;color:var(--t)';
+  var okCount=results.filter(function(r){return r.url;}).length;
+  htitle.textContent='🎨 스타일북 — '+okCount+'/'+results.length+'가지 완성';
+  var closeBtn=mk('button','');closeBtn.type='button';closeBtn.textContent='✕ 닫기';
+  closeBtn.style.cssText='padding:6px 12px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);cursor:pointer;font-size:12px';
+  closeBtn.onclick=function(){ overlay.remove(); };
+  head.appendChild(htitle);head.appendChild(closeBtn);
+  panel.appendChild(head);
+  var hint=dv('');hint.style.cssText='font-size:11px;color:var(--m2);margin-bottom:14px';
+  hint.textContent='마음에 드는 스타일의 "이 스타일로 자세히 만들기"를 누르면, 그 프리셋이 선택된 채로 돌아가서 고해상도로 다시 만들 수 있어요.';
+  panel.appendChild(hint);
+  var grid=dv('');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px';
+  results.forEach(function(r){
+    var card=dv('');card.style.cssText='border-radius:12px;overflow:hidden;border:1px solid var(--bd2);background:var(--bg2,#111)';
+    if(r.url){
+      var img=mk('img','');img.src=r.url;img.style.cssText='width:100%;aspect-ratio:3/4;object-fit:cover;display:block;cursor:pointer';
+      img.onclick=function(){ _openImageLightbox(r.url); };
+      card.appendChild(img);
+    } else {
+      var errBox=dv('');errBox.style.cssText='width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;color:var(--m2);font-size:11px;text-align:center;padding:10px';
+      errBox.textContent='생성 실패 — 다시 시도해주세요';
+      card.appendChild(errBox);
+    }
+    var lblRow=dv('');lblRow.style.cssText='padding:8px 10px 4px;font-size:12px;font-weight:700;color:var(--t)';
+    lblRow.textContent=r.l;
+    card.appendChild(lblRow);
+    if(r.url){
+      var pickBtn=mk('button','');pickBtn.type='button';pickBtn.textContent='이 스타일로 자세히 만들기 →';
+      pickBtn.style.cssText='width:calc(100% - 20px);margin:6px 10px 10px;padding:7px;border-radius:8px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+      pickBtn.onclick=function(k){
+        return function(){
+          var spTab=getTab('space');
+          spTab.selK=k;
+          spTab.prompt='';
+          overlay.remove();
+          renderSB();
+          try{ _showPresetHints(spTab); }catch(e){}
+        };
+      }(r.k);
+      card.appendChild(pickBtn);
+    }
+    grid.appendChild(card);
+  });
+  panel.appendChild(grid);
+  overlay.appendChild(panel);
+  overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
 // 거실/주방/욕실/침실 등 같은 집의 여러 방 사진을 한꺼번에 넣으면, 사용자가 올린 "참고 디자인
 // 이미지"(필수) 하나만 보고 모든 방이 각자 독립적으로 마감재·색감·조명톤·소품·가구 톤을 맞춤.
 // 공간 카테고리별 목록 — 검색 조사 결과 반영:
