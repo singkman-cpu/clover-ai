@@ -9730,6 +9730,79 @@ function sbSpace(p){
   mkTA(p,'예: 모던 미니멀, 북유럽 스타일, 조명 따뜻하게...');
   mkPre(p,PS_SPACE);
   mkSl(p,'Creativity','c0',-10,10);mkSl(p,'HDR','h0',-10,10);mkSl(p,'Resemblance','r0',-10,10);mkSl(p,'Fractality','f0',-10,10);
+  // ⚠️ 요청 반영("세상에 아직 없는 것" 신규 기능): 이미 있는 조각들(노후 프리셋, "미완성 공사중"
+  // 프리셋, 지금 선택된 리모델링 스타일, 쇼츠 자동 조립)을 한 번에 엮어서, 사진 한 장으로
+  // "기존(노후) → 공사중 → 완공" 3단계 스토리를 원클릭으로 만들고 바로 쇼츠 탭으로 넘겨서
+  // 검토·수정 후 영상으로 뽑을 수 있게 하는 베타 기능. 인테리어 업체 마케팅용 "리모델링 여정"
+  // 릴스에 바로 쓸 수 있는 걸 노림 — 경쟁 서비스 조사에서 이런 원클릭 3단계 스토리 자동화는
+  // 못 찾음(다들 before/after 2컷 비교까지만 지원).
+  if(spTab.inputImg){
+    var rjWrap=dv('');rjWrap.style.cssText='margin:14px 0;padding:12px;border-radius:12px;border:1px dashed var(--acb);background:rgba(110,231,183,.06)';
+    var rjTitle=dv('');rjTitle.style.cssText='font-size:12.5px;font-weight:700;color:var(--ac);margin-bottom:4px';
+    rjTitle.textContent='🎬 리모델링 여정 쇼츠 (베타)';
+    var rjDesc=dv('');rjDesc.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.5;margin-bottom:8px';
+    rjDesc.textContent='이 사진 한 장으로 "기존(노후) → 공사중 → 완공" 3단계를 자동 생성해서 쇼츠로 이어드려요. 완공 단계는 지금 선택된 프리셋/프롬프트를 그대로 씁니다. 3장 다 생성한 뒤 쇼츠 탭으로 이동해서 검토·수정할 수 있어요.';
+    var rjBtn=mk('button','');rjBtn.type='button';rjBtn.id='renojourney-btn';
+    rjBtn.textContent='🎬 리모델링 여정 쇼츠 만들기';
+    rjBtn.style.cssText='width:100%;padding:10px;border-radius:10px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    rjBtn.onclick=function(){ _startRenovationJourneyShorts(); };
+    rjWrap.appendChild(rjTitle);rjWrap.appendChild(rjDesc);rjWrap.appendChild(rjBtn);
+    p.appendChild(rjWrap);
+  }
+}
+// ⚠️ "리모델링 여정 쇼츠" 오케스트레이션: 업로드된 사진 하나로 노후→공사중→완공 3장을 순서대로
+// 생성한 뒤, 쇼츠 탭(G_SHORTS.images)에 라벨을 붙여 넣고 그 탭으로 이동함 — 사용자가 결과를
+// 확인하고 마음에 안 들면 개별 장면을 손보거나 지울 수 있음(바로 영상으로 렌더링하지 않음).
+function _startRenovationJourneyShorts(){
+  var spTab = getTab('space');
+  var srcImg = spTab.inputImg;
+  if(!srcImg){ alert('먼저 현장사진을 업로드해주세요.'); return; }
+  var resolution = spTab.resolution || '1K';
+  var aspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
+  var btn = gE('renojourney-btn');
+  function setBtnText(t){ if(btn){ btn.disabled=true; btn.textContent=t; } }
+  setBtnText('⏳ 1/3: 노후 상태 생성 중...');
+
+  var AGING_PROMPT = ' PHOTOREALISM IS MANDATORY: the result must look like an actual photograph, never a painting, illustration, or CGI-looking render. CRITICAL — STILL IN USE, NOT ABANDONED: this must look like an ordinary old space that is still actively used every day (whether an interior room or a building exterior) — not derelict, filthy, fire-damaged, or unsafe. Keep the space clean, intact and functional, just visibly dated and worn by roughly 20-30 years of normal use — the kind of space right before a full renovation, not condemned. Age the surface materials and finishes realistically: dated wallpaper/paint or an aged exterior facade material, worn flooring or pavement, an outdated ceiling light fixture or aged roofline, dated fixtures and hardware — but do NOT add dark streaks, mold, soot, large cracks, or rust; keep every surface clean and evenly worn, not decayed. ⚠️ THIS PHOTO IS TAKEN TODAY — do not turn any people, cars, or movable objects into vintage/period versions; only the space itself should read as dated. CRITICAL — PRESERVE THE EXACT SAME STRUCTURE: keep the exact same wall positions, window/door positions and sizes, room or building shape, and camera angle/framing as the original photo — only age the surface materials and finishes, do not redesign the architecture.';
+  AGING_PROMPT += NO_BLUR_RULE;
+
+  var stage2Preset = PS_RENDER.find(function(x){return x.k==='unfinished';});
+  var STAGE2_PROMPT = (stage2Preset ? stage2Preset.pt : 'Transform the scene into a realistic unfinished construction state, exposing raw concrete and unpainted materials, while maintaining original architecture and camera angle.') + NO_BLUR_RULE;
+
+  var selectedPreset = spTab.selK ? [].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===spTab.selK;}) : null;
+  var hqRealPreset = PS_RENDER.find(function(x){return x.k==='hq_real';});
+  var STAGE3_PROMPT = (selectedPreset ? selectedPreset.pt : (hqRealPreset ? hqRealPreset.pt : 'Redesign this space with a modern, high-quality renovation.'));
+  if(spTab.prompt && !selectedPreset) STAGE3_PROMPT += ' ' + spTab.prompt;
+  STAGE3_PROMPT += NO_BLUR_RULE + NO_BRAND_TRADEMARK_RULE + PREMIUM_QUALITY_RULE;
+
+  var results = {};
+  function runStage(promptText, stageKey, onOk){
+    falRun('fal-ai/nano-banana-2/edit', {prompt: promptText, image_urls:[srcImg], aspect_ratio: aspect, num_images:1}, function(d){
+      var url = falExtractImageUrl(d);
+      if(!url){ alert(stageKey+' 단계 생성에 실패했습니다(이미지 URL 없음). 다시 시도해주세요.'); setBtnText('🎬 리모델링 여정 쇼츠 만들기'); if(btn) btn.disabled=false; return; }
+      results[stageKey] = url;
+      onOk();
+    }, function(err){
+      alert(stageKey+' 단계 생성 실패: '+String(err).slice(0,150));
+      setBtnText('🎬 리모델링 여정 쇼츠 만들기'); if(btn) btn.disabled=false;
+    }, {wf:'space', resolution: resolution});
+  }
+
+  runStage(AGING_PROMPT, 'before', function(){
+    setBtnText('⏳ 2/3: 공사중 상태 생성 중...');
+    runStage(STAGE2_PROMPT, 'construction', function(){
+      setBtnText('⏳ 3/3: 완공 디자인 생성 중...');
+      runStage(STAGE3_PROMPT, 'after', function(){
+        if(!G_SHORTS.images) G_SHORTS.images=[];
+        var baseId = Date.now();
+        G_SHORTS.images.push({id:baseId+1, img:results.before, orig:null, role:'auto', autoRole:null, customLabel:'기존(노후)', source:'renovation_journey', skipTopText:false, skipBottomText:true});
+        G_SHORTS.images.push({id:baseId+2, img:results.construction, orig:null, role:'auto', autoRole:null, customLabel:'공사중', source:'renovation_journey', skipTopText:false, skipBottomText:true});
+        G_SHORTS.images.push({id:baseId+3, img:results.after, orig:null, role:'auto', autoRole:null, customLabel:'완공', source:'renovation_journey', skipTopText:false, skipBottomText:true});
+        selectWF('shorts');
+        renderMain('shorts');
+      });
+    });
+  });
 }
 // ── 여러 공간 세트로 디자인 — "참조 이미지 유지" 기능 ────────────────────
 // 거실/주방/욕실/침실 등 같은 집의 여러 방 사진을 한꺼번에 넣으면, 사용자가 올린 "참고 디자인
