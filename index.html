@@ -14182,8 +14182,10 @@ function _shortsHasCustomLabel(im){
   return !!(im.customLabel && im.customLabel.trim());
 }
 function _shortsIsUsable(im){
-  if(im.type==='blank') return true; // 빈 페이지는 역할·문구가 없어도 항상 유효한 장면
-  return !!_shortsResolvedRole(im) || _shortsHasCustomLabel(im);
+  // ⚠️ 위 _shortsBuildSlides 수정과 짝을 맞춤: 역할 미지정 이미지도 이제 "기타 장면"으로 영상에
+  // 실제로 포함되므로, 여기서도 항상 사용 가능으로 표시해서 화면(주황 경고 테두리)과 실제
+  // 동작이 어긋나지 않게 함.
+  return true;
 }
 // 빈 페이지용 작은 미리보기 썸네일(단색 사각형) 생성 — 사이드바 목록의 <img> 썸네일 자리에 그대로 씀
 function _shortsMakeBlankThumb(color){
@@ -14208,8 +14210,12 @@ function _shortsBuildSlides(){
     }
     var r=_shortsResolvedRole(im);
     var custom=_shortsHasCustomLabel(im);
-    if(!r && !custom)return;
-    var lbl=custom?im.customLabel.trim():_shortsRoleLabel(r);
+    // ⚠️ 버그 수정("쇼츠 이미지 불러온 게 다른 거 하다가 와도 남아있었는데, 역할 미지정이라고
+    // 지워진 건가?"): 맞았음 — 지금까지 역할도 안 잡히고(자동감지 실패) 커스텀 문구도 안 적힌
+    // 이미지는 여기서 그냥 return되어 실제 영상 생성 시 통째로 빠지고 있었음. 썸네일 목록에는
+    // 계속 보이니까 "화면엔 있는데 영상엔 없다"는 혼란을 줬을 것. 이제 역할이 없어도 절대
+    // 빼지 않고, 라벨만 "기타 장면"으로 넣어서 영상에 포함시킴.
+    var lbl = custom ? im.customLabel.trim() : (r ? _shortsRoleLabel(r) : '기타 장면');
     var vidDuration = im.isVideo ? ((im.trimEnd!=null && im.trimStart!=null) ? Math.max(0.2, im.trimEnd-im.trimStart) : im.duration) : im.duration;
     slides.push({type:'slide', img:im.img, label:lbl, role:r, zoom:im.coverZoom||1, offX:im.coverOffX||0, offY:im.coverOffY||0,
       isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.trimStart||0):0,
