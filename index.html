@@ -11847,6 +11847,17 @@ function _padExteriorTo916WithBlur(url, cb){
     // 다운그레이드를 제거함 — 대신 아래에서 9:16+건축외관 조합일 때 겹침 방지 문구를 한 번 더
     // 강하게 추가해서 프롬프트만으로 최대한 막아봄(_looseP 뒤쪽에서 처리).
     var _looseP = '';
+    // ⚠️ 버그 수정("투시뷰랑 파사드뷰 만들었는데 왜 똑같은 이미지가 나오지?"): 원인 발견 — 이
+    // 순수 생성 경로(noDirectMatch, 즉 그 뷰 전용 참고사진이 없어서 텍스트로만 새로 만드는
+    // 경우)에는 EXTERIOR_VIEW_PROMPTS(뷰 종류별 카메라 앵글 지시문, 예: "파사드뷰는 좌우대칭
+    // 정면 입면도처럼", "투시뷰는 사람 눈높이 보행자 시점으로")가 아예 프롬프트에 안 들어가고
+    // 있었음 — 그래서 파사드뷰든 투시뷰든 카메라 앵글에 대한 지시를 전혀 못 받고 그냥 AI가
+    // "적당히 괜찮아 보이는 외관 샷"을 매번 비슷하게 골라서, 뷰 이름은 다른데 결과가 똑같아
+    // 보였던 것. 건축 외관일 때 이 지시를 최우선으로 맨 앞에 추가함.
+    if(_isExteriorViewType(typeName)){
+      var _viewInstrLoose = EXTERIOR_VIEW_PROMPTS[typeName] || ('이 사진은 "'+typeName+'" 앵글로 촬영된 건물 외관 사진이어야 합니다.');
+      _looseP += ' ⚠️⚠️⚠️ 카메라 앵글(가장 중요, 반드시 지키세요): ' + _viewInstrLoose;
+    }
     // ⚠️ 버그 수정: "선택 해제하고 다시 선택해서 렌더링하면 기존이랑 느낌이 다르다"는 지적 —
     // "영감만 얻기"를 순수 텍스트 생성으로 바꾸면서 참고 이미지를 아예 다 뺐는데, 그 바람에
     // "이 세트 안에서 이미 만든 것들과 같은 느낌 유지"에 필요한 참고까지 같이 사라졌음(텍스트
@@ -11914,6 +11925,19 @@ function _padExteriorTo916WithBlur(url, cb){
       _looseRefs = _otherAnchorRefs.concat(_looseRefs).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
       if(_otherAnchorRefs.length){
         _looseP = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 공간(같은 집 또는 같은 상업공간)" 안의 다른 구역(예: 거실·주방, 또는 매장의 다른 구역) 사진입니다. 이 공간은 지금 만드는 방과 물리적으로 같은 건물·같은 세대(또는 같은 매장) 안에 있으므로, 다음 두 가지를 명확히 구분해서 지키세요: (1) 마감재·구조적 요소(벽 색상·마감재 종류, 천장 마감·색상, 바닥재 종류·색상·패턴, 문의 색상·소재·손잡이 디자인, 창호 프레임 색상, 몰딩·걸레받이 같은 디테일, 전체 조명 기구 디자인 언어)는 이 참고 이미지를 "그대로" 따라가세요 — 이건 반영도 설정과 무관하게 항상 참고 이미지 기준이며, 방마다 상상해서 다르게 만들면 안 됩니다(같은 건물 안에서 마감재가 방마다 제각각이면 안 되니까요). 참고 이미지가 타일이면 타일, 우드면 우드, 특정 색 벽이면 그 색 그대로 — 절대로 다른 재질·색상으로 바꾸지 마세요. (2) 가구·소품·배치는 방마다 다릅니다 — 이 공간(' + typeName + ')의 용도에 맞는 가구 종류(침대, 책상, 카운터, 좌석 등 상황에 맞게)로 자유롭게 구성하되, 그 가구의 스타일·색감·소재 톤은 위 마감재와 어울리는 방향으로(참고 이미지의 가구 스타일 언어를 이어받아서) 고르세요. "이 방만 마감재가 다른 느낌"은 명백한 실패입니다 — 다른 공간들과 나란히 놓고 봤을 때 반드시 "같은 건물 안의 다른 방/구역"처럼 마감재가 통일되어 보여야 합니다. ⚠️ 단, 이건 마감재·건물 구조 얘기이지 건물 종류·규모 얘기가 아닙니다 — 이 공간은 어디까지나 참고 이미지 속 공간과 정확히 같은 건물, 같은 용도(참고 이미지가 주거공간이면 이 방도 주거공간, 상업공간이면 이 공간도 그 상업공간의 일부)여야 합니다. 절대로 호텔 객실, 고급 리조트, 완전히 다른 업종의 상업공간, 초고층 건물 등 참고 이미지와 다른 종류·용도의 공간으로 만들지 마세요 — 창밖 풍경도 참고 이미지와 같은 지역·건물 유형의 평범한 전망이어야 합니다. --- ';
+      }
+    }
+    // ⚠️ 요청 반영("건축도 건축 참고이미지가 없으면 실내이미지 참고해서 만들어달라고 명확히 해줘,
+    // 창문형태나 정원이 있으면 정원도 반영해서 외부랑 실내가 잘 어울리게"): 위 블록은 실내끼리만
+    // 적용되고 있었음 — 건축 외관인데 noDirectMatch인 경우(외관 전용 참고사진이 없는 경우)엔
+    // imgs0.primary가 실내 앵커로 대체되어도(위 _autoRoomImagesFor 참고) 정작 그 이미지를 실제로
+    // 첨부하거나 "이걸 보고 반영해라"는 지시 자체가 없었음 — 그래서 실내랑 안 어울리는 외관이
+    // 나왔던 것. 실내 앵커가 있으면 실제로 첨부하고, 창호색·정원·전체 톤을 명확히 반영하게 함.
+    if(imgs0.noDirectMatch && _isExteriorViewType(typeName)){
+      var _intAnchorsForExt = (spTab.autoRoomIntAnchors||[]).filter(function(a){return a.img;}).map(function(a){return a.img;}).slice(0,2);
+      if(_intAnchorsForExt.length){
+        _looseRefs = _intAnchorsForExt.concat(_looseRefs).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
+        _looseP += ' ⚠️⚠️ 실내 참고 사진을 건물 외관 설계에 반영(매우 중요, 건축 외관 전용 참고사진이 아직 없을 때): 첨부한 참고 이미지 중 일부는 이 건물 "내부"의 실제 사진입니다(외관 사진이 아직 없어서 대신 참고용으로 붙였습니다). 이 실내 사진을 그대로 편집하거나 복사하지 말고, 그 안에서 확인되는 디자인 단서를 뽑아서 지금 만드는 건물 외관에 실제로 반영하세요: (1) 창문 프레임의 색상·재질(예: 검정 알루미늄, 우드톤, 화이트 등)을 이 외관의 모든 창호에도 동일하게 적용하세요 — 안팎이 다른 창호로 보이면 명백한 실패입니다. (2) 만약 그 실내 사진 창문 너머로 정원·마당·조경·데크가 보인다면, 그 조경을 이 외관 사진에도 실제로 존재하는 마당·정원으로 반영해서 그리세요(실내에서 보이던 마당과 외관에서 보이는 마당이 서로 다른 별개의 공간처럼 안 보이게). (3) 실내 사진의 전체적인 재료 언어·색감·분위기(예: 노출콘크리트+우드톤+미니멀, 화이트&베이지 톤 등)를 참고해서, 외관의 파사드 재질·색상도 그 분위기와 자연스럽게 이어지도록 만드세요 — "같은 건축가가 안팎을 함께 설계한 하나의 건물"처럼 느껴져야 하며, 실내와 외관이 전혀 안 어울리는 딴 건물처럼 보이면 명백한 실패입니다.';
       }
     }
     // ⚠️ 버그 수정(치명적, "상업공간을 골랐는데 결과가 계속 평범한 집처럼 나온다"): 바로 아래
@@ -12180,6 +12204,11 @@ function _autoRoomRetryOne(idx){
     var _looseAspect2 = _wantExt916b ? '3:4' : ((spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4');
     // (위 _looseAspect와 동일한 이유로 9:16→3:4 강제 다운그레이드 제거함)
     var _looseP2 = '';
+    // (위 _looseP와 동일한 이유로) 건축 외관 카메라 앵글 지시를 여기(재생성 경로)에도 추가
+    if(_isExteriorViewType(typeName)){
+      var _viewInstrLoose2 = EXTERIOR_VIEW_PROMPTS[typeName] || ('이 사진은 "'+typeName+'" 앵글로 촬영된 건물 외관 사진이어야 합니다.');
+      _looseP2 += ' ⚠️⚠️⚠️ 카메라 앵글(가장 중요, 반드시 지키세요): ' + _viewInstrLoose2;
+    }
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
     if(!imgs0b.noDirectMatch && imgs0b.primary){
@@ -12201,6 +12230,15 @@ function _autoRoomRetryOne(idx){
       _looseRefs2 = _otherAnchorRefs2.concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
       if(_otherAnchorRefs2.length){
         _looseP2 = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 집" 안의 다른 공간(거실·주방 등) 사진이며, 그 공간들은 아주 강렬하고 개성 있는 색감·소재·가구 스타일(예: 진한 살구빛/테라코타 벽, 짙은 그린 포인트, 독특한 형태의 가구, 특색 있는 소품)로 디자인되어 있습니다. 지금 만드는 이 방도 반드시 그 정도로 강렬하고 개성 있는 디자인이어야 합니다 — 벽 색상, 바닥재 종류·색상, 몰딩·마감재 톤, 문·손잡이 같은 디테일, 조명 기구 디자인, 전체적인 색감·분위기를 참고 이미지와 완전히 동일한 톤앤매너로 맞추세요. 가구도 참고 이미지처럼 평범하지 않은 형태·색감으로 고르세요. 방의 용도에 맞는 가구 종류(침대, 세면대 등)는 이 방(' + typeName + ')에 맞게 다르게 구성하되, "이 방만 평범하고 무난한 색감·가구로 만드는 것"은 명백한 실패입니다. --- ';
+      }
+    }
+    // (위 _autoRoomGenerateStep과 동일한 이유로) 건축 외관 + noDirectMatch인 경우, 실내 앵커를
+    // 실제로 첨부하고 창호색·정원·전체 톤을 반영하게 함
+    if(imgs0b.noDirectMatch && _isExteriorViewType(typeName)){
+      var _intAnchorsForExt2 = (spTab.autoRoomIntAnchors||[]).filter(function(a){return a.img;}).map(function(a){return a.img;}).slice(0,2);
+      if(_intAnchorsForExt2.length){
+        _looseRefs2 = _intAnchorsForExt2.concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
+        _looseP2 += ' ⚠️⚠️ 실내 참고 사진을 건물 외관 설계에 반영(매우 중요, 건축 외관 전용 참고사진이 아직 없을 때): 첨부한 참고 이미지 중 일부는 이 건물 "내부"의 실제 사진입니다(외관 사진이 아직 없어서 대신 참고용으로 붙였습니다). 이 실내 사진을 그대로 편집하거나 복사하지 말고, 그 안에서 확인되는 디자인 단서를 뽑아서 지금 만드는 건물 외관에 실제로 반영하세요: (1) 창문 프레임의 색상·재질을 이 외관의 모든 창호에도 동일하게 적용하세요 — 안팎이 다른 창호로 보이면 명백한 실패입니다. (2) 만약 그 실내 사진 창문 너머로 정원·마당·조경·데크가 보인다면, 그 조경을 이 외관 사진에도 실제로 존재하는 마당·정원으로 반영해서 그리세요. (3) 실내 사진의 전체적인 재료 언어·색감·분위기를 참고해서 외관의 파사드 재질·색상도 자연스럽게 이어지도록 만드세요 — "같은 건축가가 안팎을 함께 설계한 하나의 건물"처럼 느껴져야 합니다.';
       }
     }
     // ⚠️ _autoRoomGenerateStep과 동일한 이유로 여기(재시도 경로)에도 카테고리별 공간 성격
