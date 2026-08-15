@@ -303,11 +303,12 @@ select option{background:var(--c2)}
   .sb-tabs{max-height:none!important}
   .sb-scroll{overflow:visible!important;height:auto!important;max-height:none!important;flex:none!important;padding:4px 10px 8px!important}
   .sb-btm{position:fixed!important;bottom:56px!important;left:0!important;right:0!important;z-index:9998!important;padding:8px 10px!important;background:var(--sb)!important;border-top:1px solid var(--bd)!important;box-shadow:0 -4px 12px rgba(0,0,0,.4)!important}
-  .sb-tabs{display:flex!important;flex-direction:row!important;overflow-x:visible!important;border-right:none!important;border-bottom:1px solid var(--bd)!important;height:auto!important}
-  .wft{flex:1 1 0!important;min-width:0!important;padding:8px 2px!important;border-left:none!important;border-bottom:3px solid transparent!important;white-space:normal!important;justify-content:center!important;text-align:center}
+  .sb-tabs{display:flex!important;flex-direction:row!important;overflow-x:auto!important;overflow-y:hidden!important;-webkit-overflow-scrolling:touch!important;border-right:none!important;border-bottom:1px solid var(--bd)!important;height:auto!important;scrollbar-width:none!important}
+  .sb-tabs::-webkit-scrollbar{display:none!important}
+  .wft{flex:0 0 auto!important;min-width:74px!important;padding:8px 10px!important;border-left:none!important;border-bottom:3px solid transparent!important;white-space:nowrap!important;justify-content:center!important;text-align:center}
   .wft.on{border-bottom-color:var(--ac)!important;background:rgba(0,229,204,.06)!important;border-left-color:transparent!important}
   .wft-ic{display:none!important}
-  .wft-ko{font-size:9.5px!important;line-height:1.25!important;white-space:normal!important}
+  .wft-ko{font-size:11px!important;line-height:1.25!important;white-space:nowrap!important}
   .wft-en{display:none!important}
   .wft-ko span{display:none!important} /* NEW 배지는 좁은 화면에서 숨김 */
 
@@ -10082,6 +10083,87 @@ function _compositeBudgetCaption(imgUrl, captionText, cb){
     cb(imgUrl);
   }
 }
+// ⚠️ 요청 반영("공간 컨셉에 올린 참고 이미지가 PC/모바일 서로 다른 기기에서도 유지되게 해달라"):
+// 지금까지 업로드한 참고 이미지는 그 브라우저(그 기기)의 메모리에만 있고 서버에 저장이 전혀 안 돼서,
+// 다른 기기로 접속하면(같은 계정으로 로그인해도) 안 보이는 게 당연했음 — 서버(Supabase)에 저장해두고
+// 다른 기기에서 로그인하면 자동으로 불러오는 범용 함수. 여러 탭(공간 컨셉, 나중엔 쇼츠 등)에서
+// 재사용할 수 있게 tabKey로 구분해서 저장함.
+// ⚠️ 필요 조건: Supabase에 'user_workspace_state' 테이블이 있어야 동작합니다(없으면 저장/불러오기가
+// 조용히 실패하고 콘솔에 경고만 남습니다 — 이 코드만으론 테이블을 새로 만들 수 없어서, 아래 SQL을
+// Supabase 쪽에서 한 번 실행해줘야 합니다):
+//   create table user_workspace_state (
+//     user_id uuid not null, tab_key text not null, data jsonb, updated_at timestamptz default now(),
+//     primary key (user_id, tab_key)
+//   );
+//   alter table user_workspace_state enable row level security;
+//   create policy "own state" on user_workspace_state for all using (auth.uid()=user_id) with check (auth.uid()=user_id);
+function _saveWorkspaceState(tabKey, data){
+  if(!(_supa && _supaUser)) return;
+  _supa.from('user_workspace_state').upsert({user_id:_supaUser.id, tab_key:tabKey, data:data, updated_at:new Date().toISOString()}, {onConflict:'user_id,tab_key'})
+    .then(function(r){ if(r.error) console.warn('[작업상태 동기화] 저장 실패(테이블이 없을 수 있음):', r.error.message); })
+    .catch(function(e){ console.warn('[작업상태 동기화] 저장 오류:', e); });
+}
+function _loadWorkspaceState(tabKey, cb){
+  if(!(_supa && _supaUser)){ cb(null); return; }
+  _supa.from('user_workspace_state').select('data').eq('user_id',_supaUser.id).eq('tab_key',tabKey).maybeSingle()
+    .then(function(r){
+      if(r.error){ console.warn('[작업상태 동기화] 불러오기 실패:', r.error.message); cb(null); return; }
+      cb(r.data ? r.data.data : null);
+    })
+    .catch(function(e){ console.warn('[작업상태 동기화] 불러오기 오류:', e); cb(null); });
+}
+// data: URL 이미지들을 클라우드 스토리지에 업로드해서 https URL로 바꿔주는 헬퍼(작업상태 저장 시
+// data: URL을 그대로 DB에 넣으면 용량이 너무 커지므로, 파일로 올리고 URL만 저장함).
+function _uploadDataUrlIfNeeded(url, pathHint, cb){
+  if(!url || url.indexOf('data:')!==0){ cb(url); return; } // 이미 https:// 등이면 그대로 씀
+  if(!(_supa && _supaUser)){ cb(url); return; }
+  fetch(url).then(function(r){return r.blob();}).then(function(blob){
+    var path=_supaUser.id+'/workspace/'+pathHint+'-'+Date.now()+'.jpg';
+    return _supa.storage.from('gallery').upload(path, blob, {contentType:'image/jpeg', upsert:true}).then(function(res){
+      if(res.error){ cb(url); return; } // 업로드 실패하면 그냥 원래 data URL로라도 동작은 하게(다른 기기 동기화만 안 됨)
+      cb(_supa.storage.from('gallery').getPublicUrl(path).data.publicUrl);
+    });
+  }).catch(function(){ cb(url); });
+}
+// ⚠️ 공간 컨셉 디자인 전용: 참고 이미지(외관·실내 앵커) 변경될 때마다 살짝 지연 후 자동 저장
+// (매번 입력할 때마다 바로 저장하면 너무 잦으니 1.2초 디바운스).
+var _spacesetAnchorSyncTimer=null;
+function _scheduleSpacesetAnchorSync(spTab){
+  if(_spacesetAnchorSyncTimer) clearTimeout(_spacesetAnchorSyncTimer);
+  _spacesetAnchorSyncTimer=setTimeout(function(){
+    var extList=spTab.autoRoomExtAnchors||[], intList=spTab.autoRoomIntAnchors||[];
+    var pending=0, done=function(){ pending--; if(pending<=0) finalize(); };
+    var extOut=extList.map(function(a){return {img:a.img,label:a.label};});
+    var intOut=intList.map(function(a){return {img:a.img,label:a.label};});
+    var all=extOut.concat(intOut);
+    pending=all.length||1;
+    if(!all.length){ finalize(); return; }
+    all.forEach(function(a, i){
+      if(!a.img){ done(); return; }
+      _uploadDataUrlIfNeeded(a.img, 'anchor'+i, function(finalUrl){ a.img=finalUrl; done(); });
+    });
+    function finalize(){
+      _saveWorkspaceState('spaceset_anchors', {ext:extOut, int:intOut, category:spTab.autoRoomCategory||'residential'});
+    }
+  }, 1200);
+}
+// ⚠️ 탭을 열 때 한 번, 클라우드에 저장된 게 있으면 불러와서 채워줌(이미 이 세션에서 사진을 올린
+// 상태라면 덮어쓰지 않음 — 방금 올린 새 사진이 사라지면 안 되니까).
+function _tryRestoreSpacesetAnchors(spTab){
+  if(spTab._cloudAnchorSyncTried) return;
+  spTab._cloudAnchorSyncTried=true;
+  var hasAnyLocal = (spTab.autoRoomExtAnchors||[]).some(function(a){return a.img;}) || (spTab.autoRoomIntAnchors||[]).some(function(a){return a.img;});
+  if(hasAnyLocal) return; // 이미 이 기기에서 사진을 올려둔 상태면 덮어쓰지 않음
+  _loadWorkspaceState('spaceset_anchors', function(data){
+    if(!data) return;
+    var hasCloud = (data.ext||[]).some(function(a){return a.img;}) || (data.int||[]).some(function(a){return a.img;});
+    if(!hasCloud) return;
+    if(data.ext && data.ext.length) spTab.autoRoomExtAnchors=data.ext;
+    if(data.int && data.int.length) spTab.autoRoomIntAnchors=data.int;
+    if(data.category) spTab.autoRoomCategory=data.category;
+    renderSB();
+  });
+}
 function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
@@ -10300,6 +10382,8 @@ function mkMultiRoomSpace(p){
     spTab.autoRoomExtAnchors=[{img:null,label:'파사드뷰(정면)'}];
     spTab.autoRoomIntAnchors=[{img:null,label:SPACE_CATEGORIES[spTab.autoRoomCategory||'residential'].types[0]}];
     spTab.autoRoomSelected = _autoRoomTypesForCategory(spTab.autoRoomCategory||'residential').slice();
+    spTab._cloudAnchorSyncTried=true; // 리셋 직후 클라우드에서 다시 복원되지 않도록 막음
+    if(_supa && _supaUser) _supa.from('user_workspace_state').delete().eq('user_id',_supaUser.id).eq('tab_key','spaceset_anchors').then(function(){}).catch(function(){});
     idbSaveDraft(_multiRoomDraftKey(), {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
     idbSaveDraft(_autoRoomDraftKey(), {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity, autoRoomSelected:spTab.autoRoomSelected}).catch(function(){});
     renderSB();
@@ -11150,7 +11234,50 @@ function mkAutoRoomCamera(p){
       spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenIntUrls=[];
       spTab.autoRoomWindowAnchor=null;
       spTab.autoRoomStyleAnalysis=null; spTab.autoRoomStyleAnalysisSrc=null;
+      _scheduleSpacesetAnchorSync(spTab); // ⚠️ PC/모바일 등 다른 기기 동기화용 — 참고 이미지가 바뀔 때마다 클라우드에 저장 예약
     }
+    // ⚠️ 요청 반영("10개 사진을 한 번에 드래그해서 갖다놓으면 바로 다 들어가게 해달라, 넘치면
+    // 최대치만큼만 받고 나머지는 무시해도 된다"): 이 섹션(외관/실내) 전체를 드롭존으로 만들어서,
+    // 여러 장을 한꺼번에 끌어다 놓으면 빈 슬롯부터 채우고, 모자라면 새 슬롯을 최대 개수까지
+    // 자동으로 만들어서 채움. 넘치는 분량은 잘라내고 몇 장만 들어갔는지 안내함.
+    function handleMultipleFiles(fileList){
+      var files=Array.prototype.slice.call(fileList).filter(function(f){return f && f.type && f.type.indexOf('image/')===0;});
+      if(!files.length) return;
+      var emptySlots=anchors.filter(function(a){return !a.img;});
+      var capacity = emptySlots.length + Math.max(0, maxSlots-anchors.length);
+      var overflow = files.length - capacity;
+      var toUse = files.slice(0, capacity);
+      var slotIdx=0;
+      var pending=toUse.length;
+      if(!pending) return;
+      toUse.forEach(function(f){
+        var reader=new FileReader();
+        reader.onload=function(){
+          _downscaleForMemorySafety(reader.result, function(resized){
+            var target = emptySlots[slotIdx] || null;
+            if(target){ target.img=resized; slotIdx++; }
+            else {
+              var usedCount=anchors.length;
+              anchors.push({img:resized, label:typeOptions[Math.min(usedCount,typeOptions.length-1)]});
+            }
+            spTab[genKey]=[]; _resetConsistencyChain();
+            pending--;
+            if(pending<=0){
+              renderSB();
+              if(overflow>0) alert((maxSlots<=4?'건물 외관은':'이 섹션은')+' 최대 '+maxSlots+'장까지라, '+toUse.length+'장만 추가하고 나머지 '+overflow+'장은 넣지 않았어요.');
+            }
+          });
+        };
+        reader.readAsDataURL(f);
+      });
+    }
+    wrap.addEventListener('dragover', function(e){ e.preventDefault(); e.stopPropagation(); wrap.style.outline='2px dashed var(--ac)'; wrap.style.outlineOffset='4px'; });
+    wrap.addEventListener('dragleave', function(e){ wrap.style.outline='none'; });
+    wrap.addEventListener('drop', function(e){
+      e.preventDefault(); e.stopPropagation();
+      wrap.style.outline='none';
+      if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) handleMultipleFiles(e.dataTransfer.files);
+    });
     anchors.forEach(function(anchor, ai){
       var row=dv('');row.style.cssText='display:flex;gap:8px;align-items:center;margin-bottom:6px';
       var box2=dv('');box2.style.cssText='width:64px;height:64px;flex-shrink:0;border:1.5px dashed var(--bd2);border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;background:var(--c2)';
@@ -11227,16 +11354,20 @@ function mkAutoRoomCamera(p){
       wrap.appendChild(row);
     });
     if(anchors.length<maxSlots){
-      var addAnchorBtn=mk('button','');addAnchorBtn.type='button';addAnchorBtn.textContent='+ 사진 추가';
+      var addAnchorBtn=mk('button','');addAnchorBtn.type='button';addAnchorBtn.textContent='+ 사진 추가 (여러 장 한번에 선택·드래그 가능)';
       addAnchorBtn.style.cssText='width:100%;padding:8px;border-radius:8px;border:1px dashed var(--bd2);background:transparent;color:var(--ac);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
-      addAnchorBtn.onclick=function(){
-        var usedCount=anchors.length;
-        anchors.push({img:null,label:typeOptions[Math.min(usedCount,typeOptions.length-1)]});
-        renderSB();
-      };
+      var multiInp=document.createElement('input');multiInp.type='file';multiInp.accept='image/*';multiInp.multiple=true;multiInp.style.display='none';
+      multiInp.onchange=function(){ if(multiInp.files&&multiInp.files.length) handleMultipleFiles(multiInp.files); multiInp.value=''; };
+      addAnchorBtn.onclick=function(){ multiInp.click(); };
+      wrap.appendChild(multiInp);
       wrap.appendChild(addAnchorBtn);
     }
   }
+
+  // ⚠️ 요청 반영("PC에서 올린 참고 이미지가 모바일에도 유지되게 해달라"): 이 탭이 그려질 때마다
+  // 한 번(세션당 한 번만, _tryRestoreSpacesetAnchors 내부에서 플래그로 막음) 클라우드에 저장된
+  // 참고 이미지가 있는지 확인해서 자동으로 불러옴 — 이미 이 기기에서 사진을 올린 상태면 덮어쓰지 않음.
+  _tryRestoreSpacesetAnchors(spTab);
 
   // ── 건물 외관 사진: 뷰 이름표를 붙여서 최대 4장까지 ────────────────────
   var EXT_ANCHOR_TYPE_OPTIONS = ['파사드뷰(정면)','투시뷰(스트리트뷰)','좌측면뷰','우측면뷰','후면뷰'];
