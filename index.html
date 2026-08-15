@@ -406,7 +406,10 @@ select option{background:var(--c2)}
   .uthumb img{height:56px!important}
 
   /* 네비바 버튼 간격 줄이기 */
-  .nav-r{gap:4px!important}
+  .nav-r{gap:4px!important;overflow-x:auto!important;overflow-y:hidden!important;-webkit-overflow-scrolling:touch!important;flex-wrap:nowrap!important;scrollbar-width:none!important;max-width:calc(100vw - 100px)!important}
+  .nav-r::-webkit-scrollbar{display:none!important}
+  .nav-r>*{flex-shrink:0!important}
+  #btn-pricing{order:-1!important} /* 가장 중요한 CTA라 스크롤 안 해도 바로 보이게 맨 앞으로 */
   #btn-bizinfo{display:none!important}
   /* btn-account는 로그인 안 된 상태에서 로그인 창을 여는 버튼이라 숨기면 안 됨 —
      예전에 실수로 숨겨서 모바일에서 로그인 자체가 안 되는 버그가 있었음. 숨기는 대신 작게만. */
@@ -10151,6 +10154,12 @@ function _scheduleSpacesetAnchorSync(spTab){
 // 상태라면 덮어쓰지 않음 — 방금 올린 새 사진이 사라지면 안 되니까).
 function _tryRestoreSpacesetAnchors(spTab){
   if(spTab._cloudAnchorSyncTried) return;
+  // ⚠️ 버그 수정("모바일에서 참고 이미지가 안 불러와진다"): 로그인(_supaUser)이 아직 준비되기
+  // 전에 이 함수가 먼저 실행되면, 아래서 바로 "시도했음" 플래그를 세워버려서 로그인이 끝난
+  // 뒤에도 다시는 재시도를 안 하는 버그가 있었음(PC보다 인증 로딩이 늦게 끝나는 모바일에서
+  // 특히 걸리기 쉬움). 로그인이 아직 준비 안 됐으면 플래그를 세우지 않고 그냥 넘어가서,
+  // 다음 렌더(탭을 다시 열거나 화면이 갱신될 때) 때 다시 시도하게 함.
+  if(!(_supa && _supaUser)) return;
   spTab._cloudAnchorSyncTried=true;
   var hasAnyLocal = (spTab.autoRoomExtAnchors||[]).some(function(a){return a.img;}) || (spTab.autoRoomIntAnchors||[]).some(function(a){return a.img;});
   if(hasAnyLocal) return; // 이미 이 기기에서 사진을 올려둔 상태면 덮어쓰지 않음
@@ -30222,6 +30231,13 @@ function onSupaLogin(user){
   // 찾아봤다가 못 찾고 끝나버림(실제 저장은 로그인 계정 uid 키로 되어 있어서 키가 서로 안 맞았음).
   // 로그인 확인이 실제로 끝나는 이 시점에 다시 한번 복원을 시도해서, 이번엔 맞는 키로 찾게 함.
   try{ _restoreMainTabImagesDraft(); }catch(e){}
+  // ⚠️ 위와 같은 이유로 공간 컨셉 디자인의 참고 이미지 클라우드 복원도 여기서 다시 시도 —
+  // 페이지가 이미 spaceset 탭을 렌더링해버린 뒤라 플래그가 세워져 있을 수 있으니 초기화하고
+  // 다시 시도함.
+  try{
+    var _spTabForRestore = G.tabs && G.tabs.space;
+    if(_spTabForRestore){ _spTabForRestore._cloudAnchorSyncTried=false; _tryRestoreSpacesetAnchors(_spTabForRestore); }
+  }catch(e){}
   // 로딩 중 표시
   var crn=gE('cr-n');if(crn)crn.textContent='...';
   // profiles 테이블 조회/생성
