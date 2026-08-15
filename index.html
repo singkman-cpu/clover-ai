@@ -25587,32 +25587,82 @@ function _openBulkPresetApply(picked){
 
   function renderConfirmStep(preset){
     panel.innerHTML='';
-    var estCr = picked.length * 20;
+    var selRes = '1K';
+    var selAspect = 'auto';
+    var COST_PER_RES = {'1K':20,'2K':30,'4K':40};
     var title=document.createElement('div');
     title.style.cssText='font-size:15px;font-weight:800;color:var(--t);margin-bottom:10px';
     title.textContent='🎨 "'+preset.l+'" 을(를) '+picked.length+'장에 적용';
+
+    var resLbl=document.createElement('div');
+    resLbl.style.cssText='font-size:11px;color:var(--m2);margin-bottom:6px';
+    resLbl.textContent='해상도';
+    var resRow=document.createElement('div');
+    resRow.style.cssText='display:flex;gap:6px;margin-bottom:12px';
+    var resBtns={};
+    ['1K','2K','4K'].forEach(function(r){
+      var b=document.createElement('button'); b.type='button'; b.textContent=r;
+      b.style.cssText='flex:1;padding:8px 4px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;'+(r===selRes?'border:1.5px solid var(--ac);background:var(--ac);color:#04231d':'border:1px solid var(--bd2);background:var(--c2);color:var(--t2)');
+      b.onclick=function(){ selRes=r; refreshUI(); };
+      resBtns[r]=b; resRow.appendChild(b);
+    });
+
+    var aspLbl=document.createElement('div');
+    aspLbl.style.cssText='font-size:11px;color:var(--m2);margin-bottom:6px';
+    aspLbl.textContent='비율';
+    var aspRow=document.createElement('div');
+    aspRow.style.cssText='display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap';
+    var aspBtns={};
+    [['auto','원본 유지'],['1:1','1:1'],['4:3','4:3 가로'],['3:4','3:4 세로'],['16:9','16:9 가로'],['9:16','9:16 세로']].forEach(function(pair){
+      var val=pair[0], lbl=pair[1];
+      var b=document.createElement('button'); b.type='button'; b.textContent=lbl;
+      b.style.cssText='padding:7px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;'+(val===selAspect?'border:1.5px solid var(--ac);background:var(--ac);color:#04231d':'border:1px solid var(--bd2);background:var(--c2);color:var(--t2)');
+      b.onclick=function(){ selAspect=val; refreshUI(); };
+      aspBtns[val]=b; aspRow.appendChild(b);
+    });
+
+    var promptLbl=document.createElement('div');
+    promptLbl.style.cssText='font-size:11px;color:var(--m2);margin-bottom:6px';
+    promptLbl.textContent='추가 프롬프트 (선택, 전부에 똑같이 덧붙습니다)';
+    var promptInput=document.createElement('textarea');
+    promptInput.rows=2; promptInput.placeholder='예: 조명은 따뜻하게, 바닥은 우드톤으로...';
+    promptInput.style.cssText='width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:8px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit;margin-bottom:14px';
+
     var costBox=document.createElement('div');
     costBox.style.cssText='font-size:11.5px;color:var(--m2);background:var(--c2);border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6';
-    costBox.innerHTML='장당 1K 기준 약 20cr — 예상 총 크레딧: <b style="color:var(--ac)">약 '+estCr+'cr</b>('+picked.length+'장×20cr)<br>진행 중 언제든 중단할 수 있고, 이미 완료된 결과는 그대로 남습니다.';
     var backBtn=document.createElement('button');
     backBtn.textContent='← 다른 프리셋 고르기';
     backBtn.style.cssText='width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit;margin-bottom:8px';
     backBtn.onclick=renderPickStep;
     var goBtn=document.createElement('button');
-    goBtn.textContent='▶ '+picked.length+'장 일괄 적용 시작 (약 '+estCr+'cr)';
     goBtn.style.cssText='width:100%;padding:11px;border-radius:9px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
-    goBtn.onclick=function(){ runBulk(preset); };
-    panel.appendChild(title); panel.appendChild(costBox); panel.appendChild(goBtn); panel.appendChild(backBtn);
+    goBtn.onclick=function(){ runBulk(preset, selRes, selAspect, promptInput.value.trim()); };
+
+    function refreshUI(){
+      Object.keys(resBtns).forEach(function(r){ resBtns[r].style.cssText='flex:1;padding:8px 4px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;'+(r===selRes?'border:1.5px solid var(--ac);background:var(--ac);color:#04231d':'border:1px solid var(--bd2);background:var(--c2);color:var(--t2)'); });
+      Object.keys(aspBtns).forEach(function(v){ aspBtns[v].style.cssText='padding:7px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;'+(v===selAspect?'border:1.5px solid var(--ac);background:var(--ac);color:#04231d':'border:1px solid var(--bd2);background:var(--c2);color:var(--t2)'); });
+      var perImg = COST_PER_RES[selRes]||20;
+      var estCr = picked.length * perImg;
+      costBox.innerHTML='장당 '+selRes+' 기준 약 '+perImg+'cr — 예상 총 크레딧: <b style="color:var(--ac)">약 '+estCr+'cr</b>('+picked.length+'장×'+perImg+'cr)<br>진행 중 언제든 중단할 수 있고, 이미 완료된 결과는 그대로 남습니다.';
+      goBtn.textContent='▶ '+picked.length+'장 일괄 적용 시작 (약 '+estCr+'cr)';
+    }
+    refreshUI();
+
+    panel.appendChild(title);
+    panel.appendChild(resLbl); panel.appendChild(resRow);
+    panel.appendChild(aspLbl); panel.appendChild(aspRow);
+    panel.appendChild(promptLbl); panel.appendChild(promptInput);
+    panel.appendChild(costBox); panel.appendChild(goBtn); panel.appendChild(backBtn);
   }
 
-  function runBulk(preset){
+  function runBulk(preset, resolution, aspect, extraPrompt){
     var cancelled=false;
     var doneCount=0, failCount=0;
     var total=picked.length;
     panel.innerHTML='';
     var title=document.createElement('div');
     title.style.cssText='font-size:15px;font-weight:800;color:var(--t);margin-bottom:10px';
-    title.textContent='🎨 "'+preset.l+'" 적용 중...';
+    title.textContent='🎨 "'+preset.l+'" 적용 중... ('+resolution+(aspect==='auto'?', 원본 비율':', '+aspect)+')';
     var progWrap=document.createElement('div');
     progWrap.style.cssText='background:var(--c2);border-radius:8px;height:8px;overflow:hidden;margin-bottom:8px';
     var progBar=document.createElement('div');
@@ -25631,7 +25681,7 @@ function _openBulkPresetApply(picked){
     };
     panel.appendChild(title); panel.appendChild(progWrap); panel.appendChild(progLabel); panel.appendChild(stopBtn);
 
-    var PT = preset.pt + NO_BLUR_RULE + NO_BRAND_TRADEMARK_RULE + PREMIUM_QUALITY_RULE;
+    var PT = preset.pt + (extraPrompt ? (' ⚠️ 추가 요청사항: '+extraPrompt) : '') + NO_BLUR_RULE + NO_BRAND_TRADEMARK_RULE + PREMIUM_QUALITY_RULE;
     var CONCURRENCY = 2;
     var nextIdx = 0;
     function updateProgress(){
@@ -25644,19 +25694,21 @@ function _openBulkPresetApply(picked){
       var i = nextIdx++;
       var item = picked[i];
       var srcUrl = item.result || item.orig || item.origThumb;
-      _withExplicitAspect(srcUrl, function(_aspect){
-      falRun('fal-ai/nano-banana-2/edit', {prompt: PT, image_urls:[srcUrl], aspect_ratio:_aspect, num_images:1}, function(d){
-        var url = falExtractImageUrl(d);
-        if(url){
-          _saveResultToCloudGallery(item.wf||'edit', Date.now()+i, url, srcUrl, 'nano2', '1K', null, null);
-          doneCount++;
-        } else { failCount++; }
-        afterOne();
-      }, function(err){
-        failCount++;
-        afterOne();
-      }, {wf:'edit', resolution:'1K'});
-      });
+      function doRun(_aspect){
+        falRun('fal-ai/nano-banana-2/edit', {prompt: PT, image_urls:[srcUrl], aspect_ratio:_aspect, num_images:1}, function(d){
+          var url = falExtractImageUrl(d);
+          if(url){
+            _saveResultToCloudGallery(item.wf||'edit', Date.now()+i, url, srcUrl, 'nano2', resolution, null, null);
+            doneCount++;
+          } else { failCount++; }
+          afterOne();
+        }, function(err){
+          failCount++;
+          afterOne();
+        }, {wf:'edit', resolution:resolution});
+      }
+      if(aspect==='auto'){ _withExplicitAspect(srcUrl, doRun); }
+      else { doRun(aspect); }
     }
     function afterOne(){
       updateProgress();
