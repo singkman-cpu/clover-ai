@@ -25518,6 +25518,173 @@ function _loadBeforeAfterPairs(cb){
 // ⚠️ 요청 반영("갤러리든 어디든 사진 있는 곳에서 두 사진을 골라서 슬라이더로 비교하고 싶다"):
 // 임의의 두 이미지 URL을 받아서 이미 있는 _buildBeforeAfterSlider(위 함수)로 전체화면
 // 비교 화면을 띄움 — 좌우 스왑 버튼도 있어서 어느 쪽이 BEFORE/AFTER인지 바로 뒤집어볼 수 있음.
+// ⚠️ 요청 반영("렌더링된 이미지 여러 장에 미완성/노후 프리셋 등을 한 번에 적용하고 싶다" + "중간에
+// 마음에 안 들면 멈출 수 있게 해달라"): 갤러리에서 여러 장 선택 → 프리셋 하나 골라서 순차적으로
+// 일괄 적용. 진행 중 언제든 "⏹ 중단" 버튼으로 멈출 수 있고, 이미 완료된 것들은 그대로 갤러리에
+// 남아있음(중단해도 지금까지 만든 결과가 사라지지 않음).
+function _openBulkPresetApply(picked){
+  var old=document.getElementById('bulk-preset-overlay'); if(old) old.remove();
+  var ov=document.createElement('div');
+  ov.id='bulk-preset-overlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:20px';
+  var panel=document.createElement('div');
+  panel.style.cssText='background:var(--card,#161616);border-radius:16px;max-width:520px;width:100%;max-height:85vh;overflow-y:auto;padding:20px';
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+
+  function renderPickStep(){
+    panel.innerHTML='';
+    var title=document.createElement('div');
+    title.style.cssText='font-size:15px;font-weight:800;color:var(--t);margin-bottom:4px';
+    title.textContent='🎨 프리셋 일괄 적용';
+    var sub=document.createElement('div');
+    sub.style.cssText='font-size:11.5px;color:var(--m2);margin-bottom:12px';
+    sub.textContent='선택한 '+picked.length+'장에 똑같이 적용할 프리셋 하나를 골라주세요.';
+    var searchInput=document.createElement('input');
+    searchInput.type='text'; searchInput.placeholder='프리셋 검색 (예: 미완성, 노후, 트렌드...)';
+    searchInput.style.cssText='width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:9px 12px;font-size:12.5px;border-radius:8px;outline:none;box-sizing:border-box;margin-bottom:10px';
+    var resultsWrap=document.createElement('div');
+    resultsWrap.style.cssText='display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto';
+    var closeBtn=document.createElement('button');
+    closeBtn.textContent='취소';
+    closeBtn.style.cssText='width:100%;margin-top:12px;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+    closeBtn.onclick=function(){ ov.remove(); };
+    var allPS=[].concat(PS_SPACE,PS_RENDER,PS_EDIT,PS_VIDEO);
+    function runSearch(){
+      var q=searchInput.value.trim();
+      resultsWrap.innerHTML='';
+      if(!q){ return; }
+      var terms=q.toLowerCase().split(/\s+/).filter(Boolean);
+      var seen={};
+      var matched=allPS.filter(function(item){
+        if(seen[item.k]) return false;
+        var desc=PRESET_KO_DESC[item.k]||'';
+        var hay=(item.l+' '+desc).toLowerCase();
+        var ok=terms.every(function(t){return hay.indexOf(t)!==-1;});
+        if(ok) seen[item.k]=true;
+        return ok;
+      }).slice(0,30);
+      if(!matched.length){
+        var none=document.createElement('div');
+        none.style.cssText='font-size:11.5px;color:var(--m2);text-align:center;padding:14px';
+        none.textContent='검색 결과가 없어요.';
+        resultsWrap.appendChild(none);
+        return;
+      }
+      matched.forEach(function(item){
+        var row=document.createElement('div');
+        row.style.cssText='padding:9px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);cursor:pointer';
+        row.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--t)">'+item.l+'</div>'+(PRESET_KO_DESC[item.k]?'<div style="font-size:10px;color:var(--m2);margin-top:2px">'+PRESET_KO_DESC[item.k]+'</div>':'');
+        row.onclick=function(){ renderConfirmStep(item); };
+        resultsWrap.appendChild(row);
+      });
+    }
+    searchInput.oninput=runSearch;
+    panel.appendChild(title); panel.appendChild(sub); panel.appendChild(searchInput); panel.appendChild(resultsWrap); panel.appendChild(closeBtn);
+    searchInput.focus();
+  }
+
+  function renderConfirmStep(preset){
+    panel.innerHTML='';
+    var estCr = picked.length * 20;
+    var title=document.createElement('div');
+    title.style.cssText='font-size:15px;font-weight:800;color:var(--t);margin-bottom:10px';
+    title.textContent='🎨 "'+preset.l+'" 을(를) '+picked.length+'장에 적용';
+    var costBox=document.createElement('div');
+    costBox.style.cssText='font-size:11.5px;color:var(--m2);background:var(--c2);border-radius:8px;padding:10px 12px;margin-bottom:14px;line-height:1.6';
+    costBox.innerHTML='장당 1K 기준 약 20cr — 예상 총 크레딧: <b style="color:var(--ac)">약 '+estCr+'cr</b>('+picked.length+'장×20cr)<br>진행 중 언제든 중단할 수 있고, 이미 완료된 결과는 그대로 남습니다.';
+    var backBtn=document.createElement('button');
+    backBtn.textContent='← 다른 프리셋 고르기';
+    backBtn.style.cssText='width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit;margin-bottom:8px';
+    backBtn.onclick=renderPickStep;
+    var goBtn=document.createElement('button');
+    goBtn.textContent='▶ '+picked.length+'장 일괄 적용 시작 (약 '+estCr+'cr)';
+    goBtn.style.cssText='width:100%;padding:11px;border-radius:9px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    goBtn.onclick=function(){ runBulk(preset); };
+    panel.appendChild(title); panel.appendChild(costBox); panel.appendChild(goBtn); panel.appendChild(backBtn);
+  }
+
+  function runBulk(preset){
+    var cancelled=false;
+    var doneCount=0, failCount=0;
+    var total=picked.length;
+    panel.innerHTML='';
+    var title=document.createElement('div');
+    title.style.cssText='font-size:15px;font-weight:800;color:var(--t);margin-bottom:10px';
+    title.textContent='🎨 "'+preset.l+'" 적용 중...';
+    var progWrap=document.createElement('div');
+    progWrap.style.cssText='background:var(--c2);border-radius:8px;height:8px;overflow:hidden;margin-bottom:8px';
+    var progBar=document.createElement('div');
+    progBar.style.cssText='height:100%;width:0%;background:var(--ac);transition:width .3s';
+    progWrap.appendChild(progBar);
+    var progLabel=document.createElement('div');
+    progLabel.style.cssText='font-size:11.5px;color:var(--m2);margin-bottom:14px;text-align:center';
+    progLabel.textContent='0 / '+total+' 완료';
+    var stopBtn=document.createElement('button');
+    stopBtn.textContent='⏹ 중단';
+    stopBtn.style.cssText='width:100%;padding:10px;border-radius:9px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#fca5a5;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    stopBtn.onclick=function(){
+      cancelled=true;
+      stopBtn.disabled=true;
+      stopBtn.textContent='중단 중... (진행 중이던 항목만 마저 끝냅니다)';
+    };
+    panel.appendChild(title); panel.appendChild(progWrap); panel.appendChild(progLabel); panel.appendChild(stopBtn);
+
+    var PT = preset.pt + NO_BLUR_RULE + NO_BRAND_TRADEMARK_RULE + PREMIUM_QUALITY_RULE;
+    var CONCURRENCY = 2;
+    var nextIdx = 0;
+    function updateProgress(){
+      var n = doneCount+failCount;
+      progBar.style.width = Math.round(n/total*100)+'%';
+      progLabel.textContent = n+' / '+total+' 완료'+(failCount?' (실패 '+failCount+')':'')+(cancelled?' — 중단됨':'');
+    }
+    function launchNext(){
+      if(cancelled || nextIdx>=total) return;
+      var i = nextIdx++;
+      var item = picked[i];
+      var srcUrl = item.result || item.orig || item.origThumb;
+      _withExplicitAspect(srcUrl, function(_aspect){
+      falRun('fal-ai/nano-banana-2/edit', {prompt: PT, image_urls:[srcUrl], aspect_ratio:_aspect, num_images:1}, function(d){
+        var url = falExtractImageUrl(d);
+        if(url){
+          _saveResultToCloudGallery(item.wf||'edit', Date.now()+i, url, srcUrl, 'nano2', '1K', null, null);
+          doneCount++;
+        } else { failCount++; }
+        afterOne();
+      }, function(err){
+        failCount++;
+        afterOne();
+      }, {wf:'edit', resolution:'1K'});
+      });
+    }
+    function afterOne(){
+      updateProgress();
+      if(cancelled){
+        if(nextIdx>=total || (doneCount+failCount)>=total){ finish(); }
+        return;
+      }
+      if((doneCount+failCount)>=total){ finish(); return; }
+      launchNext();
+    }
+    function finish(){
+      stopBtn.style.display='none';
+      var doneMsg=document.createElement('div');
+      doneMsg.style.cssText='font-size:12px;color:var(--ac);font-weight:700;text-align:center;margin-top:8px';
+      doneMsg.textContent=cancelled?'중단됨 — 지금까지 '+doneCount+'장 완료됨 (갤러리에 저장됨)':'✓ 전부 완료! 갤러리에서 확인하세요.';
+      panel.appendChild(doneMsg);
+      var closeBtn2=document.createElement('button');
+      closeBtn2.textContent='닫기';
+      closeBtn2.style.cssText='width:100%;margin-top:12px;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+      closeBtn2.onclick=function(){ ov.remove(); renderMain(G.wf); };
+      panel.appendChild(closeBtn2);
+    }
+    for(var c=0;c<Math.min(CONCURRENCY,total);c++) launchNext();
+  }
+
+  renderPickStep();
+}
+
 function _openCompareOverlay(urlA, urlB){
   var old=document.getElementById('compare-overlay'); if(old) old.remove();
   var ov=document.createElement('div');
@@ -27145,6 +27312,23 @@ function openPanel(id){
     _openCompareOverlay(src1, src2);
   };
   selBar.appendChild(selCompareBtn);
+  // ⚠️ 요청 반영("렌더링된 이미지 여러 장에 미완성/노후 프리셋 등을 한 번에 적용하고 싶다, 10개
+  // 넘는 걸 하나씩 편집탭에서 누르는 게 비효율적"): Ctrl+클릭으로 여러 장 선택한 뒤, 프리셋
+  // 하나를 골라서 선택된 전체에 순차적으로 일괄 적용하는 버튼 추가. 1장 이상 선택되면 보임.
+  var selBulkBtn=document.createElement('button');
+  selBulkBtn.id='gal-sel-bulk-btn';
+  selBulkBtn.textContent='🎨 선택한 이미지에 프리셋 일괄 적용';
+  selBulkBtn.style.cssText='background:var(--acg);border:1px solid var(--acb);color:var(--ac);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:none';
+  selBulkBtn.onclick=function(){
+    var n=G._galSelected.size;
+    if(!n) return;
+    var ids=Array.from(G._galSelected);
+    var allItemsNow=G._curFilteredItems||items;
+    var picked=ids.map(function(iid){return allItemsNow.find(function(x){return x.id===iid;});}).filter(function(x){return x && (x.result||x.orig||x.origThumb);});
+    if(!picked.length){ alert('일괄 적용할 수 없는 항목만 선택되어 있어요(영상 등).'); return; }
+    _openBulkPresetApply(picked);
+  };
+  selBar.appendChild(selBulkBtn);
   hs.appendChild(selBar);
   _updateGalSelectionBar();
 
@@ -27341,6 +27525,8 @@ function _updateGalSelectionBar(){
   if(delBtn) delBtn.textContent = '🗑 선택 삭제 ('+n+')';
   var cmpBtn=document.getElementById('gal-sel-compare-btn');
   if(cmpBtn) cmpBtn.style.display = (n===2) ? '' : 'none';
+  var bulkBtn=document.getElementById('gal-sel-bulk-btn');
+  if(bulkBtn){ bulkBtn.style.display = (n>0) ? '' : 'none'; bulkBtn.textContent = '🎨 선택한 '+n+'개에 프리셋 일괄 적용'; }
 }
 function renderGalleryGrid(items){
   var hs=gE('hist-s');
