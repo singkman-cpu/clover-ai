@@ -6282,6 +6282,21 @@ function _presetType(pt){
   return null;
 }
 window._presetType=_presetType;
+// ⚠️ 요청 반영("좌측뷰/우측뷰 예전에 골라둔 게 여전히 45cr Pro로 뜬다, 수정 안 된 거 아니냐"):
+// 맞는 지적 — 기존엔 "프리셋을 클릭하는 그 순간"에만 엔진을 맞춰줘서, 이미 선택해둔 상태로
+// 화면을 다시 열거나 새로고침하면 옛날 엔진(nano_pro)이 그대로 남아있었음. 이 두 목록을
+// 전역으로 끌어올리고, 화면이 그려질 때마다(클릭 여부와 무관하게) 항상 다시 검증해서
+// 맞춰주는 함수를 추가함 — 이러면 "언제 선택했든" 항상 올바른 엔진·가격으로 보정됨.
+var PRESET_FORCE_PRO = ['apartment_living','kitchen_dining','bathroom','bedroom','isometric','cad_isometric','axonometry','topview','hq_real','elevation_front','elevation_left','elevation_right','elevation_rear','floor_plan_from_photo','ceiling_plan_from_photo','person_add','korean_person','person_blur','people_walk'];
+var PRESET_FORCE_NANO2 = ['aerial_to_eye','iso_to_eye','eye_to_aerial','eye_to_aerial_r45','eye_to_aerial_l45','eye_to_wide_aerial','eye_to_wide_aerial_r45','eye_to_wide_aerial_l45','aerial_to_wide_aerial','people_focus','view_left','view_right','custom_direction'];
+function _syncEngForCurrentPreset(){
+  if(G.wf!=='edit') return;
+  var tab=getTab('edit');
+  if(!tab.selK) return;
+  if(tab.selK==='hq_real_pro'){ if(G.eng!=='seedream5pro') G.eng='seedream5pro'; return; }
+  if(PRESET_FORCE_PRO.indexOf(tab.selK)!==-1){ if(G.eng!=='nano_pro') G.eng='nano_pro'; return; }
+  if(PRESET_FORCE_NANO2.indexOf(tab.selK)!==-1){ if(G.eng!=='nano2') G.eng='nano2'; return; }
+}
 function makePi(q, g){
     var pi=dv('pi'+(getTab(G.wf).selK===q.k?' on':''));
     pi.dataset.k=q.k;
@@ -6342,7 +6357,6 @@ function makePi(q, g){
         return;
       }
       // 구조 보존이 중요한 한국 아파트 핵심 4종은 Nano Banana Pro로 자동 전환 (디테일·구조 정확도 우수)
-      var proPresets=['apartment_living','kitchen_dining','bathroom','bedroom','isometric','cad_isometric','axonometry','topview','hq_real','view_left','view_right','elevation_front','elevation_left','elevation_right','elevation_rear','floor_plan_from_photo','ceiling_plan_from_photo','person_add','korean_person','person_blur','people_walk'];
       // ⚠️ 요청 반영: "고급 실사화"를 Seedream 5.0 Pro 전용 프리셋으로 새로 만듦(1K 40cr) — 다른
       // 프리셋을 고르거나 선택 해제하면 아래 "Pro 강제 대상 아님" 분기에서 자동으로 되돌아감.
       if(_t3.selK==='hq_real_pro'){
@@ -6351,9 +6365,12 @@ function makePi(q, g){
         setTimeout(function(){_showPresetHints(_t3);},0);
         return;
       }
-      var aerialNano2Presets=['aerial_to_eye','iso_to_eye','eye_to_aerial','eye_to_aerial_r45','eye_to_aerial_l45','eye_to_wide_aerial','eye_to_wide_aerial_r45','eye_to_wide_aerial_l45','aerial_to_wide_aerial','people_focus'];
+      // ⚠️ 요청 반영("뷰 방향 바꾸는 게 45cr(Pro)나 되는데 아무 변화도 없다"): view_left/view_right/
+      // custom_direction도 조감도류와 똑같은 "카메라를 크게 움직이는" 성격의 프리셋인데, 검증 없이
+      // Pro로 강제되어 있었음 — 이미 검증된 조감도류와 같은 취급으로 바꿔서 저렴한 나노바나나2로
+      // 고정함(비싸다고 더 잘 되는 게 아니라는 게 이번에 확인됨).
       // 조감도·투시도 계열은 Nano Banana 2로 통일 (결과 검증 후 사용자가 직접 확정)
-      if(_t3.selK && aerialNano2Presets.indexOf(_t3.selK)!==-1){
+      if(_t3.selK && PRESET_FORCE_NANO2.indexOf(_t3.selK)!==-1){
         G.eng='nano2';
         renderSB();
         setTimeout(function(){_showPresetHints(_t3);},0);
@@ -6361,8 +6378,8 @@ function makePi(q, g){
       }
       // 예전엔 건축외관 프리셋이면 무조건 Nano Banana Pro(1K 30cr)로 강제 전환했는데, 빌라·단독주택·
       // 전원주택 프리셋 60개 넘게가 전부 이 대상이라 불필요하게 비싸게 과금되고 있었음 — 구조 보존이
-      // 특히 중요한 proPresets 목록에 있는 것만 Pro로 전환하고, 나머지 건축외관은 일반 나노바나나2(20cr)로.
-      if(_t3.selK && proPresets.indexOf(_t3.selK)!==-1){
+      // 특히 중요한 PRESET_FORCE_PRO 목록에 있는 것만 Pro로 전환하고, 나머지 건축외관은 일반 나노바나나2(20cr)로.
+      if(_t3.selK && PRESET_FORCE_PRO.indexOf(_t3.selK)!==-1){
         G.eng='nano_pro';
         renderSB();
         setTimeout(function(){_showPresetHints(_t3);},0);
@@ -12552,6 +12569,10 @@ function sbRender(p){
   mkSl(p,'Creativity','c0',-10,10);mkSl(p,'HDR','h0',-10,10);mkSl(p,'Resemblance','r0',-10,10);mkSl(p,'Fractality','f0',-10,10);
 }
 function sbEdit(p){
+  // ⚠️ 요청 반영("예전에 골라둔 뷰 프리셋이 여전히 45cr Pro로 뜬다"): 화면이 그려질 때마다 항상
+  // 현재 선택된 프리셋에 맞는 올바른 엔진으로 재검증·보정함 — 언제 선택했든(새로고침·재방문
+  // 포함) 항상 최신 가격 규칙이 적용되게 함.
+  _syncEngForCurrentPreset();
   mkNote(p,'<strong style="color:#a78bfa">건축·인테리어 AI 포토샵</strong><br>가구·벽·바닥·조명·재질 부분 수정<br><span style="font-size:11px;color:var(--ac)">레퍼런스 이미지 업로드 → 원하는 오브젝트로 교체</span>');
   mkEng(p,false);mkUB(p,'수정할 이미지','main');
 
