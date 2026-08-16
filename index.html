@@ -12584,6 +12584,23 @@ function sbEdit(p){
   // 포함) 항상 최신 가격 규칙이 적용되게 함.
   if(window._syncEngForCurrentPreset) window._syncEngForCurrentPreset();
   mkNote(p,'<strong style="color:#a78bfa">건축·인테리어 AI 포토샵</strong><br>가구·벽·바닥·조명·재질 부분 수정<br><span style="font-size:11px;color:var(--ac)">레퍼런스 이미지 업로드 → 원하는 오브젝트로 교체</span>');
+  // ⚠️ 요청 반영("오른쪽뷰 Pro로도 2로도 안 바뀌네, AI가 구도 바꾸기 힘든가보다" → "뷰 전환하는
+  // 건 그런 문구가 다 들어가야 해"): 처음엔 view_left/view_right/custom_direction 3개에만
+  // 넣었는데, "뷰·구도 변환" 카테고리 16개 전부가 카메라 위치·각도를 바꾸는 같은 종류의 어려운
+  // 작업이라 전부 신뢰도가 낮을 수 있음 — 카테고리 전체로 확장함.
+  var VIEW_CHANGE_WARN_PRESETS = ['isometric','cad_isometric','axonometry','topview',
+    'aerial_to_eye','iso_to_eye','eye_to_aerial','eye_to_aerial_r45','eye_to_aerial_l45',
+    'eye_to_wide_aerial','eye_to_wide_aerial_r45','eye_to_wide_aerial_l45','aerial_to_wide_aerial',
+    'view_left','view_right','custom_direction'];
+  {
+    var _curTab = getTab('edit');
+    if(VIEW_CHANGE_WARN_PRESETS.indexOf(_curTab.selK)!==-1){
+      var _viewWarnBox = dv('');
+      _viewWarnBox.style.cssText='margin:0 0 12px;padding:10px 12px;border-radius:9px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);font-size:11px;line-height:1.6;color:#fbbf24';
+      _viewWarnBox.innerHTML='⚠️ <b>이 프리셋은 신뢰도가 낮아요</b> — 사진에 안 찍힌 각도·면을 AI가 새로 "상상해서" 그려야 하는 어려운 작업이라, Pro·일반 엔진 모두 결과가 기대만큼 안 바뀌는 경우가 많습니다. 크레딧을 쓰기 전에 참고해주세요.';
+      p.appendChild(_viewWarnBox);
+    }
+  }
   mkEng(p,false);mkUB(p,'수정할 이미지','main');
 
   // 편집 방식 선택 — 일반(프롬프트만으로 전체 판단) vs 마스크(브러시로 정확히 이 부분만 지정).
@@ -16529,7 +16546,11 @@ function _shortsRenderCanvas(ub){
       }).catch(function(e){
         kakaoShortsBtn.disabled=false; kakaoShortsBtn.innerHTML='💬 카카오톡으로 보내기';
         kakaoShortsNote.style.color='#f59e0b';
-        kakaoShortsNote.textContent='영상 업로드에 실패했어요: '+e.message;
+        if(/exceeded the maximum allowed size/i.test(e.message||'')){
+          kakaoShortsNote.textContent='영상 용량이 너무 커서 업로드에 실패했어요. Supabase Storage → gallery 버킷의 파일 크기 제한을 더 늘려주세요(50MB로도 부족하면 100MB 이상 권장).';
+        } else {
+          kakaoShortsNote.textContent='영상 업로드에 실패했어요: '+e.message;
+        }
       });
     };
     vidWrap.appendChild(kakaoShortsBtn);
@@ -17476,7 +17497,10 @@ function _shortsGenerate(){
         mimeType=MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':'video/webm';
       }
       var chunks=[];
-      var recorder=new MediaRecorder(stream,{mimeType:mimeType,videoBitsPerSecond:W>=2160?40000000:W>=1080?8000000:3000000});
+      // ⚠️ 요청 반영("카카오톡 공유 시 영상이 최대 용량 초과로 업로드 실패"): 1080p 8Mbps면
+      // 36초 기준 실제 파일이 45~55MB까지 나올 수 있어서 Supabase 50MB 제한에 아슬아슬하게
+      // 걸림 — 화질 체감 차이는 적으면서 용량은 확실히 줄어드는 6Mbps로 낮춰서 여유를 둠.
+      var recorder=new MediaRecorder(stream,{mimeType:mimeType,videoBitsPerSecond:W>=2160?40000000:W>=1080?6000000:3000000});
       recorder.ondataavailable=function(e){if(e.data&&e.data.size>0)chunks.push(e.data);};
       recorder.onstop=function(){
         var blob=new Blob(chunks,{type:mimeType});
