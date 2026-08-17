@@ -11477,6 +11477,55 @@ function mkAutoRoomCamera(p){
   // 참고 이미지가 있는지 확인해서 자동으로 불러옴 — 이미 이 기기에서 사진을 올린 상태면 덮어쓰지 않음.
   _tryRestoreSpacesetAnchors(spTab);
 
+  // ⚠️ 요청 반영("배치도면을 넣으면 공간 배치나 건물형태를 참고하나?"): 확인해보니 안 하고
+  // 있었음 — 참고 이미지 슬롯은 전부 "완성된 사진"을 전제로 설계돼서, 배치도면(선으로 그린
+  // 기술 도면)을 넣어도 그냥 사진인 것처럼 취급돼서 오히려 이상하게 반영될 수 있었음. 배치도면
+  // 전용 업로드 슬롯을 새로 만들어서, "이건 사진이 아니라 도면이니 레이아웃·형태·인접관계만
+  // 참고하고 도면 자체를 그리거나 스타일 참고로 쓰지 마라"는 전용 지시와 함께 붙여줌.
+  var sitePlanWrap=dv('ss');
+  sitePlanWrap.innerHTML='<div class="lbl">🗺️ 배치도면 <span class="lbl-en">선택 — 방 배치·형태를 실제로 참고해서 만들어요</span></div>';
+  var sitePlanBox=dv('');sitePlanBox.style.cssText='display:flex;gap:8px;align-items:flex-start';
+  var sitePlanThumb=dv('');sitePlanThumb.style.cssText='width:64px;height:64px;border-radius:8px;overflow:hidden;flex-shrink:0;background:var(--c2);border:1px solid var(--bd2);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative';
+  if(spTab.autoRoomSitePlan){
+    var spImg=mk('img','');spImg.src=spTab.autoRoomSitePlan;spImg.style.cssText='width:100%;height:100%;object-fit:cover';
+    sitePlanThumb.appendChild(spImg);
+  } else {
+    sitePlanThumb.innerHTML='<span style="font-size:20px;color:var(--m2)">🗺️</span>';
+  }
+  var sitePlanInp=document.createElement('input');sitePlanInp.type='file';sitePlanInp.accept='image/*';sitePlanInp.style.display='none';
+  sitePlanInp.onchange=function(){
+    var f=sitePlanInp.files[0]; if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      _downscaleForMemorySafety(reader.result, function(resized){
+        spTab.autoRoomSitePlan = resized;
+        renderSB();
+      });
+    };
+    reader.readAsDataURL(f);
+  };
+  sitePlanThumb.onclick=function(){ sitePlanInp.click(); };
+  var sitePlanRight=dv('');sitePlanRight.style.cssText='flex:1;display:flex;flex-direction:column;gap:5px';
+  var sitePlanDesc=dv('');sitePlanDesc.style.cssText='font-size:10px;color:var(--m2);line-height:1.5';
+  sitePlanDesc.textContent='번호·이름표가 붙은 배치도/평면도를 올리면, 각 공간을 만들 때 이 도면 속 그 공간의 실제 형태·비율·창문 위치·옆 공간과의 관계를 참고해서 만들어요.';
+  sitePlanRight.appendChild(sitePlanDesc);
+  if(spTab.autoRoomSitePlan){
+    var sitePlanNoteInp=mk('input','');sitePlanNoteInp.type='text';
+    sitePlanNoteInp.placeholder='선택: 방 번호·이름 매칭 메모 (예: 1=거실, 4=사무공간, 6=욕실)';
+    sitePlanNoteInp.value=spTab.autoRoomSitePlanNote||'';
+    sitePlanNoteInp.style.cssText='width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:6px 8px;font-size:10.5px;border-radius:6px;outline:none;box-sizing:border-box;font-family:inherit';
+    sitePlanNoteInp.addEventListener('change', function(){ spTab.autoRoomSitePlanNote = sitePlanNoteInp.value; });
+    sitePlanRight.appendChild(sitePlanNoteInp);
+    var sitePlanDelBtn=mk('button','');sitePlanDelBtn.type='button';sitePlanDelBtn.textContent='✕ 배치도면 삭제';
+    sitePlanDelBtn.style.cssText='align-self:flex-start;font-size:10px;color:var(--m2);background:transparent;border:none;cursor:pointer;text-decoration:underline;padding:0;font-family:inherit';
+    sitePlanDelBtn.onclick=function(){ spTab.autoRoomSitePlan=null; spTab.autoRoomSitePlanNote=''; renderSB(); };
+    sitePlanRight.appendChild(sitePlanDelBtn);
+  }
+  sitePlanBox.appendChild(sitePlanThumb);sitePlanBox.appendChild(sitePlanRight);
+  sitePlanWrap.appendChild(sitePlanBox);
+  sitePlanWrap.appendChild(sitePlanInp);
+  p.appendChild(sitePlanWrap);
+
   // ⚠️ 요청 반영("PC에 이미 올려둔 사진이 모바일에 안 보인다"): 자동 저장은 "새로 사진이
   // 바뀔 때"만 작동해서, 이 동기화 기능이 생기기 전에 이미 올려둔 사진은 한 번도 클라우드에
   // 저장된 적이 없을 수 있음 — 수동으로 지금 상태를 강제 저장할 수 있는 버튼을 추가함.
@@ -12374,6 +12423,22 @@ function _padExteriorTo916WithBlur(url, cb){
     // "전용 참고사진이 아직 없어서 순수 생성으로 가는" 경우가 많은 뷰들이 정작 이 안내를 못
     // 받고 있었음 — 여기에도 추가함.
     _looseP += (ROOM_TYPE_DISAMBIGUATION[typeName] || '');
+    // ⚠️ 요청 반영("배치도면을 넣으면 공간 배치를 참고하나?"): 새로 만든 배치도면 전용 슬롯을
+    // 실제 생성에 연결함 — 일반 참고 이미지(완성된 사진)와는 다르게 취급해야 해서, "이건 사진이
+    // 아니라 도면이다"를 명확히 하고, 레이아웃·형태·인접관계 참고 용도로만 쓰도록 지시함(도면
+    // 자체의 그림체·선·글자를 결과에 재현하면 안 됨).
+    if(spTab.autoRoomSitePlan){
+      _looseRefs = [spTab.autoRoomSitePlan].concat(_looseRefs).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,3);
+      // ⚠️ 요청 반영("배치도면이 있으면 건물형태도 참고하나?"): 지금까지는 배치도면을 "실내
+      // 공간의 한 구역"으로만 해석하게 되어있어서, 건물 외관을 만들 때는 안 맞는 지시였음 —
+      // 배치도면은 사실 건물 1층의 평면 형태(풋프린트)를 보여주는 도면이므로, 외관을 만들 땐
+      // 그 풋프린트 형태·비례와 둘레의 창문·문 위치를 건물 매싱에 반영하도록 별도 지시로 나눔.
+      if(_isExteriorViewType(typeName)){
+        _looseP += ' ⚠️⚠️⚠️ 배치도면 참고(매우 중요, 건축 외관 전용): 첨부한 참고 이미지 중 하나는 선으로 그려진 배치도/평면도(기술 도면)입니다 — 실제 사진이 아닙니다. 이 도면 자체의 그림체·선·글자·기호를 결과 이미지에 그대로 재현하지 마세요. 이 도면은 이 건물 1층의 실제 평면 형태(풋프린트)를 보여줍니다 — 도면의 전체 외곽선(둘레) 비례와 형태(정사각형에 가까운지, 가늘고 긴 직사각형인지, ㄱ자·ㄷ자로 꺾여있는지 등)를 지금 만드는 건물의 1층 매싱·평면 형태에 실제로 반영하세요. 도면 둘레를 따라 표시된 출입구·창문 위치(예: "9. Main Entrance"처럼 범례에 명시된 출입구)가 지금 만드는 뷰 쪽 면에 해당한다면, 그 위치에 맞춰 출입구·창을 배치하세요. 다만 건물의 높이·층수·지붕 형태·파사드 디자인 스타일까지 이 도면이 결정하는 건 아닙니다(이 도면은 1층 평면일 뿐, 입체 형태 정보는 없습니다) — 그 부분은 다른 참고 이미지나 스타일 설명을 따르세요.';
+      } else {
+        _looseP += ' ⚠️⚠️⚠️ 배치도면 참고(매우 중요): 첨부한 참고 이미지 중 하나는 선으로 그려진 배치도/평면도(기술 도면)입니다 — 실제 사진이 아닙니다. 이 도면 자체의 그림체·선·글자·기호를 결과 이미지에 그대로 재현하지 마세요(결과는 어디까지나 사실적인 사진이어야 합니다). 대신 이 도면을 "레이아웃 참고 자료"로만 쓰세요: 지금 만드는 공간("' + typeName + '")이 이 도면에서 어느 구역에 해당하는지 판단해서(도면 안에 함께 적힌 범례·설명 텍스트(예: "1. Origin - Coffee Roastery", "4. Office for Origin Employees"처럼 번호별 용도를 설명하는 목록)가 있다면 그 텍스트를 직접 읽어서 정확하게 매칭하고, 범례가 없다면 도면 안에 그려진 가구·집기 종류로 용도를 유추하거나' + (spTab.autoRoomSitePlanNote?(', 사용자가 남긴 메모("'+spTab.autoRoomSitePlanNote+'")를 참고해서'):'') + '), 그 구역의 실제 형태·비율(정사각형인지 좁고 긴 형태인지 등), 가구·좌석 배치, 벽 구조, 창문·문의 위치, 옆에 붙어있는 다른 공간과의 관계를 이 공간의 구조·가구 배치·카메라 구도에 실제로 반영하세요. 도면에서 확인이 안 되는 세부 마감재·색감·가구 디자인은 다른 참고 이미지나 스타일 설명을 따르세요.';
+      }
+    }
     var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1};
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
     // ⚠️ 치명적 버그 수정(반영도 3단계가 전부 똑같이 나오던 진짜 원인): 'fal-ai/nano-banana-2'는
@@ -12623,6 +12688,14 @@ function _autoRoomRetryOne(idx){
       _looseP2 += ' ⚠️⚠️⚠️ 9:16 세로 비율 실내 방 전용 경고(가장 흔한 실패 패턴): 이 좁고 긴 세로 프레임을 채우려다가, 위쪽 절반엔 이 방을 한 각도에서, 아래쪽 절반엔 같은 방을 다른 각도(또는 같은 방의 다른 부분)에서 따로따로 그려서 수평선으로 이어붙이는 실수가 매우 흔합니다 — 이건 절대 금지입니다. 결과는 반드시 하나의 카메라 위치에서 촬영한 사진 한 장이어야 합니다. 방이 세로로 다 안 담긴다면 카메라를 뒤로 물러나거나 더 넓은 화각으로 찍은 것처럼 해서 천장부터 바닥까지, 벽 전체가 왜곡 없이 자연스러운 세로 사진 한 장에 담기게 하세요. 절대 같은 방을 위아래로 두 번 그려서 붙이지 마세요.';
     }
     _looseP2 += (ROOM_TYPE_DISAMBIGUATION[typeName] || '');
+    if(spTab.autoRoomSitePlan){
+      _looseRefs2 = [spTab.autoRoomSitePlan].concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,3);
+      if(_isExteriorViewType(typeName)){
+        _looseP2 += ' \u26a0\ufe0f\u26a0\ufe0f\u26a0\ufe0f \ubc30\uce58\ub3c4\uba74 \ucc38\uace0(\ub9e4\uc6b0 \uc911\uc694, \uac74\ucd95 \uc678\uad00 \uc804\uc6a9): \uccb2\ubd80\ud55c \ucc38\uace0 \uc774\ubbf8\uc9c0 \uc911 \ud558\ub098\ub294 \uc120\uc73c\ub85c \uadf8\ub824\uc9c4 \ubc30\uce58\ub3c4/\ud3c9\uba74\ub3c4(\uae30\uc220 \ub3c4\uba74)\uc785\ub2c8\ub2e4 \u2014 \uc2e4\uc81c \uc0ac\uc9c4\uc774 \uc544\ub2d9\ub2c8\ub2e4. \uc774 \ub3c4\uba74 \uc790\uccb4\uc758 \uadf8\ub9bc\uccb4\u00b7\uc120\u00b7\uae00\uc790\u00b7\uae30\ud638\ub97c \uacb0\uacfc \uc774\ubbf8\uc9c0\uc5d0 \uadf8\ub300\ub85c \uc7ac\ud604\ud558\uc9c0 \ub9c8\uc138\uc694. \uc774 \ub3c4\uba74\uc740 \uc774 \uac74\ubb3c 1\uce35\uc758 \uc2e4\uc81c \ud3c9\uba74 \ud615\ud0dc(\ud48b\ud504\ub9b0\ud2b8)\ub97c \ubcf4\uc5ec\uc90d\ub2c8\ub2e4 \u2014 \ub3c4\uba74\uc758 \uc804\uccb4 \uc678\uacfd\uc120(\ub458\ub808) \ube44\ub840\uc640 \ud615\ud0dc\ub97c \uc9c0\uae08 \ub9cc\ub4dc\ub294 \uac74\ubb3c\uc758 1\uce35 \ub9e4\uc2f1\u00b7\ud3c9\uba74 \ud615\ud0dc\uc5d0 \uc2e4\uc81c\ub85c \ubc18\uc601\ud558\uc138\uc694. \ub3c4\uba74 \ub458\ub808\ub97c \ub530\ub77c \ud45c\uc2dc\ub41c \ucd9c\uc785\uad6c\u00b7\ucc3d\ubb38 \uc704\uce58\uac00 \uc9c0\uae08 \ub9cc\ub4dc\ub294 \ubdf0 \ucabd \uba74\uc5d0 \ud574\ub2f9\ud55c\ub2e4\uba74, \uadf8 \uc704\uce58\uc5d0 \ub9de\ucdb0 \ucd9c\uc785\uad6c\u00b7\ucc3d\uc744 \ubc30\uce58\ud558\uc138\uc694. \ub2e4\ub9cc \uac74\ubb3c\uc758 \ub192\uc774\u00b7\uce35\uc218\u00b7\uc9c0\ubd95 \ud615\ud0dc\u00b7\ud30c\uc0ac\ub4dc \ub514\uc790\uc778 \uc2a4\ud0c0\uc77c\uae4c\uc9c0 \uc774 \ub3c4\uba74\uc774 \uacb0\uc815\ud558\ub294 \uac74 \uc544\ub2d9\ub2c8\ub2e4 \u2014 \uadf8 \ubd80\ubd84\uc740 \ub2e4\ub978 \ucc38\uace0 \uc774\ubbf8\uc9c0\ub098 \uc2a4\ud0c0\uc77c \uc124\uba85\uc744 \ub530\ub974\uc138\uc694.';
+      } else {
+        _looseP2 += ' \u26a0\ufe0f\u26a0\ufe0f\u26a0\ufe0f \ubc30\uce58\ub3c4\uba74 \ucc38\uace0(\ub9e4\uc6b0 \uc911\uc694): \uccb2\ubd80\ud55c \ucc38\uace0 \uc774\ubbf8\uc9c0 \uc911 \ud558\ub098\ub294 \uc120\uc73c\ub85c \uadf8\ub824\uc9c4 \ubc30\uce58\ub3c4/\ud3c9\uba74\ub3c4(\uae30\uc220 \ub3c4\uba74)\uc785\ub2c8\ub2e4 \u2014 \uc2e4\uc81c \uc0ac\uc9c4\uc774 \uc544\ub2d9\ub2c8\ub2e4. \uc774 \ub3c4\uba74 \uc790\uccb4\uc758 \uadf8\ub9bc\uccb4\u00b7\uc120\u00b7\uae00\uc790\u00b7\uae30\ud638\ub97c \uacb0\uacfc \uc774\ubbf8\uc9c0\uc5d0 \uadf8\ub300\ub85c \uc7ac\ud604\ud558\uc9c0 \ub9c8\uc138\uc694. \ub300\uc2e0 \uc774 \ub3c4\uba74\uc744 "\ub808\uc774\uc544\uc6c3 \ucc38\uace0 \uc790\ub8cc"\ub85c\ub9cc \uc4f0\uc138\uc694: \uc9c0\uae08 \ub9cc\ub4dc\ub294 \uacf5\uac04("' + typeName + '")\uc774 \uc774 \ub3c4\uba74\uc5d0\uc11c \uc5b4\ub290 \uad6c\uc5ed\uc5d0 \ud574\ub2f9\ud558\ub294\uc9c0 \ud310\ub2e8\ud574\uc11c(\ub3c4\uba74 \uc548\uc5d0 \ud568\uaee8 \uc801\ud78c \ubc94\ub840\u00b7\uc124\uba85 \ud14d\uc2a4\ud2b8\uac00 \uc788\ub2e4\uba74 \uadf8 \ud14d\uc2a4\ud2b8\ub97c \uc9c1\uc811 \uc77d\uc5b4\uc11c \ub9e4\uce6d\ud558\uace0, \uc5c6\ub2e4\uba74 \ub3c4\uba74 \uc18d \uac00\uad6c\u00b7\uc9d1\uae30\ub85c \uc6a9\ub3c4\ub97c \uc720\ucd94\ud558\uac70\ub098' + (spTab.autoRoomSitePlanNote?(', \uc0ac\uc6a9\uc790\uac00 \ub0a8\uae34 \uba54\ubaa8("'+spTab.autoRoomSitePlanNote+'")\ub97c \ucc38\uace0\ud574\uc11c'):'') + '), \uadf8 \uad6c\uc5ed\uc758 \uc2e4\uc81c \ud615\ud0dc\u00b7\ube44\uc728, \uac00\uad6c\u00b7\uc88c\uc11d \ubc30\uce58, \ubca5 \uad6c\uc870, \ucc3d\ubb38\u00b7\ubb38\uc758 \uc704\uce58, \uc637 \uacf5\uac04\uacfc\uc758 \uad00\uacc4\ub97c \uc774 \uacf5\uac04\uc758 \uad6c\uc870\u00b7\uac00\uad6c \ubc30\uce58\u00b7\uad6c\ub3c4\uc5d0 \ubc18\uc601\ud558\uc138\uc694.';
+      }
+    }
     var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1};
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
     // ⚠️ 위 _autoRoomGenerateStep과 동일한 치명적 버그 수정: 참고 사진이 있으면 반드시 /edit
