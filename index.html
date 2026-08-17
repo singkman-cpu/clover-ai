@@ -7317,7 +7317,7 @@ function _getNormalizedRoomShare(roomKey){
 // 인테리어 견적 관행상 각 시공 항목 단가에 이미 인건비가 포함돼서 산정되는 게 일반적이라,
 // 인건비를 별도 항목으로 빼면 오히려 실제 견적서와 안 맞음(몇 명이 투입되는지도 알 수 없음).
 var ROOM_ITEM_BREAKDOWN = {
-  living:[['철거·폐기물처리',0.08,'c'],['베란다 확장공사',0.28,'c'],['바닥재',0.23,'c'],['벽지·도장',0.15,'c'],['조명(천장+무드등)',0.11,'c'],['에어컨(시스템/천장형)',0.09,'c'],['예비비',0.06,'c']],
+  living:[['철거·폐기물처리',0.08,'c'],['베란다 확장공사',0.28,'c'],['바닥재',0.23,'c'],['벽지·도장',0.15,'c'],['조명(천장·매입등)',0.11,'c'],['에어컨(시스템/천장형)',0.09,'c'],['예비비',0.06,'c']],
   kitchen:[['철거·폐기물처리',0.07,'c'],['싱크대(상·하부장)',0.41,'c'],['조리대·상판',0.16,'c'],['타일(벽·바닥)',0.19,'c'],['조명',0.1,'c'],['에어컨(시스템/천장형)',0.06,'c'],['예비비',0.01,'c']],
   bedroom:[['철거·폐기물처리',0.1,'c'],['바닥재',0.25,'c'],['벽지·도장·몰딩',0.2,'c'],['조명',0.14,'c'],['에어컨(시스템/천장형)',0.08,'c'],['붙박이장',0.18,'c'],['예비비',0.05,'c']],
   bath:[['철거·폐기물처리',0.05,'c'],['방수공사',0.11,'c'],['타일(벽·바닥)',0.22,'c'],['세면대',0.11,'c'],['변기',0.09,'c'],['샤워부스·욕조',0.17,'c'],['조명',0.07,'c'],['수납장',0.11,'c'],['예비비',0.07,'c']],
@@ -7445,6 +7445,41 @@ var EXT_ITEM_BREAKDOWN = {
 // [2026 시세 재검증] 강마루 평당 8~17만원(자재+시공) vs 원목마루 평당 15~33만원 — 실측 비율
 // 약 1.9배로 아래 원목마루 mult(1.9)와 정확히 일치함. 장판은 강마루 대비 훨씬 저렴(자재만
 // 3~8만원대)해서 mult 0.55도 합리적 범위. (출처: lifebase.kr 마루 비교 가이드, kkumigo.com)
+// ⚠️ 요청 반영("사진엔 안 보이는 비용 항목들, 소비자가 이해하기 쉽게 왜 그 비용이 드는지 적어줘"):
+// 특히 철거비·전기증설처럼 결과 사진에는 안 보이는 항목일수록 "이게 왜 돈이 들지?" 하는 의문이
+// 드는 게 당연함 — 각 항목 밑에 짧은 설명을 붙여서 신뢰도를 높임.
+var BUDGET_ITEM_EXPLANATION = {
+  '철거·폐기물처리':'기존 벽지·바닥재·조명·설비 등을 뜯어내고 폐기물을 처리하는 비용이에요. 새 마감재를 시공하기 전에 반드시 먼저 하는 작업이라, 완성된 사진에는 보이지 않아요.',
+  '베란다 확장공사':'베란다(발코니) 확장 시 기존 벽체 철거, 단열재 시공, 바닥 높이를 거실과 맞추는 공사 비용이에요.',
+  '예비비':'공사 중 예상치 못하게 추가로 드는 비용에 대비한 여유 자금이에요(보통 전체 공사비의 5~15%). 실제로 안 쓰이면 그만큼 절약돼요.',
+  '전기증설':'콘센트·조명 회로를 추가하거나 두꺼비집(분전반) 용량을 늘리는 전기 공사 비용이에요. 벽 속으로 들어가서 완성 사진에는 안 보여요.',
+  '네트워크·전기증설':'인터넷(랜선)·전기 배선을 새로 깔거나 늘리는 공사 비용이에요. 벽 속으로 들어가서 완성 사진에는 안 보여요.',
+  '방음시설':'층간소음 방지 등을 위한 바닥/벽 방음 자재·시공 비용이에요. 마감재 안쪽에 들어가서 완성 사진에는 안 보여요.',
+  '위생·소독시스템':'위생·소독 관련 설비·배관 공사 비용이에요. 천장이나 벽 속으로 들어가서 완성 사진에는 안 보여요.',
+  '위생·환기시스템':'환기 설비·덕트 공사 비용이에요. 천장 속으로 들어가서 완성 사진에는 안 보여요.',
+  '소방·안전':'화재감지기·소화기 등 소방·안전 설비 비용이에요. 법적으로 필수인 경우가 많지만 완성 사진에는 잘 안 보여요.',
+  '소방·기타':'스프링클러 등 기타 소방 설비 공사 비용이에요. 천장 속으로 들어가서 완성 사진에는 안 보여요.',
+  '냉난방·환기':'냉난방 배관·환기 덕트 공사 비용이에요. 벽/천장 속으로 들어가서 완성 사진에는 안 보여요.',
+  '설계·PM 등 전문서비스':'설계도면 작성, 현장 관리·감리를 담당하는 전문 인력 인건비예요.',
+  '바닥재':'장판·강화마루·타일 등 바닥 마감재의 자재비와 시공비예요.',
+  '벽지·도장':'벽지 또는 페인트 마감재의 자재비와 시공비예요.',
+  '벽지·도장·몰딩':'벽지/페인트 마감재와 천장 몰딩(테두리 장식)의 자재비·시공비예요.',
+  '조명(천장·매입등)':'천장에 고정 설치되는 조명(매입등·레일조명·펜던트 등)의 자재비·전기 배선·설치 인건비예요. 탁상형·스탠드형 조명은 포함되지 않아요.',
+  '조명':'천장에 고정 설치되는 조명의 자재비·전기 배선·설치 인건비예요. 탁상형·스탠드형 조명은 포함되지 않아요.',
+  '에어컨(시스템/천장형)':'천장에 매립하는 시스템에어컨의 본체·배관·설치 인건비예요.',
+  '싱크대(상·하부장)':'주방 상부장·하부장 가구의 자재비·제작·설치 비용이에요.',
+  '조리대·상판':'싱크대 상판(인조대리석·스테인리스 등)의 자재비·시공비예요.',
+  '타일(벽·바닥)':'벽·바닥 타일의 자재비와 시공비예요.',
+  '방수공사':'욕실 등 물을 쓰는 공간의 방수층 시공 비용이에요. 타일 아래로 들어가서 완성 사진에는 안 보여요.',
+  '세면대':'세면대 본체와 설치 비용이에요.',
+  '변기':'양변기 본체와 설치 비용이에요.',
+  '샤워부스·욕조':'샤워부스 또는 욕조의 자재비·설치 비용이에요.',
+  '수납장':'욕실장 등 수납 가구의 자재비·설치 비용이에요.',
+  '신발장':'현관 신발장 가구의 자재비·제작·설치 비용이에요.',
+  '중문':'현관과 거실 사이에 설치하는 중문의 자재비·설치 비용이에요.',
+  '붙박이장':'벽에 맞춤 제작해서 설치하는 붙박이장의 자재비·제작·설치 비용이에요.',
+  '붙박이장·수납':'맞춤 제작 붙박이장·수납장의 자재비·제작·설치 비용이에요.',
+};
 var ITEM_MATERIAL_OPTIONS = {
   '바닥재': [
     {label:'장판', mult:0.55, prompt:'basic vinyl flooring (jangpan)'},
@@ -7471,11 +7506,14 @@ var ITEM_MATERIAL_OPTIONS = {
     {label:'간접조명(우물천장)', mult:1.6, prompt:'indirect cove lighting in a stepped ceiling'},
     {label:'디자이너 펜던트', mult:2.2, prompt:'a designer statement pendant light fixture'},
   ],
-  '조명(천장+무드등)': [
-    {label:'기본 매입등', mult:0.6, prompt:'basic builder-grade recessed downlights with a simple mood lamp'},
-    {label:'레일조명', mult:1.0, prompt:'track lighting with a floor mood lamp'},
-    {label:'간접조명(우물천장)', mult:1.6, prompt:'indirect cove lighting in a stepped ceiling plus a designer floor lamp'},
-    {label:'디자이너 펜던트', mult:2.2, prompt:'a designer statement pendant light fixture plus a sculptural floor lamp'},
+  // ⚠️ 요청 반영("탁상형조명·스탠드조명은 시공비에서 제외해달라"): 원래 이 항목이 "천장+무드등"
+  // 이라는 이름으로 스탠드형/탁상형 조명(이동식 소품)까지 시공비에 같이 묶여있었음 — 천장에
+  // 고정 설치되는 조명(매입등·레일·간접조명·펜던트)만 시공비로 남기고, 이동식 조명은 완전히 뺐음.
+  '조명(천장·매입등)': [
+    {label:'기본 매입등', mult:0.6, prompt:'basic builder-grade recessed downlights'},
+    {label:'레일조명', mult:1.0, prompt:'track lighting'},
+    {label:'간접조명(우물천장)', mult:1.6, prompt:'indirect cove lighting in a stepped ceiling'},
+    {label:'디자이너 펜던트', mult:2.2, prompt:'a designer statement pendant light fixture'},
   ],
   '타일(벽·바닥)': [
     {label:'기본 자기질타일', mult:0.7, prompt:'basic ceramic tile'},
@@ -7626,7 +7664,7 @@ var ITEM_SYNONYMS = {
   '소파':['소파','쇼파'], 'TV·거실장':['tv','티비','텔레비전','거실장'],
   '베란다 확장공사':['베란다','발코니','확장'],
   '바닥재':['바닥재','바닥','마루','장판'], '벽지·도장':['벽지','도배','도장','페인트'],
-  '조명(천장+무드등)':['조명','등','무드등','천장등'], '조명':['조명','등'],
+  '조명(천장·매입등)':['조명','등','천장등','매입등'], '조명':['조명','등'],
   '테이블류':['테이블','탁자'], '러그·커튼':['러그','카펫','커튼','블라인드'],
   '액자·소품':['액자','소품','장식'], '침대(프레임+매트리스)':['침대','매트리스'],
   '협탁·화장대·의자':['협탁','화장대'], '커튼·블라인드':['커튼','블라인드'],
@@ -9288,16 +9326,29 @@ function mkBudgetTier(p){
           var row=dv('');row.style.cssText='display:flex;justify-content:space-between;align-items:center;font-size:11.5px;padding:3px 0;color:var(--t2)';
           var nameSpan=dv('');nameSpan.textContent=name;
           row.appendChild(nameSpan);
+          // ⚠️ 요청 반영("사진에 안 보이는 비용 항목들, 왜 비용이 드는지 소비자가 이해하기 쉽게
+          // 적어달라"): 항목명 밑에 짧은 회색 설명을 붙여서, 특히 눈에 안 보이는 항목(철거비 등)이
+          // 왜 비용이 드는지 바로 이해할 수 있게 함.
+          function _appendItemExpl(){
+            var _expl = BUDGET_ITEM_EXPLANATION[name];
+            if(_expl){
+              var explDiv=dv('');explDiv.style.cssText='font-size:9.5px;color:var(--m2);line-height:1.4;padding:0 0 5px 0;margin-top:-2px';
+              explDiv.textContent=_expl;
+              itemBreakdownBox.appendChild(explDiv);
+            }
+          }
           if(isNotApplicable){
             var naSpan=dv('');naSpan.style.cssText='color:var(--m2);font-weight:600';naSpan.textContent='— 해당없음(공간 부족)';
             row.appendChild(naSpan);
             itemBreakdownBox.appendChild(row);
+            _appendItemExpl();
             return;
           }
           if(isKept){
             var keepSpan=dv('');keepSpan.style.cssText='color:#4ade80;font-weight:600';keepSpan.textContent='✓ 유지(재사용)';
             row.appendChild(keepSpan);
             itemBreakdownBox.appendChild(row);
+            _appendItemExpl();
             return;
           }
           // 우선순위: 사용자가 직접 입력한 금액 > 총액 직접 지정했을 때의 비례 배분 > AI 배수 반영 기본 계산
@@ -9340,6 +9391,7 @@ function mkBudgetTier(p){
           inpWrap.appendChild(itInp);inpWrap.appendChild(unitSpan);
           row.appendChild(inpWrap);
           itemBreakdownBox.appendChild(row);
+          _appendItemExpl();
           // 이 항목에 세부 재질 옵션이 정의돼 있으면, 선택 칩을 바로 밑에 보여줌
           var _matOpts = ITEM_MATERIAL_OPTIONS[name];
           if(_matOpts){
@@ -9384,7 +9436,12 @@ function mkBudgetTier(p){
       var effectivePct = totalAmt>0 ? Math.round((amtForThisSpace/totalAmt)*100) : 0;
       var _roomCntForLbl = _getRoomManifest()[tab.budgetRoom] || 1;
       var _roomCntNote = _roomCntForLbl>1 ? (' <span style="color:var(--m2);font-weight:400">('+_roomCntForLbl+'개 중 이 사진 1장 몫 — 나머지 '+(_roomCntForLbl-1)+'개도 각각 비슷하게 배정됨)</span>') : '';
-      roomBudgetLine.innerHTML = '📐 '+ROOM_BUDGET_SHARE[tab.budgetRoom][0]+' 예상 몫: 실제 필요한 항목만 합쳐서 ≈ '+amtForThisSpace.toLocaleString()+'만원 (전체의 약 '+effectivePct+'%)'+shareTag+_roomCntNote+' <span style="color:var(--m2);font-weight:400">(시공+가구+소품+가전 포함)</span>';
+      // ⚠️ 버그 수정("가구·소품·조명은 견적에서 빼기로 했는데 왜 포함되어있다고 나오냐"): 실제
+      // 계산(furnTotal)은 맞게 0원 처리되고 있었는데, 이 라벨 문구가 예전 문구 "(시공+가구+
+      // 소품+가전 포함)"로 하드코딩되어 있어서 실제 계산과 다른 말을 보여주고 있었음 —
+      // furnTotal이 실제로 0원인지 여부에 따라 문구가 맞게 바뀌도록 함.
+      var _includeTag = furnTotal>0 ? '(시공+가구+소품+가전 포함)' : '(시공비만 포함, 가구·소품·가전은 별도예요)';
+      roomBudgetLine.innerHTML = '📐 '+ROOM_BUDGET_SHARE[tab.budgetRoom][0]+' 예상 몫: 실제 필요한 항목만 합쳐서 ≈ '+amtForThisSpace.toLocaleString()+'만원 (전체의 약 '+effectivePct+'%)'+shareTag+_roomCntNote+' <span style="color:var(--m2);font-weight:400">'+_includeTag+'</span>';
       // 슬롯(몇 번째 방)을 골라뒀으면, 지금 계산된 금액을 그 슬롯에 실시간으로 기록 — 카테고리
       // 전체 사용 현황(위쪽 slotSummary, 그리고 집 전체 배정 현황)이 항상 최신 상태를 반영하도록 함.
       // ⚠️ 버그 수정: 거실·주방·현관처럼 방 개수가 항상 1개로 고정인 종류는 "몇 번째 방이에요?"
@@ -29563,7 +29620,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
             .map(function(it){ return it[0]; });
           if(_visibleItemNames.length){
             _finalPrompt += ' BUDGET-TO-IMAGE CONSISTENCY (CRITICAL): the budget for this room specifically allocates money to these visible physical items — '+_visibleItemNames.join(', ')+
-              '. EVERY one of these items MUST actually be visibly present and clearly identifiable in the final image, rendered at a quality matching the stated budget tier above. Do not omit any of these items from the final image. IMPORTANT SPECIAL CASE — "TV·거실장" (TV and TV console/cabinet): if this item is in the list, the final image absolutely MUST show an actual TV SCREEN (a dark/black rectangular flat-panel screen, wall-mounted or resting on a media console) — it is NOT sufficient to only show an empty console/media cabinet with no screen on or above it; a console without a visible TV screen does not satisfy this budget item and is a failure. For every item in this list, if it is omitted, someone comparing the budget breakdown to the photo will see money was allocated to something that does not actually appear, which is a failure of this brief. Do NOT add extra large furniture, appliances, or fixtures beyond this list and what the style description above calls for — every large visible item in the final image should be traceable to either this budget list or the style description, not invented extras that were never budgeted for.';
+              '. EVERY one of these items MUST actually be visibly present and clearly identifiable in the final image, rendered at a quality matching the stated budget tier above. Do not omit any of these items from the final image. IMPORTANT SPECIAL CASE — "TV·거실장" (TV and TV console/cabinet): if this item is in the list, the final image absolutely MUST show an actual TV SCREEN (a dark/black rectangular flat-panel screen, wall-mounted or resting on a media console) — it is NOT sufficient to only show an empty console/media cabinet with no screen on or above it; a console without a visible TV screen does not satisfy this budget item and is a failure. IMPORTANT SPECIAL CASE — "에어컨(시스템/천장형)" (system air conditioner, ceiling type): if this item is in the list, the final image absolutely MUST show a clearly visible ceiling-mounted system AC unit (a distinct rectangular slim ceiling cassette with a visible grille/vent line, per the AC rule above) somewhere in the ceiling — it must be clearly noticeable as an actual appliance when looking at the photo, not blended into the ceiling so subtly that a viewer would miss it or think it is absent; do not omit it or render it so faint/small that it is not identifiable as an AC unit. For every item in this list, if it is omitted, someone comparing the budget breakdown to the photo will see money was allocated to something that does not actually appear, which is a failure of this brief. Do NOT add extra large furniture, appliances, or fixtures beyond this list and what the style description above calls for — every large visible item in the final image should be traceable to either this budget list or the style description, not invented extras that were never budgeted for.';
           }
           if(_naItemNames.length){
             _finalPrompt += ' Also, do NOT include any of the following in the final image, since an assessment of this specific room determined there is no realistic space or use for them here: '+_naItemNames.join(', ')+'. Do not force these items in even if the style description would normally suggest them.';
