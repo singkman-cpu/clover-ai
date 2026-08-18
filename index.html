@@ -3047,6 +3047,7 @@ function goHome(){gE('home-s').style.display='flex';
 function selectSpaceShortcut(kind){
   if(kind==='multiRoom'){ var _spTabReset=getTab('spaceset'); _spTabReset.isAptSimpleMode=false; }
   selectWF(kind==='multiRoom' ? 'spaceset' : 'budget');
+  if(kind==='multiRoom') renderMain('spaceset'); // 위와 동일한 이유로 모드 전환 후 한번 더 갱신
 }
 // ⚠️ 요청 반영("아파트 평형 템플릿을 메인창으로 빼자, 현장사진 디자인 앞에"): 새 최상단 메뉴
 // "아파트 컨셉 디자인" 클릭 시, 별도 워크플로우를 새로 만들지 않고 이미 있는 공간 컨셉 디자인
@@ -3064,6 +3065,11 @@ function selectAptShortcut(){
   spTab.isAptSimpleMode=true; // ⚠️ 요청 반영: "아파트 컨셉 디자인은 배치도면·건물외관 다 빼고,
   // 실내공간 체크박스+컨셉이미지 하나로 아주 간편하게" — 전용 간편 UI로 분기시키는 플래그
   renderSB();
+  // ⚠️ 요청 반영("아파트 컨셉 디자인 메인화면에 공간 컨셉 디자인 결과가 그대로 남아있다"):
+  // 위 selectWF('spaceset')가 이미 renderMain을 한 번 호출하지만, 그 시점엔 아직
+  // isAptSimpleMode가 true로 바뀌기 전이라 예전(공간 컨셉 디자인) 결과 기준으로 그려짐 —
+  // 플래그를 바꾼 뒤 다시 한번 renderMain을 호출해서 지금 모드에 맞는 결과만 보이게 함.
+  renderMain('spaceset');
   setTimeout(function(){
     var aptSection = document.querySelector('[data-apt-template-anchor]');
     if(aptSection) aptSection.scrollIntoView({behavior:'smooth', block:'start'});
@@ -3368,6 +3374,14 @@ function renderMain(callWf, preserveScroll){
   });
 
   var items=G.HIST[wf]||[];
+  // ⚠️ 요청 반영("아파트 컨셉 디자인 결과가 공간 컨셉 디자인 메인화면에도 그대로 보인다"):
+  // 두 메뉴가 같은 wf('spaceset')를 공유해서 저장은 한 배열에 같이 쌓이는데, 화면에는 지금
+  // 보고 있는 모드(isAptSimpleMode)와 일치하는 결과만 보이도록 걸러줌. isApt 표시가 없는
+  // 옛날 항목(이 수정 이전에 만들어진 것)은 원래 동작대로 공간 컨셉 디자인 쪽에 계속 보이게 둠.
+  if(wf==='spaceset'){
+    var _curIsApt = !!getTab('spaceset').isAptSimpleMode;
+    items = items.filter(function(x){ return !!x.isApt === _curIsApt; });
+  }
   // addHistEl이 내부적으로 gE('hist-s')(=첫번째 hist-s)에 append하므로,
   // 각 hist-s마다 순서대로 동일하게 채워준다.
   hsAll.forEach(function(hs, hsIdx){
@@ -10453,7 +10467,12 @@ function _showRoomResultInMain(origUrl, resultUrl, roomLabel){
   // 슬라이더로, 없으면(순수 상상 생성) 단일 이미지로 보여줌.
   // ⚠️ 요청 반영: 우측 상단 뱃지에 항상 "공간 세트"라고만 뜨던 걸, 실제 방 종류(거실/주방/
   // 회의실/대표실 등)로 정확히 보여주도록 함 — roomLabel이 없으면 기존처럼 "공간 세트"로 폴백.
-  G.HIST.spaceset.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:[roomLabel||'공간 세트'], ai:'', cx:50, fav:false, wf:'spaceset', preview:false });
+  // ⚠️ 요청 반영("아파트 컨셉 디자인이랑 공간 컨셉 디자인 메인화면이 서로 섞여서 보인다"):
+  // 두 메뉴가 내부적으로는 같은 워크플로우(spaceset)를 공유해서 결과가 같은 배열에 쌓이고
+  // 있었음 — 어느 모드에서 만들어진 결과인지 isApt로 표시해두고, renderMain에서 지금 보고
+  // 있는 모드와 일치하는 것만 걸러서 보여주도록 분리함(저장 공간·갤러리는 계속 공유하되,
+  // 화면에 섞여 보이는 것만 막음).
+  G.HIST.spaceset.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:[roomLabel||'공간 세트'], ai:'', cx:50, fav:false, wf:'spaceset', preview:false, isApt:!!getTab('spaceset').isAptSimpleMode });
   getTab('spaceset').resultImg=resultUrl;
   if(G.wf==='spaceset') renderMain('spaceset');
 }
@@ -11568,9 +11587,26 @@ function mkAptSimpleDesign(p){
   roomLabelRow.appendChild(roomBulkBtns);
   roomWrap.appendChild(roomLabelRow);
   var roomGrid=dv('');roomGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px';
+  // ⚠️ 요청 반영("34평인데 알파룸·다용도실 체크해도 렌더링이 전혀 안 된다"): 이 두 공간은
+  // 애초에 40평대 이상 표준 구성에만 있는 방이라, 지금 고른 평수(예: 34평) 템플릿엔 아예
+  // 해당 방이 없어서 체크해도 만들어질 room이 0개였음(조용히 무시됨) — 지금 평수 기준으로
+  // 실제 존재하는 공간만 계산해서, 없는 공간은 버튼을 비활성화하고 이유를 보여줌.
+  var _availableBaseTypesNow = {};
+  _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand).forEach(function(l){
+    _availableBaseTypesNow[_aptClassifyRoom(l)] = true;
+  });
+  _availableBaseTypesNow['복도']=true; _availableBaseTypesNow['팬트리']=true; // 별도 옵션이라 항상 가능
   APT_SIMPLE_BASE_TYPES.forEach(function(t){
     var isOn=spTab.aptSelectedBaseTypes.indexOf(t)!==-1;
-    var b=mk('button','');b.type='button';b.textContent=t;
+    var isAvail=!!_availableBaseTypesNow[t];
+    var b=mk('button','');b.type='button';b.textContent=t+(isAvail?'':' (해당없음)');
+    if(!isAvail){
+      b.disabled=true;
+      b.title=spTab.autoRoomAptPyeong+'평 표준 구성엔 '+t+'이(가) 보통 없어요 — 더 큰 평수를 골라보세요.';
+      b.style.cssText='padding:8px 4px;border-radius:8px;border:1.5px dashed var(--bd2);background:var(--c2);color:var(--m2);font-size:10px;font-weight:600;cursor:not-allowed;font-family:inherit;opacity:.55';
+      roomGrid.appendChild(b);
+      return;
+    }
     b.style.cssText='padding:8px 4px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
     b.onclick=function(){
       spTab._aptBasesManuallySet=true;
@@ -11628,6 +11664,29 @@ function mkAptSimpleDesign(p){
   conceptWrap.appendChild(conceptGalBtn);
   p.appendChild(conceptWrap);
 
+  // ── 레퍼런스 반영도 ──────────────────────────────────
+  // ⚠️ 버그 수정("참고이미지랑 바닥재·벽재·가구형태·컬러까지 다 똑같이 만들어달라고 했는데
+  // 안 지켜진다"): 이 간편 모드(아파트 컨셉 디자인)엔 반영도 선택 UI 자체가 없어서, 항상
+  // 기본값인 spTab.autoRoomFidelity='medium'(가구 형태·재질을 일부러 살짝씩 다르게 바꾸는
+  // 저작권 안전 모드)으로만 생성되고 있었음 — "최대한 동일하게"를 고를 방법이 없었던 것.
+  // mkAutoRoomCamera(공간 컨셉 디자인 고급 화면)에 있는 것과 동일한 선택지를 여기에도 추가함.
+  if(!spTab.autoRoomFidelity || spTab.autoRoomFidelity==='loose') spTab.autoRoomFidelity='medium';
+  var fidWrapApt=dv('ss');fidWrapApt.innerHTML='<div class="lbl">레퍼런스 반영도</div>';
+  var fidRowApt=dv('');fidRowApt.style.cssText='display:flex;flex-direction:column;gap:6px';
+  [
+    {key:'medium', label:'🟡 비슷하게 (추천)', desc:'가구·소품 재질·색상·형태를 공간 분위기에 맞게 조정(저작권 안전)'},
+    {key:'tight', label:'🔴 최대한 동일하게', desc:'바닥·벽 마감재는 물론 가구 형태·컬러까지 참고 이미지와 최대한 똑같이 — 저작권 있는 이미지면 주의하세요'}
+  ].forEach(function(opt){
+    var isOn=spTab.autoRoomFidelity===opt.key;
+    var b=mk('button','');b.type='button';
+    b.style.cssText='width:100%;text-align:left;padding:8px 10px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';cursor:pointer;font-family:inherit';
+    b.innerHTML='<div style="font-size:12px;font-weight:700;color:'+(isOn?'var(--ac)':'var(--t)')+'">'+opt.label+'</div><div style="font-size:10px;color:var(--t2);margin-top:1px">'+opt.desc+'</div>';
+    b.onclick=function(){ spTab.autoRoomFidelity=opt.key; renderSB(); };
+    fidRowApt.appendChild(b);
+  });
+  fidWrapApt.appendChild(fidRowApt);
+  p.appendChild(fidWrapApt);
+
   // ── 추가 요청사항(프롬프트) ──────────────────────────────────
   // ⚠️ 요청 반영("프롬프트 쓰는곳도 만들어줘 만약에 프롬프트를 적게되면 그게 더 우선적으로
   // 반영이 되게해줘"): 직접 텍스트로 원하는 걸 적을 수 있게 하고, 실제 생성 시 이 텍스트가
@@ -11663,6 +11722,18 @@ function mkAptSimpleDesign(p){
   // ── 실행 버튼 ──────────────────────────────────
   var _finalRoomLabels = _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand)
     .filter(function(l){ return spTab.aptSelectedBaseTypes.indexOf(_aptClassifyRoom(l))!==-1; });
+  // ⚠️ 요청 반영("욕실·작은방이 2컷씩 만들어져서 크레딧이 2배로 나간다"): 34평 이상 표준
+  // 구성엔 욕실이 2개(공용+안방전용), 작은방(침실2·3·4)도 여러 개 있어서 같은 체크박스
+  // 타입 하나에 실제로는 room이 여러 개 매칭되고 있었음 — 사용자는 체크박스 1개 = 1컷을
+  // 기대하므로, 같은 분류(_aptClassifyRoom)로 묶이는 room은 대표로 1개만 남기고 나머지는
+  // 제거함(예: 욕실 2개 → 대표 욕실 1개, 침실2/3/4 → 대표 작은방 1개).
+  var _seenBaseTypes={};
+  _finalRoomLabels = _finalRoomLabels.filter(function(l){
+    var bt=_aptClassifyRoom(l);
+    if(_seenBaseTypes[bt]) return false;
+    _seenBaseTypes[bt]=true;
+    return true;
+  });
   // 복도·팬트리는 _aptTemplateRooms에 없는 별도 옵션이라 체크되어 있으면 직접 추가
   if(spTab.aptSelectedBaseTypes.indexOf('복도')!==-1) _finalRoomLabels.push('복도(공용 공간과 각 방을 연결하는 통로)');
   if(spTab.aptSelectedBaseTypes.indexOf('팬트리')!==-1 && _finalRoomLabels.every(function(l){return l.indexOf('팬트리')===-1;})) _finalRoomLabels.push('팬트리(주방 옆 별도 식료품·소형가전 수납 공간)');
@@ -12599,7 +12670,18 @@ function _autoRoomPromptFor(basePrompt, typeName){
     _spaceUnityReminder += ' ⚠️ 브랜드 톤 참고(참고용, 절대적인 건 아님): 이 공간은 "' + _aptSpTabForTone.autoRoomAptBrand + '" 브랜드 아파트 컨셉이에요 — ' + _aptBrandToneHint2 + '. 참고 이미지의 구체적인 스타일이 항상 우선이고, 이 브랜드 톤은 참고 이미지에 없는 세부사항을 채울 때만 은은하게 참고하세요.' + " ⚠️ 요즘 신축 아파트 공통 트렌드(브랜드 무관, 기본값): 무몰딩(벽과 천장이 만나는 부분에 몰딩 없이 깔끔하게 마감, 이음새가 안 보이는 미니멀한 처리) + 히든도어/무문선(문틀이 두드러지지 않고 문이 벽의 일부처럼 자연스럽게 보이는 형태)를 기본으로 적용하세요 — 요즘 신축·리모델링 아파트에서 보편적으로 쓰이는 트렌드입니다.";
   }
   var _prependRules = _spaceUnityReminder + '⚠️⚠️ 가장 먼저 지켜야 할 절대 규칙들(다른 무엇보다 우선): ' + SINGLE_IMAGE_OUTPUT_RULE + AC_CONSISTENCY_RULE + _forceAcRule + GEOMETRY_SANITY_RULE + (prompt.indexOf('사람')===-1 && prompt.indexOf('한국인')===-1 ? NO_PEOPLE_ANIMALS_RULE : '') + ' --- ' + _styleAnalysisBlock + '이제 아래 공간 설명을 반영하세요: ';
-  return _prependRules + prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + KOREA_BACKGROUND_RULE + MAIN_LIGHT_CONSISTENCY_RULE + PREMIUM_QUALITY_RULE;
+  // ⚠️ 요청 반영("에어컨이 복도 중간·아트월 위처럼 실제 아파트에 절대 없는 위치에 나온다"):
+  // AC_CONSISTENCY_RULE에 이미 위치 규칙이 있지만 프롬프트 맨 앞쪽에만 있어서 다른 지시들
+  // 사이에 묻히는 것으로 보임 — 이 코드베이스에서 반복 확인된 패턴대로, 이 방의 실제 타입에
+  // 맞춰 짧고 구체적으로 맨 끝에 한 번 더 못박음.
+  var _acRoomType = _aptClassifyRoom(typeName);
+  var _acPositionReinforce = '';
+  if(_acRoomType==='복도' || _acRoomType==='드레스룸' || _acRoomType==='현관' || _acRoomType==='파우더룸' || _acRoomType==='팬트리'){
+    _acPositionReinforce = ' ⚠️⚠️⚠️ 마지막으로 다시 한번(가장 중요): 이 공간(' + _acRoomType + ')은 폭이 좁은 통로·부속 공간이므로 에어컨(천장형·벽걸이형 어느 것도)을 절대 그리지 마세요 — 실제 한국 아파트에서 복도·드레스룸·현관·파우더룸·팬트리에 에어컨을 다는 경우는 없습니다.';
+  } else if(_acRoomType==='거실' || _acRoomType==='안방' || _acRoomType==='작은방' || _acRoomType==='알파룸'){
+    _acPositionReinforce = ' ⚠️⚠️⚠️ 마지막으로 다시 한번(가장 중요, 반복 지적된 사항): 이 공간(' + _acRoomType + ')의 천장형 에어컨 토출구는 반드시 창문·발코니가 있는 벽 쪽 천장에, 창문과 나란한 방향으로 붙이세요 — 방 한가운데 천장, 아트월/TV벽 위, 복도로 이어지는 쪽 천장에 그리면 명백한 실패입니다. 실제 한국 아파트에서 시스템에어컨은 항상 창가 쪽에 설치됩니다.';
+  }
+  return _prependRules + prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + KOREA_BACKGROUND_RULE + MAIN_LIGHT_CONSISTENCY_RULE + PREMIUM_QUALITY_RULE + _acPositionReinforce;
 }
 function _autoRoomGenerateStep(idx){
   var spTab=getTab('spaceset');
@@ -12797,7 +12879,16 @@ function _padExteriorTo916WithBlur(url, cb){
       var _otherAnchorRefs = [imgs0.primary].concat(imgs0.ref||[]).filter(Boolean).slice(0,2);
       _looseRefs = _otherAnchorRefs.concat(_looseRefs).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
       if(_otherAnchorRefs.length){
-        _looseP = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 공간(같은 집 또는 같은 상업공간)" 안의 다른 구역(예: 거실·주방, 또는 매장의 다른 구역) 사진입니다. 이 공간은 지금 만드는 방과 물리적으로 같은 건물·같은 세대(또는 같은 매장) 안에 있으므로, 다음 두 가지를 명확히 구분해서 지키세요: (1) 마감재·구조적 요소(벽 색상·마감재 종류, 천장 마감·색상, 바닥재 종류·색상·패턴, 문의 색상·소재·손잡이 디자인, 창호 프레임 색상, 몰딩·걸레받이 같은 디테일, 전체 조명 기구 디자인 언어)는 이 참고 이미지를 "그대로" 따라가세요 — 이건 반영도 설정과 무관하게 항상 참고 이미지 기준이며, 방마다 상상해서 다르게 만들면 안 됩니다(같은 건물 안에서 마감재가 방마다 제각각이면 안 되니까요). 참고 이미지가 타일이면 타일, 우드면 우드, 특정 색 벽이면 그 색 그대로 — 절대로 다른 재질·색상으로 바꾸지 마세요. (2) 가구·소품·배치는 방마다 다릅니다 — 이 공간(' + typeName + ')의 용도에 맞는 가구 종류(침대, 책상, 카운터, 좌석 등 상황에 맞게)로 자유롭게 구성하되, 그 가구의 스타일·색감·소재 톤은 위 마감재와 어울리는 방향으로(참고 이미지의 가구 스타일 언어를 이어받아서) 고르세요. "이 방만 마감재가 다른 느낌"은 명백한 실패입니다 — 다른 공간들과 나란히 놓고 봤을 때 반드시 "같은 건물 안의 다른 방/구역"처럼 마감재가 통일되어 보여야 합니다. ⚠️⚠️ 단, 마감재 통일이 "같은 공간을 가구만 바꿔서 다시 찍으라"는 뜻은 아닙니다 — 이 공간(' + typeName + ')은 참고 이미지 속 공간과는 구조·레이아웃·구도가 뚜렷하게 다른, 같은 매장/건물 안의 "다른 물리적 구역"이어야 합니다(벽 형태·공간 규모·창문 유무나 위치·동선이 다르게). 같은 벽·같은 창문 배치에 가구만 바꿔치기한 것처럼 보이면 실패입니다. ⚠️ 단, 이건 마감재·건물 구조 얘기이지 건물 종류·규모 얘기가 아닙니다 — 이 공간은 어디까지나 참고 이미지 속 공간과 정확히 같은 건물, 같은 용도(참고 이미지가 주거공간이면 이 방도 주거공간, 상업공간이면 이 공간도 그 상업공간의 일부)여야 합니다. 절대로 호텔 객실, 고급 리조트, 완전히 다른 업종의 상업공간, 초고층 건물 등 참고 이미지와 다른 종류·용도의 공간으로 만들지 마세요 — 창밖 풍경도 참고 이미지와 같은 지역·건물 유형의 평범한 전망이어야 합니다. --- ';
+        // ⚠️ 버그 수정("반영도를 '최대한 동일하게'로 골라도 가구 형태·컬러가 참고 이미지랑
+        // 다르게 나온다"): 이 방 전용 사진이 없어서(noDirectMatch, 아파트 컨셉 디자인 간편모드는
+        // 항상 이 경로를 탐) _looseP를 통째로 재작성하면서, 반영도(tight/medium) 설정과 무관하게
+        // 무조건 "가구는 방 용도에 맞게 자유롭게 구성"으로 고정해버리고 있었음 — 그래서 사용자가
+        // "최대한 동일하게"를 골라도 가구는 항상 새로 창작됐음. 이제 tight일 땐 가구도 형태·재질·
+        // 색상까지 참고 이미지와 최대한 동일하게 맞추도록 분기함.
+        var _furnPart = (spTab.autoRoomFidelity==='tight')
+          ? ('(2) 가구·소품·가전: 이 공간(' + typeName + ')의 용도에 맞는 가구 종류(침대, 책상, 카운터, 좌석 등 상황에 맞게)로 구성하되, 형태·재질·마감재·색상까지 첨부한 참고 이미지 속 가구와 최대한 동일하게(같은 디자인 언어·같은 색감의 "같은 제품"처럼) 맞추세요 — 참고 이미지와 나란히 놓았을 때 "같은 집의 다른 방이니 가구도 같은 톤으로 맞췄구나" 싶을 정도로 닮아야 합니다. 침대·책상처럼 참고 이미지에 아예 없는 종류의 가구는 같은 소재·색감·디자인 언어로 새로 구성하세요.')
+          : ('(2) 가구·소품·배치는 방마다 다릅니다 — 이 공간(' + typeName + ')의 용도에 맞는 가구 종류(침대, 책상, 카운터, 좌석 등 상황에 맞게)로 자유롭게 구성하되, 그 가구의 스타일·색감·소재 톤은 위 마감재와 어울리는 방향으로(참고 이미지의 가구 스타일 언어를 이어받아서) 고르세요.');
+        _looseP = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 공간(같은 집 또는 같은 상업공간)" 안의 다른 구역(예: 거실·주방, 또는 매장의 다른 구역) 사진입니다. 이 공간은 지금 만드는 방과 물리적으로 같은 건물·같은 세대(또는 같은 매장) 안에 있으므로, 다음 두 가지를 명확히 구분해서 지키세요: (1) 마감재·구조적 요소(벽 색상·마감재 종류, 천장 마감·색상, 바닥재 종류·색상·패턴, 문의 색상·소재·손잡이 디자인, 창호 프레임 색상, 몰딩·걸레받이 같은 디테일, 전체 조명 기구 디자인 언어)는 이 참고 이미지를 "그대로" 따라가세요 — 이건 반영도 설정과 무관하게 항상 참고 이미지 기준이며, 방마다 상상해서 다르게 만들면 안 됩니다(같은 건물 안에서 마감재가 방마다 제각각이면 안 되니까요). 참고 이미지가 타일이면 타일, 우드면 우드, 특정 색 벽이면 그 색 그대로 — 절대로 다른 재질·색상으로 바꾸지 마세요. ' + _furnPart + ' "이 방만 마감재가 다른 느낌"은 명백한 실패입니다 — 다른 공간들과 나란히 놓고 봤을 때 반드시 "같은 건물 안의 다른 방/구역"처럼 마감재가 통일되어 보여야 합니다. ⚠️⚠️ 단, 마감재 통일이 "같은 공간을 가구만 바꿔서 다시 찍으라"는 뜻은 아닙니다 — 이 공간(' + typeName + ')은 참고 이미지 속 공간과는 구조·레이아웃·구도가 뚜렷하게 다른, 같은 매장/건물 안의 "다른 물리적 구역"이어야 합니다(벽 형태·공간 규모·창문 유무나 위치·동선이 다르게). 같은 벽·같은 창문 배치에 가구만 바꿔치기한 것처럼 보이면 실패입니다. ⚠️ 단, 이건 마감재·건물 구조 얘기이지 건물 종류·규모 얘기가 아닙니다 — 이 공간은 어디까지나 참고 이미지 속 공간과 정확히 같은 건물, 같은 용도(참고 이미지가 주거공간이면 이 방도 주거공간, 상업공간이면 이 공간도 그 상업공간의 일부)여야 합니다. 절대로 호텔 객실, 고급 리조트, 완전히 다른 업종의 상업공간, 초고층 건물 등 참고 이미지와 다른 종류·용도의 공간으로 만들지 마세요 — 창밖 풍경도 참고 이미지와 같은 지역·건물 유형의 평범한 전망이어야 합니다. --- ';
       }
     }
     // ⚠️ 요청 반영("건축도 건축 참고이미지가 없으면 실내이미지 참고해서 만들어달라고 명확히 해줘,
@@ -13166,7 +13257,12 @@ function _autoRoomRetryOne(idx){
       var _otherAnchorRefs2 = [imgs0b.primary].concat(imgs0b.ref||[]).filter(Boolean).slice(0,2);
       _looseRefs2 = _otherAnchorRefs2.concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
       if(_otherAnchorRefs2.length){
-        _looseP2 = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 집" 안의 다른 공간(거실·주방 등) 사진이며, 그 공간들은 아주 강렬하고 개성 있는 색감·소재·가구 스타일(예: 진한 살구빛/테라코타 벽, 짙은 그린 포인트, 독특한 형태의 가구, 특색 있는 소품)로 디자인되어 있습니다. 지금 만드는 이 방도 반드시 그 정도로 강렬하고 개성 있는 디자인이어야 합니다 — 벽 색상, 바닥재 종류·색상, 몰딩·마감재 톤, 문·손잡이 같은 디테일, 조명 기구 디자인, 전체적인 색감·분위기를 참고 이미지와 완전히 동일한 톤앤매너로 맞추세요. 가구도 참고 이미지처럼 평범하지 않은 형태·색감으로 고르세요. 방의 용도에 맞는 가구 종류(침대, 세면대 등)는 이 방(' + typeName + ')에 맞게 다르게 구성하되, "이 방만 평범하고 무난한 색감·가구로 만드는 것"은 명백한 실패입니다. --- ';
+        // ⚠️ 위 _autoRoomGenerateStep과 동일한 이유로(재생성 시에도 반영도 설정이 가구에
+        // 반영되도록) tight일 땐 가구도 참고 이미지와 최대한 동일하게 맞추도록 분기.
+        var _furnPart2 = (spTab.autoRoomFidelity==='tight')
+          ? ('가구도 참고 이미지 속 가구와 형태·재질·색상까지 최대한 동일하게 맞추세요(같은 톤앤매너의 "같은 제품"처럼). 방의 용도에 맞는 가구 종류(침대, 세면대 등)는 이 방(' + typeName + ')에 맞게 다르게 구성하되, 그 형태·소재·색감은 참고 이미지 속 가구와 최대한 닮게 만드세요.')
+          : ('가구도 참고 이미지처럼 평범하지 않은 형태·색감으로 고르세요. 방의 용도에 맞는 가구 종류(침대, 세면대 등)는 이 방(' + typeName + ')에 맞게 다르게 구성하되, "이 방만 평범하고 무난한 색감·가구로 만드는 것"은 명백한 실패입니다.');
+        _looseP2 = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 집" 안의 다른 공간(거실·주방 등) 사진이며, 그 공간들은 아주 강렬하고 개성 있는 색감·소재·가구 스타일(예: 진한 살구빛/테라코타 벽, 짙은 그린 포인트, 독특한 형태의 가구, 특색 있는 소품)로 디자인되어 있습니다. 지금 만드는 이 방도 반드시 그 정도로 강렬하고 개성 있는 디자인이어야 합니다 — 벽 색상, 바닥재 종류·색상, 몰딩·마감재 톤, 문·손잡이 같은 디테일, 조명 기구 디자인, 전체적인 색감·분위기를 참고 이미지와 완전히 동일한 톤앤매너로 맞추세요. ' + _furnPart2 + ' --- ';
       }
     }
     // (위 _autoRoomGenerateStep과 동일한 이유로) 건축 외관 + noDirectMatch인 경우, 실내 앵커를
@@ -24919,7 +25015,7 @@ function executeSingleRender(task){
     taskId: task.id,
     orig:task.img, result:null, origThumb:null,
     tags:['렌더링 중...'], ai:'', cx:50, fav:false,
-    wf:task.wf, preview:false, loading:true
+    wf:task.wf, preview:false, loading:true, isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined
   };
   G.HIST[task.wf].unshift(loadingItem);
   if(G.wf===task.wf) renderMain(task.wf);
@@ -24973,7 +25069,7 @@ function executeSingleRender(task){
       }
       tags.push(cost+'cr');
       if(!G.HIST[task.wf])G.HIST[task.wf]=[];
-      var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null};
+      var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null,isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined};
 
       function _finishItem(){
         // ── 1. 결과 저장 (DB 오류와 무관하게 무조건 실행) ──────────
