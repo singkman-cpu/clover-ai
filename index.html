@@ -11587,6 +11587,24 @@ function _aptTemplateRooms(pyeong, layoutType, brand){
 // mkAutoRoomCamera(복잡한 다중 앵커 관리 UI)를 그대로 재사용하지 않고, 완전히 간소화된 전용
 // 화면을 새로 만듦 — 브랜드·평수·타입 선택 + 실내 공간 체크박스 + 컨셉 이미지 1장 업로드만
 // 있으면 끝나는 구조.
+// ⚠️ 요청 반영("평수·타입별로 판상형·타워형 평면도를 저장해두면, 그 평수·타입 고를 때 자동으로
+// 불러와서 AI가 그 구조에 맞게 벽·구조를 만들게 해달라"): 사용자가 직접 평면도 스케치/사진을
+// 평수·타입 조합별로 저장해두면, 다음에 같은 평수·타입을 고를 때 자동으로 다시 불러와서 생성
+// 시 구조 기준 참고 이미지로 같이 첨부함. 브라우저 localStorage에 저장해서 새로고침해도 유지됨
+// (이 브라우저·이 기기 한정 — 다른 기기에서는 다시 올려야 함, 서버 DB가 아니라서 계정 간 공유는
+// 안 됨). 평면도는 단순한 선 그림이라 용량이 크지 않아도 되므로 많이 축소해서 저장함.
+var APT_FLOORPLAN_LS_PREFIX = 'clover_apt_floorplan_';
+function _aptFloorPlanKey(type, pyeong){ return APT_FLOORPLAN_LS_PREFIX + (type==='tower'?'tower':'flat') + '_' + (Number(pyeong)||34); }
+function _aptFloorPlanGet(type, pyeong){
+  try{ return localStorage.getItem(_aptFloorPlanKey(type, pyeong)) || null; }catch(e){ return null; }
+}
+function _aptFloorPlanSet(type, pyeong, dataUrl){
+  try{ localStorage.setItem(_aptFloorPlanKey(type, pyeong), dataUrl); return true; }
+  catch(e){ console.warn('[평면도 저장 실패 — 용량 초과 가능성]', e); return false; }
+}
+function _aptFloorPlanDelete(type, pyeong){
+  try{ localStorage.removeItem(_aptFloorPlanKey(type, pyeong)); }catch(e){}
+}
 function _aptClassifyRoom(label){
   if(label.indexOf('거실')===0) return '거실';
   if(label.indexOf('주방')===0) return '주방';
@@ -11702,6 +11720,143 @@ function mkAptSimpleDesign(p){
   }
   aptWrap.appendChild(aptBox);
   p.appendChild(aptWrap);
+
+  // ── 평면도 참고 이미지(선택, 평수·타입 전용 저장) ──────────────────────────────────
+  var fpWrap=dv('ss');
+  var _fpCurType = spTab.autoRoomAptType==='tower'?'tower':'flat';
+  var _fpCurPyeong = spTab.autoRoomAptPyeong;
+  var _fpSharedUrl = _aptFloorPlanGetShared(spTab.autoRoomAptBrand, _fpCurType, _fpCurPyeong);
+  var _fpLocalUrl = _aptFloorPlanGet(_fpCurType, _fpCurPyeong);
+  var _fpCurUrl = _fpSharedUrl || _fpLocalUrl;
+  var _fpGenericUrl = _fpCurUrl ? null : _generateAptFloorPlanSVG(_fpCurType, _fpCurPyeong);
+  // PNG 캐시 미리 데워두기(실제 생성 시 동기적으로 바로 쓸 수 있게) — 진짜 이미지가 있으면 필요없음
+  if(!_fpCurUrl){ _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, _fpCurType, _fpCurPyeong); }
+  fpWrap.innerHTML='<div class="lbl">📐 평면도 참고 이미지 <span class="lbl-en">'+(spTab.autoRoomAptType==='tower'?'타워형':'판상형')+' '+_fpCurPyeong+'평 구조 기준</span></div>';
+  var fpImgBox=dv('');fpImgBox.style.cssText='position:relative;width:100%;max-width:220px;border-radius:8px;overflow:hidden;border:1.5px solid '+(_fpCurUrl?'var(--acb)':'var(--bd2)');
+  var fpImg=mk('img','');fpImg.src=_fpCurUrl||_fpGenericUrl;fpImg.style.cssText='width:100%;display:block;cursor:pointer;background:#fff';
+  fpImg.onclick=function(){ _simpleImageZoomShow([_fpCurUrl||_fpGenericUrl], 0); };
+  fpImgBox.appendChild(fpImg);
+  fpWrap.appendChild(fpImgBox);
+  var fpActiveNote=dv('');fpActiveNote.style.cssText='font-size:10px;margin-top:4px;line-height:1.5';
+  if(_fpSharedUrl){
+    fpActiveNote.style.color='var(--ac)';
+    fpActiveNote.textContent='✅ '+(spTab.autoRoomAptBrand||'')+' '+_fpCurPyeong+'평 공식 평면도가 있어요 — 이 구조를 기준으로 만들어요.';
+  } else if(_fpLocalUrl){
+    fpActiveNote.style.color='var(--ac)';
+    fpActiveNote.textContent='✅ 내 브라우저에 저장해둔 평면도가 있어요 — 이 구조를 기준으로 만들어요.';
+    var fpDelBtn=mk('button','');fpDelBtn.type='button';fpDelBtn.textContent='✕ 이 평면도 삭제';
+    fpDelBtn.style.cssText='margin-top:6px;padding:5px 10px;border-radius:6px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#fca5a5;font-size:10.5px;cursor:pointer;font-family:inherit';
+    fpDelBtn.onclick=function(){ _aptFloorPlanDelete(_fpCurType, _fpCurPyeong); _resetAptConsistencyChain(); renderSB(); };
+    fpWrap.appendChild(fpDelBtn);
+  } else {
+    fpActiveNote.style.color='var(--m2)';
+    fpActiveNote.textContent='ℹ️ 공식 평면도가 아직 없어서, 국내 아파트 표준 구조 규칙대로 자동 생성한 개략도를 구조 기준으로 써요(마감재·가구는 이 개략도가 아니라 컨셉 이미지를 따라요).';
+  }
+  fpWrap.appendChild(fpActiveNote);
+  if(!_fpCurUrl && G.supaRole!=='admin'){
+    var fpUploadBtn=mk('button','');fpUploadBtn.type='button';fpUploadBtn.textContent='📐 우리 아파트 실제 평면도로 교체(내 브라우저에만 저장)';
+    fpUploadBtn.style.cssText='width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1.5px dashed var(--bd2);background:var(--c2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
+    var fpInp=document.createElement('input');fpInp.type='file';fpInp.accept='image/*';fpInp.style.display='none';
+    fpInp.onchange=function(){
+      var f=fpInp.files && fpInp.files[0];
+      if(!f) return;
+      var reader=new FileReader();
+      reader.onload=function(){
+        _downscaleForMemorySafety(reader.result, function(resized){
+          var ok=_aptFloorPlanSet(_fpCurType, _fpCurPyeong, resized);
+          if(!ok) alert('저장에 실패했어요 — 브라우저 저장 공간이 가득 찼을 수 있어요. 다른 평면도를 몇 개 지우고 다시 시도해주세요.');
+          _resetAptConsistencyChain();
+          renderSB();
+        });
+      };
+      reader.readAsDataURL(f);
+    };
+    fpUploadBtn.onclick=function(){ fpInp.click(); };
+    fpWrap.appendChild(fpUploadBtn);
+    fpWrap.appendChild(fpInp);
+    var fpNote=dv('');fpNote.style.cssText='font-size:10px;color:var(--m2);margin-top:4px;line-height:1.5';
+    fpNote.textContent='이 평수·타입엔 아직 공식 평면도가 없어요. 여기서 올리면 내 브라우저에만 저장돼요(전체 회원 공용은 관리자만 등록 가능).';
+    fpWrap.appendChild(fpNote);
+  }
+  p.appendChild(fpWrap);
+
+  // ── 관리자 전용: 평면도 공용 라이브러리 일괄 업로드 ──────────────────────────────────
+  // ⚠️ 요청 반영("몇십 장을 브랜드·평수·타입별로 서버에 저장해두면 전체 회원이 자동으로 쓰게
+  // 해달라"): 관리자 계정에서만 보이는 업로드 패널 — 브랜드·타입·평수를 고르고 이미지를 여러
+  // 장(다중 선택) 올리면, 그 조합으로 apt_floorplans 테이블에 저장돼서 모든 회원이 로그인 시
+  // 자동으로 불러오는 공용 라이브러리에 추가됨.
+  if(G.supaRole==='admin'){
+    var fpAdminWrap=dv('ss');
+    fpAdminWrap.style.cssText='border:1.5px solid rgba(168,85,247,.4);border-radius:10px;padding:10px;background:rgba(168,85,247,.06)';
+    fpAdminWrap.innerHTML='<div class="lbl" style="color:#c084fc">🔐 관리자 — 평면도 공용 라이브러리</div><div style="font-size:10px;color:var(--m2);margin-bottom:8px;line-height:1.5">여기서 올리면 전체 회원이 자동으로 쓰게 돼요. 브랜드·타입·평수를 고르고 이미지를 한 번에 여러 장 선택하세요(같은 조합에 여러 장 올려도 됨 — 생성할 때 그 중 하나를 무작위로 씀).</div>';
+    var fpAdmBrandSel=document.createElement('select');
+    fpAdmBrandSel.style.cssText='width:100%;padding:7px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:11.5px;margin-bottom:6px;font-family:inherit';
+    var fpAdmGeneralOpt=document.createElement('option');fpAdmGeneralOpt.value='';fpAdmGeneralOpt.textContent='브랜드 무관(범용 — 아무 브랜드에나 매칭됨)';
+    fpAdmBrandSel.appendChild(fpAdmGeneralOpt);
+    APT_BRANDS.forEach(function(b){ var o=document.createElement('option');o.value=b;o.textContent=b;fpAdmBrandSel.appendChild(o); });
+    fpAdminWrap.appendChild(fpAdmBrandSel);
+    var fpAdmRow=dv('');fpAdmRow.style.cssText='display:flex;gap:6px;margin-bottom:6px';
+    var fpAdmTypeSel=document.createElement('select');
+    fpAdmTypeSel.style.cssText='flex:1;padding:7px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:11.5px;font-family:inherit';
+    fpAdmTypeSel.innerHTML='<option value="flat">판상형</option><option value="tower">타워형</option>';
+    var fpAdmPyeongSel=document.createElement('select');
+    fpAdmPyeongSel.style.cssText='flex:1;padding:7px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:11.5px;font-family:inherit';
+    APT_COMMON_PYEONGS.forEach(function(py){ var o=document.createElement('option');o.value=py;o.textContent=py+'평';fpAdmPyeongSel.appendChild(o); });
+    fpAdmRow.appendChild(fpAdmTypeSel); fpAdmRow.appendChild(fpAdmPyeongSel);
+    fpAdminWrap.appendChild(fpAdmRow);
+    var fpAdmUploadBtn=mk('button','');fpAdmUploadBtn.type='button';fpAdmUploadBtn.textContent='📤 선택한 조합으로 이미지 올리기(여러 장 가능)';
+    fpAdmUploadBtn.style.cssText='width:100%;padding:8px;border-radius:8px;border:none;background:#a855f7;color:#fff;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    var fpAdmInp=document.createElement('input');fpAdmInp.type='file';fpAdmInp.accept='image/*';fpAdmInp.multiple=true;fpAdmInp.style.display='none';
+    var fpAdmStatus=dv('');fpAdmStatus.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.6';
+    fpAdmInp.onchange=function(){
+      var files=Array.prototype.slice.call(fpAdmInp.files||[]);
+      if(!files.length) return;
+      if(!_supa || !_supaUser){ alert('로그인이 필요해요.'); return; }
+      var brandVal=fpAdmBrandSel.value||null;
+      var typeVal=fpAdmTypeSel.value;
+      var pyeongVal=Number(fpAdmPyeongSel.value);
+      fpAdmStatus.textContent='업로드 중... 0/'+files.length;
+      var doneCount=0, failCount=0;
+      files.forEach(function(f){
+        var reader=new FileReader();
+        reader.onload=function(){
+          var filePath=_supaUser.id+'/floorplans/'+typeVal+'_'+pyeongVal+'_'+(brandVal||'general')+'_'+Date.now()+Math.random().toString(36).slice(2,8)+'.jpg';
+          fetch(reader.result).then(function(r){return r.blob();}).then(function(blob){
+            return _supa.storage.from('gallery').upload(filePath, blob, {contentType:'image/jpeg', upsert:true});
+          }).then(function(uploadRes){
+            if(uploadRes.error) throw uploadRes.error;
+            var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
+            return _supa.from('apt_floorplans').insert({
+              brand:brandVal, apt_type:typeVal, pyeong:pyeongVal,
+              storage_path:filePath, public_url:publicUrl, uploaded_by:_supaUser.id
+            });
+          }).then(function(insRes){
+            if(insRes && insRes.error) throw insRes.error;
+            doneCount++;
+          }).catch(function(e){ failCount++; console.warn('[평면도 업로드 실패]', e); })
+          .finally(function(){
+            fpAdmStatus.textContent='업로드 중... '+(doneCount+failCount)+'/'+files.length+(failCount?' (실패 '+failCount+'건)':'');
+            if(doneCount+failCount===files.length){
+              fpAdmStatus.textContent='✅ 완료: '+doneCount+'장 저장됨'+(failCount?', '+failCount+'장 실패(테이블이 없을 수 있어요)':'');
+              loadAptFloorplanLibrary();
+              setTimeout(renderSB, 600);
+            }
+          });
+        };
+        reader.readAsDataURL(f);
+      });
+    };
+    fpAdmUploadBtn.onclick=function(){ fpAdmInp.click(); };
+    fpAdminWrap.appendChild(fpAdmUploadBtn);
+    fpAdminWrap.appendChild(fpAdmInp);
+    fpAdminWrap.appendChild(fpAdmStatus);
+    // 지금까지 올라간 것 요약
+    var _fpLibCount = (G.APT_FLOORPLANS_CLOUD||[]).length;
+    var fpAdmSummary=dv('');fpAdmSummary.style.cssText='font-size:10.5px;color:var(--m2);margin-top:8px;padding-top:8px;border-top:1px solid rgba(168,85,247,.2)';
+    fpAdmSummary.textContent='현재 라이브러리에 총 '+_fpLibCount+'장 저장돼 있어요.';
+    fpAdminWrap.appendChild(fpAdmSummary);
+    p.appendChild(fpAdminWrap);
+  }
 
   // ── 실내 공간 체크박스 ──────────────────────────────────
   var roomWrap=dv('ss');
@@ -12508,6 +12663,38 @@ function _analyzeSpaceStyle(imgUrl, cb){
     }, function(err){ console.warn('[스타일 분석 실패, 기존 방식으로 진행]', err); cb(null); });
   }catch(e){ console.warn('[스타일 분석 호출 실패, 기존 방식으로 진행]', e); cb(null); }
 }
+// ⚠️ 요청 반영("계속 캡쳐해서 알려주는 것 말고 더 좋은 방법 없어?"): 사람이 결과를 보고 캡쳐해서
+// 알려주는 걸 AI가 대신 하도록 함 — 생성된 이미지를 텍스트+비전 모델(_analyzeSpaceStyle과 동일한
+// 무료 llm 액션, 이미지 생성이 아니라 텍스트 분석이라 크레딧이 안 들어감)에게 다시 보여주고
+// "에어컨 몇 개, TV 몇 대 보여?"를 직접 세게 해서, 개수가 틀리면 배지로 알려줌.
+// ⚠️ 크레딧 관련 중요 설계 결정: 여기서 "자동으로 다시 생성"까지 하면 그 재생성은 일반 재생성과
+// 똑같이 크레딧이 나감(크레딧은 서버에서 "성공적으로 완성된 이미지 1장당" 원자적으로 차감되는
+// 구조라, 재생성 사유가 사용자 요청이든 시스템 자동 검수든 서버 입장에서는 구분이 안 됨 — 이건
+// 클라이언트 코드에서 우회할 수 없음). 그래서 자동으로 크레딧을 또 쓰지 않도록, 검수까지만 자동으로
+// 하고 재생성 여부는 사용자가 배지의 버튼을 눌러서 직접 선택하게 함(기존 재생성과 크레딧 동일).
+function _verifyAcTvCount(imgUrl, roomTypeShort, cb){
+  try{
+    _falProxyCall('llm', {
+      input: {
+        model:'google/gemini-flash-1.5-8b',
+        prompt:'이 인테리어 사진을 자세히 보고 정확히 세어서 아래 형식 그대로만 답해줘(다른 설명 없이):\n에어컨개수: (천장에 매립된 직사각형 에어컨 토출구/그릴이 몇 개 보이는지 숫자만, 안 보이면 0)\nTV개수: (벽걸이든 스탠드든 합쳐서 TV가 몇 대 보이는지 숫자만, 안 보이면 0)',
+        image_url:imgUrl
+      }
+    }, function(d){
+      var txt = (d && (d.output||d.text||d.response||d.message)) || '';
+      if(typeof txt!=='string' || !txt.trim()){ cb(null); return; }
+      var acMatch = txt.match(/에어컨개수\s*:\s*(\d+)/);
+      var tvMatch = txt.match(/TV개수\s*:\s*(\d+)/i);
+      var acCount = acMatch ? parseInt(acMatch[1],10) : null;
+      var tvCount = tvMatch ? parseInt(tvMatch[1],10) : null;
+      var issues=[];
+      var _acExpected = (roomTypeShort!=='주방' && roomTypeShort!=='욕실' && roomTypeShort!=='드레스룸' && roomTypeShort!=='파우더룸' && roomTypeShort!=='현관' && roomTypeShort!=='복도' && roomTypeShort!=='발코니' && roomTypeShort!=='다용도실' && roomTypeShort!=='팬트리');
+      if(_acExpected && acCount!==null && acCount>1) issues.push('에어컨 '+acCount+'개 감지됨(1개여야 함)');
+      if(tvCount!==null && tvCount>1) issues.push('TV '+tvCount+'대 감지됨(1대여야 함)');
+      cb(issues.length ? issues.join(', ') : null);
+    }, function(err){ console.warn('[AC/TV 검수 실패, 건너뜀]', err); cb(null); });
+  }catch(e){ console.warn('[AC/TV 검수 호출 실패, 건너뜀]', e); cb(null); }
+}
 function _autoRoomRun(){
   var spTab=getTab('spaceset');
   if(!(spTab.autoRoomExtAnchors && spTab.autoRoomExtAnchors.some(function(a){return a.img;})) && !(spTab.autoRoomIntAnchors && spTab.autoRoomIntAnchors.some(function(a){return a.img;})) && !(spTab.aptConceptImages && spTab.aptConceptImages.length)){ alert('컨셉 이미지를 최소 1장 올려주세요.'); return; }
@@ -13025,6 +13212,11 @@ function _padExteriorTo916WithBlur(url, cb){
     // 내가 방금 만든 새 디자인끼리는 통일감 있게" 되도록 함.
     var _looseGenPool = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs = (_looseGenPool && _looseGenPool.length) ? [_looseGenPool[0], _looseGenPool[_looseGenPool.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    // ⚠️ 요청 반영("평수·타입별로 평면도를 저장해두면 자동으로 불러와서 그 구조에 맞게
+    // 만들어달라"): 저장된 평면도가 있으면 참고 이미지로 같이 첨부하고, 아래 _looseP 조립부에
+    // "이건 구조 기준, 마감재·가구는 다른 참고 이미지를 따르라"는 지시를 강하게 붙임.
+    var _aptFloorPlanRefImg = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
+    if(_aptFloorPlanRefImg && _looseRefs.indexOf(_aptFloorPlanRefImg)===-1) _looseRefs.unshift(_aptFloorPlanRefImg);
     // ⚠️ 요청 반영(아파트 컨셉 디자인 간편모드): 컨셉 이미지 하나를 텍스트 분석뿐 아니라 실제
     // 시각 참고 이미지로도 매 생성마다 같이 첨부함(스타일 분석 텍스트만으로는 색감·질감 디테일이
     // 약할 수 있어서, 실제 이미지도 같이 주는 게 더 정확함).
@@ -13112,6 +13304,13 @@ function _padExteriorTo916WithBlur(url, cb){
         var _qualityMatchNote = ' ⚠️⚠️⚠️ 가구·소품 퀄리티(중요): 이 세트에 딱 1장(또는 일부 방)의 참고 이미지만 주어졌더라도, 그 참고 이미지 속 가구·조명·소품의 감도(세련되고 힙한 디자인, 신경 써서 고른 듯한 소재감·컬러 배치)를 이 방에도 똑같은 수준으로 적용하세요 — 참고 사진이 없다고 이 방만 무난하고 평범한 기본 가구로 채우면 명백한 실패입니다. "같은 사람이 같은 감각으로 집 전체를 꾸몄다"처럼 모든 방이 똑같이 세련되어 보여야 합니다.';
         _looseP = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 공간(같은 집 또는 같은 상업공간)" 안의 다른 구역(예: 거실·주방, 또는 매장의 다른 구역) 사진입니다. 이 공간은 지금 만드는 방과 물리적으로 같은 건물·같은 세대(또는 같은 매장) 안에 있으므로, 다음 두 가지를 명확히 구분해서 지키세요: (1) 마감재·구조적 요소(벽 색상·마감재 종류, 천장 마감·색상, 바닥재 종류·색상·패턴, 문의 색상·소재·손잡이 디자인, 창호 프레임 색상, 몰딩·걸레받이 같은 디테일, 전체 조명 기구 디자인 언어)는 이 참고 이미지를 "그대로" 따라가세요 — 이건 반영도 설정과 무관하게 항상 참고 이미지 기준이며, 방마다 상상해서 다르게 만들면 안 됩니다(같은 건물 안에서 마감재가 방마다 제각각이면 안 되니까요). 참고 이미지가 타일이면 타일, 우드면 우드, 특정 색 벽이면 그 색 그대로 — 절대로 다른 재질·색상으로 바꾸지 마세요.' + _kitchenMatchNote + _qualityMatchNote + ' ⚠️⚠️⚠️ 창호(창틀) 색상 — 특히 자주 틀리는 부분, 다른 무엇보다 우선: 참고 이미지에 실제로 보이는 창틀 색 딱 하나(예: 화이트, 블랙, 우드톤 중 하나)만 골라서 이 세트의 모든 공간(거실이든 주방이든 침실이든)에 예외 없이 똑같이 적용하세요 — 거실 창틀은 화이트인데 주방 창틀은 블랙처럼 방마다 색이 달라지면 명백한 실패입니다. ' + _furnPart + ' "이 방만 마감재가 다른 느낌"은 명백한 실패입니다 — 다른 공간들과 나란히 놓고 봤을 때 반드시 "같은 건물 안의 다른 방/구역"처럼 마감재가 통일되어 보여야 합니다. ⚠️⚠️ 단, 마감재 통일이 "같은 공간을 가구만 바꿔서 다시 찍으라"는 뜻은 아닙니다 — 이 공간(' + typeName + ')은 참고 이미지 속 공간과는 구조·레이아웃·구도가 뚜렷하게 다른, 같은 매장/건물 안의 "다른 물리적 구역"이어야 합니다(벽 형태·공간 규모·창문 유무나 위치·동선이 다르게). 같은 벽·같은 창문 배치에 가구만 바꿔치기한 것처럼 보이면 실패입니다. ⚠️ 단, 이건 마감재·건물 구조 얘기이지 건물 종류·규모 얘기가 아닙니다 — 이 공간은 어디까지나 참고 이미지 속 공간과 정확히 같은 건물, 같은 용도(참고 이미지가 주거공간이면 이 방도 주거공간, 상업공간이면 이 공간도 그 상업공간의 일부)여야 합니다. 절대로 호텔 객실, 고급 리조트, 완전히 다른 업종의 상업공간, 초고층 건물 등 참고 이미지와 다른 종류·용도의 공간으로 만들지 마세요 — 창밖 풍경도 참고 이미지와 같은 지역·건물 유형의 평범한 전망이어야 합니다. --- ';
       }
+    }
+    // ⚠️ 요청 반영("평수·타입별로 평면도를 저장해두면 자동으로 불러와서 그 구조에 맞게
+    // 만들어달라"): _looseP가 위에서 어떤 경로로 조립됐든(첫 방이라 noDirectMatch 블록을
+    // 안 탔든) 상관없이, 평면도가 저장돼 있으면 이 문구를 무조건 덧붙임 — 평면도는 참고
+    // 이미지 목록 맨 앞(_looseRefs.unshift)에 넣어뒀으므로 AI가 가장 먼저 보게 됨.
+    if(_aptFloorPlanRefImg){
+      _looseP += ' ⚠️⚠️⚠️⚠️ 평면도 구조 기준(가장 중요, 이 세트 전용): 참고 이미지 중 하나는 이 세대(' + (spTab.autoRoomAptPyeong||34) + '평, ' + (spTab.autoRoomAptType==='tower'?'타워형':'판상형') + ')의 실제 평면도(방 배치 스케치/도면)입니다 — 이건 다른 참고 이미지(스타일 사진)와 역할이 완전히 다릅니다. 이 평면도에서 가져올 것은 오직 구조뿐입니다: 방들의 개수·상대적 위치·인접 관계, 벽의 위치, 창문·발코니가 있는 방향, 문의 위치. 지금 만드는 방(' + typeName + ')이 이 평면도에서 어느 방에 해당하는지 파악하고, 그 방의 실제 형태(가로세로 비율, 창문 위치, 인접한 벽)를 최대한 따라가세요. 반대로 이 평면도에서 절대 가져오면 안 되는 것: 마감재·색상·가구·조명·전체적인 톤앤무드 — 이런 스타일 요소는 다른 참고 이미지(있다면)를 따르거나, 없으면 이 프롬프트의 다른 지시를 따르세요. 평면도는 흑백 선 그림일 수 있지만, 실제 결과물은 그 평면도의 구조를 가진 사실적인 사진이어야지, 평면도 자체를 재현하면 안 됩니다.';
     }
     // ⚠️ 요청 반영("건축도 건축 참고이미지가 없으면 실내이미지 참고해서 만들어달라고 명확히 해줘,
     // 창문형태나 정원이 있으면 정원도 반영해서 외부랑 실내가 잘 어울리게"): 위 블록은 실내끼리만
@@ -13312,6 +13511,20 @@ function _padExteriorTo916WithBlur(url, cb){
         var _tagLabel0 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName; // ⚠️ 버그 수정("이미지 위에 room:거실(판상형 특유의...) 처럼 긴 텍스트가 뜬다"): 아파트 간편모드의 typeName은 프롬프트용으로 아주 길고 상세한 설명이라, 그대로 태그(화면 배지)로 쓰면 저렇게 됨 — 태그·배지 표시용으로는 짧은 기본 방 이름만 쓰도록 분리함(실제 생성 프롬프트는 그대로 typeName 전체를 씀, 영향 없음). 요청 반영: 배지에 평수도 같이 보이게 앞에 붙임.
         _saveResultToCloudGallery('spaceset', Date.now()+idx, finalUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, _tagLabel0);
         _showRoomResultInMain(null, finalUrl, _tagLabel0, _isAptForThisRun);
+        // ⚠️ 요청 반영("계속 캡쳐해서 알려주는 것 말고 더 좋은 방법"): 방금 만든 이미지를 무료
+        // 검수 모델에게 다시 보여줘서 에어컨·TV 개수를 확인함 — 문제가 있으면 이 결과물에 경고
+        // 배지를 달아둠(자동 재생성은 크레딧이 또 나가므로 하지 않고, 사용자가 배지의 "다시
+        // 생성" 버튼을 눌러 직접 선택하게 함).
+        (function(){
+          var _qcTargetItem = G.HIST.spaceset && G.HIST.spaceset[0];
+          var _qcRoomType = _aptClassifyRoom(typeName);
+          if(_qcTargetItem) _qcTargetItem.genIdx = idx;
+          _verifyAcTvCount(finalUrl, _qcRoomType, function(issueText){
+            if(!issueText || !_qcTargetItem) return;
+            _qcTargetItem.qcWarning = issueText;
+            if(G.wf==='spaceset') renderMain('spaceset');
+          });
+        })();
         _autoRoomGenerateStep(idx+1);
       }
       // ⚠️ 요청 반영("계속 9:16 비율 때문에 겹쳐서 나온다, 그냥 전처럼 3:4로 하면 무조건 한 장만
@@ -13463,6 +13676,8 @@ function _autoRoomRetryOne(idx){
     }
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    var _aptFloorPlanRefImg2 = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
+    if(_aptFloorPlanRefImg2 && _looseRefs2.indexOf(_aptFloorPlanRefImg2)===-1) _looseRefs2.unshift(_aptFloorPlanRefImg2);
     if(spTab.aptConceptImages && spTab.aptConceptImages.length){ spTab.aptConceptImages.slice(0,4).forEach(function(_ci){ if(_looseRefs2.indexOf(_ci)===-1) _looseRefs2.push(_ci); }); }
     if(!imgs0b.noDirectMatch && imgs0b.primary){
       _looseRefs2 = [imgs0b.primary].concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
@@ -13489,6 +13704,9 @@ function _autoRoomRetryOne(idx){
           : ('가구도 참고 이미지처럼 평범하지 않은 형태·색감으로 고르세요. 방의 용도에 맞는 가구 종류(침대, 세면대 등)는 이 방(' + typeName + ')에 맞게 다르게 구성하되, "이 방만 평범하고 무난한 색감·가구로 만드는 것"은 명백한 실패입니다.');
         _looseP2 = '⚠️⚠️ 가장 중요한 지시(이것부터 최우선으로 지키세요): 첨부한 참고 이미지는 이 "같은 집" 안의 다른 공간(거실·주방 등) 사진이며, 그 공간들은 아주 강렬하고 개성 있는 색감·소재·가구 스타일(예: 진한 살구빛/테라코타 벽, 짙은 그린 포인트, 독특한 형태의 가구, 특색 있는 소품)로 디자인되어 있습니다. 지금 만드는 이 방도 반드시 그 정도로 강렬하고 개성 있는 디자인이어야 합니다 — 벽 색상, 바닥재 종류·색상, 몰딩·마감재 톤, 문·손잡이 같은 디테일, 조명 기구 디자인, 전체적인 색감·분위기를 참고 이미지와 완전히 동일한 톤앤매너로 맞추세요. ' + _furnPart2 + ' --- ';
       }
+    }
+    if(_aptFloorPlanRefImg2){
+      _looseP2 += ' ⚠️⚠️⚠️⚠️ 평면도 구조 기준(가장 중요, 이 세트 전용): 참고 이미지 중 하나는 이 세대(' + (spTab.autoRoomAptPyeong||34) + '평, ' + (spTab.autoRoomAptType==='tower'?'타워형':'판상형') + ')의 실제 평면도(방 배치 스케치/도면)입니다 — 다른 참고 이미지(스타일 사진)와 역할이 다릅니다. 이 평면도에서 가져올 것은 오직 구조뿐입니다: 방들의 개수·상대적 위치·인접 관계, 벽의 위치, 창문·발코니가 있는 방향, 문의 위치. 지금 만드는 방(' + typeName + ')이 이 평면도에서 어느 방에 해당하는지 파악하고, 그 방의 실제 형태를 최대한 따라가세요. 마감재·색상·가구·조명 같은 스타일 요소는 이 평면도가 아니라 다른 참고 이미지를 따르세요.';
     }
     // (위 _autoRoomGenerateStep과 동일한 이유로) 건축 외관 + noDirectMatch인 경우, 실내 앵커를
     // 실제로 첨부하고 창호색·정원·전체 톤을 반영하게 함
@@ -13582,6 +13800,16 @@ function _autoRoomRetryOne(idx){
         var _tagLabel2 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
         _saveResultToCloudGallery('spaceset', Date.now()+idx, finalUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, _tagLabel2);
         _showRoomResultInMain((prevResult2&&prevResult2.url)||null, finalUrl, _tagLabel2, _isAptForThisRun);
+        (function(){
+          var _qcTargetItem2 = G.HIST.spaceset && G.HIST.spaceset[0];
+          var _qcRoomType2 = _aptClassifyRoom(typeName);
+          if(_qcTargetItem2) _qcTargetItem2.genIdx = idx;
+          _verifyAcTvCount(finalUrl, _qcRoomType2, function(issueText){
+            if(!issueText || !_qcTargetItem2) return;
+            _qcTargetItem2.qcWarning = issueText;
+            if(G.wf==='spaceset') renderMain('spaceset');
+          });
+        })();
         renderSB();
       }
       // (위와 동일한 이유로) 9:16으로 자르거나 채우지 않고 3:4로 생성된 그대로 씀
@@ -22072,6 +22300,23 @@ function addHistEl(item, scroll, targetHs, atBottom){
     // 확대/축소: +/- 버튼 제거, Z키+마우스휠로 동작
     } // end else (non-video)
 
+    // ⚠️ 요청 반영("계속 캡쳐해서 알려주는 것 말고 더 좋은 방법"): AI가 방금 만든 이미지를
+    // 스스로 검수(에어컨·TV 개수)해서 문제를 찾으면 여기 경고 배지로 보여줌 — 재생성은
+    // 크레딧이 드니 자동으로 하지 않고, 버튼을 눌러야만(=기존 재생성과 동일 크레딧) 다시 만듦.
+    if(item.wf==='spaceset' && item.qcWarning){
+      var qcBar=dv('');
+      qcBar.style.cssText='margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+      var qcText=dv('');qcText.style.cssText='font-size:11.5px;color:#f59e0b;flex:1;min-width:160px';
+      qcText.textContent='⚠️ AI 자체 검수: '+item.qcWarning;
+      qcBar.appendChild(qcText);
+      if(typeof item.genIdx==='number'){
+        var qcRetryBtn=mk('button','');qcRetryBtn.type='button';qcRetryBtn.textContent='🔄 이 뷰만 다시 생성';
+        qcRetryBtn.style.cssText='padding:6px 12px;border-radius:7px;border:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.15);color:#f59e0b;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap';
+        qcRetryBtn.onclick=function(e){ e.stopPropagation(); _autoRoomRetryOne(item.genIdx); };
+        qcBar.appendChild(qcRetryBtn);
+      }
+      cw.appendChild(qcBar);
+    }
 
     // Icon bar
     var ib=dv('ibar');
@@ -31618,6 +31863,7 @@ function onSupaLogin(user){
       if(G._cloudGalleryLoadedForUid !== user.id){
         G._cloudGalleryLoadedForUid = user.id;
         loadCloudGallery();
+        loadAptFloorplanLibrary(); // ⚠️ 요청 반영: 브랜드별 평면도 공용 라이브러리(관리자가 올린 것)를 모든 회원이 로그인 시 불러옴
       } else {
         console.log('[클라우드 갤러리] 이미 이 세션에서 로드됨 — 재요청 생략');
       }
@@ -31813,6 +32059,194 @@ function _sendAdminNewUserAlert(email){
   });
 }
 
+// ⚠️ 요청 반영("관리자가 브랜드별 평면도를 몇십 장 미리 올려두면, 회원이 브랜드·평수·타입만
+// 고르면 그 평면도를 자동으로 인식해서 구조를 만들게 해달라"): 지난번엔 브라우저 로컬 저장이라
+// 나만 쓸 수 있었는데, 이번엔 전체 회원이 같이 쓰는 진짜 공용 라이브러리로 만듦 — 새 Supabase
+// 테이블(apt_floorplans)에서 전체 목록을 불러와 캐시해둠(로그인 시 1번).
+// ⚠️ 필요한 사전 작업(Supabase 대시보드 SQL 에디터에서 1회 실행 필요, 제가 직접 실행할 권한이
+// 없어서 SQL만 준비함):
+//   create table public.apt_floorplans (
+//     id uuid primary key default gen_random_uuid(),
+//     brand text, apt_type text not null, pyeong int not null,
+//     storage_path text not null, public_url text not null,
+//     uploaded_by uuid references auth.users(id), created_at timestamptz default now()
+//   );
+//   alter table public.apt_floorplans enable row level security;
+//   create policy "apt_floorplans_select_all" on public.apt_floorplans for select using (true);
+//   create policy "apt_floorplans_insert_own" on public.apt_floorplans for insert with check (auth.uid() = uploaded_by);
+//   create policy "apt_floorplans_delete_own" on public.apt_floorplans for delete using (auth.uid() = uploaded_by);
+function loadAptFloorplanLibrary(){
+  if(!_supa) return;
+  _supa.from('apt_floorplans').select('*').then(function(res){
+    if(res.error){ console.warn('[평면도 라이브러리] 로드 실패(테이블이 아직 없을 수 있음):', res.error.message); G.APT_FLOORPLANS_CLOUD=[]; return; }
+    G.APT_FLOORPLANS_CLOUD = res.data||[];
+    console.log('[평면도 라이브러리] '+G.APT_FLOORPLANS_CLOUD.length+'개 로드됨');
+  }).catch(function(e){ console.warn('[평면도 라이브러리] 로드 오류:', e); G.APT_FLOORPLANS_CLOUD=[]; });
+}
+// 브랜드+타입+평수로 가장 적합한 평면도를 고름 — 정확히 같은 브랜드가 있으면 그걸 우선, 없으면
+// 브랜드 무관(범용, brand가 null이거나 '기타/일반')으로 올려둔 것 중에서 찾음. 같은 조건에
+// 여러 장 있으면(브랜드가 34A/34B처럼 여러 타입일 수 있어서) 그 중 하나를 무작위로 골라서
+// 매번 똑같은 평면도만 쓰이지 않고 다양하게 섞이게 함.
+function _aptFloorPlanGetShared(brand, type, pyeong){
+  var pool = (G.APT_FLOORPLANS_CLOUD||[]).filter(function(row){
+    return row.apt_type===(type==='tower'?'tower':'flat') && Number(row.pyeong)===Number(pyeong);
+  });
+  if(!pool.length) return null;
+  var exact = pool.filter(function(row){ return row.brand===brand; });
+  var general = pool.filter(function(row){ return !row.brand || row.brand==='기타/일반'; });
+  var chosen = exact.length ? exact : (general.length ? general : pool);
+  return chosen[Math.floor(Math.random()*chosen.length)].public_url;
+}
+// ⚠️ 요청 반영("네 마음대로 만들지 말고 국내 아파트 기준 구조 규칙 그대로 반영해서 만들어줘"):
+// 지금까지 실제 사진·도면으로 확인한 규칙(판상형: 발코니 쪽 일자 배치, 안방·거실·작은방 순서로
+// 나란히 + 좌우에 각각 문, 주방은 다용도실 인접+자체 창문, 뒤쪽 서비스 라인 / 타워형: 거실+주방
+// 개방형 코너존, 안방은 드레스룸·파우더·욕실 딸린 별도 존, 침실은 주방 쪽 인접)을 그대로 반영한
+// "일반적인 구조 개략도"를 코드로 직접 그림 — 특정 건설사의 실제 도면을 복제하는 게 아니라
+// 저작권 없는 표준 다이어그램이라 이 방식으로만 제공함. SVG를 data URI로 만들어 즉시 반환하므로
+// 서버 저장·업로드 없이 항상 사용 가능(관리자가 올린 진짜 브랜드 평면도가 있으면 그게 항상
+// 우선하고, 없을 때만 이 표준 개략도를 구조 참고용으로 씀).
+function _aptFloorPlanBedroomCount(pyeong){
+  var p = Number(pyeong)||34;
+  if(p<20) return 1;
+  if(p<30) return 2;
+  if(p<40) return 3;
+  if(p<50) return 4;
+  return 4;
+}
+function _generateAptFloorPlanSVG(type, pyeong){
+  var isTower = type==='tower';
+  var beds = _aptFloorPlanBedroomCount(pyeong); // 안방 포함 총 침실 개수
+  var hasDress = beds>=2; // 20평대 이상이면 드레스룸 통상 있음(코드의 _aptTemplateRooms 기준)
+  var hasUtility = true;
+  var W=440, H=600;
+  var rooms=[]; // {x,y,w,h,label,window:'S'|'N'|'E'|'W'|null,doorSide:'S'|'N'|'E'|'W'}
+  var WALL='#2a2a2a', FILL='#f6f3ee', WINCOL='#3b82c4', TXT='#333';
+
+  function esc(s){ return s.replace(/&/g,'&amp;'); }
+
+  if(!isTower){
+    // ── 판상형: 남쪽(하단) 라인에 안방·거실·침실2(3,4)가 나란히, 북쪽(상단)에 서비스 라인 ──
+    var southY = H-190, southH = 190;
+    var southRooms=[]; // in order: 안방(20+평만 별도, <20평은 거실에 통합) , 거실, 침실2..
+    var bedroomLabels=[];
+    if(beds===1){ southRooms=['거실']; } // 18평: 거실=침실겸용 하나로 표기, 별도 안방 없음
+    else {
+      bedroomLabels.push('안방');
+      for(var i=2;i<=beds;i++) bedroomLabels.push(i===2?'침실2':(i===3?'침실3':'침실4'));
+      southRooms = [bedroomLabels[0], '거실'].concat(bedroomLabels.slice(1));
+    }
+    var totalW=W-40;
+    var widths = southRooms.map(function(r){ return r==='거실' ? 1.6 : 1; });
+    var wsum = widths.reduce(function(a,b){return a+b;},0);
+    var curX=20;
+    southRooms.forEach(function(r,i){
+      var rw = totalW*widths[i]/wsum;
+      rooms.push({x:curX, y:southY, w:rw, h:southH, label:r, window:'S'});
+      curX += rw;
+    });
+    // ── 북쪽 서비스 라인 ──
+    var northY=20, northH=H-190-40-20; // gap between north and south rows for corridor feel
+    var nx=20;
+    if(beds>=2){
+      var dressW = totalW*0.16;
+      rooms.push({x:nx, y:northY, w:dressW, h:northH*0.55, label:'드레스룸'});
+      rooms.push({x:nx, y:northY+northH*0.55, w:dressW*0.55, h:northH*0.45, label:'파우더'});
+      rooms.push({x:nx+dressW*0.55, y:northY+northH*0.55, w:dressW*0.45, h:northH*0.45, label:'욕실2'});
+      nx += dressW;
+    }
+    var kitchenW = totalW*0.30;
+    rooms.push({x:nx, y:northY, w:kitchenW, h:northH, label:'주방', window:'N'});
+    nx += kitchenW;
+    if(hasUtility){
+      var utilW = totalW*0.12;
+      rooms.push({x:nx, y:northY, w:utilW, h:northH*0.5, label:'다용도실'});
+      rooms.push({x:nx, y:northY+northH*0.5, w:utilW, h:northH*0.5, label:'실외기실'});
+      nx += utilW;
+    }
+    var entW = totalW - (nx-20);
+    rooms.push({x:nx, y:northY, w:entW*0.55, h:northH, label:'현관'});
+    rooms.push({x:nx+entW*0.55, y:northY, w:entW*0.45, h:northH, label:'욕실1'});
+  } else {
+    // ── 타워형: 좌하단 거실+주방 개방존(코너창), 좌상단 안방존, 우측 침실존 ──
+    var lw = W*0.58, midY = H*0.42;
+    rooms.push({x:20, y:midY, w:lw*0.62, h:H-midY-20, label:'거실', window:'SW'});
+    rooms.push({x:20+lw*0.62, y:midY, w:lw*0.38, h:H-midY-20, label:'주방'});
+    // 안방존(좌상단)
+    var abW = lw*0.62;
+    rooms.push({x:20, y:20, w:abW*0.62, h:midY-20-20, label:'안방', window:'N'});
+    if(beds>=2){
+      rooms.push({x:20+abW*0.62, y:20, w:abW*0.38, h:(midY-40)*0.45, label:'드레스룸'});
+      rooms.push({x:20+abW*0.62, y:20+(midY-40)*0.45, w:abW*0.38*0.5, h:(midY-40)*0.55, label:'파우더'});
+      rooms.push({x:20+abW*0.62+abW*0.38*0.5, y:20+(midY-40)*0.45, w:abW*0.38*0.5, h:(midY-40)*0.55, label:'욕실2'});
+    }
+    // 현관 (안방존 아래, 코어와 인접)
+    rooms.push({x:20, y:midY-20, w:abW, h:20, label:'현관'});
+    // 우측 침실존
+    var rx = 20+lw+10, rw = W-rx-20;
+    var bedsRight = Math.max(0, beds-1);
+    if(bedsRight>0){
+      var rh = (H-40)/bedsRight;
+      for(var b=0;b<bedsRight;b++){
+        rooms.push({x:rx, y:20+rh*b, w:rw*0.6, h:rh, label:(b===0?'침실2':(b===1?'침실3':'침실4')), window:'E'});
+      }
+      rooms.push({x:rx+rw*0.6, y:20, w:rw*0.4, h:(H-40)*0.5, label:'욕실1'});
+      rooms.push({x:rx+rw*0.6, y:20+(H-40)*0.5, w:rw*0.4, h:(H-40)*0.5, label:'다용도실'});
+    }
+  }
+
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">';
+  svg += '<rect width="'+W+'" height="'+H+'" fill="#ffffff"/>';
+  svg += '<text x="'+(W/2)+'" y="16" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#666">'+(pyeong)+'평 '+(isTower?'타워형':'판상형')+' 표준 구조 개략도(구조 참고용)</text>';
+  rooms.forEach(function(r){
+    svg += '<rect x="'+r.x+'" y="'+r.y+'" width="'+r.w+'" height="'+r.h+'" fill="'+FILL+'" stroke="'+WALL+'" stroke-width="2.5"/>';
+    if(r.window){
+      // 창문 표시: 해당 변에 파란 두꺼운 선
+      if(r.window.indexOf('S')!==-1) svg += '<line x1="'+(r.x+6)+'" y1="'+(r.y+r.h)+'" x2="'+(r.x+r.w-6)+'" y2="'+(r.y+r.h)+'" stroke="'+WINCOL+'" stroke-width="5"/>';
+      if(r.window.indexOf('N')!==-1) svg += '<line x1="'+(r.x+6)+'" y1="'+r.y+'" x2="'+(r.x+r.w-6)+'" y2="'+r.y+'" stroke="'+WINCOL+'" stroke-width="5"/>';
+      if(r.window.indexOf('E')!==-1) svg += '<line x1="'+(r.x+r.w)+'" y1="'+(r.y+6)+'" x2="'+(r.x+r.w)+'" y2="'+(r.y+r.h-6)+'" stroke="'+WINCOL+'" stroke-width="5"/>';
+      if(r.window.indexOf('W')!==-1) svg += '<line x1="'+r.x+'" y1="'+(r.y+6)+'" x2="'+r.x+'" y2="'+(r.y+r.h-6)+'" stroke="'+WINCOL+'" stroke-width="5"/>';
+    }
+    var fontSize = Math.min(13, Math.max(8, r.w/6));
+    svg += '<text x="'+(r.x+r.w/2)+'" y="'+(r.y+r.h/2)+'" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif" font-size="'+fontSize+'" fill="'+TXT+'">'+esc(r.label)+'</text>';
+  });
+  svg += '<text x="'+(W-8)+'" y="'+(H-6)+'" text-anchor="end" font-family="sans-serif" font-size="9" fill="#aaa">파란선=창문(발코니) · 구조 참고용 개략도, 실제 도면 아님</text>';
+  svg += '</svg>';
+  return 'data:image/svg+xml;utf8,'+encodeURIComponent(svg);
+}
+// 우선순위: 관리자 공용 라이브러리(브랜드 정확 매칭) > 관리자 공용(범용) > 내 브라우저 저장 > 표준 개략도(항상 있음)
+function _aptFloorPlanGetBest(brand, type, pyeong){
+  return _aptFloorPlanGetShared(brand, type, pyeong) || _aptFloorPlanGet(type, pyeong) || _generateAptFloorPlanSVG(type, pyeong);
+}
+// ⚠️ 기술적 이유로 필요: fal.ai 이미지 생성 모델은 실제 픽셀 이미지(PNG/JPG)만 참고 이미지로
+// 받아들이고, data:image/svg+xml 같은 벡터 XML은 이미지로 인식하지 못함(브라우저 <img>
+// 태그에서야 SVG가 보이지만, 생성 API에는 안 통함) — 그래서 SVG로 그린 표준 개략도는 반드시
+// PNG로 변환해서 넘겨야 함. 변환은 비동기(Image 로드 필요)라 미리 캐시해두고, 캐시가 아직
+// 없으면 이번 생성엔 개략도 없이 진행(다음 생성부터는 캐시돼서 반영됨).
+var _aptFloorPlanPngCache = {};
+function _svgDataUriToPngDataUri(svgDataUri, cb){
+  try{
+    var img=new Image();
+    img.onload=function(){
+      var canvas=document.createElement('canvas');
+      canvas.width=img.naturalWidth||440; canvas.height=img.naturalHeight||600;
+      var ctx=canvas.getContext('2d');
+      ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img,0,0);
+      try{ cb(canvas.toDataURL('image/png')); }catch(e){ cb(null); }
+    };
+    img.onerror=function(){ cb(null); };
+    img.src=svgDataUri;
+  }catch(e){ cb(null); }
+}
+function _aptFloorPlanGetBestPng(brand, type, pyeong){
+  var shared = _aptFloorPlanGetShared(brand, type, pyeong) || _aptFloorPlanGet(type, pyeong);
+  if(shared) return shared; // 실제 업로드된 이미지(JPG/PNG)는 그대로 씀
+  var key = (type==='tower'?'tower':'flat')+'_'+(Number(pyeong)||34);
+  if(_aptFloorPlanPngCache[key]) return _aptFloorPlanPngCache[key]; // 캐시된 PNG면 즉시 반환
+  // 캐시가 없으면 지금 변환을 시작해두고(다음 호출부터 쓰임), 이번엔 null 반환
+  _svgDataUriToPngDataUri(_generateAptFloorPlanSVG(type, pyeong), function(pngUri){ if(pngUri) _aptFloorPlanPngCache[key]=pngUri; });
+  return null;
+}
 function loadCloudGallery(){
   if(!_supa||!_supaUser) return;
   // 예전엔 전체 워크플로우 통틀어서 "최근 200개"만 가져왔는데, 그러면 현장사진/AI편집처럼
