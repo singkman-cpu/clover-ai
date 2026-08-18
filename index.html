@@ -10561,6 +10561,10 @@ function _openGalleryPickerForMultiRoom(){
 }
 function mkMultiRoomSpace(p){
   var spTab=getTab('spaceset');
+  // ⚠️ 버그 수정("아파트 컨셉디자인에 왜 현장사진세트랑 컨셉확장이 있는거지"): 이 체크가 함수
+  // 맨 아래(토글 버튼·전체리셋 버튼을 이미 다 그린 뒤)에 있어서, 아파트 간편모드에서도 그
+  // 버튼들이 항상 같이 새어나오고 있었음 — 함수 맨 위로 옮겨서 아예 안 그려지게 함.
+  if(spTab.multiRoomSubMode==='auto' && spTab.isAptSimpleMode){ mkAptSimpleDesign(p); return; }
   // ⚠️ 재설계: localStorage 기반 draft는 사진이 많아지면 용량 제한(보통 5~10MB)에 걸려 조용히
   // 저장 실패 → 새로고침하면 다 사라지는 문제가 실제로 발생했음(즐겨찾기 등 다른 localStorage
   // 데이터에도 영향 줬을 수 있음). 훨씬 넉넉한 IndexedDB로 옮김 — 단, IndexedDB는 비동기라서
@@ -10632,7 +10636,6 @@ function mkMultiRoomSpace(p){
   };
   p.appendChild(resetAllBtn);
 
-  if(spTab.multiRoomSubMode==='auto' && spTab.isAptSimpleMode){ mkAptSimpleDesign(p); return; }
   if(spTab.multiRoomSubMode==='auto'){ mkAutoRoomCamera(p); return; }
 
   mkNote(p,'<strong style="color:var(--ac)">🏢 공간 컨셉 디자인</strong><br>공간별 실제 사진을 올려주세요. <b style="color:var(--t)">벽·창문 구조는 그대로 유지</b>하고, 색감·마감재·소품·가구 톤만 아래 참고 디자인 이미지 하나로 통일해서 만들어요.<br>🏗️ "건축 외관"을 고르면 조감뷰·파사드뷰·측면뷰 등 여러 앵글의 외관도 같은 방식으로 만들 수 있어요.<br>💡 방마다 전용 참고 이미지를 추가하면 더 정확해져요 — 일부만 넣어도 괜찮아요.<br><span style="font-size:10px;color:var(--m2)">사진 없이 AI가 상상해서 만들어주길 원하면 "컨셉 확장" 모드를 써주세요.</span><br><span style="font-size:10.5px;color:var(--m2);display:block;margin-top:6px;padding-top:6px;border-top:1px dashed var(--bd2)">📌 <b style="color:var(--t2)">현장사진 디자인</b>과 헷갈리실 수 있어요 — 여기(공간 컨셉 디자인)는 <b style="color:var(--t2)">"참고 이미지"</b>를 넣어서 여러 공간을 한 번에 통일감 있게 만들 때 쓰고, <b style="color:var(--t2)">현장사진 디자인</b>은 <b style="color:var(--t2)">프리셋</b>(정해진 스타일)으로 방 하나를 빠르게 바꿀 때 쓰세요.</span>');
@@ -31511,7 +31514,13 @@ function loadCloudGallery(){
         // "거실")으로 저장해두므로, 프리셋 목록에서 못 찾으면(=프리셋이 아니라 방 이름이므로 당연히
         // 못 찾음) 그 값을 그대로 방 이름 태그로 붙여줌.
         if(wf==='spaceset' && row.style_key && !tags.some(function(t){return t.indexOf('preset:')===0;})){
-          tags.push('room:'+row.style_key);
+          // ⚠️ 버그 수정("메인 상단에 room:거실(판상형 특유의...) 이런 긴 텍스트가 뜬다"): 예전
+          // (아파트 컨셉 디자인 태그를 줄이기 전)에 저장된 결과물은 style_key에 상세 설명 전체가
+          // 그대로 들어있어서, 지금 새로 불러와도 여전히 길게 나옴 — 화면 표시용으로는 괄호 앞
+          // 짧은 이름만(예: "거실(판상형...)" → "거실") 쓰도록 방어적으로 자름. 새로 만드는
+          // 결과물은 애초에 짧게 저장되므로 이 처리를 거쳐도 그대로 나옴.
+          var _shortRoomTag = row.style_key.split('(')[0].trim().slice(0,12);
+          tags.push('room:'+(_shortRoomTag||row.style_key.slice(0,12)));
         }
         // 예산 정보(budget_snapshot)도 복원 — jsonb 컬럼이라 문자열로 올 수도, 객체로 올 수도 있어서 둘 다 처리
         var _restoredBudgetSnap = null;
