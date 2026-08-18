@@ -11496,7 +11496,7 @@ function _aptTemplateRooms(pyeong, layoutType, brand){
 function _aptClassifyRoom(label){
   if(label.indexOf('거실')===0) return '거실';
   if(label.indexOf('주방')===0) return '주방';
-  if(label.indexOf('안방')===0 || label==='침실(안방 겸용)') return '안방';
+  if(label.indexOf('안방')===0 || label.indexOf('침실(안방 겸용')===0) return '안방';
   if(label.indexOf('침실2')===0 || label.indexOf('침실3')===0 || label.indexOf('침실4')===0) return '작은방';
   if(label.indexOf('욕실')===0) return '욕실';
   if(label.indexOf('현관')===0) return '현관';
@@ -11508,6 +11508,17 @@ function _aptClassifyRoom(label){
   return '기타';
 }
 var APT_SIMPLE_BASE_TYPES = ['거실','주방','안방','작은방','욕실','현관','드레스룸','발코니','복도','팬트리','다용도실','알파룸'];
+// ⚠️ 요청 반영("평수 표준 구성에 없어도 체크하면 만들어지게 해달라"): 이 평수의 표준 구성에는
+// 없지만 사용자가 직접 체크한 공간(예: 18평인데 발코니·드레스룸·알파룸을 원하는 경우)을 위한
+// 일반적인 대체 설명 — 특정 평수 전용 문구는 아니고, 그 공간 종류에 흔히 있는 특징만 담음.
+var APT_FALLBACK_ROOM_DESC = {
+  '작은방': '작은방(붙박이장 포함, 손님방·서브침실 등으로 쓰는 여분의 방)',
+  '드레스룸': '드레스룸(안방 옆 워크인 형태, 옷장·수납장 위주)',
+  '발코니': '발코니(거실 또는 침실과 연결, 세탁실 겸용인 경우도 흔함)',
+  '다용도실': '다용도실(주방 뒤편, 세탁·창고 겸용)',
+  '알파룸': '서재·알파룸(현관 근처나 거실 옆 별도 구획된 작은 방)',
+  '파우더룸': '파우더룸(욕실 앞 별도 세면 공간)'
+};
 function mkAptSimpleDesign(p){
   var spTab=getTab('spaceset');
   spTab.autoRoomCategory='residential';
@@ -11587,26 +11598,15 @@ function mkAptSimpleDesign(p){
   roomLabelRow.appendChild(roomBulkBtns);
   roomWrap.appendChild(roomLabelRow);
   var roomGrid=dv('');roomGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:6px';
-  // ⚠️ 요청 반영("34평인데 알파룸·다용도실 체크해도 렌더링이 전혀 안 된다"): 이 두 공간은
-  // 애초에 40평대 이상 표준 구성에만 있는 방이라, 지금 고른 평수(예: 34평) 템플릿엔 아예
-  // 해당 방이 없어서 체크해도 만들어질 room이 0개였음(조용히 무시됨) — 지금 평수 기준으로
-  // 실제 존재하는 공간만 계산해서, 없는 공간은 버튼을 비활성화하고 이유를 보여줌.
-  var _availableBaseTypesNow = {};
-  _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand).forEach(function(l){
-    _availableBaseTypesNow[_aptClassifyRoom(l)] = true;
-  });
-  _availableBaseTypesNow['복도']=true; _availableBaseTypesNow['팬트리']=true; // 별도 옵션이라 항상 가능
+  // ⚠️ 요청 반영("평수따라서 발코니·다용도실 같은 게 안 되는 거 있던데 그런 거 없이 해, 필요한
+  // 건 회원들이 선택해서 렌더링하겠지"): 지난 수정에서 평수 표준 구성에 없는 공간은 체크박스를
+  // 비활성화했는데, 그러지 말고 항상 클릭 가능하게 두고 — 대신 표준 구성에 없는 공간을 체크하면
+  // 아래 _finalRoomLabels 조립부에서 일반적인 설명으로 대체 생성하도록 처리함(바로 아래
+  // APT_FALLBACK_ROOM_DESC 참고). 안방처럼 실제로는 있는데 분류 버그로 "없음" 취급되던 것도
+  // _aptClassifyRoom 수정으로 같이 바로잡음.
   APT_SIMPLE_BASE_TYPES.forEach(function(t){
     var isOn=spTab.aptSelectedBaseTypes.indexOf(t)!==-1;
-    var isAvail=!!_availableBaseTypesNow[t];
-    var b=mk('button','');b.type='button';b.textContent=t+(isAvail?'':' (해당없음)');
-    if(!isAvail){
-      b.disabled=true;
-      b.title=spTab.autoRoomAptPyeong+'평 표준 구성엔 '+t+'이(가) 보통 없어요 — 더 큰 평수를 골라보세요.';
-      b.style.cssText='padding:8px 4px;border-radius:8px;border:1.5px dashed var(--bd2);background:var(--c2);color:var(--m2);font-size:10px;font-weight:600;cursor:not-allowed;font-family:inherit;opacity:.55';
-      roomGrid.appendChild(b);
-      return;
-    }
+    var b=mk('button','');b.type='button';b.textContent=t;
     b.style.cssText='padding:8px 4px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
     b.onclick=function(){
       spTab._aptBasesManuallySet=true;
@@ -11737,6 +11737,15 @@ function mkAptSimpleDesign(p){
   // 복도·팬트리는 _aptTemplateRooms에 없는 별도 옵션이라 체크되어 있으면 직접 추가
   if(spTab.aptSelectedBaseTypes.indexOf('복도')!==-1) _finalRoomLabels.push('복도(공용 공간과 각 방을 연결하는 통로)');
   if(spTab.aptSelectedBaseTypes.indexOf('팬트리')!==-1 && _finalRoomLabels.every(function(l){return l.indexOf('팬트리')===-1;})) _finalRoomLabels.push('팬트리(주방 옆 별도 식료품·소형가전 수납 공간)');
+  // ⚠️ 요청 반영("평수 표준 구성에 없어도 체크하면 만들어지게 해달라"): 위 필터에서 이 평수
+  // 템플릿에 없어서 빠진 타입(예: 18평인데 발코니·드레스룸·알파룸 체크)을 일반적인 설명으로
+  // 채워서 추가함 — 체크박스는 이제 평수와 무관하게 항상 클릭 가능하므로, 여기서 항상 결과가
+  // 나오도록 보장함.
+  spTab.aptSelectedBaseTypes.forEach(function(t){
+    if(t==='복도' || t==='팬트리') return; // 위에서 이미 처리됨
+    var already = _finalRoomLabels.some(function(l){ return _aptClassifyRoom(l)===t; });
+    if(!already && APT_FALLBACK_ROOM_DESC[t]) _finalRoomLabels.push(APT_FALLBACK_ROOM_DESC[t]);
+  });
 
   var _resMultApt = spTab.autoRoomResolution==='4K' ? 2.0 : spTab.autoRoomResolution==='2K' ? 1.5 : 1.0;
   var _perCutCrApt = spTab.autoRoomUrbanMode ? 30 : 20;
@@ -12289,7 +12298,7 @@ function mkAutoRoomCamera(p){
   }
   p.appendChild(goWrap);
 
-  if(st && (st.results.length || st.running)){
+  if(st && !st.isApt && (st.results.length || st.running)){
     var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">결과</div>';
     var resGrid=dv('');resGrid.style.cssText='display:flex;flex-direction:column;gap:10px';
     var allTypes=spTab.autoRoomSelected.slice();
@@ -12416,7 +12425,7 @@ function _autoRoomRun(){
     var _arRest2 = _arRest.filter(function(t){ return t!=='거실' && t!=='주방'; });
     if(_arLivKit.length) spTab.autoRoomSelected = _arLivKit.concat(_arRest2);
   }
-  spTab.autoRoomState={running:true, step:0, results:[], error:null};
+  spTab.autoRoomState={running:true, step:0, results:[], error:null, isApt:!!spTab.isAptSimpleMode};
   renderSB();
   // ⚠️ 요청 반영: 생성 시작 전에 참고 이미지 스타일을 먼저 분석해서(1회, 배치 전체가 재사용)
   // 확정된 사실로 만들어둠 — 대표 참고 이미지(외관 있으면 외관 첫 장, 없으면 실내 첫 장) 기준.
@@ -12588,9 +12597,19 @@ function _autoRoomPromptFor(basePrompt, typeName){
   // 복제하는 결과가 나왔음 — 서재·안방·거실에 똑같은 의자·소파·테이블이 반복된 원인. 이제
   // noDirectMatch일 땐 반영도 설정과 무관하게 "가구는 항상 새로 창작, 마감재 톤만 통일"로 분기함.
   if(imgs.noDirectMatch){
-    _fidelitySuffix = ' ⚠️⚠️⚠️ 가구·소품(매우 중요, 반영도 설정과 무관하게 항상 적용): 지금 첨부한 참고 이미지는 이 방("' + typeName + '")의 사진이 아니라 같은 건물 안 다른 공간의 사진입니다 — 그 사진 속 소파·의자·테이블·조명·러그·액자·화병 같은 가구·소품을 그대로 복제하거나 다른 방에서 봤던 것과 똑같은 걸 또 넣지 마세요. 이 공간에 실제로 필요한 가구·소품을 새로 골라 창작하되, 참고 이미지와 같은 디자인 장르(예: 미드센추리, 미니멀 등)·색 계열 안에서 실루엣과 디테일은 방마다 다르게 만드세요 — 같은 세트 안의 다른 방들과 나란히 놓고 봤을 때 "또 이 의자, 또 이 소파"라는 느낌이 들면 명백한 실패입니다. 벽·천장·바닥 마감재의 종류·색상·톤만 참고 이미지와 통일감 있게 유지하세요(마감재는 반영도 설정과 무관하게 항상 참고 이미지 기준).';
-    if(true){ // ⚠️ 요청 반영: '비슷하게'에 다양성 강화를 항상 합쳐서 적용(체크박스 제거)
-      _fidelitySuffix += ' ⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션): 위 지시를 더 강하게 지키세요 — 참고 이미지 속 가구의 실루엣·비례조차 참고하지 말고, 이 공간의 분위기·색감에만 어울리는 완전히 다른 제품을 새로 창작하세요.';
+    // ⚠️ 버그 수정("최대한 동일하게를 골라도 가구가 참고 이미지와 다르게 나온다"): 여기가 진짜
+    // 원인이었음 — noDirectMatch면 반영도 설정을 아예 무시하고 무조건 "가구는 새로 창작"으로
+    // 못박고 있었는데, 이 텍스트가 최종 프롬프트 뒷부분(더 강하게 반영되는 위치)에 그대로
+    // 다시 이어붙여지고 있어서, 앞에서 따로 넣은 "최대한 동일하게" 지시를 사실상 덮어썼음.
+    // 이제 tight(최대한 동일하게)일 땐 여기서도 가구를 참고 이미지와 최대한 동일하게 맞추도록
+    // 분기함 — "구조(배치)만 새로 만들고, 가구 자체는 참고 이미지의 것을 그대로" 원칙 유지.
+    if(spTab.autoRoomFidelity==='tight'){
+      _fidelitySuffix = ' ⚠️⚠️⚠️ 가구·소품(매우 중요, 다른 무엇보다 우선): 지금 첨부한 참고 이미지는 이 방("' + typeName + '")의 사진이 아니라 같은 건물 안 다른 공간의 사진이지만, 그 사진 속 소파·의자·테이블·조명·러그·액자·화병 같은 가구·소품의 형태·재질·색상은 그대로 이 공간에도 가져와서 쓰세요(같은 집이니 가구·마감재 라인업이 같은 게 자연스럽습니다) — 이 방의 용도에 맞게 필요한 가구 종류(침대, 책상 등 참고 이미지에 없는 종류)만 같은 소재·색감·디자인 언어로 새로 구성하고, 참고 이미지에 이미 나온 것과 같은 종류의 가구(소파, 테이블, 의자, 조명, 러그 등)는 형태·재질·색상까지 최대한 동일하게 재현하세요. 배치(위치·방향)만 이 공간 구조에 맞게 새로 정하면 됩니다. 벽·천장·바닥 마감재도 참고 이미지와 통일감 있게 유지하세요.';
+    } else {
+      _fidelitySuffix = ' ⚠️⚠️⚠️ 가구·소품(매우 중요, 반영도 설정과 무관하게 항상 적용): 지금 첨부한 참고 이미지는 이 방("' + typeName + '")의 사진이 아니라 같은 건물 안 다른 공간의 사진입니다 — 그 사진 속 소파·의자·테이블·조명·러그·액자·화병 같은 가구·소품을 그대로 복제하거나 다른 방에서 봤던 것과 똑같은 걸 또 넣지 마세요. 이 공간에 실제로 필요한 가구·소품을 새로 골라 창작하되, 참고 이미지와 같은 디자인 장르(예: 미드센추리, 미니멀 등)·색 계열 안에서 실루엣과 디테일은 방마다 다르게 만드세요 — 같은 세트 안의 다른 방들과 나란히 놓고 봤을 때 "또 이 의자, 또 이 소파"라는 느낌이 들면 명백한 실패입니다. 벽·천장·바닥 마감재의 종류·색상·톤만 참고 이미지와 통일감 있게 유지하세요(마감재는 반영도 설정과 무관하게 항상 참고 이미지 기준).';
+      if(true){ // ⚠️ 요청 반영: '비슷하게'에 다양성 강화를 항상 합쳐서 적용(체크박스 제거)
+        _fidelitySuffix += ' ⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션): 위 지시를 더 강하게 지키세요 — 참고 이미지 속 가구의 실루엣·비례조차 참고하지 말고, 이 공간의 분위기·색감에만 어울리는 완전히 다른 제품을 새로 창작하세요.';
+      }
     }
   } else if(spTab.autoRoomFidelity==='medium'){
     // ⚠️ 요청 반영(최종 확정, 2단계 체계): "비슷하게"는 공간 구조가 바뀌는 방식은 "최대한
