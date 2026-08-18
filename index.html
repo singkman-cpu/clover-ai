@@ -11319,6 +11319,83 @@ function _openGalleryPickerForAnchor(setter){
   ov.appendChild(modal);
   document.body.appendChild(ov);
 }
+// ⚠️ 요청 반영("한국 아파트 브랜드별 평면도를 자동으로 세팅해서 공간별 사진 없이도 컨셉디자인
+// 렌더링되게 해달라"): 브랜드마다 실제 평면도가 다른 게 아니라 "판상형/타워형 + 평수"라는
+// 건축 형식 자체가 방 개수·구조를 결정하므로(같은 34평 판상형이면 어느 브랜드든 방3+욕실2
+// 구조가 거의 같음), 브랜드는 참고용 라벨로만 쓰고 실제 방 구성은 평수+타입 공식으로 만듦.
+// 브랜드 실제 평면도(저작권·상표 소유물)를 재현하는 게 아니라, 한국 아파트 전반에 통용되는
+// 일반적인 평형별 표준 구성을 사용함.
+var APT_BRANDS = ['래미안','힐스테이트','자이','e편한세상·아크로','푸르지오','롯데캐슬','더샵','아이파크','SK VIEW','포레나','두산위브','하늘채','아테라','센트레빌','더 플래티넘','데시앙','스위첸','엘리프','호반써밋·베르디움','중흥S-클래스','유보라','금강펜테리움','린','한신더휴','파라곤','파밀리에','서희스타힐스','디에트르','모아엘가','에일린의 뜰','휴먼빌','예미지','화성파크드림','동화아이위시','대성베르힐','남양휴튼','동원로얄듀크','기타/일반'];
+function _aptTemplateRooms(pyeong, layoutType){
+  var p = Number(pyeong)||34;
+  var isTower = layoutType==='tower';
+  var m2 = Math.round(p*3.305);
+  var rooms = [];
+  // ⚠️ 요청 반영("벽체구조·붙박이장 위치·현관 위치·팬트리 형태 등 일반적인 구조를 참고해서
+  // 새로 공간을 만들어달라"): 특정 브랜드·특정 단지의 실제 도면을 재현하는 게 아니라, 한국
+  // 아파트 전반에 널리 쓰이는 일반적인 건축 관습(업계 통념 수준의 지식)을 반영해서 공간 설명을
+  // 더 정교하게 다듬음 — 벽체 구조(내력벽/비내력벽 배치 패턴), 붙박이장 위치, 현관 동선,
+  // 팬트리 형태 등.
+  if(!isTower){
+    // 판상형: 남향 위주 일자 배치, 발코니 쪽으로 긴 내력벽이 지나가는 구조라 거실·주방·침실이
+    // 한 면을 따라 나란히 배치되고, 거실-주방 사이엔 구조벽이 없어 완전히 개방된 경우가 많음.
+    rooms.push('거실(판상형 특유의 남향 일자 배치 — 발코니 쪽 긴 창을 따라 거실이 넓게 트여있고, 주방과는 구조벽 없이 완전히 개방된 구조. 주방 쪽에서 거실 전체와 발코니 창을 바라보는 뷰)');
+    rooms.push('주방(거실과 한 면을 공유하는 개방형 구조, ㄱ자 또는 일자형 싱크대 배치가 흔함. 거실 쪽에서 주방을 바라보는 뷰)');
+  } else {
+    // 타워형: 코어(엘리베이터·계단실)를 중심으로 각 세대가 방사형/꺾인 형태로 배치되어, 판상형
+    // 만큼 한 면이 길게 트이지 않고 거실이 코어 반대쪽에 독립적으로 자리잡는 경우가 흔함.
+    rooms.push('거실(타워형 특유의 코어 중심 배치 — 판상형처럼 한 면 전체가 트여있지 않고, 거실이 세대 내에서 비교적 독립된 구획으로 자리잡은 구조. 현관에서 들어서면 거실이 정면 또는 대각선으로 바로 보이는 동선)');
+    rooms.push('주방(코어 인접부에 배치되는 경우가 흔하며, 거실과는 부분적으로 구획된(완전 개방형이 아닌) 구조)');
+  }
+  // 현관: 판상형은 세대 한쪽 끝에서 복도형으로 진입, 타워형은 코어 바로 옆이라 진입 즉시
+  // 거실이 보이는 경우가 흔함. 최근(2015년 이후) 신축은 현관 옆에 별도 펜트리를 두는 경우가
+  // 늘었음(중대형 평형일수록 흔함).
+  rooms.push('현관(신발장과 중문 포함, ' + (isTower?'진입 즉시 거실이 보이는 짧은 동선':'복도를 따라 들어가는 동선') + (p>=30?', 현관 옆 별도 팬트리 공간(식료품·소형가전 수납용, 문이 있거나 오픈형 선반 형태) 인접':'') + ')');
+  // 침실 개수: 평수 구간별 표준 구성(한국 아파트 일반적인 평형별 방 개수 통념 기준). 안방은
+  // 보통 침대 맞은편이나 옆 벽을 따라 붙박이장(슬라이딩 도어 또는 여닫이)이 배치되는 게 표준.
+  if(p < 20){
+    rooms.push('침실(안방 겸용, 한쪽 벽을 따라 붙박이장 배치)');
+    rooms.push('욕실');
+  } else if(p < 30){
+    rooms.push('안방(침대 맞은편 또는 옆 벽을 따라 붙박이장 배치, 슬라이딩 도어 형태가 흔함)');
+    rooms.push('침실2(붙박이장 포함)');
+    rooms.push('욕실(공용, 침실 인접 복도에 배치)');
+    rooms.push('발코니(거실 또는 침실과 연결, 세탁실 겸용인 경우 많음)');
+  } else if(p < 40){
+    rooms.push('안방(별도 드레스룸 딸린 구조가 흔함 — 침실과 화장실 사이에 워크인 드레스룸 배치)');
+    rooms.push('침실2(붙박이장 포함)');
+    rooms.push('침실3(붙박이장 포함, 상대적으로 작은 침실)');
+    rooms.push('욕실(공용, 현관에서 가까운 복도 쪽에 배치)');
+    rooms.push('욕실(안방 전용, 드레스룸을 통해 진입)');
+    rooms.push('드레스룸(안방 옆 워크인 형태)');
+    rooms.push('발코니(거실 확장형이 흔함, 일부는 다용도실 겸용)');
+  } else if(p < 50){
+    rooms.push('안방(별도 드레스룸 딸린 구조, 침실 규모가 넉넉함)');
+    rooms.push('침실2(붙박이장 포함)');
+    rooms.push('침실3(붙박이장 포함)');
+    rooms.push('서재·알파룸(현관 근처나 거실 옆 별도 구획된 작은 방)');
+    rooms.push('욕실(공용, 현관에서 가까운 복도 쪽에 배치)');
+    rooms.push('욕실(안방 전용, 드레스룸을 통해 진입)');
+    rooms.push('드레스룸(안방 옆 워크인 형태)');
+    rooms.push('파우더룸(안방 욕실 앞 별도 세면 공간)');
+    rooms.push('발코니(거실 확장형)');
+  } else {
+    rooms.push('안방(별도 드레스룸 딸린 넓은 구조)');
+    rooms.push('침실2(붙박이장 포함)');
+    rooms.push('침실3(붙박이장 포함)');
+    rooms.push('침실4(붙박이장 포함, 서재 겸용인 경우도 흔함)');
+    rooms.push('서재·알파룸');
+    rooms.push('욕실(공용, 현관에서 가까운 복도 쪽에 배치)');
+    rooms.push('욕실(안방 전용, 드레스룸을 통해 진입)');
+    rooms.push('욕실3(침실3·4 인접)');
+    rooms.push('드레스룸(안방 옆 워크인 형태)');
+    rooms.push('파우더룸(안방 욕실 앞 별도 세면 공간)');
+    rooms.push('다용도실(주방 뒤편, 세탁·창고 겸용)');
+
+    rooms.push('발코니');
+  }
+  return rooms;
+}
 function mkAutoRoomCamera(p){
   var spTab=getTab('spaceset');
   if(!spTab.autoRoomCategory || spTab.autoRoomCategory==='exterior') spTab.autoRoomCategory='residential';
@@ -11581,6 +11658,59 @@ function mkAutoRoomCamera(p){
   // 한 번(세션당 한 번만, _tryRestoreSpacesetAnchors 내부에서 플래그로 막음) 클라우드에 저장된
   // 참고 이미지가 있는지 확인해서 자동으로 불러옴 — 이미 이 기기에서 사진을 올린 상태면 덮어쓰지 않음.
   _tryRestoreSpacesetAnchors(spTab);
+
+  // ⚠️ 요청 반영("아파트 브랜드·평형별로 표준 방 구성을 자동으로 세팅해서, 공간별 사진 없이도
+  // 컨셉디자인 렌더링되게 해달라"): 평수+타입(판상형/타워형)을 고르면 그 평형의 표준 공간
+  // 구성(방·욕실 개수, 주요 뷰 각도)을 자동으로 실내 사진 슬롯에 채워넣음 — 브랜드는 참고용
+  // 라벨일 뿐, 실제 방 구성은 평수+타입 공식으로 계산함(특정 브랜드의 실제 평면도를 재현하는
+  // 게 아님).
+  var aptWrap=dv('ss');
+  aptWrap.innerHTML='<div class="lbl">🏢 아파트 평형 템플릿 <span class="lbl-en">선택 — 평수·타입에 맞는 표준 공간 구성을 자동으로 채워요</span></div>';
+  var aptBox=dv('');aptBox.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:9px;padding:10px;display:flex;flex-direction:column;gap:8px';
+  var aptRow1=dv('');aptRow1.style.cssText='display:flex;gap:6px';
+  var aptBrandSel=document.createElement('select');
+  aptBrandSel.style.cssText='flex:1.3;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:7px 8px;font-size:11.5px;border-radius:6px;outline:none;font-family:inherit';
+  APT_BRANDS.forEach(function(b){ var o=document.createElement('option'); o.value=b; o.textContent=b; aptBrandSel.appendChild(o); });
+  if(spTab.autoRoomAptBrand) aptBrandSel.value=spTab.autoRoomAptBrand;
+  var aptPyeongInp=document.createElement('input');aptPyeongInp.type='number';aptPyeongInp.placeholder='평수';aptPyeongInp.value=spTab.autoRoomAptPyeong||'34';
+  aptPyeongInp.style.cssText='flex:0.7;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:7px 8px;font-size:11.5px;border-radius:6px;outline:none;font-family:inherit';
+  aptRow1.appendChild(aptBrandSel); aptRow1.appendChild(aptPyeongInp);
+  var aptRow2=dv('');aptRow2.style.cssText='display:flex;gap:6px';
+  var aptTypeFlat=mk('button','');aptTypeFlat.type='button';aptTypeFlat.textContent='판상형';
+  var aptTypeTower=mk('button','');aptTypeTower.type='button';aptTypeTower.textContent='타워형';
+  var _curAptType = spTab.autoRoomAptType||'flat';
+  function _styleAptTypeBtns(){
+    aptTypeFlat.style.cssText='flex:1;padding:7px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(_curAptType==='flat'?'var(--acb)':'var(--bd2)')+';background:'+(_curAptType==='flat'?'var(--acg)':'var(--card)')+';color:'+(_curAptType==='flat'?'var(--ac)':'var(--t2)');
+    aptTypeTower.style.cssText='flex:1;padding:7px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(_curAptType==='tower'?'var(--acb)':'var(--bd2)')+';background:'+(_curAptType==='tower'?'var(--acg)':'var(--card)')+';color:'+(_curAptType==='tower'?'var(--ac)':'var(--t2)');
+  }
+  _styleAptTypeBtns();
+  aptTypeFlat.onclick=function(){ _curAptType='flat'; _styleAptTypeBtns(); };
+  aptTypeTower.onclick=function(){ _curAptType='tower'; _styleAptTypeBtns(); };
+  aptRow2.appendChild(aptTypeFlat); aptRow2.appendChild(aptTypeTower);
+  var aptApplyBtn=mk('button','');aptApplyBtn.type='button';aptApplyBtn.textContent='✓ 이 평형 구성으로 실내 슬롯 자동 채우기';
+  aptApplyBtn.style.cssText='width:100%;padding:8px;border-radius:8px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
+  var aptNote=dv('');aptNote.style.cssText='font-size:9.5px;color:var(--m2);line-height:1.5';
+  aptNote.textContent='실제 특정 브랜드의 평면도를 그대로 쓰는 게 아니라, 그 평수·타입대에서 일반적으로 쓰이는 표준 방 구성(방·욕실 개수, 주요 시야각)을 자동으로 채워드려요. 브랜드는 참고용 표시일 뿐입니다.';
+  aptApplyBtn.onclick=function(){
+    var pyeong = parseInt(aptPyeongInp.value,10) || 34;
+    spTab.autoRoomAptBrand = aptBrandSel.value;
+    spTab.autoRoomAptPyeong = pyeong;
+    spTab.autoRoomAptType = _curAptType;
+    var roomLabels = _aptTemplateRooms(pyeong, _curAptType);
+    var m2Est = Math.round(pyeong*3.305);
+    if(!confirm('지금 채워진 실내 사진 슬롯(라벨만 채워진 빈 슬롯 제외하고, 이미 사진이 있는 슬롯은 유지)에 "'+aptBrandSel.value+' '+pyeong+'평형(전용 약 '+m2Est+'㎡) '+(_curAptType==='flat'?'판상형':'타워형')+'" 표준 구성('+roomLabels.length+'개 공간)을 적용합니다. 계속할까요?')) return;
+    // 이미 사진이 채워진 슬롯은 그대로 두고, 빈 슬롯들만 템플릿 라벨로 교체 + 부족하면 새로 추가
+    var existingWithImg = spTab.autoRoomIntAnchors.filter(function(a){return a.img;});
+    var newAnchors = existingWithImg.slice();
+    roomLabels.forEach(function(lbl){
+      newAnchors.push({img:null, label:lbl});
+    });
+    spTab.autoRoomIntAnchors = newAnchors;
+    renderSB();
+  };
+  aptBox.appendChild(aptRow1); aptBox.appendChild(aptRow2); aptBox.appendChild(aptApplyBtn); aptBox.appendChild(aptNote);
+  aptWrap.appendChild(aptBox);
+  p.appendChild(aptWrap);
 
   // ⚠️ 요청 반영("배치도면을 넣으면 공간 배치나 건물형태를 참고하나?"): 확인해보니 안 하고
   // 있었음 — 참고 이미지 슬롯은 전부 "완성된 사진"을 전제로 설계돼서, 배치도면(선으로 그린
