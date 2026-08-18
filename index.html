@@ -3045,6 +3045,7 @@ function goHome(){gE('home-s').style.display='flex';
 // (내부적으로 sbSpace를 재사용), renderMain에서도 G.HIST 조회 시 'space'로 별칭 처리해뒀으므로
 // 기존 selectWF/렌더링 파이프라인을 그대로 타면서 하이라이트도 자동으로 정확하게 맞음.
 function selectSpaceShortcut(kind){
+  if(kind==='multiRoom'){ var _spTabReset=getTab('spaceset'); _spTabReset.isAptSimpleMode=false; }
   selectWF(kind==='multiRoom' ? 'spaceset' : 'budget');
 }
 // ⚠️ 요청 반영("아파트 평형 템플릿을 메인창으로 빼자, 현장사진 디자인 앞에"): 새 최상단 메뉴
@@ -3060,6 +3061,8 @@ function selectAptShortcut(){
   selectWF('spaceset');
   var spTab = getTab('spaceset');
   spTab.multiRoomSubMode='auto';
+  spTab.isAptSimpleMode=true; // ⚠️ 요청 반영: "아파트 컨셉 디자인은 배치도면·건물외관 다 빼고,
+  // 실내공간 체크박스+컨셉이미지 하나로 아주 간편하게" — 전용 간편 UI로 분기시키는 플래그
   renderSB();
   setTimeout(function(){
     var aptSection = document.querySelector('[data-apt-template-anchor]');
@@ -10626,6 +10629,7 @@ function mkMultiRoomSpace(p){
   };
   p.appendChild(resetAllBtn);
 
+  if(spTab.multiRoomSubMode==='auto' && spTab.isAptSimpleMode){ mkAptSimpleDesign(p); return; }
   if(spTab.multiRoomSubMode==='auto'){ mkAutoRoomCamera(p); return; }
 
   mkNote(p,'<strong style="color:var(--ac)">🏢 공간 컨셉 디자인</strong><br>공간별 실제 사진을 올려주세요. <b style="color:var(--t)">벽·창문 구조는 그대로 유지</b>하고, 색감·마감재·소품·가구 톤만 아래 참고 디자인 이미지 하나로 통일해서 만들어요.<br>🏗️ "건축 외관"을 고르면 조감뷰·파사드뷰·측면뷰 등 여러 앵글의 외관도 같은 방식으로 만들 수 있어요.<br>💡 방마다 전용 참고 이미지를 추가하면 더 정확해져요 — 일부만 넣어도 괜찮아요.<br><span style="font-size:10px;color:var(--m2)">사진 없이 AI가 상상해서 만들어주길 원하면 "컨셉 확장" 모드를 써주세요.</span><br><span style="font-size:10.5px;color:var(--m2);display:block;margin-top:6px;padding-top:6px;border-top:1px dashed var(--bd2)">📌 <b style="color:var(--t2)">현장사진 디자인</b>과 헷갈리실 수 있어요 — 여기(공간 컨셉 디자인)는 <b style="color:var(--t2)">"참고 이미지"</b>를 넣어서 여러 공간을 한 번에 통일감 있게 만들 때 쓰고, <b style="color:var(--t2)">현장사진 디자인</b>은 <b style="color:var(--t2)">프리셋</b>(정해진 스타일)으로 방 하나를 빠르게 바꿀 때 쓰세요.</span>');
@@ -11459,6 +11463,190 @@ function _aptTemplateRooms(pyeong, layoutType, brand){
   }
   return rooms;
 }
+// ⚠️ 요청 반영("아파트 컨셉 디자인은 배치도면·건물외관 다 빼고, 실내공간만 체크박스로 골라서
+// 컨셉이미지 하나 넣으면 전체 반영되게, 공간구조는 표준 아파트 구조 그대로 유지"): 기존
+// mkAutoRoomCamera(복잡한 다중 앵커 관리 UI)를 그대로 재사용하지 않고, 완전히 간소화된 전용
+// 화면을 새로 만듦 — 브랜드·평수·타입 선택 + 실내 공간 체크박스 + 컨셉 이미지 1장 업로드만
+// 있으면 끝나는 구조.
+function _aptClassifyRoom(label){
+  if(label.indexOf('거실')===0) return '거실';
+  if(label.indexOf('주방')===0) return '주방';
+  if(label.indexOf('안방')===0 || label==='침실(안방 겸용)') return '안방';
+  if(label.indexOf('침실2')===0 || label.indexOf('침실3')===0 || label.indexOf('침실4')===0) return '작은방';
+  if(label.indexOf('욕실')===0) return '욕실';
+  if(label.indexOf('현관')===0) return '현관';
+  if(label.indexOf('드레스룸')===0) return '드레스룸';
+  if(label.indexOf('발코니')===0) return '발코니';
+  if(label.indexOf('다용도실')===0) return '다용도실';
+  if(label.indexOf('서재')===0 || label.indexOf('알파룸')!==-1) return '알파룸';
+  if(label.indexOf('파우더룸')===0) return '파우더룸';
+  return '기타';
+}
+var APT_SIMPLE_BASE_TYPES = ['거실','주방','안방','작은방','욕실','현관','드레스룸','발코니','복도','팬트리','다용도실','알파룸'];
+function mkAptSimpleDesign(p){
+  var spTab=getTab('spaceset');
+  spTab.autoRoomCategory='residential';
+  if(!spTab.autoRoomAptPyeong) spTab.autoRoomAptPyeong=34;
+  if(!spTab.autoRoomAptType) spTab.autoRoomAptType='flat';
+  if(!spTab.autoRoomAptBrand) spTab.autoRoomAptBrand='기타/일반';
+  if(!spTab.aptSelectedBaseTypes){
+    // 기본값: 지금 평수 기준으로 표준적으로 있는 공간들만 자동 체크
+    var _defaultRooms = _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand);
+    var _defaultBases = {};
+    _defaultRooms.forEach(function(l){ _defaultBases[_aptClassifyRoom(l)]=true; });
+    spTab.aptSelectedBaseTypes = APT_SIMPLE_BASE_TYPES.filter(function(t){return _defaultBases[t];});
+  }
+
+  mkNote(p,'<strong style="color:#a78bfa">🏢 아파트 컨셉 디자인</strong><br>브랜드·평수·타입 고르고, 원하는 컨셉 이미지 <b style="color:var(--t)">딱 1장</b>만 넣으면 <b style="color:var(--t)">우리집 실내 공간 전체</b>에 그 스타일이 반영돼요.<br><span style="font-size:10.5px;color:var(--m2)">공간 구조(방 배치·크기)는 항상 실제 아파트 표준 구조 그대로 유지되고, 마감재·색감·가구 톤만 바뀝니다.</span>');
+
+  // ── 브랜드·평수·타입 ──────────────────────────────────
+  var aptWrap=dv('ss');
+  aptWrap.setAttribute('data-apt-template-anchor','1');
+  aptWrap.innerHTML='<div class="lbl">🏢 우리 아파트 정보</div>';
+  var aptBox=dv('');aptBox.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:9px;padding:10px;display:flex;flex-direction:column;gap:8px';
+  var aptRow1=dv('');aptRow1.style.cssText='display:flex;gap:6px';
+  var aptBrandSel=document.createElement('select');
+  aptBrandSel.style.cssText='flex:1.3;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:7px 8px;font-size:11.5px;border-radius:6px;outline:none;font-family:inherit';
+  APT_BRANDS.forEach(function(b){ var o=document.createElement('option'); o.value=b; o.textContent=b; aptBrandSel.appendChild(o); });
+  aptBrandSel.value=spTab.autoRoomAptBrand;
+  var aptPyeongInp=document.createElement('input');aptPyeongInp.type='number';aptPyeongInp.placeholder='평수';aptPyeongInp.value=spTab.autoRoomAptPyeong;
+  aptPyeongInp.style.cssText='flex:0.7;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:7px 8px;font-size:11.5px;border-radius:6px;outline:none;font-family:inherit';
+  aptRow1.appendChild(aptBrandSel); aptRow1.appendChild(aptPyeongInp);
+  var aptRow2=dv('');aptRow2.style.cssText='display:flex;gap:6px';
+  var aptTypeFlat=mk('button','');aptTypeFlat.type='button';aptTypeFlat.textContent='판상형';
+  var aptTypeTower=mk('button','');aptTypeTower.type='button';aptTypeTower.textContent='타워형';
+  function _styleAptTypeBtns2(){
+    aptTypeFlat.style.cssText='flex:1;padding:7px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(spTab.autoRoomAptType==='flat'?'var(--acb)':'var(--bd2)')+';background:'+(spTab.autoRoomAptType==='flat'?'var(--acg)':'var(--card)')+';color:'+(spTab.autoRoomAptType==='flat'?'var(--ac)':'var(--t2)');
+    aptTypeTower.style.cssText='flex:1;padding:7px;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(spTab.autoRoomAptType==='tower'?'var(--acb)':'var(--bd2)')+';background:'+(spTab.autoRoomAptType==='tower'?'var(--acg)':'var(--card)')+';color:'+(spTab.autoRoomAptType==='tower'?'var(--ac)':'var(--t2)');
+  }
+  _styleAptTypeBtns2();
+  aptTypeFlat.onclick=function(){ spTab.autoRoomAptType='flat'; renderSB(); };
+  aptTypeTower.onclick=function(){ spTab.autoRoomAptType='tower'; renderSB(); };
+  aptRow2.appendChild(aptTypeFlat); aptRow2.appendChild(aptTypeTower);
+  aptBrandSel.onchange=function(){
+    spTab.autoRoomAptBrand=aptBrandSel.value;
+    if(aptBrandSel.value==='디에트르') spTab.autoRoomAptType='tower';
+    renderSB();
+  };
+  aptPyeongInp.addEventListener('change', function(){ spTab.autoRoomAptPyeong=parseInt(aptPyeongInp.value,10)||34; delete spTab._aptBasesManuallySet; renderSB(); });
+  aptBox.appendChild(aptRow1); aptBox.appendChild(aptRow2);
+  aptWrap.appendChild(aptBox);
+  p.appendChild(aptWrap);
+
+  // ── 실내 공간 체크박스 ──────────────────────────────────
+  var roomWrap=dv('ss');
+  roomWrap.innerHTML='<div class="lbl">체크박스로 원하는 공간 선택 <span class="lbl-en">평수 기준 표준 구성이 자동 체크돼요</span></div>';
+  var roomGrid=dv('');roomGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px';
+  APT_SIMPLE_BASE_TYPES.forEach(function(t){
+    var isOn=spTab.aptSelectedBaseTypes.indexOf(t)!==-1;
+    var b=mk('button','');b.type='button';b.textContent=t;
+    b.style.cssText='padding:8px 4px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+    b.onclick=function(){
+      spTab._aptBasesManuallySet=true;
+      if(isOn){ spTab.aptSelectedBaseTypes=spTab.aptSelectedBaseTypes.filter(function(x){return x!==t;}); }
+      else { spTab.aptSelectedBaseTypes.push(t); }
+      renderSB();
+    };
+    roomGrid.appendChild(b);
+  });
+  roomWrap.appendChild(roomGrid);
+  p.appendChild(roomWrap);
+
+  // ── 컨셉 이미지 1장 ──────────────────────────────────
+  var conceptWrap=dv('ss');
+  conceptWrap.innerHTML='<div class="lbl">🎨 컨셉 이미지 <span class="lbl-en">딱 1장 — 이 스타일이 위에서 선택한 모든 공간에 반영돼요</span></div>';
+  var conceptBox=dv('');conceptBox.style.cssText='display:flex;gap:8px;align-items:center';
+  var conceptThumb=dv('');conceptThumb.style.cssText='width:72px;height:72px;border-radius:9px;overflow:hidden;flex-shrink:0;background:var(--c2);border:1.5px dashed var(--bd2);display:flex;align-items:center;justify-content:center;cursor:pointer';
+  if(spTab.aptConceptImage){
+    var cImg=mk('img','');cImg.src=spTab.aptConceptImage;cImg.style.cssText='width:100%;height:100%;object-fit:cover';
+    conceptThumb.appendChild(cImg);
+    conceptThumb.style.border='1.5px solid var(--acb)';
+  } else {
+    conceptThumb.innerHTML='<span style="font-size:24px;color:var(--m2)">🎨</span>';
+  }
+  var conceptInp=document.createElement('input');conceptInp.type='file';conceptInp.accept='image/*';conceptInp.style.display='none';
+  conceptInp.onchange=function(){
+    var f=conceptInp.files[0]; if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      _downscaleForMemorySafety(reader.result, function(resized){
+        spTab.aptConceptImage=resized;
+        renderSB();
+      });
+    };
+    reader.readAsDataURL(f);
+  };
+  conceptThumb.onclick=function(){ conceptInp.click(); };
+  var conceptRight=dv('');conceptRight.style.cssText='flex:1;display:flex;flex-direction:column;gap:5px';
+  var conceptGalBtn=mk('button','');conceptGalBtn.type='button';conceptGalBtn.textContent='🖼️ 갤러리에서 선택';
+  conceptGalBtn.style.cssText='padding:6px 8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit;text-align:left';
+  conceptGalBtn.onclick=function(){ _openGalleryPickerForAnchor(function(url){ spTab.aptConceptImage=url; renderSB(); }); };
+  conceptRight.appendChild(conceptGalBtn);
+  if(spTab.aptConceptImage){
+    var conceptDelBtn=mk('button','');conceptDelBtn.type='button';conceptDelBtn.textContent='✕ 삭제';
+    conceptDelBtn.style.cssText='padding:0;background:transparent;border:none;color:var(--m2);font-size:10px;text-decoration:underline;cursor:pointer;font-family:inherit;text-align:left';
+    conceptDelBtn.onclick=function(){ spTab.aptConceptImage=null; renderSB(); };
+    conceptRight.appendChild(conceptDelBtn);
+  }
+  conceptBox.appendChild(conceptThumb); conceptBox.appendChild(conceptRight);
+  conceptWrap.appendChild(conceptBox);
+  conceptWrap.appendChild(conceptInp);
+  p.appendChild(conceptWrap);
+
+  // ⚠️ 버그 방지: 범용 mkResolution(p)은 getTab(G.wf).resolution 필드를 쓰는데, 이 화면(및
+  // 나머지 아파트 관련 비용 계산 전체)은 spTab.autoRoomResolution이라는 별도 필드를 쓰고
+  // 있어서 서로 안 맞을 뻔했음 — mkAutoRoomCamera에서 쓰는 것과 동일한 전용 해상도 UI를 씀.
+  var resWrapApt=dv('ss');resWrapApt.innerHTML='<div class="lbl">해상도</div>';
+  var resRowApt=dv('');resRowApt.style.cssText='display:flex;gap:6px';
+  if(!spTab.autoRoomResolution) spTab.autoRoomResolution='1K';
+  [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
+    var key=pair[0];
+    var isOn=spTab.autoRoomResolution===key;
+    var b=mk('button','');b.type='button';
+    b.style.cssText='flex:1;padding:8px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--c2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    b.innerHTML=key+' <span style="font-size:10px;font-weight:400;color:var(--m2)">('+pair[1]+' 비용)</span>';
+    b.onclick=function(){ spTab.autoRoomResolution=key; renderSB(); };
+    resRowApt.appendChild(b);
+  });
+  resWrapApt.appendChild(resRowApt);
+  p.appendChild(resWrapApt);
+
+  // ── 실행 버튼 ──────────────────────────────────
+  var _finalRoomLabels = _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand)
+    .filter(function(l){ return spTab.aptSelectedBaseTypes.indexOf(_aptClassifyRoom(l))!==-1; });
+  // 복도·팬트리는 _aptTemplateRooms에 없는 별도 옵션이라 체크되어 있으면 직접 추가
+  if(spTab.aptSelectedBaseTypes.indexOf('복도')!==-1) _finalRoomLabels.push('복도(공용 공간과 각 방을 연결하는 통로)');
+  if(spTab.aptSelectedBaseTypes.indexOf('팬트리')!==-1 && _finalRoomLabels.every(function(l){return l.indexOf('팬트리')===-1;})) _finalRoomLabels.push('팬트리(주방 옆 별도 식료품·소형가전 수납 공간)');
+
+  var _resMultApt = spTab.autoRoomResolution==='4K' ? 2.0 : spTab.autoRoomResolution==='2K' ? 1.5 : 1.0;
+  var _perCutCrApt = spTab.autoRoomUrbanMode ? 30 : 20;
+  var totalCrApt=Math.round(_finalRoomLabels.length*_perCutCrApt*_resMultApt);
+  var aptGoBtn=mk('button','');aptGoBtn.type='button';
+  var _stAptRun = spTab.autoRoomState || {running:false};
+  aptGoBtn.disabled = !_finalRoomLabels.length || !spTab.aptConceptImage || _stAptRun.running;
+  aptGoBtn.style.cssText='width:100%;padding:14px;border-radius:10px;border:none;background:'+(aptGoBtn.disabled?'var(--bd2)':'var(--ac)')+';color:'+(aptGoBtn.disabled?'var(--m2)':'#000')+';font-size:14px;font-weight:800;cursor:'+(aptGoBtn.disabled?'not-allowed':'pointer')+';font-family:inherit;margin-top:6px';
+  aptGoBtn.innerHTML = _stAptRun.running ? ('생성 중... ('+((_stAptRun.step||0)+1)+'/'+_finalRoomLabels.length+')') : ('🏠 우리집 '+_finalRoomLabels.length+'컷 만들기 <span style="font-size:12px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 8px;margin-left:5px">'+totalCrApt+'cr</span>');
+  if(!spTab.aptConceptImage){
+    var noConceptNote=dv('');noConceptNote.style.cssText='font-size:10.5px;color:#f59e0b;margin-top:4px;text-align:center';
+    noConceptNote.textContent='⚠️ 컨셉 이미지를 먼저 올려주세요';
+    p.appendChild(noConceptNote);
+  } else if(!_finalRoomLabels.length){
+    var noRoomNote=dv('');noRoomNote.style.cssText='font-size:10.5px;color:#f59e0b;margin-top:4px;text-align:center';
+    noRoomNote.textContent='⚠️ 공간을 최소 1개는 선택해주세요';
+    p.appendChild(noRoomNote);
+  }
+  aptGoBtn.onclick=function(){
+    spTab.autoRoomExtAnchors=[];
+    spTab.autoRoomIntAnchors=[];
+    spTab.autoRoomSelected=_finalRoomLabels.slice();
+    _autoRoomRun();
+  };
+  p.appendChild(aptGoBtn);
+
+  var _bottomNote=dv('');_bottomNote.style.cssText='font-size:9.5px;color:var(--m2);line-height:1.5;margin-top:8px;text-align:center';
+  _bottomNote.textContent='실제 특정 브랜드의 평면도를 그대로 쓰는 게 아니라, 그 평수·타입대에서 일반적으로 쓰이는 표준 방 구성을 자동으로 채워드려요. 브랜드는 참고용 표시일 뿐입니다.';
+  p.appendChild(_bottomNote);
+}
 function mkAutoRoomCamera(p){
   var spTab=getTab('spaceset');
   if(!spTab.autoRoomCategory || spTab.autoRoomCategory==='exterior') spTab.autoRoomCategory='residential';
@@ -12127,7 +12315,7 @@ function _analyzeSpaceStyle(imgUrl, cb){
 }
 function _autoRoomRun(){
   var spTab=getTab('spaceset');
-  if(!(spTab.autoRoomExtAnchors && spTab.autoRoomExtAnchors.some(function(a){return a.img;})) && !(spTab.autoRoomIntAnchors && spTab.autoRoomIntAnchors.some(function(a){return a.img;}))){ alert('건물 외관 또는 실내 사진을 최소 1장 올려주세요.'); return; }
+  if(!(spTab.autoRoomExtAnchors && spTab.autoRoomExtAnchors.some(function(a){return a.img;})) && !(spTab.autoRoomIntAnchors && spTab.autoRoomIntAnchors.some(function(a){return a.img;})) && !spTab.aptConceptImage){ alert('컨셉 이미지를 1장 올려주세요.'); return; }
   if(!spTab.autoRoomSelected.length){ alert('만들어줄 뷰를 최소 1개는 선택해주세요.'); return; }
   if(!_supaUser){ openMd('account'); return; }
   var _resMultCheck2 = spTab.autoRoomResolution==='4K' ? 2.0 : spTab.autoRoomResolution==='2K' ? 1.5 : 1.0;
@@ -12170,7 +12358,8 @@ function _autoRoomRun(){
   // 확정된 사실로 만들어둠 — 대표 참고 이미지(외관 있으면 외관 첫 장, 없으면 실내 첫 장) 기준.
   // 이미 같은 이미지로 분석해둔 게 있으면(재실행 등) 재사용하고, 분석이 실패해도(네트워크 오류
   // 등) 기존 방식으로 그대로 진행하도록 안전하게 처리함 — 절대 여기서 전체가 멈추지 않게 함.
-  var _repImgForAnalysis = (spTab.autoRoomExtAnchors||[]).map(function(a){return a.img;}).filter(Boolean)[0]
+  var _repImgForAnalysis = spTab.aptConceptImage
+    || (spTab.autoRoomExtAnchors||[]).map(function(a){return a.img;}).filter(Boolean)[0]
     || (spTab.autoRoomIntAnchors||[]).map(function(a){return a.img;}).filter(Boolean)[0];
   // ⚠️ 요청 반영("외부 마감재가 작은방·서재 등에도 계속 생성됨"): 분석 대상이 건축 외관 사진인지
   // 아닌지를 별도로 기억해둠 — 지난번엔 "거실·주방에만 액센트로"라는 문구를 텍스트로만 덧붙였는데,
@@ -12539,6 +12728,10 @@ function _padExteriorTo916WithBlur(url, cb){
     // 내가 방금 만든 새 디자인끼리는 통일감 있게" 되도록 함.
     var _looseGenPool = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs = (_looseGenPool && _looseGenPool.length) ? [_looseGenPool[0], _looseGenPool[_looseGenPool.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    // ⚠️ 요청 반영(아파트 컨셉 디자인 간편모드): 컨셉 이미지 하나를 텍스트 분석뿐 아니라 실제
+    // 시각 참고 이미지로도 매 생성마다 같이 첨부함(스타일 분석 텍스트만으로는 색감·질감 디테일이
+    // 약할 수 있어서, 실제 이미지도 같이 주는 게 더 정확함).
+    if(spTab.aptConceptImage && _looseRefs.indexOf(spTab.aptConceptImage)===-1){ _looseRefs.push(spTab.aptConceptImage); }
     // ⚠️ 요청 반영(중요한 지적): "영감만 얻기인데 이미지 참고를 안 하면, 완전히 다른 게 나와도
     // 그게 진짜 영감을 얻은 건가?" — 맞는 지적임. 지금까지 "영감만 얻기"는 참고 이미지를 아예
     // 안 보고 순수 텍스트로만 생성하고 있어서(구조를 그대로 따라하는 문제를 막으려고 일부러
@@ -12937,6 +13130,7 @@ function _autoRoomRetryOne(idx){
     }
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
+    if(spTab.aptConceptImage && _looseRefs2.indexOf(spTab.aptConceptImage)===-1){ _looseRefs2.push(spTab.aptConceptImage); }
     if(!imgs0b.noDirectMatch && imgs0b.primary){
       _looseRefs2 = [imgs0b.primary].concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
       if(spTab.autoRoomFidelity==='tight'){
@@ -31585,7 +31779,14 @@ function _initChatWidget(){
 window.addEventListener('load', function(){ try{ _initChatWidget(); }catch(e){ console.warn('[chat-widget]', e); } });
 </script>
 
-<div id="site-footer" style="background:#07070a;border-top:1px solid #1e1e2a;padding:20px 24px;text-align:center;font-size:11px;color:#555;line-height:2">
+<!-- ⚠️ 버그 수정("아파트 컨셉 디자인에서 스크롤하니 화면 아래쪽에 회사 정보가 떠서 화면이
+이상해진다"): 이 푸터는 앱이 SPA(고정 높이 레이아웃)로 동작하는 걸 전제로 "평소엔 절대 안
+보이는" 위치에 있었는데, 사이드바 내용이 길어지면(이번처럼 폼이 많은 화면 등) 문서 전체 높이가
+늘어나면서 이 푸터가 화면 중간에 끼어드는 것처럼 보이는 버그가 있었음. 같은 정보(상호명·사업자
+등록번호 등)가 이미 상단 "사업자정보" 버튼(모달)으로 제대로 제공되고 있어서 이 푸터 자체가
+중복이므로, 완전히 숨김.
+-->
+<div id="site-footer" style="display:none;background:#07070a;border-top:1px solid #1e1e2a;padding:20px 24px;text-align:center;font-size:11px;color:#555;line-height:2">
   <div style="max-width:800px;margin:0 auto">
     <div style="margin-bottom:6px;color:#444;font-size:12px;font-weight:600">CLOVER AI</div>
     <div>상호명: 스냅 &nbsp;|&nbsp; 대표자: 김충민 &nbsp;|&nbsp; 사업자등록번호: 119-20-32968</div>
