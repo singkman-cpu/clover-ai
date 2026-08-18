@@ -11489,6 +11489,11 @@ function mkAptSimpleDesign(p){
   if(!spTab.autoRoomAptPyeong) spTab.autoRoomAptPyeong=34;
   if(!spTab.autoRoomAptType) spTab.autoRoomAptType='flat';
   if(!spTab.autoRoomAptBrand) spTab.autoRoomAptBrand='기타/일반';
+  // ⚠️ 버그 수정("렌더링 안 되는 것 같다" — 콘솔에 "Cannot read properties of undefined
+  // (reading 'trim')" 에러): 간편모드 화면엔 "추가 요청사항" 입력칸 자체를 안 만들어서
+  // spTab.autoRoomPrompt가 한 번도 초기화된 적이 없었는데, 생성 로직에서 이 값에 무조건
+  // .trim()을 호출해서 크래시 나고 있었음 — 빈 문자열로 초기화해서 방지함.
+  if(!spTab.autoRoomPrompt) spTab.autoRoomPrompt='';
   if(!spTab.aptSelectedBaseTypes){
     // 기본값: 지금 평수 기준으로 표준적으로 있는 공간들만 자동 체크
     var _defaultRooms = _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand);
@@ -30532,6 +30537,21 @@ document.addEventListener('DOMContentLoaded',function(){try{
       if(items[i].type.indexOf('image')!==-1){
         var file=items[i].getAsFile();
         if(!file)continue;
+        // ⚠️ 요청 반영("컨셉이미지 ctrl+v 가능하게 해줘"): 아파트 컨셉 디자인 간편모드일 땐
+        // 일반 "main" 슬롯이 아니라 컨셉 이미지 칸으로 바로 붙여넣기 되도록 특수 처리.
+        if(G.wf==='spaceset' && getTab('spaceset').isAptSimpleMode){
+          var _pasteSpTab=getTab('spaceset');
+          var _pasteReader=new FileReader();
+          _pasteReader.onload=function(){
+            _downscaleForMemorySafety(_pasteReader.result, function(resized){
+              _pasteSpTab.aptConceptImage=resized;
+              renderSB();
+            });
+          };
+          _pasteReader.readAsDataURL(file);
+          e.preventDefault();
+          break;
+        }
         // 현재 활성 탭에 맞는 슬롯에 이미지 넣기
         var slot='main';
         if(G.wf==='video' && G.vidMode==='startend'){
