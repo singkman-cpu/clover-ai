@@ -10457,7 +10457,7 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
     }).catch(function(e){console.warn('[Gallery] fetch 오류:',e);});
   }catch(e){ console.warn('[Gallery] 오류:', e); }
 }
-function _showRoomResultInMain(origUrl, resultUrl, roomLabel){
+function _showRoomResultInMain(origUrl, resultUrl, roomLabel, isAptOverride){
   // ⚠️ 재설계: "공간 컨셉 디자인"이 "현장사진 디자인"이랑 G.HIST.space를 같이 써서 메인화면이
   // 두 탭에서 똑같이 보이는 문제가 있었음 — 이제 이 함수는 오직 "공간 컨셉 디자인"(spaceset)
   // 전용이므로 G.HIST.spaceset(독립된 배열)에 저장하고 그 탭 화면만 갱신함.
@@ -10467,12 +10467,16 @@ function _showRoomResultInMain(origUrl, resultUrl, roomLabel){
   // 슬라이더로, 없으면(순수 상상 생성) 단일 이미지로 보여줌.
   // ⚠️ 요청 반영: 우측 상단 뱃지에 항상 "공간 세트"라고만 뜨던 걸, 실제 방 종류(거실/주방/
   // 회의실/대표실 등)로 정확히 보여주도록 함 — roomLabel이 없으면 기존처럼 "공간 세트"로 폴백.
-  // ⚠️ 요청 반영("아파트 컨셉 디자인이랑 공간 컨셉 디자인 메인화면이 서로 섞여서 보인다"):
-  // 두 메뉴가 내부적으로는 같은 워크플로우(spaceset)를 공유해서 결과가 같은 배열에 쌓이고
-  // 있었음 — 어느 모드에서 만들어진 결과인지 isApt로 표시해두고, renderMain에서 지금 보고
-  // 있는 모드와 일치하는 것만 걸러서 보여주도록 분리함(저장 공간·갤러리는 계속 공유하되,
-  // 화면에 섞여 보이는 것만 막음).
-  G.HIST.spaceset.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:[roomLabel||'공간 세트'], ai:'', cx:50, fav:false, wf:'spaceset', preview:false, isApt:!!getTab('spaceset').isAptSimpleMode });
+  // ⚠️ 요청 반영("아파트 컨셉디자인에서 렌더링했는데 계속 공간 컨셉 디자인에 남아있다, 당장
+  // 수정해"): 지난 수정에선 이미지가 완성되는 "그 순간"에 spTab.isAptSimpleMode를 다시 읽어서
+  // 태그를 매겼는데, 생성은 몇 초~몇십 초가 걸리는 비동기 작업이라 그 사이에 사용자가 다른
+  // 탭(공간 컨셉 디자인)으로 이동해버리면 완성 시점엔 isAptSimpleMode가 이미 false로 바뀌어
+  // 있어서 결과가 엉뚱하게 "공간 컨셉 디자인" 것으로 태깅되고 있었음 — 근본 원인. 이제 호출부
+  // (_autoRoomGenerateStep 등)에서 그 생성을 "시작한 시점"에 미리 캡처해둔 값(isAptOverride)을
+  // 넘겨받아 그걸 그대로 쓰고, 넘어온 값이 없을 때만(예: 현장사진세트 쪽 호출) 지금 시점의
+  // spTab.isAptSimpleMode를 읽는 것으로 폴백함.
+  var _isAptTag = (typeof isAptOverride!=='undefined' && isAptOverride!==null) ? !!isAptOverride : !!getTab('spaceset').isAptSimpleMode;
+  G.HIST.spaceset.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:[roomLabel||'공간 세트'], ai:'', cx:50, fav:false, wf:'spaceset', preview:false, isApt:_isAptTag });
   getTab('spaceset').resultImg=resultUrl;
   if(G.wf==='spaceset') renderMain('spaceset');
 }
@@ -12731,6 +12735,11 @@ function _autoRoomGenerateStep(idx){
   var spTab=getTab('spaceset');
   var st=spTab.autoRoomState;
   var allTypes=spTab.autoRoomSelected;
+  // ⚠️ 요청 반영("아파트 컨셉디자인에서 렌더링했는데 공간 컨셉 디자인에 계속 남아있다"): 생성은
+  // 비동기라 완성될 때까지 사용자가 다른 탭으로 이동할 수 있음 — 결과가 완성되는 시점이 아니라
+  // 지금 이 생성을 "시작하는 시점"의 모드를 캡처해서 끝까지 들고 다님(_showRoomResultInMain에
+  // 그대로 넘김). st.isApt는 _autoRoomRun이 맨 처음 실행될 때 캡처해둔 값.
+  var _isAptForThisRun = (st && typeof st.isApt!=='undefined') ? !!st.isApt : !!spTab.isAptSimpleMode;
   // ⚠️ 요청 반영: "10개 체크했는데 한두 개 보고 마음에 안 들면 멈추고 싶다" — 정지 버튼을
   // 누르면 이 플래그가 서고, 다음 뷰로 넘어가기 전에 여기서 확인해서 멈춤(이미 진행 중인
   // 현재 뷰는 끝까지 만들고, 그다음 뷰부터 정지 — 중간에 뚝 끊으면 크레딧만 날리고 결과도
@@ -13131,9 +13140,9 @@ function _padExteriorTo916WithBlur(url, cb){
         var isExtType0 = _isExteriorViewType(typeName);
         if(isExtType0){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(finalUrl); }
         else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(finalUrl); }
-        var _tagLabel0 = spTab.isAptSimpleMode ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName; // ⚠️ 버그 수정("이미지 위에 room:거실(판상형 특유의...) 처럼 긴 텍스트가 뜬다"): 아파트 간편모드의 typeName은 프롬프트용으로 아주 길고 상세한 설명이라, 그대로 태그(화면 배지)로 쓰면 저렇게 됨 — 태그·배지 표시용으로는 짧은 기본 방 이름만 쓰도록 분리함(실제 생성 프롬프트는 그대로 typeName 전체를 씀, 영향 없음). 요청 반영: 배지에 평수도 같이 보이게 앞에 붙임.
+        var _tagLabel0 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName; // ⚠️ 버그 수정("이미지 위에 room:거실(판상형 특유의...) 처럼 긴 텍스트가 뜬다"): 아파트 간편모드의 typeName은 프롬프트용으로 아주 길고 상세한 설명이라, 그대로 태그(화면 배지)로 쓰면 저렇게 됨 — 태그·배지 표시용으로는 짧은 기본 방 이름만 쓰도록 분리함(실제 생성 프롬프트는 그대로 typeName 전체를 씀, 영향 없음). 요청 반영: 배지에 평수도 같이 보이게 앞에 붙임.
         _saveResultToCloudGallery('spaceset', Date.now()+idx, finalUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, _tagLabel0);
-        _showRoomResultInMain(null, finalUrl, _tagLabel0);
+        _showRoomResultInMain(null, finalUrl, _tagLabel0, _isAptForThisRun);
         _autoRoomGenerateStep(idx+1);
       }
       // ⚠️ 요청 반영("계속 9:16 비율 때문에 겹쳐서 나온다, 그냥 전처럼 3:4로 하면 무조건 한 장만
@@ -13223,7 +13232,7 @@ function _padExteriorTo916WithBlur(url, cb){
       if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[];
       spTab.autoRoomGenIntUrls.push(resultUrl);
     }
-    var _tagLabel1 = spTab.isAptSimpleMode ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
+    var _tagLabel1 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
     _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution, null, _tagLabel1);
     // ⚠️ 버그 수정: "왼쪽에 렌더링된 걸 클릭해서 오른쪽에 띄우지 않으면 갤러리에 안 보인다"는
     // 지적 — 클라우드 저장(_saveResultToCloudGallery) 자체는 클릭과 무관하게 항상 실행되고
@@ -13231,7 +13240,7 @@ function _padExteriorTo916WithBlur(url, cb){
     // 히스토리(G.HIST.spaceset)에 자동으로 추가해주는 _showRoomResultInMain 호출이 빠져있어서,
     // 사용자가 직접 클릭해야만 화면(왼쪽 히스토리·오른쪽 메인)에 나타나고 있었음 — 이제 생성되는
     // 즉시 자동으로 나타나게 함(현장사진세트와 동일하게 통일).
-    _showRoomResultInMain(null, resultUrl, _tagLabel1);
+    _showRoomResultInMain(null, resultUrl, _tagLabel1, _isAptForThisRun);
     _autoRoomGenerateStep(idx+1);
   }, function(err){
     getTab('space').refs = origRefs;
@@ -13243,6 +13252,9 @@ function _autoRoomRetryOne(idx){
   var spTab=getTab('spaceset');
   var st=spTab.autoRoomState;
   if(!st) return;
+  // ⚠️ 위 _autoRoomGenerateStep과 동일한 이유로(비동기 생성 도중 탭 전환) 재생성 시작 시점의
+  // 모드를 캡처해서 끝까지 들고 다님.
+  var _isAptForThisRun = (st && typeof st.isApt!=='undefined') ? !!st.isApt : !!spTab.isAptSimpleMode;
   var prevResult2 = st.results[idx];
   st.results[idx]=null;
   st.running=true; st.step=idx;
@@ -13398,9 +13410,9 @@ function _autoRoomRetryOne(idx){
         var isExtType0b = _isExteriorViewType(typeName);
         if(isExtType0b){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(finalUrl); }
         else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(finalUrl); }
-        var _tagLabel2 = spTab.isAptSimpleMode ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
+        var _tagLabel2 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
         _saveResultToCloudGallery('spaceset', Date.now()+idx, finalUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, _tagLabel2);
-        _showRoomResultInMain((prevResult2&&prevResult2.url)||null, finalUrl, _tagLabel2);
+        _showRoomResultInMain((prevResult2&&prevResult2.url)||null, finalUrl, _tagLabel2, _isAptForThisRun);
         renderSB();
       }
       // (위와 동일한 이유로) 9:16으로 자르거나 채우지 않고 3:4로 생성된 그대로 씀
@@ -13444,11 +13456,11 @@ function _autoRoomRetryOne(idx){
     if(!spTab.autoRoomWindowAnchor) spTab.autoRoomWindowAnchor = resultUrl;
     if(isExtType2){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
     else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
-    var _tagLabel3 = spTab.isAptSimpleMode ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
+    var _tagLabel3 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
     _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution, null, _tagLabel3);
     // ⚠️ 요청 반영: "다시 생성"으로 재생성한 경우엔 직전 시도(prevResult2)가 있으니 그걸 "이전"으로
     // 넘겨서 슬라이더로 비교되게 함 — 첫 생성일 때만(prevResult2 없음) 단일 이미지로 보여줌.
-    _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, _tagLabel3);
+    _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, _tagLabel3, _isAptForThisRun);
     renderSB();
   }, function(err){
     getTab('space').refs = origRefs;
