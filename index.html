@@ -10412,6 +10412,16 @@ function _tryRestoreSpacesetAnchors(spTab){
   if(hasAnyLocal) return; // 이미 이 기기에서 사진을 올려둔 상태면 덮어쓰지 않음
   _loadWorkspaceState('spaceset_anchors', function(data){
     if(!data) return;
+    // ⚠️ 버그 수정(치명적, "새로고침하면 컨셉확장에 넣어둔 참고 이미지가 다 리셋된다"): 이 함수가
+    // 호출된 시점(위)엔 로컬 이미지가 아직 없었더라도, 클라우드 응답을 기다리는 동안 같은 화면에서
+    // 먼저 시작된 IndexedDB 복원(idbLoadDraft, mkAutoRoomCamera 쪽)이 그 사이 실제 이미지로
+    // 먼저 채워 넣었을 수 있음(둘 다 비동기라 어느 쪽이 먼저 끝날지 보장이 안 됨) — 그런데 이
+    // 콜백은 훨씬 이전(비동기 요청을 보내기 직전)에 계산해둔 hasAnyLocal 값만 보고 무조건
+    // 덮어쓰고 있어서, 방금 막 복원된 로컬 이미지를 클라우드의 더 오래된(또는 빈) 데이터로 다시
+    // 지워버리는 경쟁 상태(race condition)가 있었음 — 지금 이 시점 기준으로 다시 한 번 확인해서,
+    // 그 사이 로컬에 이미지가 채워졌으면 클라우드 데이터로 덮어쓰지 않고 그대로 둠.
+    var hasAnyLocalNow = (spTab.autoRoomExtAnchors||[]).some(function(a){return a.img;}) || (spTab.autoRoomIntAnchors||[]).some(function(a){return a.img;});
+    if(hasAnyLocalNow) return;
     var hasCloud = (data.ext||[]).some(function(a){return a.img;}) || (data.int||[]).some(function(a){return a.img;});
     if(!hasCloud) return;
     if(data.ext && data.ext.length) spTab.autoRoomExtAnchors=data.ext;
