@@ -12232,7 +12232,7 @@ function mkAptSimpleDesign(p){
   var _perCutCrApt = spTab.autoRoomUrbanMode ? 30 : 20;
   var totalCrApt=Math.round(_finalRoomLabels.length*_perCutCrApt*_resMultApt);
   var aptGoBtn=mk('button','');aptGoBtn.type='button';
-  var _stAptRun = spTab.autoRoomState || {running:false};
+  var _stAptRun = spTab.aptRoomState || {running:false};
   // ⚠️ 버그 수정("참고 이미지 넣었는데 렌더링 버튼이 활성화가 안 된다"): 공통 컨셉 이미지가
   // 없어도, 방별 전용 참고 이미지를 하나라도 넣었으면 생성 가능해야 하는데, 이 조건이 여전히
   // "공통 컨셉 이미지가 1장 이상 있어야만" 활성화되게 막고 있었음(방별 이미지 기능을 추가하기
@@ -12253,9 +12253,13 @@ function mkAptSimpleDesign(p){
   }
   aptGoBtn.onclick=function(){
     spTab.aptCustomPrompt=promptTa.value; // change 이벤트가 아직 안 뜬 상태에서 바로 눌러도 최신값 반영
-    spTab.autoRoomExtAnchors=[];
-    spTab.autoRoomIntAnchors=[];
-    spTab.autoRoomSelected=_finalRoomLabels.slice();
+    // ⚠️ 요청 반영("아파트 컨셉디자인이랑 공간컨셉디자인 렌더링이 서로 방해된다, 분리시켜줘"):
+    // 예전엔 여기서 spTab.autoRoomExtAnchors/IntAnchors/autoRoomSelected(전부 공간 컨셉 디자인과
+    // 공유하는 필드)를 강제로 비우고 덮어써서, 공간 컨셉 디자인 쪽에 올려둔 참고 이미지·선택
+    // 목록이 그대로 날아가버리는 문제가 있었음 — 이제 아파트 전용 필드(aptRoomSelected)만 쓰고
+    // 공용 필드는 전혀 건드리지 않음(_autoRoomImagesFor도 아파트 모드일 땐 공용 앵커를 아예
+    // 안 읽도록 같이 고쳤으므로, 비워둘 필요 자체가 없어짐).
+    spTab.aptRoomSelected=_finalRoomLabels.slice();
     _autoRoomRun();
   };
   p.appendChild(aptGoBtn);
@@ -12929,18 +12933,28 @@ function _verifyAcTvCount(imgUrl, roomTypeShort, cb){
 }
 function _autoRoomRun(){
   var spTab=getTab('spaceset');
+  // ⚠️ 요청 반영("아파트 컨셉디자인이랑 공간컨셉디자인 렌더링이 서로 방해된다, 분리시켜줘"):
+  // 이 함수는 두 화면(공간 컨셉 디자인의 "컨셉 확장" / 아파트 컨셉 디자인)이 공유해서 쓰는데,
+  // 지금까지는 진행 상태(autoRoomState)·선택한 뷰 목록(autoRoomSelected)·참고 이미지 앵커까지
+  // 전부 하나의 필드를 같이 써서, 한쪽에서 "생성" 버튼을 누르면 다른 쪽 진행 중인 작업이나
+  // 설정을 덮어써버리는 문제가 있었음 — 여기서 "지금 이 실행이 아파트 모드인지"를 한 번 확정해서
+  // (_runIsApt) 그 값을 끝까지 들고 다니며, 진행 상태·선택 목록을 모드별로 완전히 분리된
+  // 필드(spTab.aptRoomState/aptRoomSelected vs spTab.autoRoomState/autoRoomSelected)에 저장함.
+  var _runIsApt = !!spTab.isAptSimpleMode;
+  var _runSelectedList = _runIsApt ? (spTab.aptRoomSelected||[]) : spTab.autoRoomSelected;
   // ⚠️ 버그 수정("거실에만 사진 넣었는데 컨셉 이미지 최소 1장 올려달라는 알림이 계속 뜬다"):
   // 버튼 활성화 조건(aptGoBtn.disabled)은 방별 전용 이미지도 인정하도록 고쳤는데, 정작 실행
   // 시점의 이 검증문(다른 화면과 공유하는 _autoRoomRun 진입부)은 여전히 공통 컨셉 이미지·
   // 앵커만 확인하고 있었음 — 방별 전용 이미지가 하나라도 있으면 통과하도록 같이 고침.
   var _hasAnyConceptForRun = (spTab.aptConceptImages && spTab.aptConceptImages.length) ||
     (spTab.aptRoomConceptImages && Object.keys(spTab.aptRoomConceptImages).some(function(k){ return !!spTab.aptRoomConceptImages[k]; }));
-  if(!(spTab.autoRoomExtAnchors && spTab.autoRoomExtAnchors.some(function(a){return a.img;})) && !(spTab.autoRoomIntAnchors && spTab.autoRoomIntAnchors.some(function(a){return a.img;})) && !_hasAnyConceptForRun){ alert('컨셉 이미지를 최소 1장 올려주세요(공통 컨셉 이미지 또는 방별 전용 이미지 중 아무거나).'); return; }
-  if(!spTab.autoRoomSelected.length){ alert('만들어줄 뷰를 최소 1개는 선택해주세요.'); return; }
+  if(!_runIsApt && !(spTab.autoRoomExtAnchors && spTab.autoRoomExtAnchors.some(function(a){return a.img;})) && !(spTab.autoRoomIntAnchors && spTab.autoRoomIntAnchors.some(function(a){return a.img;})) && !_hasAnyConceptForRun){ alert('컨셉 이미지를 최소 1장 올려주세요(공통 컨셉 이미지 또는 방별 전용 이미지 중 아무거나).'); return; }
+  if(_runIsApt && !_hasAnyConceptForRun){ alert('컨셉 이미지를 최소 1장 올려주세요(공통 컨셉 이미지 또는 방별 전용 이미지 중 아무거나).'); return; }
+  if(!_runSelectedList.length){ alert('만들어줄 뷰를 최소 1개는 선택해주세요.'); return; }
   if(!_supaUser){ openMd('account'); return; }
   var _resMultCheck2 = spTab.autoRoomResolution==='4K' ? 2.0 : spTab.autoRoomResolution==='2K' ? 1.5 : 1.0;
   var _perCutCrCheck2 = spTab.autoRoomUrbanMode ? 30 : 20;
-  var totalCr=Math.round(spTab.autoRoomSelected.length*_perCutCrCheck2*_resMultCheck2);
+  var totalCr=Math.round(_runSelectedList.length*_perCutCrCheck2*_resMultCheck2);
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCr){
     alert('크레딧이 부족합니다. 필요: '+totalCr+'cr, 현재: '+G.cr+'cr');
     openMd('credits');
@@ -12962,17 +12976,18 @@ function _autoRoomRun(){
   // 있으면 그걸 가장 먼저 만들어서 기준으로 삼고, 없으면(주거공간이면) 거실·주방을 먼저
   // 만들어서 기준으로 삼고, 그것도 없으면 목록의 첫 번째 뷰가 자연스럽게 기준이 됨 — 생성
   // 순서만 살짝 바꾸는 것이라 실제로 만들어지는 뷰 목록·개수는 그대로임.
-  var _arSelected = spTab.autoRoomSelected.slice();
+  var _arSelected = _runSelectedList.slice();
   var _arExtFirst = _arSelected.filter(function(t){ return _isExteriorViewType(t); });
   var _arRest = _arSelected.filter(function(t){ return !_isExteriorViewType(t); });
   if(_arExtFirst.length){
-    spTab.autoRoomSelected = _arExtFirst.concat(_arRest);
+    _runSelectedList = _arExtFirst.concat(_arRest);
   } else {
     var _arLivKit = _arRest.filter(function(t){ return t==='거실' || t==='주방'; });
     var _arRest2 = _arRest.filter(function(t){ return t!=='거실' && t!=='주방'; });
-    if(_arLivKit.length) spTab.autoRoomSelected = _arLivKit.concat(_arRest2);
+    if(_arLivKit.length) _runSelectedList = _arLivKit.concat(_arRest2);
   }
-  spTab.autoRoomState={running:true, step:0, results:[], error:null, isApt:!!spTab.isAptSimpleMode};
+  if(_runIsApt) spTab.aptRoomSelected = _runSelectedList; else spTab.autoRoomSelected = _runSelectedList;
+  spTab[_runIsApt ? 'aptRoomState' : 'autoRoomState'] = {running:true, step:0, results:[], error:null, isApt:_runIsApt};
   spTab._aptRoomConceptUsed = {}; // ⚠️ 방별 참고 이미지(작은방/아이방 등) 배정을 이번 실행마다 새로 시작
   renderSB();
   // ⚠️ 요청 반영: 생성 시작 전에 참고 이미지 스타일을 먼저 분석해서(1회, 배치 전체가 재사용)
@@ -12989,15 +13004,15 @@ function _autoRoomRun(){
   var _repImgIsExterior = !!(spTab.autoRoomExtAnchors||[]).map(function(a){return a.img;}).filter(Boolean)[0];
   if(_repImgForAnalysis && spTab.autoRoomStyleAnalysisSrc===_repImgForAnalysis && spTab.autoRoomStyleAnalysis){
     spTab.autoRoomStyleAnalysisIsExterior = _repImgIsExterior;
-    _autoRoomGenerateStep(0); // 이미 분석해둔 이미지와 같으면 재분석 없이 바로 진행
+    _autoRoomGenerateStep(0, _runIsApt); // 이미 분석해둔 이미지와 같으면 재분석 없이 바로 진행
     return;
   }
-  if(!_repImgForAnalysis){ _autoRoomGenerateStep(0); return; }
+  if(!_repImgForAnalysis){ _autoRoomGenerateStep(0, _runIsApt); return; }
   var _stlAnalyze=gE('stl'); if(_stlAnalyze) _stlAnalyze.textContent='참고 이미지 스타일 분석 중...';
   var _analysisDone=false;
   var _analysisTimer=setTimeout(function(){ // 5초 안에 응답 없으면 그냥 진행(분석 없이도 기존 방식으로는 동작함)
     if(_analysisDone) return; _analysisDone=true;
-    _autoRoomGenerateStep(0);
+    _autoRoomGenerateStep(0, _runIsApt);
   }, 5000);
   _analyzeSpaceStyle(_repImgForAnalysis, function(analysisText){
     if(_analysisDone) return; _analysisDone=true;
@@ -13005,7 +13020,7 @@ function _autoRoomRun(){
     spTab.autoRoomStyleAnalysis = analysisText||null;
     spTab.autoRoomStyleAnalysisSrc = _repImgForAnalysis;
     spTab.autoRoomStyleAnalysisIsExterior = _repImgIsExterior;
-    _autoRoomGenerateStep(0);
+    _autoRoomGenerateStep(0, _runIsApt);
   });
   return;
 }
@@ -13037,10 +13052,18 @@ function _autoRoomBuildFusedPrompt(basePrompt, typeName){
     : '이 결과는 실내 공간이므로 두 번째(실내) 참고 사진의 공간 구성·가구·소재 감성을 중심으로 따르되, 첫 번째(외관) 참고 사진의 재료·색감 언어(예: 노출콘크리트, 벽돌, 우드 루버 등)도 마감재나 포인트 요소로 은은하게 반영해서, "이 외관을 가진 건물 안이구나" 싶은 통일감을 주세요.';
   return basePrompt + ' ' + head + '첨부한 이미지 중 첫 번째는 이 건물의 외관(건축 디자인)이, 두 번째는 이 건물 내부의 실내 공간(인테리어 디자인)이 이미 완성된 모습입니다. 이 두 사진을 그대로 편집하지 말고, 두 사진에 담긴 디자인 포인트를 모두 살려서 융합한 하나의 통일된 디자인 언어로 "' + typeName + '"을(를) 처음부터 새로 상상해서 그려주세요. ' + tail + ' 두 사진 속 형태나 구체적인 요소를 그대로 복사하지 말고, 두 사진의 디자인 포인트를 종합해서 이 뷰에 맞게 새로 창작하세요.' + (targetIsExt?EXTERIOR_CONSISTENCY_RULE:'');
 }
-function _autoRoomImagesFor(typeName){
+function _autoRoomImagesFor(typeName, isApt){
   var spTab=getTab('spaceset');
-  var extAnchors=(spTab.autoRoomExtAnchors||[]).filter(function(a){return a.img;});
-  var intAnchors=(spTab.autoRoomIntAnchors||[]).filter(function(a){return a.img;});
+  // ⚠️ 요청 반영("아파트 컨셉디자인이랑 공간컨셉디자인 렌더링이 서로 방해된다, 분리시켜줘"):
+  // 아파트 컨셉 디자인은 공용 참고 이미지 앵커(autoRoomExtAnchors/IntAnchors)를 아예 쓰지 않고
+  // 완전히 별도의 컨셉 이미지 체계(aptConceptImages/aptRoomConceptImages)만 씁니다 — 예전엔
+  // "생성" 버튼을 누를 때마다 이 공용 앵커를 강제로 비워서(spTab.autoRoomExtAnchors=[] 등)
+  // 우회했는데, 그러면 같은 시점에 공간 컨셉 디자인 쪽에 올려둔 참고 이미지까지 같이 지워지는
+  // 문제가 있었음 — 이제 비우는 대신, 아파트 모드로 실행 중인 게 확실할 때(isApt===true)는
+  // 이 함수가 공용 앵커 자체를 아예 안 보고(존재해도 무시) 처음부터 noDirectMatch 경로로
+  // 보내도록 바꿔서, 서로의 참고 이미지 풀을 전혀 안 건드리게 분리함.
+  var extAnchors = isApt ? [] : (spTab.autoRoomExtAnchors||[]).filter(function(a){return a.img;});
+  var intAnchors = isApt ? [] : (spTab.autoRoomIntAnchors||[]).filter(function(a){return a.img;});
   var targetIsExt=_isExteriorViewType(typeName);
   // ⚠️ 방향 전환(요청 반영): 이름표가 일치하는 앵커가 있으면(외관이든 실내든) 여전히 "가장
   // 관련있는 사진"으로 주 이미지에 우선 배정하지만(더 정확한 참고가 됨), 이제 이 사진을 그대로
@@ -13287,15 +13310,15 @@ function _autoRoomPromptFor(basePrompt, typeName){
   }
   return _prependRules + prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + KOREA_BACKGROUND_RULE + MAIN_LIGHT_CONSISTENCY_RULE + PREMIUM_QUALITY_RULE + _acPositionReinforce;
 }
-function _autoRoomGenerateStep(idx){
+function _autoRoomGenerateStep(idx, isApt){
   var spTab=getTab('spaceset');
-  var st=spTab.autoRoomState;
-  var allTypes=spTab.autoRoomSelected;
+  var st = spTab[isApt ? 'aptRoomState' : 'autoRoomState'];
+  var allTypes = isApt ? (spTab.aptRoomSelected||[]) : spTab.autoRoomSelected;
   // ⚠️ 요청 반영("아파트 컨셉디자인에서 렌더링했는데 공간 컨셉 디자인에 계속 남아있다"): 생성은
   // 비동기라 완성될 때까지 사용자가 다른 탭으로 이동할 수 있음 — 결과가 완성되는 시점이 아니라
   // 지금 이 생성을 "시작하는 시점"의 모드를 캡처해서 끝까지 들고 다님(_showRoomResultInMain에
   // 그대로 넘김). st.isApt는 _autoRoomRun이 맨 처음 실행될 때 캡처해둔 값.
-  var _isAptForThisRun = (st && typeof st.isApt!=='undefined') ? !!st.isApt : !!spTab.isAptSimpleMode;
+  var _isAptForThisRun = !!isApt;
   // ⚠️ 요청 반영: "10개 체크했는데 한두 개 보고 마음에 안 들면 멈추고 싶다" — 정지 버튼을
   // 누르면 이 플래그가 서고, 다음 뷰로 넘어가기 전에 여기서 확인해서 멈춤(이미 진행 중인
   // 현재 뷰는 끝까지 만들고, 그다음 뷰부터 정지 — 중간에 뚝 끊으면 크레딧만 날리고 결과도
@@ -13313,7 +13336,7 @@ function _autoRoomGenerateStep(idx){
   // 유지하려는 경향이 있었음. "영감만 얻기"는 아예 이미지 편집이 아니라 순수 텍스트만으로
   // 새로 생성(text-to-image)하는 방식으로 완전히 분리함 — 참고할 이미지 자체가 없으니 시각적으로
   // 끌려갈 대상이 원천적으로 사라짐.
-  var imgs0 = _autoRoomImagesFor(typeName);
+  var imgs0 = _autoRoomImagesFor(typeName, isApt);
   // ⚠️ 요청 반영(근본 원인 수정): "욕실·아이방·서재가 거실로 나오는 경우가 많다" — 자기 앵커
   // 사진이 없는 방 타입은 지금까지 "같은 종류 앵커 중 첫 번째"(흔히 거실)를 편집 기준(주 이미지)
   // 으로 써왔는데, 이미지 편집 모델은 기준 이미지의 구조·형태를 강하게 유지하려는 경향이 있어서
@@ -13400,7 +13423,7 @@ function _padExteriorTo916WithBlur(url, cb){
   // ⚠️ 요청 반영("브랜드도 톤으로 써 — 마감재 톤/분위기가 그 브랜드다운 느낌 나오게"): 아파트
   // 평형 템플릿에서 브랜드를 골랐다면(기타/일반이 아닌 경우) 그 브랜드의 일반적인 시장
   // 포지셔닝(마감 톤·분위기)을 참고 힌트로 살짝 얹음 — 구조는 그대로 평수+타입 공식을 따름.
-  if(spTab.isAptSimpleMode){
+  if(_isAptForThisRun){
     _looseP += ' ⚠️⚠️⚠️ 거실 확장형 무조건 적용(매우 중요, 반복 지적된 사항): 이 아파트는 거실(및 발코니와 붙은 침실들)이 반드시 발코니 확장 공사가 되어있는 것으로 그리세요 — 거실 창이 별도 발코니 단(구획된 바닥 단차, 난간, 새시로 나뉜 반외부 공간) 없이 바로 외부 조망으로 이어지는 확장형 구조여야 합니다. ⚠️ 컨셉/참고 이미지에 발코니가 확장되지 않은 모습(창 안쪽에 별도 바닥 단이나 난간이 있는 비확장형)이 찍혀 있어도 그 구조를 그대로 따라 그리면 안 됩니다 — 그런 참고 이미지가 있어도 이 규칙대로 확장형으로 고쳐서 그리세요, 참고 이미지는 마감재·가구·색감 스타일만 참고하고 발코니 구조는 항상 이 규칙(확장형)을 따르세요. 사용자가 직접 "발코니 확장 안 함"이라고 명시했을 때만 예외입니다. ⚠️ 문(도어) 통일: 방문·중문 등 문의 색상·소재·스타일도 창호·바닥·벽·천장과 마찬가지로 이 세트 전체에서 통일하세요. ⚠️ 층고(천장고) 고정값: 이 아파트 세트의 모든 실내 공간은 천장고(바닥부터 천장까지 실내 높이) 2300mm(한국 아파트 표준 천장고)로 일관되게 그리세요 — 방마다 천장 높이가 달라 보이면 안 됩니다.';
   }
   if(spTab.autoRoomAptBrand && spTab.autoRoomAptBrand!=='기타/일반'){
@@ -13433,11 +13456,11 @@ function _padExteriorTo916WithBlur(url, cb){
     // 앞쪽 이미지에 더 크게 가중치를 두는 경향이 있어서, 정작 가장 중요한 컨셉 이미지가 뒷전으로
     // 밀리고 있었던 것으로 보임 — 컨셉 이미지를 항상 맨 앞 슬롯에 확보하고, 전체 개수도 최대
     // 4장으로 제한해서(컨셉 최대 2 + 평면도 1 + 이전결과 1) 한 장당 가중치가 옅어지지 않게 함.
-    var _aptFloorPlanRefImg = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
+    var _aptFloorPlanRefImg = (_isAptForThisRun && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
     // ⚠️ 요청 반영("거실은 반영이 잘 되는데 안방·주방은 안 된다, 방마다 참고 이미지를 따로
     // 넣게 해달라"): 이 방 전용 참고 이미지가 있으면 그게 무조건 최우선 슬롯(맨 앞)을 차지함 —
     // 공통 컨셉 이미지보다도 우선.
-    var _aptThisRoomConceptImg = spTab.isAptSimpleMode ? _aptRoomConceptImageFor(spTab, typeName) : null;
+    var _aptThisRoomConceptImg = _isAptForThisRun ? _aptRoomConceptImageFor(spTab, typeName) : null;
     var _conceptSlots = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
     // ⚠️ 버그 수정("거실은 참고 이미지가 잘 반영되는데 다른 공간은 안 된다"): 원인을 찾음 —
     // "거실 사진이면 공통 컨셉 이미지 말고 거실 칸에 바로 넣으세요"라고 안내했었는데, 그러면
@@ -13758,7 +13781,7 @@ function _padExteriorTo916WithBlur(url, cb){
     var _looseModelBase = _wantUrbanPro ? 'fal-ai/nano-banana-pro' : 'fal-ai/nano-banana-2';
     falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _looseInput, function(d){
       var resultUrl=falExtractImageUrl(d);
-      if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomGenerateStep(idx+1); return; }
+      if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomGenerateStep(idx+1, isApt); return; }
       function _finishLoose(finalUrl){
         st.results[idx]={url:finalUrl};
         if(!spTab.autoRoomWindowAnchor) spTab.autoRoomWindowAnchor = finalUrl;
@@ -13782,7 +13805,7 @@ function _padExteriorTo916WithBlur(url, cb){
             if(G.wf==='spaceset') renderMain('spaceset');
           });
         })();
-        _autoRoomGenerateStep(idx+1);
+        _autoRoomGenerateStep(idx+1, isApt);
       }
       // ⚠️ 요청 반영("계속 9:16 비율 때문에 겹쳐서 나온다, 그냥 전처럼 3:4로 하면 무조건 한 장만
       // 나오니까 그렇게 해달라"): 3:4로 생성한 뒤 9:16으로 자르거나 채우려던 후처리를 없애고,
@@ -13791,7 +13814,7 @@ function _padExteriorTo916WithBlur(url, cb){
       _finishLoose(resultUrl);
     }, function(err){
       st.results[idx]={error:String(err).slice(0,120)};
-      _autoRoomGenerateStep(idx+1);
+      _autoRoomGenerateStep(idx+1, isApt);
     }, {wf:'space', resolution:spTab.autoRoomResolution||'1K'});
     return;
   }
@@ -13880,11 +13903,11 @@ function _padExteriorTo916WithBlur(url, cb){
     // 사용자가 직접 클릭해야만 화면(왼쪽 히스토리·오른쪽 메인)에 나타나고 있었음 — 이제 생성되는
     // 즉시 자동으로 나타나게 함(현장사진세트와 동일하게 통일).
     _showRoomResultInMain(null, resultUrl, _tagLabel1, _isAptForThisRun);
-    _autoRoomGenerateStep(idx+1);
+    _autoRoomGenerateStep(idx+1, isApt);
   }, function(err){
     getTab('space').refs = origRefs;
     st.results[idx]={error:String(err).slice(0,120)};
-    _autoRoomGenerateStep(idx+1);
+    _autoRoomGenerateStep(idx+1, isApt);
   });
 }
 function _autoRoomRetryOne(idx){
@@ -13915,7 +13938,7 @@ function _autoRoomRetryOne(idx){
       _looseP2 += '⚠️⚠️⚠️⚠️ 사용자가 직접 적은 최우선 요청사항(다른 모든 지시보다 우선 반영하세요, 단 위의 "절대 공식"(평형 구조·타입·평수·방 배치)은 예외 — 이 요청과 충돌해도 항상 그대로 유지하세요): "' + spTab.aptCustomPrompt.trim() + '" — 아래 이어지는 지시들과 이 요청이 서로 충돌하면(구조 공식 관련이 아닌 한) 반드시 이 요청을 따르세요. ';
     }
     _looseP2 += '⚠️⚠️⚠️ 이 세트 전체의 대전제(절대 잊지 마세요): 지금 만드는 이 공간은 "따로 노는 개별 이미지"가 아니라, 거실·주방·침실·외관 등이 전부 같은 하나의 건물·같은 하나의 프로젝트에 속한 세트입니다. 마감재 종류·색감, 창호(창틀) 색상·소재, 조명 디자인 언어, 전체적인 톤앤매너가 이 세트의 다른 공간·외관과 반드시 통일되어 보여야 합니다 — 이 방 하나만 보면 괜찮아도, 다른 공간들과 나란히 놓고 봤을 때 "따로 노는 건물/공간처럼" 보이면 명백한 실패입니다. ';
-    if(spTab.isAptSimpleMode){
+    if(_isAptForThisRun){
       _looseP2 += ' ⚠️⚠️⚠️ 거실 확장형 무조건 적용(매우 중요, 반복 지적된 사항): 이 아파트는 거실(및 발코니와 붙은 침실들)이 반드시 발코니 확장 공사가 되어있는 것으로 그리세요 — 거실 창이 별도 발코니 단(구획된 바닥 단차, 난간, 새시로 나뉜 반외부 공간) 없이 바로 외부 조망으로 이어지는 확장형 구조여야 합니다. ⚠️ 컨셉/참고 이미지에 발코니가 확장되지 않은 모습(창 안쪽에 별도 바닥 단이나 난간이 있는 비확장형)이 찍혀 있어도 그 구조를 그대로 따라 그리면 안 됩니다 — 그런 참고 이미지가 있어도 이 규칙대로 확장형으로 고쳐서 그리세요, 참고 이미지는 마감재·가구·색감 스타일만 참고하고 발코니 구조는 항상 이 규칙(확장형)을 따르세요. 사용자가 직접 "발코니 확장 안 함"이라고 명시했을 때만 예외입니다. ⚠️ 문(도어) 통일: 방문·중문 등 문의 색상·소재·스타일도 창호·바닥·벽·천장과 마찬가지로 이 세트 전체에서 통일하세요. ⚠️ 층고(천장고) 고정값: 이 아파트 세트의 모든 실내 공간은 천장고(바닥부터 천장까지 실내 높이) 2300mm(한국 아파트 표준 천장고)로 일관되게 그리세요 — 방마다 천장 높이가 달라 보이면 안 됩니다.';
     }
 
@@ -13933,10 +13956,10 @@ function _autoRoomRetryOne(idx){
     }
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
-    var _aptFloorPlanRefImg2 = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
+    var _aptFloorPlanRefImg2 = (_isAptForThisRun && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
     // ⚠️ _autoRoomGenerateStep과 동일한 이유(컨셉 이미지가 뒷순위로 밀려서 반영이 안 되던 문제,
     // 방별 전용 참고 이미지 최우선)로, 여기도 똑같이 정렬함.
-    var _aptThisRoomConceptImg2 = spTab.isAptSimpleMode ? _aptRoomConceptImageFor(spTab, typeName) : null;
+    var _aptThisRoomConceptImg2 = _isAptForThisRun ? _aptRoomConceptImageFor(spTab, typeName) : null;
     var _conceptSlots2 = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
     // ⚠️ _autoRoomGenerateStep과 동일한 폴백(전용 사진도, 공통 컨셉 이미지도 없으면 다른 방
     // 전용 사진이라도 최소한의 스타일 참고로 붙여줌).
@@ -13953,7 +13976,7 @@ function _autoRoomRetryOne(idx){
     // 생성 경로(_autoRoomGenerateStep)에는 있던 이 블록이 재생성 경로(_autoRoomRetryOne)엔
     // 원래 없었음 — 재생성을 눌러도 매번 똑같이 스타일이 약하게 반영되는 원인 중 하나였으므로
     // 동일하게 추가함.
-    if(spTab.isAptSimpleMode){
+    if(_isAptForThisRun){
       if(_aptThisRoomConceptImg2){
         _looseP2 += ' ⚠️⚠️⚠️⚠️ 이 방 전용 참고 이미지(가장 중요, 다른 모든 참고 이미지보다 우선): 첨부한 참고 이미지 중 하나는 다른 방을 위한 일반 스타일 참고가 아니라, 바로 이 공간(' + typeName + ')을 위해 직접 고른 사진입니다 — 이 사진 속 가구·소품·마감재·색감을 이 방에 가장 정확하고 직접적으로 재현하세요. 다른 공통 컨셉 이미지나 다른 방 사진보다 이 사진을 절대적으로 우선하세요.';
       } else if(_conceptSlots2.length){
