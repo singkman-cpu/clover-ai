@@ -11952,6 +11952,68 @@ function mkAptSimpleDesign(p){
   }
   p.appendChild(conceptWrap);
 
+  // ── 방별 전용 참고 이미지(선택) ──────────────────────────────────
+  // ⚠️ 요청 반영("거실은 반영이 잘 되는데 안방·주방은 안 된다, 공간 컨셉 디자인처럼 방마다
+  // 참고 이미지를 따로 넣게 해달라"): 정확한 진단이었음 — 위 "컨셉 이미지"는 보통 거실 사진
+  // 하나라서, 거실을 만들 땐 "거실 사진 보고 거실 만들기"(쉬움)인데 안방·주방을 만들 땐
+  // "거실 사진 보고 완전히 다른 종류의 방을 상상하기"(훨씬 어려움)가 되고 있었음. 방마다 직접
+  // 사진을 넣을 수 있게 하면, 그 방을 만들 때 이 직접 사진을 최우선으로 참고하도록 함.
+  function _aptRoomConceptSave(){
+    try{ localStorage.setItem('clover_apt_room_concept_images', JSON.stringify(spTab.aptRoomConceptImages||{})); }
+    catch(e){ console.warn('[방별 참고 이미지 저장 실패]', e); }
+  }
+  if(!spTab.aptRoomConceptImages){
+    spTab.aptRoomConceptImages = {};
+    try{
+      var _savedRoomConcepts = JSON.parse(localStorage.getItem('clover_apt_room_concept_images')||'{}');
+      if(_savedRoomConcepts && typeof _savedRoomConcepts==='object') spTab.aptRoomConceptImages = _savedRoomConcepts;
+    }catch(e){}
+  }
+  var _checkedRoomTypes = spTab.aptSelectedBaseTypes||[];
+  if(_checkedRoomTypes.length){
+    var roomConceptWrap=dv('ss');
+    roomConceptWrap.innerHTML='<div class="lbl">🖼️ 방별 전용 참고 이미지 <span class="lbl-en">선택 — 넣은 방은 이 사진을 최우선으로 참고해요(안 넣은 방은 위 공통 컨셉 이미지를 따라요)</span></div>';
+    var roomConceptGrid=dv('');roomConceptGrid.style.cssText='display:flex;flex-direction:column;gap:6px';
+    _checkedRoomTypes.forEach(function(rt){
+      var rcRow=dv('');rcRow.style.cssText='display:flex;align-items:center;gap:8px;padding:6px;border-radius:8px;background:var(--c2)';
+      var rcLabel=dv('');rcLabel.style.cssText='width:52px;flex-shrink:0;font-size:11px;font-weight:700;color:var(--t2)';
+      rcLabel.textContent=rt;
+      rcRow.appendChild(rcLabel);
+      var rcImgUrl = spTab.aptRoomConceptImages[rt];
+      if(rcImgUrl){
+        var rcThumb=mk('img','');rcThumb.src=rcImgUrl;rcThumb.style.cssText='width:40px;height:40px;border-radius:6px;object-fit:cover;cursor:pointer;border:1.5px solid var(--acb)';
+        rcThumb.onclick=function(){ _simpleImageZoomShow([rcImgUrl], 0); };
+        rcRow.appendChild(rcThumb);
+        var rcDel=mk('button','');rcDel.type='button';rcDel.textContent='✕ 삭제';
+        rcDel.style.cssText='padding:4px 8px;border-radius:6px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#fca5a5;font-size:10px;cursor:pointer;font-family:inherit';
+        rcDel.onclick=function(){ delete spTab.aptRoomConceptImages[rt]; _aptRoomConceptSave(); _resetAptConsistencyChain(); renderSB(); };
+        rcRow.appendChild(rcDel);
+      } else {
+        var rcUpBtn=mk('button','');rcUpBtn.type='button';rcUpBtn.textContent='+ 사진 추가';
+        rcUpBtn.style.cssText='padding:6px 10px;border-radius:6px;border:1px dashed var(--bd2);background:var(--c);color:var(--m2);font-size:10.5px;cursor:pointer;font-family:inherit';
+        var rcInp=document.createElement('input');rcInp.type='file';rcInp.accept='image/*';rcInp.style.display='none';
+        rcInp.onchange=function(){
+          var f=rcInp.files && rcInp.files[0];
+          if(!f) return;
+          var reader=new FileReader();
+          reader.onload=function(){
+            _downscaleForMemorySafety(reader.result, function(resized){
+              spTab.aptRoomConceptImages[rt]=resized;
+              _aptRoomConceptSave(); _resetAptConsistencyChain(); renderSB();
+            });
+          };
+          reader.readAsDataURL(f);
+        };
+        rcUpBtn.onclick=function(){ rcInp.click(); };
+        rcRow.appendChild(rcUpBtn);
+        rcRow.appendChild(rcInp);
+      }
+      roomConceptGrid.appendChild(rcRow);
+    });
+    roomConceptWrap.appendChild(roomConceptGrid);
+    p.appendChild(roomConceptWrap);
+  }
+
   // ── 레퍼런스 반영도 ──────────────────────────────────
   // ⚠️ 요청 반영("반영도를 '비슷하게'/'최대한 동일하게' 두 가지로 나누지 말고 그냥 100%
   // 똑같이 만들어줘"): 선택 UI를 없애고, 이 탭(아파트 컨셉 디자인)은 항상 "최대한 동일하게"
@@ -13201,8 +13263,13 @@ function _padExteriorTo916WithBlur(url, cb){
     // 밀리고 있었던 것으로 보임 — 컨셉 이미지를 항상 맨 앞 슬롯에 확보하고, 전체 개수도 최대
     // 4장으로 제한해서(컨셉 최대 2 + 평면도 1 + 이전결과 1) 한 장당 가중치가 옅어지지 않게 함.
     var _aptFloorPlanRefImg = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
+    // ⚠️ 요청 반영("거실은 반영이 잘 되는데 안방·주방은 안 된다, 방마다 참고 이미지를 따로
+    // 넣게 해달라"): 이 방 전용 참고 이미지가 있으면 그게 무조건 최우선 슬롯(맨 앞)을 차지함 —
+    // 공통 컨셉 이미지보다도 우선.
+    var _aptThisRoomConceptImg = (spTab.isAptSimpleMode && spTab.aptRoomConceptImages) ? spTab.aptRoomConceptImages[_aptClassifyRoom(typeName)] : null;
     var _conceptSlots = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
-    var _looseRefsOrdered = _conceptSlots.slice();
+    var _looseRefsOrdered = _aptThisRoomConceptImg ? [_aptThisRoomConceptImg] : [];
+    _conceptSlots.forEach(function(_c){ if(_looseRefsOrdered.indexOf(_c)===-1) _looseRefsOrdered.push(_c); });
     if(_aptFloorPlanRefImg && _looseRefsOrdered.indexOf(_aptFloorPlanRefImg)===-1) _looseRefsOrdered.push(_aptFloorPlanRefImg);
     _looseRefs.forEach(function(_r){ if(_looseRefsOrdered.indexOf(_r)===-1) _looseRefsOrdered.push(_r); });
     _looseRefs = _looseRefsOrdered.slice(0,4);
@@ -13285,6 +13352,12 @@ function _padExteriorTo916WithBlur(url, cb){
     // 이미지 목록 맨 앞(_looseRefs.unshift)에 넣어뒀으므로 AI가 가장 먼저 보게 됨.
     if(_aptFloorPlanRefImg){
       _looseP += ' ⚠️⚠️⚠️⚠️ 평면도 구조 기준(가장 중요, 이 세트 전용): 참고 이미지 중 하나는 이 세대(' + (spTab.autoRoomAptPyeong||34) + '평, ' + (spTab.autoRoomAptType==='tower'?'타워형':'판상형') + ')의 실제 평면도(방 배치 스케치/도면)입니다 — 이건 다른 참고 이미지(스타일 사진)와 역할이 완전히 다릅니다. 이 평면도에서 가져올 것은 오직 구조뿐입니다: 방들의 개수·상대적 위치·인접 관계, 벽의 위치, 창문·발코니가 있는 방향, 문의 위치. 지금 만드는 방(' + typeName + ')이 이 평면도에서 어느 방에 해당하는지 파악하고, 그 방의 실제 형태(가로세로 비율, 창문 위치, 인접한 벽)를 최대한 따라가세요. 반대로 이 평면도에서 절대 가져오면 안 되는 것: 마감재·색상·가구·조명·전체적인 톤앤무드 — 이런 스타일 요소는 다른 참고 이미지(있다면)를 따르거나, 없으면 이 프롬프트의 다른 지시를 따르세요. 평면도는 흑백 선 그림일 수 있지만, 실제 결과물은 그 평면도의 구조를 가진 사실적인 사진이어야지, 평면도 자체를 재현하면 안 됩니다.';
+    }
+    // ⚠️ 요청 반영("거실은 반영이 잘 되는데 안방·주방은 안 된다, 방마다 참고 이미지를 따로
+    // 넣게 해달라"): 이 방 전용 참고 이미지가 첨부돼 있으면, 그게 다른 어떤 참고 이미지보다
+    // 우선하는 "이 방의 직접 기준 사진"이라고 명확히 구분해서 못박음.
+    if(_aptThisRoomConceptImg){
+      _looseP += ' ⚠️⚠️⚠️⚠️ 이 방 전용 참고 이미지(가장 중요, 다른 모든 참고 이미지보다 우선): 첨부한 참고 이미지 중 하나는 다른 방을 위한 일반 스타일 참고가 아니라, 바로 이 공간(' + typeName + ')을 위해 직접 고른 사진입니다 — 이 사진 속 가구·소품·마감재·색감을 이 방에 가장 정확하고 직접적으로 재현하세요. 다른 공통 컨셉 이미지나 다른 방 사진보다 이 사진을 절대적으로 우선하세요.';
     }
     // ⚠️ 요청 반영("건축도 건축 참고이미지가 없으면 실내이미지 참고해서 만들어달라고 명확히 해줘,
     // 창문형태나 정원이 있으면 정원도 반영해서 외부랑 실내가 잘 어울리게"): 위 블록은 실내끼리만
@@ -13651,10 +13724,12 @@ function _autoRoomRetryOne(idx){
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
     var _aptFloorPlanRefImg2 = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
-    // ⚠️ _autoRoomGenerateStep과 동일한 이유(컨셉 이미지가 뒷순위로 밀려서 반영이 안 되던 문제)로,
-    // 여기도 컨셉 이미지를 항상 맨 앞 슬롯에 확보하고 전체 4장으로 제한함.
+    // ⚠️ _autoRoomGenerateStep과 동일한 이유(컨셉 이미지가 뒷순위로 밀려서 반영이 안 되던 문제,
+    // 방별 전용 참고 이미지 최우선)로, 여기도 똑같이 정렬함.
+    var _aptThisRoomConceptImg2 = (spTab.isAptSimpleMode && spTab.aptRoomConceptImages) ? spTab.aptRoomConceptImages[_aptClassifyRoom(typeName)] : null;
     var _conceptSlots2 = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
-    var _looseRefs2Ordered = _conceptSlots2.slice();
+    var _looseRefs2Ordered = _aptThisRoomConceptImg2 ? [_aptThisRoomConceptImg2] : [];
+    _conceptSlots2.forEach(function(_c){ if(_looseRefs2Ordered.indexOf(_c)===-1) _looseRefs2Ordered.push(_c); });
     if(_aptFloorPlanRefImg2 && _looseRefs2Ordered.indexOf(_aptFloorPlanRefImg2)===-1) _looseRefs2Ordered.push(_aptFloorPlanRefImg2);
     _looseRefs2.forEach(function(_r){ if(_looseRefs2Ordered.indexOf(_r)===-1) _looseRefs2Ordered.push(_r); });
     _looseRefs2 = _looseRefs2Ordered.slice(0,4);
