@@ -11730,7 +11730,14 @@ function mkAptSimpleDesign(p){
   var _fpCurUrl = _fpSharedUrl || _fpLocalUrl;
   var _fpGenericUrl = _fpCurUrl ? null : _generateAptFloorPlanSVG(_fpCurType, _fpCurPyeong);
   // PNG 캐시 미리 데워두기(실제 생성 시 동기적으로 바로 쓸 수 있게) — 진짜 이미지가 있으면 필요없음
+  // ⚠️ 요청 반영("어설프게 그린 개략도를 회원들이 왜 보고 있냐, AI만 알면 되지 회원은 몰라도
+  // 된다"): 이 캐시 데우기는 화면 표시 여부와 무관하게 항상 실행돼야(그래야 실제 생성 때 밀리지
+  // 않고 바로 쓰임), 그래서 관리자 전용 화면 블록 밖, 즉 모든 사용자 기준으로 항상 실행되게 둠.
   if(!_fpCurUrl){ _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, _fpCurType, _fpCurPyeong); }
+  // 아래 화면 표시(이미지 미리보기, 업로드 버튼 등)는 관리자에게만 보이게 함 — 일반 회원은
+  // 이 섹션 자체를 볼 필요가 없고(그냥 뒤에서 자동으로 구조에 반영됨), 어설픈 개략도를 보여줘서
+  // 괜히 신뢰도만 떨어뜨릴 수 있음.
+  if(G.supaRole==='admin'){
   fpWrap.innerHTML='<div class="lbl">📐 평면도 참고 이미지 <span class="lbl-en">'+(spTab.autoRoomAptType==='tower'?'타워형':'판상형')+' '+_fpCurPyeong+'평 구조 기준</span></div>';
   var fpImgBox=dv('');fpImgBox.style.cssText='position:relative;width:100%;max-width:220px;border-radius:8px;overflow:hidden;border:1.5px solid '+(_fpCurUrl?'var(--acb)':'var(--bd2)');
   var fpImg=mk('img','');fpImg.src=_fpCurUrl||_fpGenericUrl;fpImg.style.cssText='width:100%;display:block;cursor:pointer;background:#fff';
@@ -11753,32 +11760,8 @@ function mkAptSimpleDesign(p){
     fpActiveNote.textContent='ℹ️ 공식 평면도가 아직 없어서, 국내 아파트 표준 구조 규칙대로 자동 생성한 개략도를 구조 기준으로 써요(마감재·가구는 이 개략도가 아니라 컨셉 이미지를 따라요).';
   }
   fpWrap.appendChild(fpActiveNote);
-  if(!_fpCurUrl && G.supaRole!=='admin'){
-    var fpUploadBtn=mk('button','');fpUploadBtn.type='button';fpUploadBtn.textContent='📐 우리 아파트 실제 평면도로 교체(내 브라우저에만 저장)';
-    fpUploadBtn.style.cssText='width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1.5px dashed var(--bd2);background:var(--c2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
-    var fpInp=document.createElement('input');fpInp.type='file';fpInp.accept='image/*';fpInp.style.display='none';
-    fpInp.onchange=function(){
-      var f=fpInp.files && fpInp.files[0];
-      if(!f) return;
-      var reader=new FileReader();
-      reader.onload=function(){
-        _downscaleForMemorySafety(reader.result, function(resized){
-          var ok=_aptFloorPlanSet(_fpCurType, _fpCurPyeong, resized);
-          if(!ok) alert('저장에 실패했어요 — 브라우저 저장 공간이 가득 찼을 수 있어요. 다른 평면도를 몇 개 지우고 다시 시도해주세요.');
-          _resetAptConsistencyChain();
-          renderSB();
-        });
-      };
-      reader.readAsDataURL(f);
-    };
-    fpUploadBtn.onclick=function(){ fpInp.click(); };
-    fpWrap.appendChild(fpUploadBtn);
-    fpWrap.appendChild(fpInp);
-    var fpNote=dv('');fpNote.style.cssText='font-size:10px;color:var(--m2);margin-top:4px;line-height:1.5';
-    fpNote.textContent='이 평수·타입엔 아직 공식 평면도가 없어요. 여기서 올리면 내 브라우저에만 저장돼요(전체 회원 공용은 관리자만 등록 가능).';
-    fpWrap.appendChild(fpNote);
-  }
   p.appendChild(fpWrap);
+  } // end if(G.supaRole==='admin') — 이 미리보기 섹션은 관리자에게만 보임
 
   // ── 관리자 전용: 평면도 공용 라이브러리 일괄 업로드 ──────────────────────────────────
   // ⚠️ 요청 반영("몇십 장을 브랜드·평수·타입별로 서버에 저장해두면 전체 회원이 자동으로 쓰게
@@ -30614,10 +30597,17 @@ document.addEventListener('DOMContentLoaded',function(){try{
 
   // ── Supabase 초기화 ───────────────────────────────────────────
   initSupabase();
-  // 비로그인 상태 초기 표시
+  // ⚠️ 버그 수정("로그인 되어있어서 크레딧도 다 보이는데 로그인하라고 뜨네"): initSupabase()는
+  // 비동기라(Supabase 세션 확인이 끝나기 전) 이 시점엔 _supaUser가 아직 null인 게 정상인데,
+  // 그렇다고 무조건 "로그인"이라고 표시해버리고 있었음 — 그새 localStorage에 저장해둔 이전
+  // 크레딧 캐시(clover_cr)는 G.cr에 이미 동기적으로 로드돼 있어서(2606번째 줄 참고), 실제로는
+  // 로그인된 사용자인데도 잠깐(비동기 확인이 끝날 때까지) 헤더에 "로그인"이라고 잘못 뜨고
+  // 있었던 것. 로그인 흔적(캐시된 크레딧·플랜)이 있으면 "로그인"이 아니라 그 캐시된 숫자를
+  // 먼저 보여주고, 진짜 로그인 확인이 끝나면(SIGNED_IN 등) 정확한 값으로 다시 갱신됨.
   if(!_supaUser){
     var crn=gE('cr-n');
-    if(crn)crn.textContent='로그인';
+    var _hasSessionHint = localStorage.getItem('clover_cr') || localStorage.getItem('clover_plan');
+    if(crn) crn.textContent = _hasSessionHint ? (G.plan==='admin'?'무제한':G.cr.toLocaleString()) : '로그인';
     updateAccountBtn();
   }
 
@@ -31900,7 +31890,11 @@ function updateAccountBtn(){
     var crn=gE('cr-n');
     if(crn&&G.cr===0&&!G.supaRole){crn.textContent='...';}
   } else {
-    btn.textContent='로그인';
+    // ⚠️ 버그 수정: cr-n과 동일한 이유 — Supabase 비동기 확인이 끝나기 전엔 _supaUser가 항상
+    // null이라, 로그인 캐시(clover_cr/clover_plan)가 있어도 무조건 "로그인"으로 표시되고
+    // 있었음. 세션 흔적이 있으면 "확인 중..."으로, 정말 없을 때만 "로그인"으로 표시함.
+    var _hasSessionHint2 = localStorage.getItem('clover_cr') || localStorage.getItem('clover_plan');
+    btn.textContent = _hasSessionHint2 ? '...' : '로그인';
   }
 }
 
@@ -32160,37 +32154,51 @@ function _generateAptFloorPlanSVG(type, pyeong){
     if(hasUtility){
       var utilW = totalW*0.12;
       rooms.push({x:nx, y:northY, w:utilW, h:northH*0.5, label:'다용도실'});
-      rooms.push({x:nx, y:northY+northH*0.5, w:utilW, h:northH*0.5, label:'실외기실'});
+      rooms.push({x:nx, y:northY+northH*0.5, w:utilW, h:northH*0.5, label:'팬트리'});
       nx += utilW;
     }
     var entW = totalW - (nx-20);
     rooms.push({x:nx, y:northY, w:entW*0.55, h:northH, label:'현관'});
     rooms.push({x:nx+entW*0.55, y:northY, w:entW*0.45, h:northH, label:'욕실1'});
   } else {
-    // ── 타워형: 좌하단 거실+주방 개방존(코너창), 좌상단 안방존, 우측 침실존 ──
-    var lw = W*0.58, midY = H*0.42;
-    rooms.push({x:20, y:midY, w:lw*0.62, h:H-midY-20, label:'거실', window:'SW'});
-    rooms.push({x:20+lw*0.62, y:midY, w:lw*0.38, h:H-midY-20, label:'주방'});
-    // 안방존(좌상단)
-    var abW = lw*0.62;
-    rooms.push({x:20, y:20, w:abW*0.62, h:midY-20-20, label:'안방', window:'N'});
-    if(beds>=2){
-      rooms.push({x:20+abW*0.62, y:20, w:abW*0.38, h:(midY-40)*0.45, label:'드레스룸'});
-      rooms.push({x:20+abW*0.62, y:20+(midY-40)*0.45, w:abW*0.38*0.5, h:(midY-40)*0.55, label:'파우더'});
-      rooms.push({x:20+abW*0.62+abW*0.38*0.5, y:20+(midY-40)*0.45, w:abW*0.38*0.5, h:(midY-40)*0.55, label:'욕실2'});
-    }
-    // 현관 (안방존 아래, 코어와 인접)
-    rooms.push({x:20, y:midY-20, w:abW, h:20, label:'현관'});
-    // 우측 침실존
-    var rx = 20+lw+10, rw = W-rx-20;
-    var bedsRight = Math.max(0, beds-1);
-    if(bedsRight>0){
-      var rh = (H-40)/bedsRight;
-      for(var b=0;b<bedsRight;b++){
-        rooms.push({x:rx, y:20+rh*b, w:rw*0.6, h:rh, label:(b===0?'침실2':(b===1?'침실3':'침실4')), window:'E'});
+    // ── 타워형: 업로드해주신 실제 대표 평면도 기준으로 재구성 ──
+    // 상단: 안방(우측, 자체 발코니) + 드레스룸·파우더·욕실2(안방 옆) + 욕실1(좌측, 공용)
+    // 하단: 침실2·침실3(좌측) + 주방(가운데) + 거실(우측, 자체 발코니) — 거실·주방 개방존
+    // 현관: 상단·하단 경계, 좌측(욕실1·침실2 쪽)에 위치
+    var midY2 = H*0.42;
+    var topH = midY2-20-16; // 16=현관 스트립
+    // 상단 좌측: 욕실1
+    rooms.push({x:20, y:20, w:W*0.16, h:topH, label:'욕실1'});
+    // 상단 중간: 드레스룸(위)+파우더/욕실2(아래) — 안방 옆
+    var dressX = 20+W*0.16;
+    var dressW = W*0.18;
+    rooms.push({x:dressX, y:20, w:dressW, h:topH*0.45, label:'드레스룸'});
+    rooms.push({x:dressX, y:20+topH*0.45, w:dressW*0.5, h:topH*0.55, label:'파우더'});
+    rooms.push({x:dressX+dressW*0.5, y:20+topH*0.45, w:dressW*0.5, h:topH*0.55, label:'욕실2'});
+    // 상단 우측: 안방(자체 발코니, 동쪽 창)
+    var abX = dressX+dressW;
+    rooms.push({x:abX, y:20, w:W-abX-20, h:topH, label:'안방', window:'E'});
+    // 현관: 상/하단 경계 스트립(좌측)
+    rooms.push({x:20, y:20+topH, w:W*0.34, h:16, label:'현관'});
+    // 하단: 침실2·침실3(좌측, 세로로 나란히) + 주방(가운데) + 거실(우측, 자체 발코니)
+    var botY = midY2;
+    var botH = H-botY-20;
+    var bedsBottom = Math.max(0, beds-1); // 안방 제외 나머지 침실 개수(2~3개)
+    var leftW = W*0.22;
+    if(bedsBottom>0){
+      var brh = botH/Math.min(bedsBottom,2);
+      for(var b=0;b<Math.min(bedsBottom,2);b++){
+        rooms.push({x:20, y:botY+brh*b, w:leftW, h:brh, label:(b===0?'침실2':'침실3')});
       }
-      rooms.push({x:rx+rw*0.6, y:20, w:rw*0.4, h:(H-40)*0.5, label:'욕실1'});
-      rooms.push({x:rx+rw*0.6, y:20+(H-40)*0.5, w:rw*0.4, h:(H-40)*0.5, label:'다용도실'});
+    }
+    var kitchenX = 20+leftW;
+    var kitchenW = W*0.24;
+    rooms.push({x:kitchenX, y:botY, w:kitchenW, h:botH, label:'주방'});
+    var livX = kitchenX+kitchenW;
+    rooms.push({x:livX, y:botY, w:W-livX-20, h:botH, label:'거실', window:'E'});
+    if(beds>=4){
+      // 4베드룸(44평 이상)이면 다용도실 대신 침실4를 침실3 아래 살짝 추가
+      rooms.push({x:20, y:botY+botH*0.7, w:leftW*0.9, h:botH*0.3, label:'침실4'});
     }
   }
 
