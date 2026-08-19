@@ -11628,7 +11628,7 @@ function _aptFloorPlanDelete(type, pyeong){
 // 사진이 2개 다 있으면 침실2엔 "작은방" 사진, 침실3엔 "아이방" 사진 이런 식으로).
 function _aptRoomConceptKeysFor(typeName){
   if(typeName.indexOf('거실')===0) return ['거실'];
-  if(typeName.indexOf('주방')===0) return ['주방'];
+  if(typeName.indexOf('주방')===0) return ['주방','다이닝룸'];
   if(typeName.indexOf('안방')===0 || typeName.indexOf('침실(안방 겸용')===0) return ['안방'];
   if(typeName.indexOf('욕실')===0){
     if(typeName.indexOf('공용')!==-1) return ['공용욕실'];
@@ -11664,26 +11664,37 @@ function _aptClassifyRoom(label){
   if(label.indexOf('주방')===0) return '주방';
   if(label.indexOf('안방')===0 || label.indexOf('침실(안방 겸용')===0) return '안방';
   if(label.indexOf('침실2')===0 || label.indexOf('침실3')===0 || label.indexOf('침실4')===0) return '작은방';
-  if(label.indexOf('욕실')===0) return '욕실';
+  // ⚠️ 요청 반영("체크박스로 원하는 공간 선택하는 것도 참고이미지만큼 늘어나야지"): 욕실을
+  // "안방욕실"/"공용욕실"로 구분해서 각각 따로 체크·생성할 수 있게 함(예전엔 욕실 하나로
+  // 뭉뚱그려서 대표 1개만 만들어졌음).
+  if(label.indexOf('욕실')===0){
+    if(label.indexOf('안방')!==-1) return '안방욕실';
+    return '공용욕실';
+  }
   if(label.indexOf('현관')===0) return '현관';
   if(label.indexOf('드레스룸')===0) return '드레스룸';
   if(label.indexOf('발코니')===0) return '발코니';
   if(label.indexOf('다용도실')===0) return '다용도실';
-  if(label.indexOf('서재')===0 || label.indexOf('알파룸')!==-1) return '알파룸';
+  if(label.indexOf('서재')===0 || label.indexOf('알파룸')!==-1) return '서재';
   if(label.indexOf('파우더룸')===0) return '파우더룸';
+  if(label.indexOf('다이닝룸')===0) return '다이닝룸';
   return '기타';
 }
-var APT_SIMPLE_BASE_TYPES = ['거실','주방','안방','작은방','욕실','현관','드레스룸','발코니','복도','팬트리','다용도실','알파룸'];
+var APT_SIMPLE_BASE_TYPES = ['거실','주방','다이닝룸','안방','작은방','아이방','서재','드레스룸','안방욕실','공용욕실','현관','발코니','복도','팬트리','다용도실','파우더룸'];
 // ⚠️ 요청 반영("평수 표준 구성에 없어도 체크하면 만들어지게 해달라"): 이 평수의 표준 구성에는
 // 없지만 사용자가 직접 체크한 공간(예: 18평인데 발코니·드레스룸·알파룸을 원하는 경우)을 위한
 // 일반적인 대체 설명 — 특정 평수 전용 문구는 아니고, 그 공간 종류에 흔히 있는 특징만 담음.
 var APT_FALLBACK_ROOM_DESC = {
   '작은방': '작은방(붙박이장 포함, 손님방·서브침실 등으로 쓰는 여분의 방)',
+  '아이방': '작은방(아이 방으로 꾸며진 침실, 붙박이장 포함)',
   '드레스룸': '드레스룸(안방 옆 워크인 형태, 옷장·수납장 위주)',
   '발코니': '발코니(거실 또는 침실과 연결, 세탁실 겸용인 경우도 흔함)',
   '다용도실': '다용도실(주방 뒤편, 세탁·창고 겸용)',
-  '알파룸': '서재·알파룸(현관 근처나 거실 옆 별도 구획된 작은 방)',
-  '파우더룸': '파우더룸(욕실 앞 별도 세면 공간)'
+  '서재': '서재·알파룸(현관 근처나 거실 옆 별도 구획된 작은 방)',
+  '파우더룸': '파우더룸(욕실 앞 별도 세면 공간)',
+  '안방욕실': '욕실(안방 전용, 드레스룸을 통해 진입. ⚠️ 안방욕실은 보통 욕조 없이 샤워부스(유리 파티션)가 있습니다 — 샤워부스를 넣으세요)',
+  '공용욕실': '욕실(공용, 현관에서 가까운 복도 쪽에 배치. ⚠️ 공용욕실은 보통 샤워부스가 아니라 욕조(배스터브)가 있습니다 — 욕조를 넣으세요)',
+  '다이닝룸': '다이닝룸(주방과 이어지는 별도 식사 공간, 다이닝 테이블이 주인공인 구도. ⚠️ 카메라는 다이닝 테이블 쪽에 집중하고, 주방 조리대·싱크대는 프레임에 크게 안 보이게 하세요)'
 };
 function mkAptSimpleDesign(p){
   var spTab=getTab('spaceset');
@@ -12059,20 +12070,29 @@ function mkAptSimpleDesign(p){
   // 배치해서 스크롤을 줄임. 아이방·서재는 작은방·알파룸과 사실상 같은 슬롯을 공유하되(집에
   // 작은방이 2개면 하나는 "작은방", 하나는 "아이방"으로 서로 다른 사진을 넣을 수 있음),
   // 실제 생성 시 매칭은 _aptRoomConceptImageFor()가 순서대로 알아서 배정함.
-  var APT_ROOM_CONCEPT_DISPLAY_TYPES = ['거실','주방','안방','작은방','아이방','서재','드레스룸','안방욕실','공용욕실','현관','팬트리','파우더룸','발코니'];
-  var APT_ROOM_CONCEPT_ICONS = {'거실':'🛋️','주방':'🍳','안방':'🛏️','작은방':'🛌','아이방':'🧸','서재':'📚','드레스룸':'👔','안방욕실':'🚿','공용욕실':'🛁','현관':'🚪','팬트리':'🥫','파우더룸':'💄','발코니':'🌿'};
+  var APT_ROOM_CONCEPT_DISPLAY_TYPES = ['거실','주방','안방','작은방','아이방','서재','드레스룸','안방욕실','공용욕실','현관','팬트리','파우더룸','발코니','다이닝룸'];
+  var APT_ROOM_CONCEPT_ICONS = {'거실':'🛋️','주방':'🍳','안방':'🛏️','작은방':'🛌','아이방':'🧸','서재':'📚','드레스룸':'👔','안방욕실':'🚿','공용욕실':'🛁','현관':'🚪','팬트리':'🥫','파우더룸':'💄','발코니':'🌿','다이닝룸':'🍽️'};
   var roomConceptWrap=dv('ss');
   roomConceptWrap.innerHTML='<div class="lbl">🖼️ 방별 전용 참고 이미지 <span class="lbl-en">선택 — 넣은 방은 이 사진을 최우선으로 참고해요(안 넣은 방은 위 공통 컨셉 이미지를 따라요)</span></div>';
   var roomConceptGrid=dv('');roomConceptGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:8px';
   APT_ROOM_CONCEPT_DISPLAY_TYPES.forEach(function(rt){
     var rcImgUrl = spTab.aptRoomConceptImages[rt];
-    var rcRow=dv('');rcRow.style.cssText='display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px;background:'+(rcImgUrl?'linear-gradient(135deg, rgba(0,229,204,.1), var(--c2))':'var(--c2)')+';border:1px solid '+(rcImgUrl?'var(--acb)':'var(--bd2)')+';transition:border-color .15s';
+    var _rcIsArmed = spTab._aptPasteTargetRoom === rt;
+    var rcRow=dv('');rcRow.style.cssText='display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px;background:'+(rcImgUrl?'linear-gradient(135deg, rgba(0,229,204,.1), var(--c2))':'var(--c2)')+';border:1px solid '+(_rcIsArmed?'#facc15':(rcImgUrl?'var(--acb)':'var(--bd2)'))+';transition:border-color .15s;cursor:pointer;'+(_rcIsArmed?'box-shadow:0 0 0 2px rgba(250,204,21,.25)':'');
+    // ⚠️ 요청 반영("이미지 업로드하는 곳 ctrl+v 할 수 있게 해줘"): 이 방 카드를 클릭하면
+    // "붙여넣기 대상"으로 지정돼(노란 테두리로 표시), 그 상태에서 Ctrl+V 하면 클립보드 이미지가
+    // 바로 이 방 칸에 들어감 — 파일 선택창 없이 캡쳐한 이미지를 바로 붙여넣을 수 있음.
+    rcRow.onclick=function(e){
+      if(e.target && e.target.tagName==='BUTTON') return; // 삭제·업로드 버튼 클릭은 그대로 두기
+      spTab._aptPasteTargetRoom = (spTab._aptPasteTargetRoom===rt) ? null : rt;
+      renderSB();
+    };
     var rcIconBadge=dv('');rcIconBadge.style.cssText='width:22px;text-align:center;font-size:14px;flex-shrink:0';
     rcIconBadge.textContent=APT_ROOM_CONCEPT_ICONS[rt]||'📷';
     rcRow.appendChild(rcIconBadge);
     var rcTextCol=dv('');rcTextCol.style.cssText='flex:1;min-width:0;display:flex;flex-direction:column;gap:4px';
-    var rcLabel=dv('');rcLabel.style.cssText='font-size:10.5px;font-weight:700;color:'+(rcImgUrl?'var(--ac)':'var(--t2)');
-    rcLabel.textContent=rt;
+    var rcLabel=dv('');rcLabel.style.cssText='font-size:10.5px;font-weight:700;color:'+(_rcIsArmed?'#facc15':(rcImgUrl?'var(--ac)':'var(--t2)'));
+    rcLabel.textContent=rt + (_rcIsArmed ? ' · Ctrl+V로 붙여넣기' : '');
     rcTextCol.appendChild(rcLabel);
     if(rcImgUrl){
       var rcInner=dv('');rcInner.style.cssText='display:flex;align-items:center;gap:6px';
@@ -12163,29 +12183,37 @@ function mkAptSimpleDesign(p){
   p.appendChild(resWrapApt);
 
   // ── 실행 버튼 ──────────────────────────────────
-  var _finalRoomLabels = _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand)
-    .filter(function(l){ return spTab.aptSelectedBaseTypes.indexOf(_aptClassifyRoom(l))!==-1; });
-  // ⚠️ 요청 반영("욕실·작은방이 2컷씩 만들어져서 크레딧이 2배로 나간다"): 34평 이상 표준
-  // 구성엔 욕실이 2개(공용+안방전용), 작은방(침실2·3·4)도 여러 개 있어서 같은 체크박스
-  // 타입 하나에 실제로는 room이 여러 개 매칭되고 있었음 — 사용자는 체크박스 1개 = 1컷을
-  // 기대하므로, 같은 분류(_aptClassifyRoom)로 묶이는 room은 대표로 1개만 남기고 나머지는
-  // 제거함(예: 욕실 2개 → 대표 욕실 1개, 침실2/3/4 → 대표 작은방 1개).
+  var _rawAptRooms = _aptTemplateRooms(spTab.autoRoomAptPyeong, spTab.autoRoomAptType, spTab.autoRoomAptBrand);
+  var _finalRoomLabels = _rawAptRooms.filter(function(l){ return spTab.aptSelectedBaseTypes.indexOf(_aptClassifyRoom(l))!==-1; });
+  // ⚠️ 요청 반영("욕실·작은방이 2컷씩 만들어져서 크레딧이 2배로 나간다" → 그 다음 "체크박스도
+  // 참고이미지만큼 늘어나야지, 작은방·아이방을 따로 체크하면 둘 다 나와야지"): 안방욕실·
+  // 공용욕실은 이제 _aptClassifyRoom이 서로 다른 이름으로 구분해주므로 일반적인 dedup으로도
+  // 자동으로 각각 1개씩만 남음. 작은방·아이방은 둘 다 같은 원본 풀(침실2·3·4)을 나눠 쓰는
+  // 특수 케이스라서 따로 처리 — 작은방·아이방 둘 다 체크했으면 그 풀에서 순서대로 하나씩
+  // 나눠 갖고, 하나만 체크했으면 그 하나만 가져감(2컷이 안 되게).
+  var _bedroomPoolRaw = _rawAptRooms.filter(function(l){ return _aptClassifyRoom(l)==='작은방'; }).slice();
+  _finalRoomLabels = _finalRoomLabels.filter(function(l){ return _aptClassifyRoom(l)!=='작은방'; });
+  if(spTab.aptSelectedBaseTypes.indexOf('작은방')!==-1 && _bedroomPoolRaw.length) _finalRoomLabels.push(_bedroomPoolRaw.shift());
+  if(spTab.aptSelectedBaseTypes.indexOf('아이방')!==-1 && _bedroomPoolRaw.length) _finalRoomLabels.push(_bedroomPoolRaw.shift());
+  // 그 외 타입은 같은 분류로 묶이는 room이 여러 개 나오면(예전 방식대로) 대표 1개만 남김.
   var _seenBaseTypes={};
   _finalRoomLabels = _finalRoomLabels.filter(function(l){
     var bt=_aptClassifyRoom(l);
+    if(bt==='작은방') return true; // 위에서 이미 최대 2개까지 정확히 다뤘으니 여기선 건드리지 않음
     if(_seenBaseTypes[bt]) return false;
     _seenBaseTypes[bt]=true;
     return true;
   });
-  // 복도·팬트리는 _aptTemplateRooms에 없는 별도 옵션이라 체크되어 있으면 직접 추가
+  // 복도·팬트리·다이닝룸은 _aptTemplateRooms에 없는 별도 옵션이라 체크되어 있으면 직접 추가
   if(spTab.aptSelectedBaseTypes.indexOf('복도')!==-1) _finalRoomLabels.push('복도(공용 공간과 각 방을 연결하는 통로. ⚠️ 카메라는 복도 자체(바닥재·벽·조명·문틀)에 집중하고, 양옆으로 열린 문 사이로 방 안의 침대·소파 같은 구체적인 가구까지 자세히 보여주지 마세요 — 문은 닫혀있거나 살짝 걸치는 정도로 처리하세요)');
   if(spTab.aptSelectedBaseTypes.indexOf('팬트리')!==-1 && _finalRoomLabels.every(function(l){return l.indexOf('팬트리')===-1;})) _finalRoomLabels.push('팬트리(주방 옆 별도 식료품·소형가전 수납 공간)');
+  if(spTab.aptSelectedBaseTypes.indexOf('다이닝룸')!==-1 && _finalRoomLabels.every(function(l){return l.indexOf('다이닝룸')===-1;})) _finalRoomLabels.push(APT_FALLBACK_ROOM_DESC['다이닝룸']);
   // ⚠️ 요청 반영("평수 표준 구성에 없어도 체크하면 만들어지게 해달라"): 위 필터에서 이 평수
-  // 템플릿에 없어서 빠진 타입(예: 18평인데 발코니·드레스룸·알파룸 체크)을 일반적인 설명으로
+  // 템플릿에 없어서 빠진 타입(예: 18평인데 발코니·드레스룸·서재 체크)을 일반적인 설명으로
   // 채워서 추가함 — 체크박스는 이제 평수와 무관하게 항상 클릭 가능하므로, 여기서 항상 결과가
   // 나오도록 보장함.
   spTab.aptSelectedBaseTypes.forEach(function(t){
-    if(t==='복도' || t==='팬트리') return; // 위에서 이미 처리됨
+    if(t==='복도' || t==='팬트리' || t==='다이닝룸') return; // 위에서 이미 처리됨
     var already = _finalRoomLabels.some(function(l){ return _aptClassifyRoom(l)===t; });
     if(!already && APT_FALLBACK_ROOM_DESC[t]) _finalRoomLabels.push(APT_FALLBACK_ROOM_DESC[t]);
   });
@@ -12862,7 +12890,7 @@ function _verifyAcTvCount(imgUrl, roomTypeShort, cb){
       var tvCount = tvMatch ? parseInt(tvMatch[1],10) : null;
       var lightCount = lightMatch ? parseInt(lightMatch[1],10) : null;
       var issues=[];
-      var _acExpected = (roomTypeShort!=='주방' && roomTypeShort!=='욕실' && roomTypeShort!=='드레스룸' && roomTypeShort!=='파우더룸' && roomTypeShort!=='현관' && roomTypeShort!=='복도' && roomTypeShort!=='발코니' && roomTypeShort!=='다용도실' && roomTypeShort!=='팬트리');
+      var _acExpected = (roomTypeShort!=='주방' && roomTypeShort!=='안방욕실' && roomTypeShort!=='공용욕실' && roomTypeShort!=='드레스룸' && roomTypeShort!=='파우더룸' && roomTypeShort!=='현관' && roomTypeShort!=='복도' && roomTypeShort!=='발코니' && roomTypeShort!=='다용도실' && roomTypeShort!=='팬트리');
       if(_acExpected && acCount!==null && acCount>1) issues.push('에어컨 '+acCount+'개 감지됨(1개여야 함)');
       if(tvCount!==null && tvCount>1) issues.push('TV '+tvCount+'대 감지됨(1대여야 함)');
       if(lightCount!==null && lightCount>1) issues.push('메인 조명 종류가 '+lightCount+'가지 감지됨(1가지여야 함, 예: 실링팬+펜던트 동시 설치)');
@@ -13210,7 +13238,7 @@ function _autoRoomPromptFor(basePrompt, typeName){
   var _acPositionReinforce = '';
   if(_acRoomType==='복도' || _acRoomType==='드레스룸' || _acRoomType==='현관' || _acRoomType==='파우더룸' || _acRoomType==='팬트리'){
     _acPositionReinforce = ' ⚠️⚠️⚠️ 마지막으로 다시 한번(가장 중요): 이 공간(' + _acRoomType + ')은 폭이 좁은 통로·부속 공간이므로 에어컨(천장형·벽걸이형 어느 것도)을 절대 그리지 마세요 — 실제 한국 아파트에서 복도·드레스룸·현관·파우더룸·팬트리에 에어컨을 다는 경우는 없습니다.';
-  } else if(_acRoomType==='거실' || _acRoomType==='안방' || _acRoomType==='작은방' || _acRoomType==='알파룸'){
+  } else if(_acRoomType==='거실' || _acRoomType==='안방' || _acRoomType==='작은방' || _acRoomType==='서재'){
     _acPositionReinforce = ' ⚠️⚠️⚠️ 마지막으로 다시 한번(가장 중요, 반복 지적된 사항): 이 공간(' + _acRoomType + ')의 천장형 에어컨 토출구는 반드시 창문·발코니가 있는 벽 쪽 천장에, 창문과 나란한 방향으로 붙이세요. ⚠️⚠️⚠️ 정확한 위치·방향(가장 중요, 여러 번 반복 지적된 사항, 모든 세대·모든 아파트 공통 고정값): 에어컨은 "거실(또는 방)의 메인 대형 창문 바로 앞쪽 천장"에 설치하고, 바람이 나오는 토출구 방향은 그 창문을 등지고 방 안쪽을 향해(거실 중앙 쪽으로) 바람을 불어내는 방향이어야 합니다 — 즉 창문 쪽에서 방 안쪽을 바라보는 위치·방향입니다. 거실과 주방 사이(개방형 경계선)에 걸쳐 있거나, 거실과 주방의 중간 지점에 있으면 명백한 실패입니다 — 에어컨은 오직 창문 앞쪽에만 있어야 합니다. ⚠️⚠️⚠️ 구체적으로 틀렸던 사례(절대 반복하지 말 것): TV장 위·아트월 위쪽 천장, 거실-주방 경계 천장에 에어컨을 그리는 것은 실제로 자주 나온 실패 패턴입니다 — TV·아트월이 있는 벽은 보통 창문이 없는 벽(짧은 쪽 벽)이므로 그 위 천장에는 에어컨을 절대 그리지 마세요. 방 한가운데 천장, 복도로 이어지는 쪽 천장도 마찬가지로 금지입니다. 실제 한국 아파트에서 시스템에어컨은 예외 없이 창가 쪽에 설치됩니다 — 그림을 그리기 전에 "이 방에서 창문·발코니가 있는 벽이 어디인지" 먼저 확인하고, 반드시 그 벽 쪽 천장에만 배치하세요. ⚠️⚠️⚠️ 개수도 마지막으로 한 번 더: 이 방 천장에는 에어컨 토출구가 정확히 1개만 있어야 합니다 — 창가 쪽에 하나 그렸다면 그걸로 끝입니다, 반대쪽이나 다른 자리에 비슷한 사각 그릴을 또 그리지 마세요. ⚠️⚠️⚠️ TV도 마지막으로 한 번 더(반복 지적된 사항): TV는 벽걸이형이든 스탠드형이든 딱 1대만 그리세요 — 벽에 건 TV와 별도의 거치대 위 TV가 같은 방에 동시에 나오면 명백한 실패입니다.';
   }
   // ⚠️ 요청 반영("참고이미지가 단독주택인데 왜 단독주택 구조로 나오냐, 아파트 구조는 무조건
@@ -13382,6 +13410,18 @@ function _padExteriorTo916WithBlur(url, cb){
     // 공통 컨셉 이미지보다도 우선.
     var _aptThisRoomConceptImg = spTab.isAptSimpleMode ? _aptRoomConceptImageFor(spTab, typeName) : null;
     var _conceptSlots = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
+    // ⚠️ 버그 수정("거실은 참고 이미지가 잘 반영되는데 다른 공간은 안 된다"): 원인을 찾음 —
+    // "거실 사진이면 공통 컨셉 이미지 말고 거실 칸에 바로 넣으세요"라고 안내했었는데, 그러면
+    // 공통 컨셉 이미지(spTab.aptConceptImages)가 텅 비게 되고, 전용 사진이 없는 다른 방들은
+    // (안방·욕실 등) 참고할 실제 사진이 하나도 없이 순수 텍스트 지시만으로 만들어지고
+    // 있었음(genPool엔 "이미 생성된 결과물"만 쌓이지, 사용자가 올린 원본 사진은 안 들어감) —
+    // 그래서 유독 거실만 잘 되고 나머지는 안 됐던 것. 전용 사진도 없고 공통 컨셉 이미지도
+    // 없으면, 이미 올려둔 다른 방 전용 사진 중 아무거나(거실 우선) 최소한의 스타일 참고로
+    // 같이 붙여줌 — 완전히 사진 없이 텍스트만으로 만드는 것보다 훨씬 나음.
+    if(!_aptThisRoomConceptImg && !_conceptSlots.length && spTab.aptRoomConceptImages){
+      var _anyRoomImg = spTab.aptRoomConceptImages['거실'] || Object.keys(spTab.aptRoomConceptImages).map(function(k){return spTab.aptRoomConceptImages[k];}).filter(Boolean)[0];
+      if(_anyRoomImg) _conceptSlots = [_anyRoomImg];
+    }
     var _looseRefsOrdered = _aptThisRoomConceptImg ? [_aptThisRoomConceptImg] : [];
     _conceptSlots.forEach(function(_c){ if(_looseRefsOrdered.indexOf(_c)===-1) _looseRefsOrdered.push(_c); });
     if(_aptFloorPlanRefImg && _looseRefsOrdered.indexOf(_aptFloorPlanRefImg)===-1) _looseRefsOrdered.push(_aptFloorPlanRefImg);
@@ -13842,6 +13882,12 @@ function _autoRoomRetryOne(idx){
     // 방별 전용 참고 이미지 최우선)로, 여기도 똑같이 정렬함.
     var _aptThisRoomConceptImg2 = spTab.isAptSimpleMode ? _aptRoomConceptImageFor(spTab, typeName) : null;
     var _conceptSlots2 = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
+    // ⚠️ _autoRoomGenerateStep과 동일한 폴백(전용 사진도, 공통 컨셉 이미지도 없으면 다른 방
+    // 전용 사진이라도 최소한의 스타일 참고로 붙여줌).
+    if(!_aptThisRoomConceptImg2 && !_conceptSlots2.length && spTab.aptRoomConceptImages){
+      var _anyRoomImg2 = spTab.aptRoomConceptImages['거실'] || Object.keys(spTab.aptRoomConceptImages).map(function(k){return spTab.aptRoomConceptImages[k];}).filter(Boolean)[0];
+      if(_anyRoomImg2) _conceptSlots2 = [_anyRoomImg2];
+    }
     var _looseRefs2Ordered = _aptThisRoomConceptImg2 ? [_aptThisRoomConceptImg2] : [];
     _conceptSlots2.forEach(function(_c){ if(_looseRefs2Ordered.indexOf(_c)===-1) _looseRefs2Ordered.push(_c); });
     if(_aptFloorPlanRefImg2 && _looseRefs2Ordered.indexOf(_aptFloorPlanRefImg2)===-1) _looseRefs2Ordered.push(_aptFloorPlanRefImg2);
@@ -31360,13 +31406,25 @@ document.addEventListener('DOMContentLoaded',function(){try{
       if(items[i].type.indexOf('image')!==-1){
         var file=items[i].getAsFile();
         if(!file)continue;
-        // ⚠️ 요청 반영("컨셉이미지 ctrl+v 가능하게 해줘"): 아파트 컨셉 디자인 간편모드일 땐
-        // 일반 "main" 슬롯이 아니라 컨셉 이미지 칸으로 바로 붙여넣기 되도록 특수 처리.
+        // ⚠️ 요청 반영("컨셉이미지 ctrl+v 가능하게 해줘", "이미지 업로드하는 곳 ctrl+v 할 수
+        // 있게 해줘 — 방별 칸에도"): 아파트 컨셉 디자인 간편모드일 땐 일반 "main" 슬롯이 아니라
+        // 컨셉 이미지 칸으로 바로 붙여넣기 되도록 특수 처리. 방 카드를 클릭해서 "붙여넣기
+        // 대상"으로 지정해뒀으면(spTab._aptPasteTargetRoom) 그 방 전용 칸으로, 아니면 기존처럼
+        // 공통 컨셉 이미지 목록으로 붙여넣음.
         if(G.wf==='spaceset' && getTab('spaceset').isAptSimpleMode){
           var _pasteSpTab=getTab('spaceset');
+          var _pasteTargetRoom=_pasteSpTab._aptPasteTargetRoom;
           var _pasteReader=new FileReader();
           _pasteReader.onload=function(){
             _downscaleForMemorySafety(_pasteReader.result, function(resized){
+              if(_pasteTargetRoom){
+                if(!_pasteSpTab.aptRoomConceptImages) _pasteSpTab.aptRoomConceptImages={};
+                _pasteSpTab.aptRoomConceptImages[_pasteTargetRoom]=resized;
+                _pasteSpTab._aptPasteTargetRoom=null; // 한 번 붙여넣으면 자동 해제
+                try{ localStorage.setItem('clover_apt_room_concept_images', JSON.stringify(_pasteSpTab.aptRoomConceptImages)); }catch(e2){}
+                renderSB();
+                return;
+              }
               if(!_pasteSpTab.aptConceptImages) _pasteSpTab.aptConceptImages=[];
               _pasteSpTab.aptConceptImages.push(resized);
               try{ localStorage.setItem('clover_apt_concept_images', JSON.stringify(_pasteSpTab.aptConceptImages)); }catch(e2){}
