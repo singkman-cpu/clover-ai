@@ -13165,15 +13165,18 @@ function _padExteriorTo916WithBlur(url, cb){
     // 내가 방금 만든 새 디자인끼리는 통일감 있게" 되도록 함.
     var _looseGenPool = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs = (_looseGenPool && _looseGenPool.length) ? [_looseGenPool[0], _looseGenPool[_looseGenPool.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
-    // ⚠️ 요청 반영("평수·타입별로 평면도를 저장해두면 자동으로 불러와서 그 구조에 맞게
-    // 만들어달라"): 저장된 평면도가 있으면 참고 이미지로 같이 첨부하고, 아래 _looseP 조립부에
-    // "이건 구조 기준, 마감재·가구는 다른 참고 이미지를 따르라"는 지시를 강하게 붙임.
+    // ⚠️ 치명적 버그 수정("컨셉 이미지랑 하나도 안 닮았다, 렌더링에 반영이 안 된다"): 진짜 원인을
+    // 찾음 — image_urls 배열에 평면도·이전 생성 결과(genPool)가 먼저 들어가고, 정작 스타일의
+    // 기준인 컨셉 이미지는 맨 뒤에 4번째~7번째로 붙고 있었음. 참고 이미지가 여러 장일 때 모델이
+    // 앞쪽 이미지에 더 크게 가중치를 두는 경향이 있어서, 정작 가장 중요한 컨셉 이미지가 뒷전으로
+    // 밀리고 있었던 것으로 보임 — 컨셉 이미지를 항상 맨 앞 슬롯에 확보하고, 전체 개수도 최대
+    // 4장으로 제한해서(컨셉 최대 2 + 평면도 1 + 이전결과 1) 한 장당 가중치가 옅어지지 않게 함.
     var _aptFloorPlanRefImg = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
-    if(_aptFloorPlanRefImg && _looseRefs.indexOf(_aptFloorPlanRefImg)===-1) _looseRefs.unshift(_aptFloorPlanRefImg);
-    // ⚠️ 요청 반영(아파트 컨셉 디자인 간편모드): 컨셉 이미지 하나를 텍스트 분석뿐 아니라 실제
-    // 시각 참고 이미지로도 매 생성마다 같이 첨부함(스타일 분석 텍스트만으로는 색감·질감 디테일이
-    // 약할 수 있어서, 실제 이미지도 같이 주는 게 더 정확함).
-    if(spTab.aptConceptImages && spTab.aptConceptImages.length){ spTab.aptConceptImages.slice(0,4).forEach(function(_ci){ if(_looseRefs.indexOf(_ci)===-1) _looseRefs.push(_ci); }); }
+    var _conceptSlots = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
+    var _looseRefsOrdered = _conceptSlots.slice();
+    if(_aptFloorPlanRefImg && _looseRefsOrdered.indexOf(_aptFloorPlanRefImg)===-1) _looseRefsOrdered.push(_aptFloorPlanRefImg);
+    _looseRefs.forEach(function(_r){ if(_looseRefsOrdered.indexOf(_r)===-1) _looseRefsOrdered.push(_r); });
+    _looseRefs = _looseRefsOrdered.slice(0,4);
     // ⚠️ 요청 반영(중요한 지적): "영감만 얻기인데 이미지 참고를 안 하면, 완전히 다른 게 나와도
     // 그게 진짜 영감을 얻은 건가?" — 맞는 지적임. 지금까지 "영감만 얻기"는 참고 이미지를 아예
     // 안 보고 순수 텍스트로만 생성하고 있어서(구조를 그대로 따라하는 문제를 막으려고 일부러
@@ -13619,8 +13622,13 @@ function _autoRoomRetryOne(idx){
     var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
     var _aptFloorPlanRefImg2 = (spTab.isAptSimpleMode && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
-    if(_aptFloorPlanRefImg2 && _looseRefs2.indexOf(_aptFloorPlanRefImg2)===-1) _looseRefs2.unshift(_aptFloorPlanRefImg2);
-    if(spTab.aptConceptImages && spTab.aptConceptImages.length){ spTab.aptConceptImages.slice(0,4).forEach(function(_ci){ if(_looseRefs2.indexOf(_ci)===-1) _looseRefs2.push(_ci); }); }
+    // ⚠️ _autoRoomGenerateStep과 동일한 이유(컨셉 이미지가 뒷순위로 밀려서 반영이 안 되던 문제)로,
+    // 여기도 컨셉 이미지를 항상 맨 앞 슬롯에 확보하고 전체 4장으로 제한함.
+    var _conceptSlots2 = (spTab.aptConceptImages && spTab.aptConceptImages.length) ? spTab.aptConceptImages.slice(0,2) : [];
+    var _looseRefs2Ordered = _conceptSlots2.slice();
+    if(_aptFloorPlanRefImg2 && _looseRefs2Ordered.indexOf(_aptFloorPlanRefImg2)===-1) _looseRefs2Ordered.push(_aptFloorPlanRefImg2);
+    _looseRefs2.forEach(function(_r){ if(_looseRefs2Ordered.indexOf(_r)===-1) _looseRefs2Ordered.push(_r); });
+    _looseRefs2 = _looseRefs2Ordered.slice(0,4);
     if(!imgs0b.noDirectMatch && imgs0b.primary){
       _looseRefs2 = [imgs0b.primary].concat(_looseRefs2).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,2);
       if(spTab.autoRoomFidelity==='tight'){
