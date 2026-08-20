@@ -19474,17 +19474,55 @@ function _shortsScheduleSwooshes(audioCtx, dest, timeline, baseTime){
 }
 
 
+// ⚠️ 버그 수정(치명적, "28초로 만들었는데 렌더링 걸어두고 다른 걸 하다 보니 2분 넘게 나온다"):
+// 진짜 원인을 다시 찾아보니, 지난번에 넣은 "탭을 벗어나지 마세요" 경고만으로는 부족했음(사용자가
+// 실제로 다른 작업을 하러 탭을 벗어나면 경고를 봐도 어차피 못 돌아옴) — 근본 원인은 이 화면 아래
+// 프레임 타이머(setInterval)가 메인 스레드에서 돌고 있는데, 브라우저는 탭이 백그라운드로 가면
+// 배터리 절약을 위해 메인 스레드의 타이머를 강제로 아주 느리게(최악의 경우 1초에 1번 이하로)
+// 만들어버림 — 그래서 프레임을 다 그리기까지 걸리는 "진짜 시간"이 늘어지고, 녹화는 그 늘어진
+// 시간을 그대로 담아서 영상이 길어짐. Web Worker(별도 백그라운드 스레드) 안에서 도는 타이머는
+// 브라우저가 이렇게까지 심하게 느리게 만들지 않으므로, 프레임을 찍을 "타이밍 신호"만 워커에서
+// 정확하게 받아오고, 실제 화면 그리기는 그대로 메인 스레드에서 하도록 구조를 바꿈 — 이러면 탭을
+// 벗어나 있어도 훨씬 정확한 속도로 계속 진행돼서, 의도한 길이에 훨씬 가깝게(대부분 거의 정확히)
+// 완성됨. 혹시 워커 생성이 막힌 환경(일부 보안 설정 등)이면 예전 방식(setInterval)으로 자동 전환.
+function _shortsCreateTickerWorker(intervalMs){
+  try{
+    var code = 'setInterval(function(){ postMessage(1); }, ' + intervalMs + ');';
+    var blob = new Blob([code], {type:'application/javascript'});
+    var url = URL.createObjectURL(blob);
+    var worker = new Worker(url);
+    worker._blobUrl = url;
+    return worker;
+  }catch(e){ return null; }
+}
 function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone, videoCache){
   var frame=0;
-  var interval=setInterval(function(){
-    if(frame>=totalFrames){clearInterval(interval);onDone();return;}
+  var interval=null, worker=null, stopped=false;
+  function cleanup(){
+    if(stopped) return; stopped=true;
+    if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
+    if(interval){ clearInterval(interval); interval=null; }
+  }
+  function tick(){
+    if(stopped) return;
+    if(frame>=totalFrames){cleanup();onDone();return;}
     var t=frame/FPS;
     _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
     frame++;
     if(frame%Math.max(1,Math.round(FPS/5))===0){
       onProgress(frame/totalFrames);
     }
-  },1000/FPS);
+  }
+  worker=_shortsCreateTickerWorker(1000/FPS);
+  if(worker){
+    worker.onmessage=tick;
+    worker.onerror=function(){ // 워커가 도중에 문제 생기면 기존 방식으로 안전하게 전환
+      if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
+      if(!stopped && !interval) interval=setInterval(tick,1000/FPS);
+    };
+  } else {
+    interval=setInterval(tick,1000/FPS); // 폴백: 워커를 못 만드는 환경
+  }
 }
 
 // ── 프레임 렌더링 ─────────────────────────────────────────────────
