@@ -31018,6 +31018,25 @@ document.addEventListener('DOMContentLoaded',function(){try{
     var _hasSessionHint = localStorage.getItem('clover_cr') || localStorage.getItem('clover_plan');
     if(crn) crn.textContent = _hasSessionHint ? (G.plan==='admin'?'무제한':G.cr.toLocaleString()) : '로그인';
     updateAccountBtn();
+    // ⚠️ 버그 수정(치명적, "계정 버튼이 점 3개(...)로 계속 떠있고 안 바뀐다"): 위에서 세션 흔적이
+    // 있으면 일단 "확인 중..." 뜻으로 "..."을 낙관적으로 보여주고, Supabase의 실제 로그인 확인
+    // (onAuthStateChange의 SIGNED_IN/INITIAL_SESSION 이벤트)이 끝나면 그때 실제 값으로 다시
+    // 갱신되는 구조였는데 — 만약 그 이벤트가 네트워크 문제·세션 만료·브라우저 저장소 차단 등의
+    // 이유로 끝내 한 번도 발생하지 않으면, "..."이 영원히 안 바뀌고 그대로 멈춰있는 문제가 있었음
+    // (크레딧 0인데 로그인은 된 것처럼 보이는 화면이 바로 이 상태). 8초 안에 실제 로그인 확인이
+    // 안 끝나면(_supaUser가 여전히 비어있으면) 세션이 없는 것으로 보고 "로그인"으로 확정 표시.
+    setTimeout(function(){
+      if(_supaUser) return; // 그 사이 정상적으로 로그인 확인이 끝났으면 아무것도 안 함
+      console.warn('[Supabase] 8초 안에 로그인 확인이 끝나지 않음 → 세션 없음으로 간주하고 로그인 필요 상태로 전환');
+      var crn2=gE('cr-n');
+      if(crn2) crn2.textContent='로그인 필요';
+      updateAccountBtn();
+      var btn2=gE('btn-account');
+      if(btn2 && btn2.textContent==='...') btn2.textContent='로그인';
+      // 다음 새로고침 때도 같은 "낙관적 ..." 상태로 다시 멈춰있지 않도록, 더 이상 유효하지
+      // 않은 것으로 보이는 캐시를 정리함(실제로 로그인돼있었다면 이 코드는 아예 실행 안 됨).
+      try{ localStorage.removeItem('clover_cr'); localStorage.removeItem('clover_plan'); }catch(e){}
+    }, 8000);
   }
 
   window.addEventListener('beforeunload', function(){
