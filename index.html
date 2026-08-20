@@ -3196,6 +3196,12 @@ function selectWF(wf){
           Object.assign(G_SHORTS.opts, d.opts||{});
         } else {
           _draftClear(_shortsDraftKey());
+          // ⚠️ 버그 수정(치명적, "'아니요'를 눌렀는데도 이전 작업이 계속 불러와진다"): 이 로컬
+          // 저장분은 지웠는데, 아래(mkShortsCreation 안, _loadWorkspaceState('shorts_images'))에
+          // 있는 완전히 별개의 클라우드 자동 복원 로직이 이 "아니요" 선택과 무관하게 그 뒤에
+          // 또 한 번 조용히(확인창 없이) 복원해버리고 있었음 — 사용자가 방금 명시적으로 거절
+          // 했다는 걸 플래그로 남겨서, 그 자동 복원도 이번 세션에서는 건너뛰게 함.
+          G._shortsDraftDeclined = true;
         }
       } else if(typeof _shortsCloudLoadDraft==='function'){
         // 로컬엔 없지만 다른 브라우저/기기에서 작업하던 게 클라우드에 있을 수 있으니 확인
@@ -3206,6 +3212,8 @@ function selectWF(wf){
             G_SHORTS.images=cloudDraft.data.images;
             Object.assign(G_SHORTS.opts, cloudDraft.data.opts||{});
             renderSB(); renderMain('shorts');
+          } else {
+            G._shortsDraftDeclined = true; // 위와 같은 이유
           }
         });
       }
@@ -16436,7 +16444,10 @@ function sbShorts(p){
   // 참고 이미지 자동저장과 같은 방식.
   if(!G_SHORTS._cloudSyncTried && _supa && _supaUser){
     G_SHORTS._cloudSyncTried = true;
-    if(!images.length){
+    // ⚠️ 버그 수정(위와 짝을 이루는 수정): 방금 전 새로고침 직후 확인창에서 사용자가 "아니요"를
+    // 눌러 명시적으로 이전 작업을 안 불러오겠다고 했으면, 이 완전히 별개의 클라우드 자동 복원
+    // 로직도 이번 세션 동안은 조용히 다시 불러오지 않게 건너뜀.
+    if(!images.length && !G._shortsDraftDeclined){
       _loadWorkspaceState('shorts_images', function(data){
         if(!data || !data.images || !data.images.length) return;
         G_SHORTS.images = data.images;
