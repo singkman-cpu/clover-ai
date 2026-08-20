@@ -19186,6 +19186,48 @@ function _shortsGenerate(){
   if(progWrap){progWrap.style.display='';}
   if(dlWrap){dlWrap.style.display='none';}
 
+  // ⚠️ 버그 수정(치명적, "28초로 만들었는데 실제로는 1분 넘게 나온다"): 원인을 찾아보니, 이
+  // 영상은 캔버스를 실시간으로 녹화하는 방식(canvas.captureStream + MediaRecorder)이라, 렌더링
+  // 도중에 이 탭이 백그라운드로 밀려나면(다른 탭으로 전환하거나 화면이 꺼지면) 브라우저가 타이머
+  // 속도를 강제로 늦춰버려서, 실제로 다 그려지기까지 걸리는 "현실 시간"이 훨씬 길어지고, 녹화는
+  // 그 현실 시간만큼 그대로 다 담기기 때문에 의도한 길이보다 훨씬 긴 영상이 나오는 것이었음
+  // (BGM은 그 늘어난 시간에 맞춰 소리가 항상 정확히 끝나도록 이미 보정돼있었지만, 정작 "영상
+  // 전체 길이가 늘어나는 것" 자체는 막는 장치가 없었음). 완전히 막을 방법은 없지만(브라우저가
+  // 백그라운드 탭을 강제로 느리게 만드는 건 웹페이지가 어찌할 수 없는 부분), 화면이 꺼지는 것은
+  // Wake Lock으로 막고, 다른 탭으로 이동하면 눈에 띄게 경고해서 사용자가 바로 알아채고 돌아오게 함.
+  var _shortsWakeLock=null;
+  if('wakeLock' in navigator){
+    navigator.wakeLock.request('screen').then(function(wl){ _shortsWakeLock=wl; }).catch(function(){});
+  }
+  var _shortsVisWarnEl=null;
+  function _shortsOnVisChange(){
+    if(document.hidden){
+      if(!_shortsVisWarnEl && progWrap){
+        _shortsVisWarnEl=document.createElement('div');
+        _shortsVisWarnEl.style.cssText='margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;font-size:11.5px;font-weight:600;text-align:center';
+        _shortsVisWarnEl.textContent='⚠️ 이 탭을 벗어나면 렌더링이 느려져서 영상이 의도한 길이보다 길게 나올 수 있어요 — 이 탭으로 돌아와주세요!';
+        progWrap.appendChild(_shortsVisWarnEl);
+      }
+    } else if(_shortsVisWarnEl){
+      _shortsVisWarnEl.remove();
+      _shortsVisWarnEl=null;
+    }
+  }
+  document.addEventListener('visibilitychange', _shortsOnVisChange);
+  function _shortsCleanupRenderGuards(){
+    document.removeEventListener('visibilitychange', _shortsOnVisChange);
+    if(_shortsVisWarnEl){ _shortsVisWarnEl.remove(); _shortsVisWarnEl=null; }
+    if(_shortsWakeLock){ try{_shortsWakeLock.release();}catch(e){} _shortsWakeLock=null; }
+  }
+  if(progWrap && !progWrap.querySelector('#shorts-tab-warn-note')){
+    var _tabWarnNote=document.createElement('div');
+    _tabWarnNote.id='shorts-tab-warn-note';
+    _tabWarnNote.style.cssText='margin-top:6px;font-size:10.5px;color:var(--m2);text-align:center';
+    _tabWarnNote.textContent='💡 렌더링 중에는 이 탭을 계속 보고 계셔야 의도한 길이로 정확히 만들어져요.';
+    progWrap.appendChild(_tabWarnNote);
+  }
+
+  var _shortsRenderRealStart=performance.now();
   var RES={'HD':{w:720,h:1280},'FHD':{w:1080,h:1920},'4K':{w:2160,h:3840}};
   var dim=RES[opts.quality]||RES['FHD'];
   var W=dim.w, H=dim.h, FPS=opts.fps||30;
@@ -19277,6 +19319,7 @@ function _shortsGenerate(){
       var recorder=new MediaRecorder(stream,{mimeType:mimeType,videoBitsPerSecond:W>=2160?40000000:W>=1080?6000000:3000000});
       recorder.ondataavailable=function(e){if(e.data&&e.data.size>0)chunks.push(e.data);};
       recorder.onstop=function(){
+        _shortsCleanupRenderGuards();
         var blob=new Blob(chunks,{type:mimeType});
         var url=URL.createObjectURL(blob);
         G_SHORTS.resultUrl=url;
@@ -19292,7 +19335,14 @@ function _shortsGenerate(){
         if(dlBtn)dlBtn.onclick=doDownload;
         if(dlWrap){dlWrap.style.display='';}
         if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
-        if(progTxt)progTxt.textContent='✅ 완성! 메인 화면에서 바로 다운로드하세요.';
+        if(progTxt){
+          var _realElapsedSec=(performance.now()-_shortsRenderRealStart)/1000;
+          if(_realElapsedSec > totalDuration*1.6){
+            progTxt.textContent='✅ 완성! (렌더링 중 탭을 벗어나서 실제보다 시간이 더 걸렸어요 — 다운로드하세요)';
+          } else {
+            progTxt.textContent='✅ 완성! 메인 화면에서 바로 다운로드하세요.';
+          }
+        }
         if(progFill)progFill.style.width='100%';
         // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
         // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
