@@ -19544,7 +19544,19 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
     if(targetFrame>frame) frame=targetFrame; // 밀렸으면 중간 프레임들은 건너뛰고 바로 지금 시점으로
     if(frame>=totalFrames){ busy=false; cleanup(); onDone(); return; }
     var t=frame/FPS;
-    _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
+    // ⚠️ 버그 수정(치명적, "렌더링 다운받아보면 몇 초부터 이미지가 멈춘 상태에서 시간만 간다"):
+    // 방금 위에서 넣은 busy 플래그가 진짜 원인이었음 — _shortsRenderFrame이 특정 프레임에서
+    // (예: 영상 소스가 새로고침 등으로 유실됐거나, 이미지 하나가 깨진 경우 등) 예외를 던지면,
+    // 맨 아래 있던 "busy=false"가 실행되기 전에 함수가 끊겨버려서 busy가 영원히 true로 남았음
+    // — 그 뒤로 오는 모든 타이밍 신호가 "이미 처리 중"으로 오해받아 전부 무시되면서, 캔버스가
+    // 그 프레임에서 완전히 멈춰버렸던 것(그동안 오디오·녹화 시간만 계속 흘러감). try/finally로
+    // 예외가 나도 busy는 반드시 풀리게 고치고, 문제가 된 프레임은 건너뛰고 다음 프레임으로
+    // 넘어가도록(같은 프레임에서 계속 실패를 반복하지 않게) 함.
+    try{
+      _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
+    }catch(err){
+      console.warn('[쇼츠 렌더] 프레임 '+frame+' 그리기 실패, 건너뜀:', err);
+    }
     frame++;
     if(frame%Math.max(1,Math.round(FPS/5))===0){
       onProgress(frame/totalFrames);
