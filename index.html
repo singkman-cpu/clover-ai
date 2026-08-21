@@ -19299,6 +19299,20 @@ function _shortsGenerate(){
   // 영상 슬라이드(있으면, 여러 개 가능·어느 위치든) 준비 — 재생 가능한 상태(loadeddata)까지 기다린 뒤 렌더 시작
   var videoCache={};
   function loadEndVideo(){
+    // ⚠️ 버그 수정(치명적, "렌더링 다 되서 재생해보면 특정 장면 이후로 화면 전환도 안 되고
+    // 노래만 나오고 끝난다"): 진짜 원인을 다시 찾아보니, 이미지 프리로드가 실패한 URL은
+    // imgCache에 아예 안 들어가는데(재시도까지 다 실패한 경우), 그동안은 이걸 사용자에게
+    // 전혀 알려주지 않고 그냥 조용히 렌더링을 시작해버렸음 — 그 이미지가 나올 차례가 되면
+    // 화면에 아무것도 못 그리는데(검은 화면 또는 멈춘 화면), 오디오·녹화는 계속 진행되니까
+    // 딱 "그 장면부터 화면은 멈추고 시간만 가는" 증상으로 나타났던 것. 이제 프리로드가 다
+    // 끝난 시점에 실패한 이미지가 있는지 확인해서, 있으면 렌더링 시작 전에 명확히 알려줌 —
+    // 어떤 장면이 문제인지 바로 알 수 있어서 그 사진만 다시 올리면 해결됨.
+    var failedImgUrls = imgUrls.filter(function(u){ return !imgCache[u]; });
+    if(failedImgUrls.length){
+      var failedSlides = slides.filter(function(s){ return s.img && failedImgUrls.indexOf(s.img)!==-1; });
+      var failedLabels = failedSlides.map(function(s){ return s.label||s.customLabel||'(이름 없음)'; }).join(', ');
+      alert('⚠️ 다음 사진('+failedImgUrls.length+'개)을 불러오지 못했어요: '+failedLabels+'\n\n원인은 보통 이미지 주소가 만료됐거나 네트워크 문제예요. 이번 렌더링에서는 이 장면들이 검은 화면으로 나올 수 있으니, 사이드바에서 해당 사진을 다시 업로드하고 다시 만들어주세요.');
+    }
     var vSlides=slides.filter(function(s){return s.isVideo;});
     var missing=vSlides.filter(function(s){return !s.videoUrl;});
     if(missing.length){
@@ -19662,7 +19676,20 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed)
   // 자동 전환함 — 문구가 하나라도 켜져 있는 장면은 기존처럼 레터박스 그대로 유지됨.
   var _bothTextOff = !!slide.skipTopText && !!slide.skipBottomText;
   var _effFitMode = ((opts&&(opts.fitMode||'cover'))==='contain' && _bothTextOff) ? 'cover' : (opts&&(opts.fitMode||'cover'));
-  if(img)_shortsDrawImage(ctx,W,H,img,_effFitMode,slide.zoom,slide.offX,slide.offY);
+  if(img){
+    _shortsDrawImage(ctx,W,H,img,_effFitMode,slide.zoom,slide.offX,slide.offY);
+  } else {
+    // ⚠️ 이미지 로드 실패(위 loadEndVideo에서 이미 경고했지만, 사용자가 무시하고 진행한 경우 대비):
+    // 그냥 검은 화면으로 남겨두면 "왜 멈췄지?" 알 수가 없으니, 최소한 원인을 알 수 있는 문구를
+    // 화면에 남겨서 결과 영상만 보고도 어떤 장면이 문제였는지 바로 알 수 있게 함.
+    ctx.save();
+    ctx.fillStyle='#1a1a1a'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='rgba(255,255,255,.55)';
+    ctx.font='600 '+Math.round(W*0.045)+'px sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('⚠️ 이미지를 불러오지 못했어요', W/2, H/2);
+    ctx.restore();
+  }
   // 레터박스에서 "레터박스 문구"(상단/하단 공통칸)를 실제로 채워뒀을 때만 그 전용 시스템을 쓰고,
   // 그게 비어있으면(꽉채우기이거나, 레터박스인데 이 공통칸을 안 쓰는 경우) 예전 "화면 문구 위치"
   // 선택 시스템으로 감 — 그 시스템도 레터박스일 땐 검은 여백을 자동으로 피해서 그려줌.
