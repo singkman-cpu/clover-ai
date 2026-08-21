@@ -11798,10 +11798,21 @@ function mkAptSimpleDesign(p){
   var aptWrap=dv('ss');
   aptWrap.setAttribute('data-apt-template-anchor','1');
   aptWrap.innerHTML='<div class="lbl">🏢 우리 아파트 정보</div>';
+  // ⚠️ 요청 반영("가끔 브랜드 선택을 깜빡한다 + 위에 실제와 다를 수 있다는 안내 메시지 만들어줘"):
+  // 브랜드 선택란이 다른 버튼들 사이에 묻혀서 눈에 잘 안 띄고, "브랜드별 평수·타입은 참고용이고
+  // 실제 단지와 다를 수 있다"는 안내도 평수 버튼 아래 작은 글씨로만 조건부로 있어서 놓치기
+  // 쉬웠음 — 맨 위에 눈에 띄는 안내 박스를 하나 추가하고, 브랜드 선택란 자체도 훨씬 크고
+  // 뚜렷하게 스타일을 강화함.
+  var aptTopNote=dv('');
+  aptTopNote.style.cssText='background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;color:#f59e0b;line-height:1.55;font-weight:600';
+  aptTopNote.textContent='⚠️ 아래 브랜드·평수·타입은 우리 아파트와 비슷한 구조를 찾기 위한 참고용 선택이에요 — 브랜드마다 실제로 제공하는 평수·타입 구성은 단지마다 다르므로, 지금 고르신 조합이 그 브랜드의 실제 평형·타입과 정확히 일치하지 않을 수 있어요. 최대한 우리 집과 비슷한 걸로 골라주세요.';
+  aptWrap.appendChild(aptTopNote);
   var aptBox=dv('');aptBox.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:9px;padding:10px;display:flex;flex-direction:column;gap:8px';
-  var aptRow1=dv('');aptRow1.style.cssText='display:flex;gap:6px';
+  var aptRow1=dv('');aptRow1.style.cssText='display:flex;flex-direction:column;gap:4px';
+  var aptBrandLbl=dv('');aptBrandLbl.style.cssText='font-size:11px;font-weight:700;color:var(--t2);margin-bottom:2px';aptBrandLbl.textContent='브랜드 선택 (잊지 말고 골라주세요!)';
+  aptRow1.appendChild(aptBrandLbl);
   var aptBrandSel=document.createElement('select');
-  aptBrandSel.style.cssText='flex:1;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:7px 8px;font-size:11.5px;border-radius:6px;outline:none;font-family:inherit';
+  aptBrandSel.style.cssText='flex:1;background:var(--card);border:2px solid var(--acb,#00e5cc);color:var(--t);padding:12px 10px;font-size:14.5px;font-weight:700;border-radius:8px;outline:none;font-family:inherit;box-shadow:0 0 0 3px rgba(0,229,204,.08)';
   APT_BRANDS.forEach(function(b){ var o=document.createElement('option'); o.value=b; o.textContent=b; aptBrandSel.appendChild(o); });
   aptBrandSel.value=spTab.autoRoomAptBrand;
   aptRow1.appendChild(aptBrandSel);
@@ -23378,7 +23389,15 @@ function _showDrawingQuickMenu(item, anchorBtn){
   overlay.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.62);'+
     'display:flex;align-items:center;justify-content:center;padding:20px';
   overlay._forItem=item;
-  overlay.addEventListener('click',function(e){ if(e.target===overlay) overlay.remove(); });
+  // ⚠️ 버그 수정(치명적, "홈페이지가 계속 버벅거린다"의 원인 중 하나): 이 메뉴를 닫는 방법이
+  // 3가지(바깥 클릭, ✕ 버튼, 옵션 선택)인데, 그동안 셋 다 그냥 overlay.remove()만 부르고 아래
+  // Escape 키 리스너(document에 직접 붙임)는 한 번도 정리를 안 했음 — 이 메뉴를 열 때마다 document에
+  // 리스너가 하나씩 계속 쌓여서, 여러 번 쓸수록 브라우저가 점점 느려지는 누적형 성능 저하였음.
+  // 이제 닫는 방법이 무엇이든 전부 이 함수 하나(closeOverlay)를 거치게 해서 리스너를 확실히 정리함.
+  function closeOverlay(){ overlay.remove(); document.removeEventListener('keydown', _escCloseHandler); }
+  function _escCloseHandler(e){ if(e.key==='Escape') closeOverlay(); }
+  document.addEventListener('keydown', _escCloseHandler);
+  overlay.addEventListener('click',function(e){ if(e.target===overlay) closeOverlay(); });
 
   var card=dv('');
   card.style.cssText='background:var(--c2,#171e20);border:1px solid rgba(110,231,183,.3);border-radius:16px;'+
@@ -23390,7 +23409,7 @@ function _showDrawingQuickMenu(item, anchorBtn){
   head.appendChild(title);
   var closeBtn=mk('button','');closeBtn.type='button';closeBtn.textContent='✕';
   closeBtn.style.cssText='background:none;border:none;color:var(--t2,#9fb0ad);font-size:18px;cursor:pointer;padding:2px 6px';
-  closeBtn.onclick=function(){ overlay.remove(); };
+  closeBtn.onclick=function(){ closeOverlay(); };
   head.appendChild(closeBtn);
   card.appendChild(head);
 
@@ -23417,18 +23436,13 @@ function _showDrawingQuickMenu(item, anchorBtn){
     b.addEventListener('mouseleave',function(){b.style.background='rgba(110,231,183,.08)';});
     b.addEventListener('click',function(e){
       e.stopPropagation();
-      overlay.remove();
+      closeOverlay();
       _quickDrawing(item, opt.k);
     });
     grid.appendChild(b);
   });
 
   document.body.appendChild(overlay);
-  setTimeout(function(){
-    document.addEventListener('keydown', function _escClose(e){
-      if(e.key==='Escape'){ overlay.remove(); document.removeEventListener('keydown', _escClose); }
-    });
-  }, 0);
 }
 // ── 렌더링 완료된 결과를 예산 계산기로 바로 넘김 — 여러 공간 세트/컨셉 확장/AI 에이전트에서
 // "이 공간 견적 보기"를 누르면, 기존에 이미 정교하게 만들어져 있는 예산 계산기(주거 6개 방/
