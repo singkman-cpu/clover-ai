@@ -19517,22 +19517,39 @@ function _shortsCreateTickerWorker(intervalMs){
   }catch(e){ return null; }
 }
 function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone, videoCache){
+  // ⚠️ 버그 수정(치명적, "쇼츠 렌더링 중에 화면이 멈춰있는데 시간은 가거나, 느려지면서
+  // 겹쳐 보인다"): 워커에서 오는 타이밍 신호를 받을 때마다 무조건 프레임을 1개씩만 그리고
+  // frame을 1 증가시켰는데, 만약 한 프레임 그리는 게 워커의 신호 주기보다 오래 걸리면(무거운
+  // 이미지 합성 등) 그 사이 워커는 계속 신호를 보내고 있어서 처리 못 한 신호가 브라우저
+  // 이벤트 큐에 쌓임 — 메인 스레드가 잠깐 자유로워지는 순간 그 쌓인 신호들을 한꺼번에 몰아서
+  // 처리하면서, 정작 화면(진행률 표시 등)은 그동안 안 그려지다가(멈춘 것처럼 보임) 갑자기
+  // 확 건너뛰는 것처럼 보이는 문제였음 — "겹쳐 보인다"는 것도 이 몰아치기 처리 도중 다른 화면
+  // 요소가 같이 밀리면서 생긴 현상. 이제 신호가 올 때마다 "그냥 다음 프레임"이 아니라 "지금
+  // 실제로 몇 초 지났는지"를 직접 계산해서 그 시점에 맞는 프레임 딱 하나만 그리도록 바꿈 —
+  // 밀렸으면 자동으로 건너뛰고 항상 지금 시점에 맞는 프레임을 그리므로 밀린 신호가 쌓여서
+  // 한꺼번에 처리될 일 자체가 없어짐(busy 플래그로 같은 프레임이 겹쳐 처리되는 것도 막음).
   var frame=0;
-  var interval=null, worker=null, stopped=false;
+  var startTime=null;
+  var interval=null, worker=null, stopped=false, busy=false;
   function cleanup(){
     if(stopped) return; stopped=true;
     if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
     if(interval){ clearInterval(interval); interval=null; }
   }
   function tick(){
-    if(stopped) return;
-    if(frame>=totalFrames){cleanup();onDone();return;}
+    if(stopped || busy) return; // 이미 처리 중인 신호가 있으면 이번 신호는 건너뜀(겹침 방지)
+    busy=true;
+    if(startTime==null) startTime=performance.now();
+    var targetFrame = Math.min(totalFrames, Math.round((performance.now()-startTime)/1000*FPS));
+    if(targetFrame>frame) frame=targetFrame; // 밀렸으면 중간 프레임들은 건너뛰고 바로 지금 시점으로
+    if(frame>=totalFrames){ busy=false; cleanup(); onDone(); return; }
     var t=frame/FPS;
     _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
     frame++;
     if(frame%Math.max(1,Math.round(FPS/5))===0){
       onProgress(frame/totalFrames);
     }
+    busy=false;
   }
   worker=_shortsCreateTickerWorker(1000/FPS);
   if(worker){
@@ -30761,12 +30778,34 @@ function buildPricing(){
           '① 위 패키지를 매달 <strong style="color:var(--t2)">직접 재충전</strong>하시거나,<br>'+
           '② <strong style="color:var(--t2)">세금계산서 발행 + 계좌이체</strong>로 월 단위 이용 계약을 맺고, 담당자가 확인 후 크레딧을 지급해드리는 방식도 가능해요 (팀 계정·다인원 이용 시 추천).'+
         '</div>'+
-        '<a href="mailto:cloverai.design@gmail.com?subject='+encodeURIComponent('[CLOVER AI] 업체용 정기 이용 문의')+'" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--ac)">📧 업체용 이용 문의하기 →</a>'+
+        '<button type="button" id="apt-inquiry-btn" style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--ac);background:none;border:none;cursor:pointer;font-family:inherit;padding:0">📧 업체용 이용 문의하기 →</button>'+
       '</div>'+
     '</div>'+
   '</div>';
 
   b.innerHTML=html;
+  // ⚠️ 버그 수정("업체용 이용 문의하기 눌러도 반응이 없다"): 원래 mailto: 링크였는데, 컴퓨터에
+  // 기본 메일 앱(아웃룩 등)이 설정 안 돼있으면 — 특히 웹메일(Gmail 등)만 쓰는 경우 아주 흔함 —
+  // 클릭해도 아무 일도 안 일어나서 "눌러도 반응 없다"로 보였음. 이제 버튼으로 바꿔서, mailto도
+  // 시도하되(메일 앱이 있으면 그대로 열림) 이메일 주소를 클립보드에 복사하고 안내 문구를 항상
+  // 띄워서, 메일 앱이 없어도 사용자가 반응을 확실히 볼 수 있고 직접 메일을 보낼 수 있게 함.
+  var _aptInquiryBtn = gE('apt-inquiry-btn');
+  if(_aptInquiryBtn){
+    _aptInquiryBtn.onclick=function(){
+      var email='cloverai.design@gmail.com';
+      var subject='[CLOVER AI] 업체용 정기 이용 문의';
+      try{ window.location.href='mailto:'+email+'?subject='+encodeURIComponent(subject); }catch(e){}
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        navigator.clipboard.writeText(email).then(function(){
+          alert('메일 앱이 열리지 않으면, 이메일 주소가 복사됐어요!\n\n'+email+'\n\n자주 쓰시는 메일함에서 직접 새 메일을 보내주세요.');
+        }).catch(function(){
+          alert('아래 이메일 주소로 문의해주세요:\n\n'+email);
+        });
+      } else {
+        alert('아래 이메일 주소로 문의해주세요:\n\n'+email);
+      }
+    };
+  }
 }
 function buildAccount(){
   var b=gE('ac-b');if(!b)return;
