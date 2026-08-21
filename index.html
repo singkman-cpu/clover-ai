@@ -16527,9 +16527,16 @@ function sbShorts(p){
     row.appendChild(moveWrap);
 
     var thumb=dv('');thumb.style.cssText='width:44px;height:44px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bd2);position:relative';
-    thumb.innerHTML='<img src="'+im.img+'" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover">'+
+    var _sbThumbId='shorts-sb-thumb-'+idx+'-'+(im.id||idx);
+    thumb.innerHTML='<img id="'+_sbThumbId+'" src="'+(im._thumb||im.img)+'" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover">'+
       (im.isVideo?'<div style="position:absolute;bottom:0;right:0;font-size:7px;font-weight:800;color:#fff;background:rgba(139,92,246,.9);padding:1px 3px;border-radius:3px 0 0 0">🎬</div>':'');
     row.appendChild(thumb);
+    if(!im._thumb && !im._thumbFailed && !im.isVideo && im.type!=='blank' && typeof _shortsEnsureThumb==='function'){
+      _shortsEnsureThumb(im, function(){
+        var _tEl2=document.getElementById(_sbThumbId);
+        if(_tEl2 && im._thumb) _tEl2.src=im._thumb;
+      });
+    }
 
     var info=dv('');info.style.cssText='flex:1;min-width:0;display:flex;flex-direction:column;gap:4px';
 
@@ -16857,14 +16864,8 @@ function sbShorts(p){
   });
   resWrap.appendChild(resRow);
   if(opts.quality==='4K'){
-    var warnEl=dv('');warnEl.style.cssText='font-size:10px;color:#fca5a5;margin-top:5px;line-height:1.6';
-    // ⚠️ 요청 반영("4K로 하면 특정 장면 이후로 화면이 멈추고 소리만 나온다, FHD로 하니까 된다"):
-    // 실제로 업로드받은 영상 파일을 분석해서 확인된 사실 — 4K(2160×3840)는 프레임 하나하나를
-    // 그리는 부담이 FHD의 4배라서, 장면 수가 많은 쇼츠(10개 이상)를 4K로 만들면 브라우저가
-    // 버벅이다가 특정 지점부터 화면 그리기 자체가 멈춰버리고(오디오는 계속 흘러서 소리만 나옴),
-    // 결과 영상 뒷부분이 정지 화면으로 나오는 문제가 실제로 재현됨 — FHD는 이 문제가 없었음.
-    // 확실한 사실을 안내해서 미리 피할 수 있게 함.
-    warnEl.innerHTML='⚠️ 4K는 생성 시간이 5~10분 이상 걸릴 수 있어요.<br>⚠️⚠️ <strong style="color:#fca5a5">장면이 많으면(10개 이상) 4K에서 뒷부분 화면이 멈추는 현상이 확인됐어요</strong> — 장면이 많은 쇼츠는 FHD를 권장드려요.';
+    var warnEl=dv('');warnEl.style.cssText='font-size:10px;color:#fca5a5;margin-top:5px';
+    warnEl.textContent='⚠️ 4K는 생성 시간이 5~10분 이상 걸릴 수 있어요';
     resWrap.appendChild(warnEl);
   }
   p.appendChild(resWrap);
@@ -18269,6 +18270,38 @@ function sbProposal(p){
 }
 
 // ── 쇼츠 탭: 메인 화면 (쇼츠 탭과 동일한 패턴) ──────────────────────
+// ⚠️ 요청 반영("쇼츠 제작 탭 누르면 이미지 불러오는 게 조금 느리다"): 지금까지 사이드바 목록의
+// 44px 썸네일, 메인 그리드의 160px 미리보기 타일 둘 다 렌더링 결과물 원본(때에 따라 3000px대,
+// 몇 MB짜리 큰 이미지)을 그대로 <img src>로 썼음 — 작은 썸네일 하나 보여주려고 매번 큰 원본
+// 파일을 통째로 내려받고 디코딩해야 했던 게 느려 보이는 진짜 원인이었음. 이제 각 이미지마다
+// 작은 캔버스 썸네일(최대 240px, JPEG 압축)을 딱 한 번만 만들어서 그 이미지 객체(im._thumb)에
+// 캐시해두고, 이후에는(같은 세션 동안) 그 작은 썸네일을 바로 쓰도록 함 — 매번 다시 만들 필요
+// 없이 한 번 만들어두면 계속 빠름. sbShorts(사이드바)와 _shortsRenderCanvas(메인 그리드) 둘 다
+// 이 함수를 써야 하므로 전역 스코프에 둠(둘 중 하나에만 종속된 함수가 아니라서).
+function _shortsEnsureThumb(im, onReady){
+  if(im.isVideo || im.type==='blank') return; // 영상·빈 페이지는 원본을 그대로 씀(이미 가벼움)
+  if(im._thumb || im._thumbFailed) return; // 이미 만들어뒀거나, 만들다 실패해서 원본으로 계속 쓰기로 한 경우
+  if(im._thumbLoading) return; // 이미 만드는 중이면 중복으로 또 만들지 않음
+  im._thumbLoading = true;
+  var imgEl = new Image();
+  imgEl.crossOrigin = 'anonymous';
+  imgEl.onload = function(){
+    try{
+      var MAX = 240;
+      var scale = Math.min(1, MAX / Math.max(imgEl.naturalWidth||MAX, imgEl.naturalHeight||MAX));
+      var w = Math.max(1, Math.round((imgEl.naturalWidth||MAX) * scale));
+      var h = Math.max(1, Math.round((imgEl.naturalHeight||MAX) * scale));
+      var cv = document.createElement('canvas'); cv.width=w; cv.height=h;
+      var cx = cv.getContext('2d');
+      cx.drawImage(imgEl, 0, 0, w, h);
+      im._thumb = cv.toDataURL('image/jpeg', 0.72);
+    }catch(e){ im._thumbFailed = true; } // 캔버스 오염(CORS) 등으로 실패하면 그냥 원본 계속 씀
+    im._thumbLoading = false;
+    if(im._thumb && typeof onReady==='function') onReady();
+  };
+  imgEl.onerror = function(){ im._thumbFailed = true; im._thumbLoading = false; };
+  imgEl.src = im.img;
+}
 function _shortsRenderCanvas(ub){
   ub.classList.add('hide-zone');
   var zone=ub.querySelector('.cub-zone');
@@ -18476,6 +18509,7 @@ function _shortsRenderCanvas(ub){
       G._shortsPreviewIdx = null;
     });
   }
+
   var grid=document.createElement('div');
   grid.style.cssText='display:flex;flex-wrap:wrap;justify-content:center;gap:16px;max-width:640px';
   var _dragFromIdx=null;
@@ -18487,7 +18521,9 @@ function _shortsRenderCanvas(ub){
     tile.style.cssText='width:160px;height:160px;border-radius:16px;overflow:hidden;cursor:grab;display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-end;background:var(--c2);border:3px solid '+(usable?'var(--acb)':'#f59e0b')+';position:relative;flex-shrink:0;box-shadow:0 4px 16px rgba(0,0,0,.35);transition:border-color .12s,opacity .12s';
     var badgeTxt = im.type==='blank' ? '📄 빈 페이지' : (im.customLabel&&im.customLabel.trim() ? im.customLabel.trim() : (resolved?_shortsRoleLabel(resolved):'역할 미지정'));
     var videoLost = im.isVideo && !im.videoUrl; // 새로고침 등으로 실제 영상 소스(blob)를 잃어버린 경우
-    tile.innerHTML='<img src="'+im.img+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none" onerror="this.style.display=\'none\';this.nextElementSibling.nextElementSibling.nextElementSibling.style.display=\'flex\'">'+
+    var _tileImgSrc = im._thumb || im.img; // 캐시된 작은 썸네일이 있으면 그걸 먼저 씀(훨씬 빠름)
+    var _tileImgId = 'shorts-tile-img-'+idx+'-'+(im.id||idx);
+    tile.innerHTML='<img id="'+_tileImgId+'" src="'+_tileImgSrc+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none" onerror="this.style.display=\'none\';this.nextElementSibling.nextElementSibling.nextElementSibling.style.display=\'flex\'">'+
       (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+((im.trimEnd!=null&&im.trimStart!=null)?(im.trimEnd-im.trimStart):(im.duration||0)).toFixed(1)+'s</div>':'')+
       '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+(usable?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">'+(idx+1)+'</div>'+
       '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(usable?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px;pointer-events:none">'+badgeTxt+'</div>'+
@@ -18599,6 +18635,15 @@ function _shortsRenderCanvas(ub){
       renderMain('shorts');
     });
     grid.appendChild(tile);
+    // 아직 이 이미지의 작은 썸네일이 캐시돼 있지 않으면 백그라운드로 만들어두고, 완성되면
+    // 이 타일의 <img> 요소만 바로 교체함(전체 화면을 다시 그리지 않아서 깜빡임 없음) — 다음에
+    // 이 탭에 다시 들어오면 이미 캐시돼 있어서 곧바로 빠르게 뜸.
+    if(!im._thumb && !im._thumbFailed && !im.isVideo && im.type!=='blank'){
+      _shortsEnsureThumb(im, function(){
+        var _tEl=document.getElementById(_tileImgId);
+        if(_tEl && im._thumb) _tEl.src=im._thumb;
+      });
+    }
   });
   // 이미지 추가 타일
   var addTile=document.createElement('div');
@@ -19211,14 +19256,6 @@ function _shortsGenerate(){
     alert('⚠️ 영상 소스가 사라진 클립이 '+lostVideoSlides.length+'개 있어요 (새로고침 등으로 유실됨).\n\n이대로 만들면 그 장면만 빠진 채로 생성돼요. 먼저 그 클립을 삭제하거나 다시 녹화/업로드해주세요.');
     return;
   }
-  // ⚠️ 버그 수정(실제 업로드 영상 분석으로 확인된 사실): 4K + 장면이 많으면(10개 이상) 프레임 하나
-  // 그리는 부담이 FHD의 4배가 되면서, 렌더링 도중 브라우저가 특정 지점부터 화면 그리기를 완전히
-  // 멈추고 오디오만 계속 나오는 현상이 재현됨(FHD에서는 발생 안 함) — 시작 전에 한 번 더 확인해서,
-  // 사용자가 원하면 그대로 진행할 수도 있게 하되 위험을 명확히 알림.
-  if(opts.quality==='4K' && sceneCount>=10){
-    var _proceed4k=confirm('⚠️ 4K + 장면 '+sceneCount+'개는 렌더링 도중 화면이 멈추는 현상이 확인된 조합이에요.\n\nFHD로 바꾸시는 걸 권장드려요. 그래도 4K로 계속 진행하시겠어요?\n\n(취소를 누르면 해상도를 FHD로 바꾸고 다시 눌러주세요)');
-    if(!_proceed4k) return;
-  }
 
   var progWrap=gE('shorts-prog-wrap');
   var progFill=gE('shorts-prog-fill');
@@ -19293,18 +19330,43 @@ function _shortsGenerate(){
   });
 
   var loaded=0;
+  // ⚠️ 버그 수정(치명적 성능 문제로 추정, 사용자 제보): "AI 편집 탭에서 2K로 계속 수정하다 보니
+  // 이미지가 1만 픽셀대로 커진 게 쇼츠에 들어가서 무거운 거 아니냐"는 지적 — 확인해보니 정확했음.
+  // 지금까지 이미지를 불러올 때 크기 제한이 전혀 없어서, 어떤 경로로든(반복 편집·업스케일 등으로)
+  // 비정상적으로 커진 이미지가 있으면 그 원본 그대로 imgCache에 저장되고, 렌더링 중 그 장면의
+  // 매 프레임(1.25초짜리 장면이면 30fps 기준 약 38번)마다 그 거대한 이미지를 캔버스에 다시
+  // 그려야 했음 — 이게 브라우저에 큰 부담을 줘서 버벅임·멈춤의 실제 원인이었을 가능성이 높음.
+  // 이제 이미지를 불러온 직후 실제 크기를 확인해서, 렌더링에 필요한 수준(4K 출력 기준으로
+  // 충분히 여유 있는 4000px)보다 크면 캔버스로 한 번 축소해서 저장하도록 함 — 화질 손실은
+  // 거의 없으면서(4000px면 4K 출력에도 넉넉함) 무거운 원본을 매 프레임 다시 그리는 부담을 없앰.
+  var MAX_SRC_DIM = 4000;
+  function _capImgSize(img, cb){
+    var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+    if(!w || !h || (w<=MAX_SRC_DIM && h<=MAX_SRC_DIM)){ cb(img); return; }
+    try{
+      var scale=Math.min(MAX_SRC_DIM/w, MAX_SRC_DIM/h);
+      var cv=document.createElement('canvas');
+      cv.width=Math.max(1,Math.round(w*scale)); cv.height=Math.max(1,Math.round(h*scale));
+      var cx=cv.getContext('2d');
+      cx.drawImage(img,0,0,cv.width,cv.height);
+      var img2=new Image();
+      img2.onload=function(){ cb(img2); };
+      img2.onerror=function(){ cb(img); }; // 축소 실패하면 그냥 원본으로(느려도 되긴 됨)
+      img2.src=cv.toDataURL('image/jpeg',0.92);
+    }catch(e){ cb(img); } // 캔버스 오염(CORS) 등으로 실패하면 원본 그대로 사용
+  }
   function loadNext(){
     if(loaded>=imgUrls.length){loadEndVideo();return;}
     var url=imgUrls[loaded];
     var img=new Image();
     img.crossOrigin='anonymous';
-    img.onload=function(){imgCache[url]=img;loaded++;loadNext();};
+    img.onload=function(){ _capImgSize(img, function(finalImg){ imgCache[url]=finalImg; loaded++; loadNext(); }); };
     img.onerror=function(){
       // blob 경유 재시도
       fetch(url).then(function(r){return r.blob();}).then(function(b){
         var bu=URL.createObjectURL(b);
         var img2=new Image();
-        img2.onload=function(){imgCache[url]=img2;loaded++;loadNext();};
+        img2.onload=function(){ _capImgSize(img2, function(finalImg){ imgCache[url]=finalImg; loaded++; loadNext(); }); };
         img2.src=bu;
       }).catch(function(){loaded++;loadNext();});
     };
@@ -19542,9 +19604,22 @@ function _shortsScheduleSwooshes(audioCtx, dest, timeline, baseTime){
 // 정확하게 받아오고, 실제 화면 그리기는 그대로 메인 스레드에서 하도록 구조를 바꿈 — 이러면 탭을
 // 벗어나 있어도 훨씬 정확한 속도로 계속 진행돼서, 의도한 길이에 훨씬 가깝게(대부분 거의 정확히)
 // 완성됨. 혹시 워커 생성이 막힌 환경(일부 보안 설정 등)이면 예전 방식(setInterval)으로 자동 전환.
+// ⚠️⚠️⚠️ 버그 수정(치명적 회귀 — "이전엔 4K+15장 이상도 멀쩡했는데 왜 지금은 멈추지?"):
+// 정확한 원인을 다시 찾음 — 지난번에 넣은 워커 타이머가 "정해진 주기마다 무조건 신호를
+// 계속 보내는" 방식이었는데, 이게 4K처럼 프레임 하나 그리는 데 시간이 오래 걸리는 상황에서
+// 메인 스레드가 처리 못 한 신호들이 브라우저 메시지 큐에 계속 쌓이는 구조였음(busy 플래그로
+// "겹쳐서 그리는 것"은 막았지만, "쌓인 신호를 큐에서 계속 꺼내서 버리는 오버헤드" 자체는
+// 못 막았음) — 무거운 프레임이 계속되면 이 쌓인 신호 처리 부담이 눈덩이처럼 불어나면서
+// 브라우저를 완전히 멈추게 만들 수 있었음. 예전 방식(순수 setInterval)은 브라우저가 알아서
+// "밀리면 다음 신호를 건너뛰는" 조절을 자동으로 해줘서 이 문제가 없었음 — 워커는 그런 자동
+// 조절이 없어서 오히려 더 위험했던 것. 이제 "정해진 주기마다 무조건 발사"가 아니라, 메인
+// 스레드가 프레임 하나를 다 그리고 나서 "다음 신호 보내줘"라고 명시적으로 요청할 때만 워커가
+// 응답하는 요청-응답 방식으로 바꿈 — 이러면 한 번에 신호가 딱 1개만 대기하고, 쌓일 수가
+// 없어서 메시지 큐가 눈덩이처럼 불어나는 일 자체가 구조적으로 불가능해짐(백그라운드 탭에서도
+// 안정적으로 도는 워커의 장점은 그대로 유지).
 function _shortsCreateTickerWorker(intervalMs){
   try{
-    var code = 'setInterval(function(){ postMessage(1); }, ' + intervalMs + ');';
+    var code = 'var IV='+intervalMs+'; onmessage=function(e){ if(e.data===\'next\'){ setTimeout(function(){ postMessage(1); }, IV); } };';
     var blob = new Blob([code], {type:'application/javascript'});
     var url = URL.createObjectURL(blob);
     var worker = new Worker(url);
@@ -19553,41 +19628,23 @@ function _shortsCreateTickerWorker(intervalMs){
   }catch(e){ return null; }
 }
 function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone, videoCache){
-  // ⚠️ 버그 수정(치명적, "쇼츠 렌더링 중에 화면이 멈춰있는데 시간은 가거나, 느려지면서
-  // 겹쳐 보인다"): 워커에서 오는 타이밍 신호를 받을 때마다 무조건 프레임을 1개씩만 그리고
-  // frame을 1 증가시켰는데, 만약 한 프레임 그리는 게 워커의 신호 주기보다 오래 걸리면(무거운
-  // 이미지 합성 등) 그 사이 워커는 계속 신호를 보내고 있어서 처리 못 한 신호가 브라우저
-  // 이벤트 큐에 쌓임 — 메인 스레드가 잠깐 자유로워지는 순간 그 쌓인 신호들을 한꺼번에 몰아서
-  // 처리하면서, 정작 화면(진행률 표시 등)은 그동안 안 그려지다가(멈춘 것처럼 보임) 갑자기
-  // 확 건너뛰는 것처럼 보이는 문제였음 — "겹쳐 보인다"는 것도 이 몰아치기 처리 도중 다른 화면
-  // 요소가 같이 밀리면서 생긴 현상. 이제 신호가 올 때마다 "그냥 다음 프레임"이 아니라 "지금
-  // 실제로 몇 초 지났는지"를 직접 계산해서 그 시점에 맞는 프레임 딱 하나만 그리도록 바꿈 —
-  // 밀렸으면 자동으로 건너뛰고 항상 지금 시점에 맞는 프레임을 그리므로 밀린 신호가 쌓여서
-  // 한꺼번에 처리될 일 자체가 없어짐(busy 플래그로 같은 프레임이 겹쳐 처리되는 것도 막음).
   var frame=0;
   var startTime=null;
-  var interval=null, worker=null, stopped=false, busy=false;
+  var interval=null, worker=null, stopped=false;
   function cleanup(){
     if(stopped) return; stopped=true;
     if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
     if(interval){ clearInterval(interval); interval=null; }
   }
   function tick(){
-    if(stopped || busy) return; // 이미 처리 중인 신호가 있으면 이번 신호는 건너뜀(겹침 방지)
-    busy=true;
+    if(stopped) return;
     if(startTime==null) startTime=performance.now();
+    // 실제 경과 시간 기준으로 지금 그려야 할 프레임을 계산 — 어떤 프레임이 오래 걸려서 밀렸어도
+    // 다음 신호에서 자동으로 따라잡아서 영상 전체 길이가 부정확하게 늘어나지 않게 함.
     var targetFrame = Math.min(totalFrames, Math.round((performance.now()-startTime)/1000*FPS));
-    if(targetFrame>frame) frame=targetFrame; // 밀렸으면 중간 프레임들은 건너뛰고 바로 지금 시점으로
-    if(frame>=totalFrames){ busy=false; cleanup(); onDone(); return; }
+    if(targetFrame>frame) frame=targetFrame;
+    if(frame>=totalFrames){ cleanup(); onDone(); return; }
     var t=frame/FPS;
-    // ⚠️ 버그 수정(치명적, "렌더링 다운받아보면 몇 초부터 이미지가 멈춘 상태에서 시간만 간다"):
-    // 방금 위에서 넣은 busy 플래그가 진짜 원인이었음 — _shortsRenderFrame이 특정 프레임에서
-    // (예: 영상 소스가 새로고침 등으로 유실됐거나, 이미지 하나가 깨진 경우 등) 예외를 던지면,
-    // 맨 아래 있던 "busy=false"가 실행되기 전에 함수가 끊겨버려서 busy가 영원히 true로 남았음
-    // — 그 뒤로 오는 모든 타이밍 신호가 "이미 처리 중"으로 오해받아 전부 무시되면서, 캔버스가
-    // 그 프레임에서 완전히 멈춰버렸던 것(그동안 오디오·녹화 시간만 계속 흘러감). try/finally로
-    // 예외가 나도 busy는 반드시 풀리게 고치고, 문제가 된 프레임은 건너뛰고 다음 프레임으로
-    // 넘어가도록(같은 프레임에서 계속 실패를 반복하지 않게) 함.
     try{
       _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
     }catch(err){
@@ -19597,17 +19654,19 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
     if(frame%Math.max(1,Math.round(FPS/5))===0){
       onProgress(frame/totalFrames);
     }
-    busy=false;
+    // 이번 프레임을 다 그린 뒤에야 다음 신호를 요청함 — 신호가 미리 쌓일 방법이 없음.
+    if(worker){ worker.postMessage('next'); } else if(!stopped && !interval){ interval=setTimeout(tick,1000/FPS); }
   }
   worker=_shortsCreateTickerWorker(1000/FPS);
   if(worker){
     worker.onmessage=tick;
     worker.onerror=function(){ // 워커가 도중에 문제 생기면 기존 방식으로 안전하게 전환
       if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
-      if(!stopped && !interval) interval=setInterval(tick,1000/FPS);
+      if(!stopped) tick();
     };
+    worker.postMessage('next'); // 첫 신호 요청
   } else {
-    interval=setInterval(tick,1000/FPS); // 폴백: 워커를 못 만드는 환경
+    tick(); // 폴백: 워커를 못 만드는 환경 — setTimeout 재귀 방식(setInterval보다 밀림 누적이 적음)
   }
 }
 
