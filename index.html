@@ -12961,7 +12961,11 @@ function mkAutoRoomCamera(p){
             role:'auto', autoRole:'ai_design', customLabel:r.label, source:'clover'
           });
         });
+        // ⚠️ 방어적으로 추가: selectWF 내부에서도 renderSB를 부르긴 하지만, 혹시 모를 타이밍
+        // 문제(비동기 클라우드 복원 콜백 등)로 사이드바가 최신 개수를 못 따라가는 일이 없도록
+        // 여기서도 명시적으로 한 번 더 갱신함(중복 호출돼도 부작용 없음, 그냥 다시 그리는 것뿐).
         selectWF('shorts');
+        renderSB();
       };
       resWrap.appendChild(toShortsBtn);
     }
@@ -16457,7 +16461,11 @@ function sbShorts(p){
         if(!data || !data.images || !data.images.length) return;
         G_SHORTS.images = data.images;
         if(data.opts) G_SHORTS.opts = Object.assign({}, G_SHORTS.opts, data.opts);
-        renderMain('shorts');
+        // ⚠️ 버그 수정("메인화면엔 이미지들이 그대로 있는데 왼쪽 사이드바만 0개로 리셋된 것 같다"):
+        // 여기서 G_SHORTS.images를 바꾼 뒤 renderMain만 부르고 renderSB()는 안 불러서, 메인
+        // 미리보기는 갱신되는데 정작 사이드바의 "이미지 N개" 목록은 그 시점 그대로 멈춰있는(오래된
+        // 값을 계속 보여주는) 화면 불일치가 생길 수 있었음 — 항상 같이 갱신되도록 추가함.
+        renderSB(); renderMain('shorts');
       });
     }
   }
@@ -33928,6 +33936,13 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
               customLabel:'VR 직접녹화', source:'clover'};
           if(typeof G_SHORTS!=='undefined' && G_SHORTS.images){
             G_SHORTS.images.push(_addedItem);
+            // ⚠️ 버그 수정("메인화면엔 그대로인데 사이드바만 0개로 리셋된 것 같다"): 여기서 방금
+            // G_SHORTS.images에 추가했는데, 정작 화면을 다시 그리는 호출이 한참 아래 비동기
+            // 클라우드 업로드가 끝난 뒤(로그인 안 했거나 업로드 실패하면 아예 호출 안 될 수도
+            // 있었음)에만 있었음 — 추가한 즉시 사이드바·메인화면 둘 다 바로 갱신되도록 여기서
+            // 바로 호출함(사용자가 나중에 쇼츠 탭으로 가면 바로 반영된 상태를 보게 됨).
+            if(typeof renderSB==='function') renderSB();
+            if(typeof renderMain==='function') renderMain('shorts');
           }
           addBtn.textContent='✓ 추가됨 (저장 중...)'; addBtn.disabled=true;
           // ⚠️ 2026-07-22: blob: 주소는 이 브라우저 탭이 살아있는 동안만 유효해서, 새로고침하면
@@ -33942,6 +33957,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
               _addedItem.videoUrl = publicUrl; // 새로고침해도 안 사라지는 영구 주소로 교체
               _addedItem.cloudVideoUrl = publicUrl;
               addBtn.textContent='✓ 추가됨 (클라우드 저장 완료)';
+              if(typeof renderSB==='function') renderSB();
               if(typeof renderMain==='function') renderMain('shorts');
             }).catch(function(){ addBtn.textContent='✓ 추가됨 (클라우드 저장 실패, 이 탭에서만 유효)'; });
           } else {
