@@ -15906,8 +15906,7 @@ function _shortsSaveDraftAsync(){
 setInterval(function(){
   _shortsSaveDraftAsync();
   if(G_PROPOSAL.scenes && G_PROPOSAL.scenes.length) _draftSave(_proposalDraftKey(), G_PROPOSAL);
-}, 3000); // ⚠️ 6초→3초로 단축: blob: 이미지가 영구 저장 형태로 변환되기 전에 새로고침/탭 종료가
-          // 끼면 그 이미지가 사라지는 문제가 있었음 — 주기를 줄여서 유실 구간을 더 좁힘.
+}, 6000); // 6초마다 자동 저장 (이미지나 문구가 있을 때만)
 // ⚠️ 요청 반영: 새로고침·탭 닫기 등 다른 상황엔 안 물어보고, 마우스 뒤로가기/앞으로가기
 // 버튼을 눌렀을 때만 확인창이 뜨게 함 — beforeunload는 모든 나가는 상황에 다 걸려서
 // (새로고침도 포함) 너무 광범위했음. popstate 이벤트는 브라우저의 뒤로/앞으로가기 버튼을
@@ -18871,14 +18870,7 @@ function _shortsAddImageFlow(){
           G_SHORTS.images.push({id:Date.now()+Math.random(), img:dataUrl, orig:null, role:'auto', autoRole:null, source:'upload'});
         }
         remain--;
-        if(remain===0){
-          ov.remove();renderSB();renderMain('shorts');
-          // ⚠️ 버그 수정("이미지 업로드한 게 갑자기 사라짐"): 원래는 6초마다 도는 자동저장
-          // 타이머가 올 때까지 기다렸다가 blob→영구 저장용 데이터로 변환했음 — 그 사이에
-          // 새로고침/브라우저 종료/블랍 만료가 끼면 방금 올린 이미지가 통째로 날아갔음.
-          // 업로드가 끝나자마자 바로 한 번 저장을 시켜서 이 손실 구간을 없앰.
-          _shortsSaveDraftAsync();
-        }
+        if(remain===0){ ov.remove();renderSB();renderMain('shorts'); }
       });
     });
   };
@@ -18919,7 +18911,6 @@ function _shortsAddImageFlow(){
             vBtn.disabled=false;
             vBtn.style.background='rgba(18,230,230,.1)';vBtn.style.borderColor='rgba(18,230,230,.4)';vBtn.style.color='#12E6E6';
             vBtn.textContent='✓ 영상 '+added+'개 추가됨 — 아래 그리드에서 순서/역할을 지정하세요';
-            _shortsSaveDraftAsync(); // 업로드 직후 즉시 저장(자동저장 주기를 기다리다 유실되는 것 방지)
           } else {
             vBtn.disabled=false; vBtn.innerHTML='🎬 영상 클립 추가 (선택 · 클립당 최대 '+SHORTS_END_VIDEO_MAX_SEC+'초, 넘으면 앞부분만 사용)';
             alert('영상을 읽을 수 없어요. 다른 파일로 시도해주세요.');
@@ -19285,30 +19276,13 @@ function _shortsGenerate(){
     var url=imgUrls[loaded];
     var img=new Image();
     img.crossOrigin='anonymous';
-    // ⚠️ 버그 수정("렌더링 다운받으면 중간에 화면이 멈춘 채로 시간만 간다"): 원인 중 하나는
-    // 이미지가 "로드"는 됐지만 아직 "디코딩"은 안 된 상태라는 것 — 브라우저는 drawImage를
-    // 실제로 처음 호출하는 그 프레임에서야 무거운 디코딩을 하는 경우가 많음. 그 디코딩이
-    // 수십~수백ms 걸리는 동안 메인 스레드가 막히면, 그 사이 canvas.captureStream은 새로
-        // 그려질 화면이 없어서 "직전 프레임을 그대로 반복 캡처"하게 되고, 이게 정확히 사용자가
-    // 보는 "화면은 멈췄는데 시간(오디오/진행률)은 계속 가는" 현상으로 나타남. 렌더 시작 전에
-    // (진행률이 "이미지 로딩 중"으로 떠 있는, 아직 녹화 시작 전인) 이 시점에 미리 디코딩까지
-    // 끝내두면 실제 프레임을 그리는 도중엔 디코딩 지연이 없어져서 이 멈춤이 사라진다.
-    img.onload=function(){
-      imgCache[url]=img;
-      if(img.decode){
-        img.decode().catch(function(){}).then(function(){loaded++;loadNext();});
-      } else { loaded++;loadNext(); }
-    };
+    img.onload=function(){imgCache[url]=img;loaded++;loadNext();};
     img.onerror=function(){
       // blob 경유 재시도
       fetch(url).then(function(r){return r.blob();}).then(function(b){
         var bu=URL.createObjectURL(b);
         var img2=new Image();
-        img2.onload=function(){
-          imgCache[url]=img2;
-          if(img2.decode){ img2.decode().catch(function(){}).then(function(){loaded++;loadNext();}); }
-          else { loaded++;loadNext(); }
-        };
+        img2.onload=function(){imgCache[url]=img2;loaded++;loadNext();};
         img2.src=bu;
       }).catch(function(){loaded++;loadNext();});
     };
@@ -19432,9 +19406,9 @@ function _shortsGenerate(){
         // _shortsScheduleSwooshes(audioCtx,dest,timeline,audioCtx.currentTime);
         var combined=new MediaStream([].concat(vidStream.getVideoTracks(),dest.stream.getAudioTracks()));
         var rec=beginRecord(combined);
-        runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p,warnMsg){
+        runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
           if(progFill)progFill.style.width=Math.round(p*100)+'%';
-          if(progTxt)progTxt.textContent=warnMsg||('생성 중... '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)');
+          if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)';
           // 오디오 볼륨을 "정해진 시간"이 아니라 "실제 렌더링 진행률(p)"에 맞춰 갱신.
           // 탭이 백그라운드로 밀려 렌더링이 느려지더라도, 음악은 항상 실제 영상 진행 상황과 정확히 맞물려 끝난다.
           if(bgmGainNode){
@@ -19469,9 +19443,9 @@ function _shortsGenerate(){
     }catch(e){
       // AudioContext 자체를 만들 수 없는 예외적 환경 — 오디오 없이 영상만 생성
       var rec=beginRecord(vidStream);
-      runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p,warnMsg){
+      runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
         if(progFill)progFill.style.width=Math.round(p*100)+'%';
-        if(progTxt)progTxt.textContent=warnMsg||('생성 중... '+Math.round(p*100)+'% (약 '+Math.round((totalDuration*(1-p))/opts.fps*opts.fps)+'초 남음)');
+        if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% (약 '+Math.round((totalDuration*(1-p))/opts.fps*opts.fps)+'초 남음)';
       },function(){
         Object.keys(videoCache).forEach(function(vu){ try{videoCache[vu].pause();}catch(e){} });
         rec.stop();
@@ -19557,7 +19531,6 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
   var frame=0;
   var startTime=null;
   var interval=null, worker=null, stopped=false, busy=false;
-  var _shortsConsecFail=0;
   function cleanup(){
     if(stopped) return; stopped=true;
     if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
@@ -19581,18 +19554,8 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
     // 넘어가도록(같은 프레임에서 계속 실패를 반복하지 않게) 함.
     try{
       _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
-      _shortsConsecFail=0;
     }catch(err){
-      // ⚠️ 어떤 프레임에서 왜 실패했는지 콘솔에서 바로 원인을 알 수 있도록 스택까지 남김
-      // (전에는 console.warn(err)만 찍혀서 실제 원인 파악이 어려웠음).
-      console.error('[쇼츠 렌더] 프레임 '+frame+' 그리기 실패, 건너뜀:', err && (err.stack||err.message||err));
-      _shortsConsecFail=(_shortsConsecFail||0)+1;
-      // 같은 문제로 연속으로 여러 프레임이 계속 실패하면(=한 슬라이드가 계속 깨져 있는 상태),
-      // 화면엔 그 직전에 정상적으로 그려진 프레임이 계속 남아있는 채로 시간만 흘러가서 "멈춘
-      // 것처럼" 보이는 영상이 만들어진다 — 진행률 콜백에 표시해서 사용자가 알 수 있게 함.
-      if(_shortsConsecFail===Math.round(FPS*1.5)){
-        onProgress(frame/totalFrames, '⚠️ 일부 장면을 그리는 중 문제가 있어요(콘솔 확인) — 계속 진행 중...');
-      }
+      console.warn('[쇼츠 렌더] 프레임 '+frame+' 그리기 실패, 건너뜀:', err);
     }
     frame++;
     if(frame%Math.max(1,Math.round(FPS/5))===0){
