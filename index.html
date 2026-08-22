@@ -19553,6 +19553,18 @@ function _shortsGenerate(){
         (function(){
           var _chkV=document.createElement('video');
           _chkV.preload='metadata'; _chkV.src=url; _chkV.muted=true;
+          // ⚠️ 버그 대응("결과물이 아예 재생이 안 됨, 0:00에서 멈춰있음"): 위의 duration 체크는
+          // loadedmetadata가 떠야 동작하는데, 녹화된 blob 자체가 손상/텅 빈 상태면(브라우저 업데이트나
+          // 그래픽 드라이버 문제로 인코더가 데이터를 거의 못 만든 경우) loadedmetadata가 아예 안 뜨고
+          // error 이벤트만 뜸 — 이 경우를 못 잡으면 사용자는 "완성!"이라고만 뜬 걸 보고 재생해봤다가
+          // 원인도 모른 채 막힘. blob 자체가 비정상적으로 작을 때(정상적인 33초 4K 영상이라면 최소
+          // 수백 KB는 나와야 함)와, video 태그가 아예 로드에 실패했을 때 둘 다 명확히 경고함.
+          _chkV.addEventListener('error', function(){
+            var _errBox=document.createElement('div');
+            _errBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
+            _errBox.textContent='⚠️ 결과 영상 파일이 손상돼서 재생이 안 돼요(브라우저나 그래픽 드라이버 문제일 수 있어요). 화질을 낮추거나, 크롬을 재시작·업데이트 확인 후 다시 만들어보세요.';
+            if(progWrap)progWrap.appendChild(_errBox);
+          }, {once:true});
           _chkV.addEventListener('loadedmetadata', function(){
             var d=_chkV.duration;
             if(isFinite(d) && d>0 && d < totalDuration*0.85){
@@ -19562,6 +19574,12 @@ function _shortsGenerate(){
               if(progWrap)progWrap.appendChild(_warnBox);
             }
           }, {once:true});
+          if(blob.size < 20000){
+            var _sizeBox=document.createElement('div');
+            _sizeBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
+            _sizeBox.textContent='⚠️ 결과 영상 파일 용량이 비정상적으로 작아요('+Math.round(blob.size/1024)+'KB) — 녹화가 거의 안 된 채로 끝난 것 같아요. 화질을 낮추거나 브라우저를 재시작한 뒤 다시 만들어보세요.';
+            if(progWrap)progWrap.appendChild(_sizeBox);
+          }
         })();
         // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
         // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
