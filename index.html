@@ -23547,13 +23547,22 @@ function zoomItem(id){
 function deleteHistItem(id){
   // G.HIST에서 해당 항목 제거
   var galleryId=null;
+  var wasShorts=false;
   Object.keys(G.HIST).forEach(function(wf){
     var before=G.HIST[wf]||[];
     var found=before.find(function(x){return x.id===id;});
     if(found&&found.gallery_id) galleryId=found.gallery_id;
+    if(found&&wf==='shorts') wasShorts=true;
     G.HIST[wf]=before.filter(function(x){return x.id!==id;});
   });
   saveHistToStorage();
+  // ⚠️ 버그 수정(치명적, "쇼츠 갤러리 항목을 삭제해도 새로고침하면 다시 나타난다"): 쇼츠로 만든
+  // 영상은 Supabase 'gallery' 테이블이 아니라 별도의 localStorage 키(clover_shorts_gallery)에
+  // 메타데이터가 스냅샷으로 저장돼있고, 새로고침 시 그 스냅샷을 그대로 다시 읽어와 G.HIST.shorts에
+  // 채워넣는 구조임. 그런데 지금까지 이 삭제 함수는 화면(G.HIST)에서만 지우고 그 스냅샷은 전혀
+  // 갱신을 안 해서, 새로고침하면 삭제되기 전 상태의 스냅샷이 그대로 다시 로드되어 부활했던 것.
+  // 쇼츠 항목을 지운 경우엔 스냅샷도 즉시 다시 저장해서(현재 G.HIST.shorts 기준으로) 동기화함.
+  if(wasShorts && typeof _shortsSaveGalleryMeta==='function'){ try{_shortsSaveGalleryMeta();}catch(e){} }
   // Supabase gallery에서도 삭제
   if(_supa&&_supaUser&&galleryId){
     _supa.from('gallery').delete().eq('id',galleryId).eq('user_id',_supaUser.id)
@@ -23569,6 +23578,9 @@ function deleteAllHist(){
   });
   Object.keys(G.HIST).forEach(function(wf){ G.HIST[wf]=[]; });
   saveHistToStorage();
+  // ⚠️ 위 deleteHistItem과 같은 이유로, 전체삭제도 쇼츠 전용 localStorage 스냅샷을 지워야
+  // 새로고침 후 쇼츠 항목들이 부활하지 않음.
+  try{localStorage.removeItem('clover_shorts_gallery');}catch(e){}
   // Supabase gallery에서도 일괄 삭제 (안 하면 새로고침 시 클라우드에서 다시 로드되어 복구됨)
   if(_supa&&_supaUser&&galleryIds.length>0){
     _supa.from('gallery').delete().in('id',galleryIds).eq('user_id',_supaUser.id)
@@ -32355,6 +32367,7 @@ function mobGalleryDelAll(){
     });
     Object.keys(G.HIST).forEach(function(wf){G.HIST[wf]=[];});
     saveHistToStorage();
+    try{localStorage.removeItem('clover_shorts_gallery');}catch(e){}
     // Supabase gallery에서도 일괄 삭제 (안 하면 새로고침 시 클라우드에서 다시 로드되어 복구됨)
     if(_supa&&_supaUser&&galleryIds.length>0){
       _supa.from('gallery').delete().in('id',galleryIds).eq('user_id',_supaUser.id)
