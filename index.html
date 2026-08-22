@@ -19621,32 +19621,44 @@ function _shortsGenerate(){
         (function(){
           var _chkV=document.createElement('video');
           _chkV.preload='metadata'; _chkV.src=url; _chkV.muted=true;
-          // ⚠️ 버그 대응("결과물이 아예 재생이 안 됨, 0:00에서 멈춰있음"): 위의 duration 체크는
-          // loadedmetadata가 떠야 동작하는데, 녹화된 blob 자체가 손상/텅 빈 상태면(브라우저 업데이트나
-          // 그래픽 드라이버 문제로 인코더가 데이터를 거의 못 만든 경우) loadedmetadata가 아예 안 뜨고
-          // error 이벤트만 뜸 — 이 경우를 못 잡으면 사용자는 "완성!"이라고만 뜬 걸 보고 재생해봤다가
-          // 원인도 모른 채 막힘. blob 자체가 비정상적으로 작을 때(정상적인 33초 4K 영상이라면 최소
-          // 수백 KB는 나와야 함)와, video 태그가 아예 로드에 실패했을 때 둘 다 명확히 경고함.
+          // ⚠️ 버그 수정(치명적, "경고 메시지가 코드는 도는데 화면엔 안 뜬다"): 이 블록 아래에서
+          // 곧 renderMain('shorts')가 호출되면서 사이드바가 통째로 다시 그려지는데, 그러면 지금
+          // 클로저로 잡고 있는 progWrap DOM 노드는 화면에서 떨어져나간(이미 교체된) 옛날 노드가
+          // 됨. 그런데 error/loadedmetadata 이벤트는 영상을 실제로 열어봐야 알 수 있어서 항상
+          // renderMain 이후에(비동기로 조금 늦게) 발생함 — 그 시점에 옛날 progWrap에 경고를
+          // appendChild해봤자 이미 화면에서 사라진 노드라 아무 효과가 없었음(에러도 안 나서
+          // 눈치채기 어려웠음). 이제 이벤트가 실제로 발생하는 시점에 gE()로 "그 순간의 진짜
+          // 화면에 붙어있는" progWrap을 다시 조회해서 거기에 붙임.
           _chkV.addEventListener('error', function(){
+            var _pw=gE('shorts-prog-wrap');
+            if(!_pw)return;
             var _errBox=document.createElement('div');
             _errBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
             _errBox.textContent='⚠️ 결과 영상 파일이 손상돼서 재생이 안 돼요(브라우저나 그래픽 드라이버 문제일 수 있어요). 화질을 낮추거나, 크롬을 재시작·업데이트 확인 후 다시 만들어보세요.';
-            if(progWrap)progWrap.appendChild(_errBox);
+            _pw.appendChild(_errBox);
+            _pw.style.display='';
           }, {once:true});
           _chkV.addEventListener('loadedmetadata', function(){
             var d=_chkV.duration;
             if(isFinite(d) && d>0 && d < totalDuration*0.85){
+              var _pw=gE('shorts-prog-wrap');
+              if(!_pw)return;
               var _warnBox=document.createElement('div');
               _warnBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
               _warnBox.textContent='⚠️ 인코딩이 밀려서 영상이 도중에 멈춘 것 같아요(의도한 '+Math.round(totalDuration)+'초보다 짧게 만들어짐: '+Math.round(d)+'초). 화질을 한 단계 낮춰서(예: 4K→FHD) 다시 만들어보세요.';
-              if(progWrap)progWrap.appendChild(_warnBox);
+              _pw.appendChild(_warnBox);
+              _pw.style.display='';
             }
           }, {once:true});
           if(blob.size < 20000){
-            var _sizeBox=document.createElement('div');
-            _sizeBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
-            _sizeBox.textContent='⚠️ 결과 영상 파일 용량이 비정상적으로 작아요('+Math.round(blob.size/1024)+'KB) — 녹화가 거의 안 된 채로 끝난 것 같아요. 화질을 낮추거나 브라우저를 재시작한 뒤 다시 만들어보세요.';
-            if(progWrap)progWrap.appendChild(_sizeBox);
+            var _pw2=gE('shorts-prog-wrap');
+            if(_pw2){
+              var _sizeBox=document.createElement('div');
+              _sizeBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
+              _sizeBox.textContent='⚠️ 결과 영상 파일 용량이 비정상적으로 작아요('+Math.round(blob.size/1024)+'KB) — 녹화가 거의 안 된 채로 끝난 것 같아요. 화질을 낮추거나 브라우저를 재시작한 뒤 다시 만들어보세요.';
+              _pw2.appendChild(_sizeBox);
+              _pw2.style.display='';
+            }
           }
         })();
         // ⚠️ 버그 수정(갤러리 버벅임의 실제 원인): 지금까지는 인코더가 도중에 죽어서 결과물이
@@ -19657,13 +19669,17 @@ function _shortsGenerate(){
         // 감지한 인코더 스톨이 있었다면(=화면이 도중에 멈춘 게 거의 확실) 갤러리에는 저장하지
         // 않고, 그래도 만들어진 데이터는 있으니 다운로드/미리보기까지는 그대로 가능하게 둠.
         if(_shortsEncoderStalled){
-          if(progWrap && !progWrap.querySelector('#shorts-notsaved-note')){
-            var _nsBox=document.createElement('div');
-            _nsBox.id='shorts-notsaved-note';
-            _nsBox.style.cssText='margin-top:6px;font-size:10.5px;color:var(--m2);text-align:center';
-            _nsBox.textContent='(인코딩 오류가 감지돼서 이 결과물은 갤러리에 자동 저장하지 않았어요 — 위에서 직접 다운로드는 가능해요)';
-            progWrap.appendChild(_nsBox);
-          }
+          setTimeout(function(){
+            var _pw3=gE('shorts-prog-wrap');
+            if(_pw3 && !_pw3.querySelector('#shorts-notsaved-note')){
+              var _nsBox=document.createElement('div');
+              _nsBox.id='shorts-notsaved-note';
+              _nsBox.style.cssText='margin-top:6px;font-size:10.5px;color:var(--m2);text-align:center';
+              _nsBox.textContent='(인코딩 오류가 감지돼서 이 결과물은 갤러리에 자동 저장하지 않았어요 — 위에서 직접 다운로드는 가능해요)';
+              _pw3.appendChild(_nsBox);
+              _pw3.style.display='';
+            }
+          },0); // renderMain('shorts')가 DOM을 새로 그린 "다음" 틱에 실행돼야 안 사라짐
         } else {
           // 갤러리에 비디오로도 추가 — IndexedDB에 실제 바이너리를 저장해서
           // 새로고침/재방문·재생성 후에도 사라지지 않도록 한다.
