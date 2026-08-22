@@ -2912,6 +2912,31 @@ function _openImageLightbox(url, urls, idx){
   img.src=hasNav?urls[curIdx]:url;
   img.style.cssText='max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.5)';
   var zoomCtl=_wireZoomPanControls(img, ov);
+  // ⚠️ 요청 반영: "갤러리뿐 아니라 이미지를 클릭해서 크게 보는 곳이면 어디든 사이즈 표시,
+  // 눈에 잘 띄게 이미지 안쪽 우하단, 브랜드 컬러로" — 이 라이트박스는 앱 전체에서 더블클릭
+  // 확대볼 때 가장 많이 쓰이는 공용 함수라 여기 고치면 사실상 전역에 다 적용됨.
+  var mediaWrap=document.createElement('div');
+  mediaWrap.style.cssText='position:relative;display:inline-flex;max-width:100%;max-height:100%';
+  mediaWrap.appendChild(img);
+  var dimBadge=document.createElement('div');
+  dimBadge.style.cssText='position:absolute;bottom:12px;right:12px;color:#00e5cc;font-size:13px;font-weight:700;background:rgba(0,0,0,.65);border:1px solid rgba(0,229,204,.5);padding:5px 12px;border-radius:20px;z-index:2;font-variant-numeric:tabular-nums;pointer-events:none';
+  dimBadge.textContent='크기 확인 중...';
+  mediaWrap.appendChild(dimBadge);
+  function _updateDimBadge(){
+    dimBadge.style.display='';
+    dimBadge.textContent='크기 확인 중...';
+    var _cur=img; // 클로저로 매번 최신 img 참조
+    var check=function(){
+      if(_cur.naturalWidth&&_cur.naturalHeight) dimBadge.textContent=_cur.naturalWidth+' × '+_cur.naturalHeight;
+      else dimBadge.style.display='none';
+    };
+    if(_cur.complete && _cur.naturalWidth) check();
+    else{
+      _cur.addEventListener('load', check, {once:true});
+      _cur.addEventListener('error', function(){ dimBadge.style.display='none'; }, {once:true});
+    }
+  }
+  _updateDimBadge();
   var closeBtn=document.createElement('button');
   closeBtn.type='button'; closeBtn.innerHTML='&#10005;';
   closeBtn.style.cssText='position:absolute;top:18px;right:22px;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
@@ -2921,6 +2946,7 @@ function _openImageLightbox(url, urls, idx){
     curIdx = ((newIdx % urls.length) + urls.length) % urls.length; // 양끝에서 순환
     img.src = urls[curIdx];
     zoomCtl.reset(); // 이미지가 바뀌면 이전 확대/이동 상태는 초기화
+    _updateDimBadge(); // 이미지가 바뀌었으니 사이즈 배지도 새로 확인
     if(counter) counter.textContent = (curIdx+1)+' / '+urls.length;
   }
   function onKey(e){
@@ -2932,7 +2958,7 @@ function _openImageLightbox(url, urls, idx){
   closeBtn.onclick=close;
   ov.onclick=function(){ if(!zoomCtl.isZoomed()) close(); }; // 확대 중엔 바깥 클릭으로 안 닫히게(드래그 실수 방지)
   document.addEventListener('keydown', onKey);
-  ov.appendChild(img); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn);
+  ov.appendChild(mediaWrap); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn);
   if(hasNav){
     var prevBtn=document.createElement('button'); prevBtn.type='button'; prevBtn.innerHTML='&#10094;';
     prevBtn.style.cssText='position:absolute;left:14px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
@@ -30005,11 +30031,28 @@ function _simpleImageZoomShow(urlList, idx){
   ov.id='simple-zoom-ov';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
   ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  var mediaWrap=document.createElement('div');
+  mediaWrap.style.cssText='position:relative;display:inline-flex;max-width:96%;max-height:75vh';
   var mediaEl=document.createElement('img');
   mediaEl.src=src;
-  mediaEl.style.cssText='max-width:96%;max-height:75vh;object-fit:contain;border-radius:8px';
+  mediaEl.style.cssText='max-width:100%;max-height:75vh;object-fit:contain;border-radius:8px';
   _wireZoomPanControls(mediaEl, ov);
-  ov.appendChild(mediaEl);
+  mediaWrap.appendChild(mediaEl);
+  // ⚠️ 요청 반영: 이미지를 클릭해서 크게 보는 곳이면 어디든(갤러리뿐 아니라 여기도) 사이즈 표시.
+  var dimBadge=document.createElement('div');
+  dimBadge.style.cssText='position:absolute;bottom:12px;right:12px;color:#00e5cc;font-size:13px;font-weight:700;background:rgba(0,0,0,.65);border:1px solid rgba(0,229,204,.5);padding:5px 12px;border-radius:20px;z-index:2;font-variant-numeric:tabular-nums;pointer-events:none';
+  dimBadge.textContent='크기 확인 중...';
+  mediaWrap.appendChild(dimBadge);
+  var _showImgDim=function(){
+    if(mediaEl.naturalWidth&&mediaEl.naturalHeight) dimBadge.textContent=mediaEl.naturalWidth+' × '+mediaEl.naturalHeight;
+    else dimBadge.remove();
+  };
+  if(mediaEl.complete && mediaEl.naturalWidth) _showImgDim();
+  else{
+    mediaEl.addEventListener('load', _showImgDim, {once:true});
+    mediaEl.addEventListener('error', function(){ dimBadge.remove(); }, {once:true});
+  }
+  ov.appendChild(mediaWrap);
   if(urlList.length>1){
     var prevBtn=document.createElement('button');prevBtn.type='button';prevBtn.textContent='‹';
     prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
@@ -30042,23 +30085,30 @@ function _galleryZoomShow(list, idx){
   var isVidItem=src.includes('.mp4')||src.includes('.webm')||it.wf==='video'||it.wf==='shorts';
   var mediaEl;
   var zoomCtl=null;
+  // ⚠️ 요청 반영: 사이즈 배지가 실제 사진/영상의 테두리에 딱 붙어 보이도록(뷰포트 좌상단 구석이
+  // 아니라) 미디어를 감싸는 wrapper를 추가함 — wrapper가 미디어 크기에 딱 맞게(inline-flex)
+  // 줄어들어서, 그 안에서 absolute로 배치하면 항상 실제 이미지 모서리에 붙음.
+  var mediaWrap=document.createElement('div');
+  mediaWrap.style.cssText='position:relative;display:inline-flex;max-width:96%;max-height:75vh';
   if(isVidItem){
     mediaEl=document.createElement('video');
     mediaEl.src=src;mediaEl.controls=true;mediaEl.autoplay=true;mediaEl.loop=true;
-    mediaEl.style.cssText='max-width:96%;max-height:75vh;border-radius:8px;background:#000';
+    mediaEl.style.cssText='max-width:100%;max-height:75vh;border-radius:8px;background:#000';
   } else {
     mediaEl=document.createElement('img');
     mediaEl.src=src;
-    mediaEl.style.cssText='max-width:96%;max-height:75vh;object-fit:contain;border-radius:8px';
+    mediaEl.style.cssText='max-width:100%;max-height:75vh;object-fit:contain;border-radius:8px';
     // ⚠️ 요청 반영: "갤러리·즐겨찾기 이미지도 확대/축소 넣어달라" — 공용 헬퍼 재사용.
     zoomCtl=_wireZoomPanControls(mediaEl, ov);
   }
-  // ⚠️ 요청 반영: "갤러리에서 이미지 크게 볼 때 이미지 사이즈도 표시해달라" — 로드 완료되면
-  // 실제 픽셀 크기(가로×세로)를 좌상단에 작은 배지로 보여줌. 사진/영상 둘 다 지원.
+  mediaWrap.appendChild(mediaEl);
+  // ⚠️ 요청 반영: "갤러리 탭뿐 아니라 이미지를 클릭해서 크게 보는 곳이면 어디든 사이즈 표시,
+  // 위치도 눈에 잘 띄게(이미지 안쪽 우측 하단), 색깔도 브랜드 로고 컬러로" — 사진 우하단에
+  // 딱 붙는 배지로 변경하고 브랜드 민트색(#00e5cc)을 씀.
   var dimBadge=document.createElement('div');
-  dimBadge.style.cssText='position:absolute;top:16px;left:20px;color:#ccc;font-size:12.5px;background:rgba(0,0,0,.4);padding:4px 12px;border-radius:20px;z-index:2;font-variant-numeric:tabular-nums';
+  dimBadge.style.cssText='position:absolute;bottom:12px;right:12px;color:#00e5cc;font-size:13px;font-weight:700;background:rgba(0,0,0,.65);border:1px solid rgba(0,229,204,.5);padding:5px 12px;border-radius:20px;z-index:2;font-variant-numeric:tabular-nums;pointer-events:none';
   dimBadge.textContent='크기 확인 중...';
-  ov.appendChild(dimBadge);
+  mediaWrap.appendChild(dimBadge);
   if(isVidItem){
     mediaEl.addEventListener('loadedmetadata', function(){
       if(mediaEl.videoWidth&&mediaEl.videoHeight) dimBadge.textContent=mediaEl.videoWidth+' × '+mediaEl.videoHeight;
@@ -30161,10 +30211,10 @@ function _galleryZoomShow(list, idx){
     var mediaRow=document.createElement('div');
     mediaRow.style.cssText='display:flex;gap:16px;align-items:flex-start;justify-content:center;max-width:96%;max-height:75vh;flex-wrap:wrap';
     mediaEl.style.maxWidth='min(72vw, 800px)';
-    mediaRow.appendChild(mediaEl); mediaRow.appendChild(_budgetPanel);
+    mediaRow.appendChild(mediaWrap); mediaRow.appendChild(_budgetPanel);
     ov.appendChild(mediaRow);
   } else {
-    ov.appendChild(mediaEl);
+    ov.appendChild(mediaWrap);
   }
   ov.appendChild(btns);
   ov.onclick=function(e){if(e.target===ov||(e.target===mediaEl && !(zoomCtl&&zoomCtl.isZoomed())))ov.remove();};
