@@ -3218,6 +3218,11 @@ function selectWF(wf){
       var d=_draftLoad(_shortsDraftKey(), 24*60*60*1000);
       if(d && d.images && d.images.length){
         if(confirm('이전에 작업하던 쇼츠 내용이 있어요 (사진 '+d.images.length+'장). 불러올까요?')){
+          // ⚠️ 버그 수정("썸네일 흐린 거 고쳤다더니 그대로다"): 예전(수정 전) 저화질 설정으로
+          // 만들어져서 같이 저장돼있던 캐시된 썸네일(_thumb)이 그대로 복원돼서, 새로 고친 고화질
+          // 생성 로직이 다시 실행되지 않고 계속 예전 흐린 썸네일을 재사용하고 있었음 — 복원 시
+          // _thumb를 지워서 화면에 그려질 때 항상 지금 버전의(고화질) 로직으로 새로 만들어지게 함.
+          d.images.forEach(function(im){ delete im._thumb; delete im._thumbFailed; delete im._thumbPending; });
           G_SHORTS.images=d.images;
           Object.assign(G_SHORTS.opts, d.opts||{});
         } else {
@@ -3446,7 +3451,7 @@ function _shortsEnsureThumb(im, cb){
       var cv=document.createElement('canvas');
       cv.width=Math.max(1,Math.round(w*scale)); cv.height=Math.max(1,Math.round(h*scale));
       cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
-      im._thumb=cv.toDataURL('image/jpeg',0.75);
+      im._thumb=cv.toDataURL('image/jpeg',0.88); // ⚠️ 0.75→0.88로 올림(압축으로 뿌옇게 보이던 것 개선)
     }catch(e){ im._thumbFailed=true; /* CORS 등으로 실패하면 그냥 원본 계속 사용 */ }
     im._thumbPending=false;
     if(im._thumb && im._tileDomId){
@@ -10511,7 +10516,15 @@ function _scheduleShortsCloudSync(statusEl){
       _uploadDataUrlIfNeeded(im.img, 'shorts'+i, function(u){ im.img=u; done(); });
     });
     function finalize(){
-      _saveWorkspaceState('shorts_images', {images: G_SHORTS.images, opts: G_SHORTS.opts});
+      // ⚠️ 예방 조치: _thumb(캐시된 썸네일 base64)는 순전히 화면 표시용 캐시일 뿐이라 클라우드에
+      // 저장할 필요가 없고, 오히려 저장해두면 나중에 썸네일 생성 로직을 개선해도 예전 캐시가
+      // 계속 복원되어 개선이 반영 안 되는 문제가 생김(실제로 한 번 발생했었음) — 저장 시 제외함.
+      var _imgsForSave = (G_SHORTS.images||[]).map(function(im){
+        var c=Object.assign({}, im);
+        delete c._thumb; delete c._thumbFailed; delete c._thumbPending; delete c._thumbCbs; delete c._tileDomId;
+        return c;
+      });
+      _saveWorkspaceState('shorts_images', {images: _imgsForSave, opts: G_SHORTS.opts});
       if(statusEl && statusEl.isConnected) statusEl.textContent='☁️ 자동으로 클라우드에 저장돼요 (다른 기기에서 이어보기 가능)';
     }
   }, 1200);
@@ -16612,6 +16625,9 @@ function sbShorts(p){
     if(!images.length && !G._shortsDraftDeclined){
       _loadWorkspaceState('shorts_images', function(data){
         if(!data || !data.images || !data.images.length) return;
+        // ⚠️ 버그 수정("썸네일 흐린 거 고쳤다더니 그대로다"): 로컬 draft 복원과 동일한 이유로,
+        // 클라우드에 저장돼있던 예전(수정 전) 저화질 썸네일 캐시도 지워서 항상 새로 생성되게 함.
+        data.images.forEach(function(im){ delete im._thumb; delete im._thumbFailed; delete im._thumbPending; });
         G_SHORTS.images = data.images;
         if(data.opts) G_SHORTS.opts = Object.assign({}, G_SHORTS.opts, data.opts);
         // ⚠️ 버그 수정("메인화면엔 이미지들이 그대로 있는데 왼쪽 사이드바만 0개로 리셋된 것 같다"):
