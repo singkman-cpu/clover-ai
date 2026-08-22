@@ -13845,7 +13845,15 @@ function _padExteriorTo916WithBlur(url, cb){
     // 정작 그 사진은 뒤에서 잘려나가 앞뒤가 안 맞는 프롬프트가 되는 걸 방지). 실내 뷰는 여러 장
     // 참고해도 안전하므로 그대로 둠.
     if(spTab.autoRoomWindowAnchor && !_isExteriorViewType(typeName)){
-      _looseRefs = _looseRefs.concat([spTab.autoRoomWindowAnchor]).filter(function(v,i,a){return v && a.indexOf(v)===i;}).slice(0,3);
+      // ⚠️ 버그 수정(핵심 원인, "바닥은 통일 잘 되는데 창호 색은 잘 안 맞는다"): 여기서도 위
+      // _autoRoomGenerateStep의 다른 경로와 똑같은 문제가 있었음 — _looseRefs가 이미 최대 2장으로
+      // 정리돼 있었는데(위 13687/13731/13793줄), 여기서 창호 기준을 추가하며 slice(0,3)으로
+      // 3장까지 다시 늘어나서 창호 신호가 다른 참고 이미지들 사이에서 희석되고 있었음. 항상
+      // [기존 참고 중 가장 마지막(최신) 1장 + 창호 기준 1장]으로만 유지해서 창호 신호 비중을 크게 함.
+      var _looseOther = _looseRefs.length ? _looseRefs[_looseRefs.length-1] : null;
+      _looseRefs = _looseOther && _looseOther!==spTab.autoRoomWindowAnchor
+        ? [_looseOther, spTab.autoRoomWindowAnchor]
+        : [spTab.autoRoomWindowAnchor];
       // ⚠️ 버그 수정(치명적, "서재·작은방·아이방이 전부 똑같은 구도로 나온다"): 이 지시가 "창호
       // 색상·형태만" 맞추라고 했는데도, 사진 전체를 참고 이미지로 통째로 첨부하다 보니 모델이
       // 창호뿐 아니라 카메라 구도·천장 높이·방 비율·창문 크기·가구 배치까지 통째로 따라 그리는
@@ -14065,19 +14073,25 @@ function _padExteriorTo916WithBlur(url, cb){
   // (창틀) 색상·형태만큼은 최우선으로 맞추라고 명시함 — genPool은 외관/실내로 나뉘어 있어서
   // 서로를 참고 못 했던 문제를, 이 별도의 공용 기준 이미지로 보완함.
   if(spTab.autoRoomWindowAnchor && chainedRefs.indexOf(spTab.autoRoomWindowAnchor)===-1){
-    chainedRefs = chainedRefs.concat([spTab.autoRoomWindowAnchor]).slice(0,3);
+    // ⚠️ 버그 수정(핵심 원인, "바닥은 통일 잘 되는데 창호 색은 잘 안 맞는다"): 여기서 창호 기준을
+    // 추가하면서 참고 이미지가 3장까지 늘어났었음(바로 위에서 "콜라주 방지 위해 최대 2장"으로
+    // 이미 정리해놨는데도) — 참고 이미지 3장 중 2장은 "바닥·벽 등 전체적으로 맞춰라"는 넓은
+    // 지시를 달고 들어가고, 창호 기준 1장만 "창호만 맞춰라"는 좁은 지시를 다니까, 모델 입장에서
+    // 바닥 쪽 신호는 두 배로 강하고 창호 쪽 신호는 상대적으로 약해서 묻히기 쉬웠던 것으로 보임.
+    // 세로 비율(9:16/3:4)에서만 걸려있던 "다시 1장으로" 안전장치를 모든 비율에 동일하게 적용해서,
+    // 창호 기준이 있을 땐 항상 [창호 기준 이미지 1장 + genPool 중 가장 최근 것 1장]으로만 유지함
+    // (창호 신호가 다른 참고 이미지에 묻히지 않도록 항상 비중을 크게 유지).
+    var _otherRef = chainedRefs.length ? chainedRefs[chainedRefs.length-1] : null;
+    chainedRefs = _otherRef ? [_otherRef, spTab.autoRoomWindowAnchor] : [spTab.autoRoomWindowAnchor];
     // ⚠️ 버그 수정(치명적, "서재·작은방·아이방이 전부 똑같은 구도로 나온다"): 아래 자세한 이유는
     // 위 _autoRoomGenerateStep의 동일한 수정 참고 — 여기서도 "창호만 같고 나머지는 완전히 다른
     // 방"임을 구체적으로 못박음.
     task.prompt += ' ⚠️⚠️ 창호(창틀) 색상·형태만 통일(매우 중요, 다른 스타일 지시보다 창호에 관해서는 우선): 첨부된 참고 이미지 중 하나는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에서 창호(창틀)의 색상·소재·형태(창틀 두께, 창을 몇 칸으로 나누는 분할 패턴/멀리언 개수와 배치까지 포함)를 뽑아서 이 공간에도 동일하게 적용하세요. 문(현관문·중문 등)이 보이는 공간이라면 문의 색상·소재도 이 창호와 어울리는 통일된 톤으로 맞추세요. ⚠️⚠️⚠️ 단, 그 사진의 나머지 요소는 절대 따라 그리지 마세요 — 카메라 구도·앵글, 천장 높이·방의 세로/가로 비율, 창문의 개수·크기·위치, 조명 기구의 종류·위치, 가구 배치·수납장 구조는 이 사진과 완전히 다르게, 지금 만드는 이 공간(용도·크기)에 맞게 새로 구성하세요. "창호 기준 사진과 이 공간이 거의 같은 구도·같은 방처럼 보인다"면 명백한 실패입니다. ⚠️ 단, 사용자가 직접 창문 프레임 색상을 지정했다면 그 색이 항상 우선합니다.';
   }
-  // ⚠️ 버그 수정(핵심 원인, "거실은 블랙 창호인데 주방은 우드로 나온다"): 창호 기준 이미지를
-  // 여기서 다시 추가하면서(concat) 세로 비율용 "1장만" 제한이 풀려서 2장이 되고 있었음(콜라주
-  // 위험 재발) — 세로 비율이면 창호 기준 이미지를 우선해서 다시 1장으로 최종 정리함.
-  if(_tallAspect && chainedRefs.length>1){
-    chainedRefs = spTab.autoRoomWindowAnchor && chainedRefs.indexOf(spTab.autoRoomWindowAnchor)!==-1
-      ? [spTab.autoRoomWindowAnchor]
-      : chainedRefs.slice(0,1);
+  // ⚠️ 위에서 창호 기준이 있을 때 이미 [기존참고 1장+창호기준 1장]으로 최종 정리했으므로, 세로
+  // 비율에서 또 손댈 필요는 없음(창호 기준이 없는 경우에만 아래 로직이 의미가 있음).
+  if(_tallAspect && chainedRefs.length>1 && chainedRefs.indexOf(spTab.autoRoomWindowAnchor)===-1){
+    chainedRefs = chainedRefs.slice(0,1);
   }
   getTab('space').refs = chainedRefs;
   // ⚠️ 되돌림: "레퍼런스 비율 그대로 강제"가 오히려 컨셉확장 자체의 "출력 비율" 선택(mkAspectRatio,
