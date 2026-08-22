@@ -16019,7 +16019,18 @@ function _shortsDeleteImageWithUndo(item){
   window._shortsDeleteUndoStack.push({item:item, index:idx});
   if(window._shortsDeleteUndoStack.length>10){
     var dropped = window._shortsDeleteUndoStack.shift();
-    if(dropped.item.img && dropped.item.img.indexOf('blob:')===0){ try{ URL.revokeObjectURL(dropped.item.img); }catch(e){} }
+    // ⚠️ 버그 수정(치명적, 실제 콘솔 에러로 확인됨 — "net::ERR_FILE_NOT_FOUND"): 같은 사진을
+    // 여러 장면에 썼거나(복제 등) 실행 취소 스택에 같은 blob URL을 가진 항목이 겹쳐 있는 경우,
+    // 여기서 "스택에서 밀려난 항목이니 이제 안 쓰겠지" 하고 무조건 URL을 해제해버리면, 그 사이
+    // 실제로 지금 화면·렌더링에 여전히 쓰이고 있는 다른 이미지까지 같이 깨져버렸음(같은 blob URL
+    // 이니까) — 렌더링 도중 그 이미지를 다시 불러오려다 "파일을 찾을 수 없음" 에러가 나는 게
+    // 바로 이 상황. 이제 지우기 전에 (1)현재 G_SHORTS.images 목록과 (2)아직 undo 스택에 남아있는
+    // 다른 항목들 양쪽에 같은 blob URL을 쓰는 게 하나도 없을 때만 실제로 해제하도록 고침.
+    var stillUsed = G_SHORTS.images.some(function(x){ return x.img===dropped.item.img; })
+      || window._shortsDeleteUndoStack.some(function(e){ return e.item.img===dropped.item.img; });
+    if(!stillUsed && dropped.item.img && dropped.item.img.indexOf('blob:')===0){
+      try{ URL.revokeObjectURL(dropped.item.img); }catch(e){}
+    }
   }
   G_SHORTS.images = G_SHORTS.images.filter(function(x){ return x!==item; });
   renderSB(); renderMain('shorts');
