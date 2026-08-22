@@ -15879,14 +15879,19 @@ function _shortsSaveDraftAsync(){
   // 이미 3번 이상 변환에 실패한(죽은) blob은 더 이상 재시도하지 않음 — 무한 재시도로 콘솔에
   // net::ERR_FILE_NOT_FOUND가 계속 쌓이던 문제 방지. 대신 화면에서 "깨짐" 표시로 보여줌.
   var blobImgs=G_SHORTS.images.filter(function(im){return im.img && im.img.indexOf('blob:')===0 && !im._blobDead;});
-  if(!blobImgs.length){ _draftSave(_shortsDraftKey(), G_SHORTS); _shortsCloudSaveDraft(G_SHORTS); return; } // 변환할 게 없으면 그냥 바로 저장
+  if(!blobImgs.length){ _shortsSaveSnapshot(G_SHORTS); return; } // 변환할 게 없으면 바로 저장(dirty-check 포함)
+  // ⚠️ 성능 개선(위와 짝을 이룸): blob 하나당 6초마다 매번 다시 base64로 변환하고 있었는데,
+  // 같은 blob URL이면 지난번에 변환해둔 결과(im._cachedDataUrl)를 그대로 재사용하도록 해서,
+  // 실제로 새로 추가되거나 바뀐 blob만 변환 작업을 하게 함.
   Promise.all(blobImgs.map(function(im){
+    if(im._cachedDataUrl && im._cachedDataUrlSrc===im.img) return Promise.resolve(im._cachedDataUrl);
     return _blobUrlToDataUrl(im.img).then(function(dataUrl){
       if(!dataUrl){
         im._blobFailCount=(im._blobFailCount||0)+1;
         if(im._blobFailCount>=3){ im._blobDead=true; console.warn('[Shorts] 이미지 복구 불가(재업로드 필요):', im.id); renderMain('shorts'); }
       } else {
         im._blobFailCount=0;
+        im._cachedDataUrl=dataUrl; im._cachedDataUrlSrc=im.img;
       }
       return dataUrl;
     });
@@ -15895,6 +15900,11 @@ function _shortsSaveDraftAsync(){
     var snapshot=JSON.parse(JSON.stringify(G_SHORTS, function(k,v){
       if(k==='bgmFile'||k==='file') return undefined;
       if(k==='videoUrl' && typeof v==='string' && v.indexOf('blob:')===0) return undefined;
+      // ⚠️ 성능 개선: 이 내부 캐시 필드들(썸네일·변환 캐시)은 화면 표시·저장 최적화용으로
+      // 이 세션 안에서만 쓰는 값이라 굳이 저장할 필요가 없음 — 그대로 두면 im.img 자체가
+      // 이미 큰 base64로 바뀌는 경우(blob) 그 큰 문자열이 중복으로 한 번 더 들어가서 저장
+      // 용량만 불필요하게 커짐. 다음에 이 탭에 다시 들어오면 필요할 때 다시 만들어지므로 안전.
+      if(k==='_thumb'||k==='_thumbLoading'||k==='_thumbFailed'||k==='_cachedDataUrl'||k==='_cachedDataUrlSrc'||k==='_blobFailCount') return undefined;
       return v;
     }));
     var bi=0;
@@ -15903,9 +15913,27 @@ function _shortsSaveDraftAsync(){
     });
     // 복구 불가로 확정된 이미지는 백업에서 아예 빼서, 다음 새로고침 때 깨진 채로 복원되지 않게 함
     snapshot.images=snapshot.images.filter(function(im){return !im._blobDead;});
-    try{ localStorage.setItem(_shortsDraftKey(), JSON.stringify({t:Date.now(), data:snapshot})); }catch(e){}
-    _shortsCloudSaveDraft(snapshot);
+    _shortsSaveSnapshot(snapshot);
   });
+}
+// ⚠️ 버그 수정(치명적 성능 문제, "쇼츠 제작하는데 전체가 버벅거린다"): 지금까지 6초마다 매번
+// 무조건 전체 상태를 JSON으로 직렬화해서 "동기적(블로킹)"인 localStorage.setItem으로 저장하고
+// 있었음 — 사진이 많거나(썸네일 캐시까지 포함되면 더 커짐) 데이터가 크면, 이 한 번의 setItem
+// 호출이 메인 스레드를 그 순간 동안 완전히 멈추게 해서, 정확히 6초 주기로 화면 전체가 잠깐씩
+// 얼어붙는(버벅이는) 원인이었을 가능성이 높음. 직전 저장 내용과 완전히 같으면(아무것도 안
+// 바뀌었으면) 아예 저장 자체를 건너뛰도록 고침 — 실제로 뭔가 바뀌었을 때만 무거운 직렬화·저장
+// 작업을 하게 되므로, 가만히 보고만 있거나 렌더링 중일 때는 이 부담이 거의 사라짐. (저장소
+// 자체를 IndexedDB로 옮기는 것도 고려했지만, 새로고침 직후 "이전 작업 불러올까요?" 확인은
+// 동기적으로 localStorage를 읽는 구조라서 그쪽까지 같이 비동기로 바꿔야 해 위험 부담이 커서,
+// 이번엔 안전하게 "불필요한 반복 저장 제거"만으로 확실한 개선을 함.)
+var _shortsLastSnapshotHash = null;
+function _shortsSaveSnapshot(snapshot){
+  var json = JSON.stringify({t:Date.now(), data:snapshot});
+  var bodyForHash = json.slice(json.indexOf('"data":')); // t(타임스탬프)는 비교에서 제외
+  if(bodyForHash === _shortsLastSnapshotHash) return; // 내용이 안 바뀌었으면 저장 자체를 건너뜀
+  _shortsLastSnapshotHash = bodyForHash;
+  try{ localStorage.setItem(_shortsDraftKey(), json); }catch(e){}
+  _shortsCloudSaveDraft(snapshot);
 }
 setInterval(function(){
   _shortsSaveDraftAsync();
