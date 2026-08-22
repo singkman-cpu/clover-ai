@@ -18891,14 +18891,16 @@ function _shortsBitmapToBlob(bmp, cb, origFile){
     var ctx=canvas.getContext('2d');
     ctx.drawImage(bmp,0,0);
     bmp.close&&bmp.close();
-    if(canvas.toBlob){
-      canvas.toBlob(function(blob){
-        if(blob) cb(URL.createObjectURL(blob));
-        else _shortsResizeImageFileLegacy(origFile, 1600, cb);
-      }, 'image/jpeg', 0.86);
-    } else {
-      cb(canvas.toDataURL('image/jpeg',0.86));
-    }
+    // ⚠️ 버그 수정(치명적, "외부에서 불러온 이미지만 나갔다 오면 역할 지정이 리셋되고 미리보기도
+    // 깨진다"): 예전엔 여기서 canvas.toBlob()으로 blob: 주소를 만들어서 G_SHORTS.images[].img에
+    // 저장했음 — blob: 주소는 브라우저를 새로고침하거나 세션이 끊기면 즉시 무효화되는데, 이
+    // 항목이 하나라도 blob:이면 쇼츠 임시저장(draft) 전체가 통째로 스킵되도록 이미 방어 코드가
+    // 있었지만(hasUnconvertedBlob), 정작 이 blob을 나중에 영구 주소로 바꿔주는 코드가 없어서
+    // 계속 미저장 상태로 남았고, 결국 새로고침 시 예전 스냅샷으로 복원되며 역할 지정이 사라지고
+    // (죽은 blob이라) 미리보기도 깨진 이미지로 보였던 것. toBlob 대신 처음부터 toDataURL(영구
+    // base64 문자열)로 저장해서, 애초에 이 문제가 생길 수 없게 함 — 1600px로 이미 축소된 뒤라
+    // 인코딩 부담도 크지 않음.
+    cb(canvas.toDataURL('image/jpeg',0.86));
   }catch(err){ _shortsResizeImageFileLegacy(origFile, 1600, cb); }
 }
 // 구형 브라우저용 대체 경로 (기존 방식 그대로 유지)
