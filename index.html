@@ -18723,6 +18723,14 @@ function _shortsRenderCanvas(ub){
       // 선택 자체는 되게 해서(_shortsPreviewIdx 지정) Delete/Backspace로 지울 수 있게 함. 위쪽
       // 미리보기 캔버스는 이 사진이 애초에 영상에 포함 안 되니 안전하게 첫 번째 실제 장면을
       // 대신 보여주도록 이미 처리돼 있음(16183줄 부근) — 크래시 없이 그대로 동작함.
+      // ⚠️ 버그 수정(치명적, "외부 이미지는 더블클릭으로 문구 설정이 안 된다"): 역할 미지정
+      // 사진을 클릭할 때마다 아래에서 즉시 renderMain('shorts')로 화면 전체를 다시 그렸는데,
+      // 더블클릭은 실제로는 "클릭 두 번"이라서 첫 번째 클릭에서 이미 이 tile을 포함한 화면
+      // 전체가 새 DOM으로 통째로 교체돼버림 — 그러면 브라우저 입장에서 두 번째 클릭이 "같은
+      // 요소를 두 번 클릭"한 게 아니게 되어 dblclick 이벤트 자체가 안정적으로 발생하지 못했음
+      // (역할이 이미 있는 사진은 이 경고 분기를 안 타서 문제없이 잘 됐던 것). 화면 갱신을 약간
+      // (더블클릭 인식 시간만큼) 지연시키고, 그 사이 진짜 두 번째 클릭(더블클릭)이 오면 이
+      // 지연된 갱신을 취소해서 tile이 그대로 유지되게 함 — 그래야 더블클릭이 안 깨짐.
       if(im.type!=='blank' && !_shortsResolvedRole(im) && !_shortsHasCustomLabel(im)){
         var stl=gE('stl');
         if(stl){
@@ -18733,7 +18741,8 @@ function _shortsRenderCanvas(ub){
         }
         tile.animate&&tile.animate([{boxShadow:'0 0 0 3px #f59e0b'},{boxShadow:'0 0 0 0px #f59e0b'}],{duration:500});
         G._shortsPreviewIdx=idx; // 선택은 시켜서 Delete 키가 먹히게 함(미리보기 화면 자체는 안 바뀔 수 있음)
-        renderMain('shorts');
+        clearTimeout(tile._clickRedrawTimer);
+        tile._clickRedrawTimer=setTimeout(function(){ renderMain('shorts'); }, 320);
         return;
       }
       if(G._shortsPreviewIdx===idx) return; // 이미 이 장면 보고 있으면 다시 안 그림
@@ -18743,6 +18752,7 @@ function _shortsRenderCanvas(ub){
     if(G._shortsPreviewIdx===idx){ tile.style.boxShadow='0 0 0 3px var(--ac)'; }
     tile.addEventListener('dblclick',function(e){
       e.preventDefault();
+      clearTimeout(tile._clickRedrawTimer); // 첫 클릭에서 예약해둔 지연 갱신 취소 — 더블클릭이면 필요 없음
       if(im.type==='blank'){
         var stlB=gE('stl');
         if(stlB){
