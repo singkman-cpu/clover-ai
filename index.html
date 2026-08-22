@@ -16986,13 +16986,41 @@ function sbShorts(p){
 
   var bgmInput=document.createElement('input');
   bgmInput.type='file';bgmInput.accept='audio/*';bgmInput.style.cssText='width:100%;font-size:12px;color:var(--t2);cursor:pointer;background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:7px 10px';
+  // ⚠️ 버그 대응("음악 선택했는데 다른 탭 갔다오면 안 보임"): opts.bgmFile/bgmUrl은 전역 상태라
+  // 실제로는 그대로 유지되고 있었음 — 문제는 사이드바를 다시 그릴 때마다 <input type=file>을
+  // 새로 만드는데, 브라우저 보안 정책상 파일 입력창엔 이전 선택을 프로그램적으로 다시 채워넣을
+  // 수 없어서 화면엔 항상 "선택 안 됨"으로 보였던 것(실제 데이터 유실은 아니었음). 이제 현재
+  // 선택된 파일명을 별도 줄로 항상 표시해서, 유지되고 있다는 걸 눈으로 바로 확인할 수 있게 함.
+  var bgmCurWrap=dv('');bgmCurWrap.style.cssText='display:flex;align-items:center;gap:8px;margin-top:6px';
+  function _refreshBgmCurLabel(){
+    bgmCurWrap.innerHTML='';
+    if(opts.bgmFile){
+      var okChip=document.createElement('div');
+      okChip.style.cssText='flex:1;min-width:0;font-size:11px;color:var(--ac,#00e5cc);background:var(--acg,rgba(0,229,204,.1));border:1px solid var(--ac,#00e5cc);border-radius:7px;padding:6px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      okChip.textContent='🎵 '+opts.bgmFile.name;
+      okChip.title=opts.bgmFile.name;
+      bgmCurWrap.appendChild(okChip);
+      var rmBtn=document.createElement('button');rmBtn.type='button';
+      rmBtn.style.cssText='flex-shrink:0;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);border-radius:7px;padding:6px 10px;font-size:11px;cursor:pointer;font-family:inherit';
+      rmBtn.textContent='✕ 제거';
+      rmBtn.onclick=function(){
+        opts.bgmFile=null; opts.bgmUrl=null;
+        bgmInput.value='';
+        _refreshBgmCurLabel();
+      };
+      bgmCurWrap.appendChild(rmBtn);
+    }
+  }
   bgmInput.onchange=function(){
     if(bgmInput.files[0]){
       opts.bgmFile=bgmInput.files[0];
       opts.bgmUrl=URL.createObjectURL(bgmInput.files[0]);
+      _refreshBgmCurLabel();
     }
   };
   bgmWrap.appendChild(bgmInput);
+  _refreshBgmCurLabel();
+  bgmWrap.appendChild(bgmCurWrap);
   var bgmNote=dv('');
   bgmNote.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.5';
   bgmNote.innerHTML='음악은 영상 길이에 맞춰 자동으로 잘리고, 끝나기 2초 전부터 서서히 페이드아웃돼요.';
@@ -19428,7 +19456,12 @@ function _shortsGenerate(){
   // 이제 이미지를 불러온 직후 실제 크기를 확인해서, 렌더링에 필요한 수준(4K 출력 기준으로
   // 충분히 여유 있는 4000px)보다 크면 캔버스로 한 번 축소해서 저장하도록 함 — 화질 손실은
   // 거의 없으면서(4000px면 4K 출력에도 넉넉함) 무거운 원본을 매 프레임 다시 그리는 부담을 없앰.
-  var MAX_SRC_DIM = 4000;
+  // ⚠️ 버그 개선("업로드 이미지 중 1만 픽셀짜리가 있는데 그것 때문에 특정 장면에서 멈추는 것
+  // 같다"는 사용자 제보 반영): 기존엔 화질 설정(HD/FHD/4K)과 무관하게 무조건 4000px로만
+  // 캡을 걸어서, FHD로 만들어도 필요 이상으로 큰 이미지를 매 프레임 다시 그려야 했음. 이제
+  // 실제 출력 해상도(H, 세로가 더 긴 9:16 기준)에 맞춰 여유(1.15배, 확대/이동 슬라이더로 살짝
+  // 확대해도 깨지지 않을 정도)만 두고 캡을 계산해서, 화질이 낮을수록 더 가볍게 처리되게 함.
+  var MAX_SRC_DIM = Math.max(1600, Math.round(H*1.15));
   function _capImgSize(img, cb){
     var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
     if(!w || !h || (w<=MAX_SRC_DIM && h<=MAX_SRC_DIM)){ cb(img); return; }
@@ -19438,10 +19471,12 @@ function _shortsGenerate(){
       cv.width=Math.max(1,Math.round(w*scale)); cv.height=Math.max(1,Math.round(h*scale));
       var cx=cv.getContext('2d');
       cx.drawImage(img,0,0,cv.width,cv.height);
-      var img2=new Image();
-      img2.onload=function(){ cb(img2); };
-      img2.onerror=function(){ cb(img); }; // 축소 실패하면 그냥 원본으로(느려도 되긴 됨)
-      img2.src=cv.toDataURL('image/jpeg',0.92);
+      // ⚠️ 성능 개선: 예전엔 여기서 축소된 캔버스를 다시 JPEG로 인코딩(toDataURL)한 뒤 그걸
+      // 또 <img>로 재디코딩했는데, 큰 원본일수록 이 재인코딩 자체가 무거워서(1만px 원본이면
+      // 특히) 메인 스레드를 오래 붙잡고 있었음. canvas 엘리먼트는 img처럼 drawImage()에 바로
+      // 쓸 수 있으므로, 재인코딩·재디코딩 없이 축소된 캔버스를 그대로 캐시에 사용함 — 화질
+      // 손실 없이 훨씬 빠름.
+      cb(cv);
     }catch(e){ cb(img); } // 캔버스 오염(CORS) 등으로 실패하면 원본 그대로 사용
   }
   function loadNext(){
