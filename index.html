@@ -15620,16 +15620,18 @@ function _shortsLoadGalleryMeta(){
   }catch(e){console.warn('[Shorts] 갤러리 메타 복원 실패:',e.message);}
 }
 // 새로고침/재방문 후 idbKey를 가진 쇼츠 항목들을 실제 blob: URL로 복원
-function _shortsRestoreVideosFromIDB(){
+// onDone: 모든 pending 항목의 비동기 로드가 끝나면 호출됨(갤러리를 다시 그려서 반영할 때 씀)
+function _shortsRestoreVideosFromIDB(onDone){
   var list=(G.HIST&&G.HIST.shorts)||[];
   var pending=list.filter(function(x){return x.idbKey && (!x.result||!x.result.startsWith('blob:'));});
-  if(!pending.length)return;
-  pending.forEach(function(item){
-    idbLoadVideo(item.idbKey).then(function(blob){
+  if(!pending.length){ if(onDone)onDone(); return; }
+  var proms=pending.map(function(item){
+    return idbLoadVideo(item.idbKey).then(function(blob){
       if(!blob)return;
       item.result=URL.createObjectURL(blob);
     }).catch(function(){});
   });
+  Promise.all(proms).then(function(){ if(onDone)onDone(); });
 }
 
 // 고정 역할 카탈로그 — 항상 이 순서대로 쇼츠가 구성된다
@@ -29709,9 +29711,20 @@ function bypassLogin(){
   var crn=gE('cr-n');
   if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
 }
+var _shortsVideosRestored=false;
 function openPanel(id){
   G._curGalleryId = id; // renderGalleryGrid에서 즐겨찾기/삭제 후 재오픈 시 사용
   G._galleryPageSize = 40; // 패널을 새로 열 때마다 페이지네이션 처음부터
+  // ⚠️ 성능 개선("갤러리 버벅임 — 자동저장 영상 용량 때문 아닌가?"): 예전엔 앱이 켜지자마자
+  // 저장된 쇼츠 영상을 전부(최대 30개, 개당 수십MB일 수 있음) 미리 불러왔었는데, 이제는
+  // 갤러리를 실제로 열 때 딱 한 번만 불러오도록 미룸. 비동기로 로드되는 동안엔 아직 결과가
+  // 없어서 잠깐 빠져 보일 수 있으니, 로드가 끝나면 패널을 한 번 다시 그려서 반영함.
+  if(!_shortsVideosRestored){
+    _shortsVideosRestored=true;
+    _shortsRestoreVideosFromIDB(function(){
+      if(G._curGalleryId===id) openPanel(id);
+    });
+  }
   var hs=gE('hist-s');
   var home=gE('home-s');
   var cub=document.getElementById('canvas-upload-box');
@@ -30024,6 +30037,29 @@ function _galleryZoomShow(list, idx){
     // ⚠️ 요청 반영: "갤러리·즐겨찾기 이미지도 확대/축소 넣어달라" — 공용 헬퍼 재사용.
     zoomCtl=_wireZoomPanControls(mediaEl, ov);
   }
+  // ⚠️ 요청 반영: "갤러리에서 이미지 크게 볼 때 이미지 사이즈도 표시해달라" — 로드 완료되면
+  // 실제 픽셀 크기(가로×세로)를 좌상단에 작은 배지로 보여줌. 사진/영상 둘 다 지원.
+  var dimBadge=document.createElement('div');
+  dimBadge.style.cssText='position:absolute;top:16px;left:20px;color:#ccc;font-size:12.5px;background:rgba(0,0,0,.4);padding:4px 12px;border-radius:20px;z-index:2;font-variant-numeric:tabular-nums';
+  dimBadge.textContent='크기 확인 중...';
+  ov.appendChild(dimBadge);
+  if(isVidItem){
+    mediaEl.addEventListener('loadedmetadata', function(){
+      if(mediaEl.videoWidth&&mediaEl.videoHeight) dimBadge.textContent=mediaEl.videoWidth+' × '+mediaEl.videoHeight;
+      else dimBadge.remove();
+    }, {once:true});
+    mediaEl.addEventListener('error', function(){ dimBadge.remove(); }, {once:true});
+  } else {
+    var _showImgDim=function(){
+      if(mediaEl.naturalWidth&&mediaEl.naturalHeight) dimBadge.textContent=mediaEl.naturalWidth+' × '+mediaEl.naturalHeight;
+      else dimBadge.remove();
+    };
+    if(mediaEl.complete && mediaEl.naturalWidth) _showImgDim();
+    else{
+      mediaEl.addEventListener('load', _showImgDim, {once:true});
+      mediaEl.addEventListener('error', function(){ dimBadge.remove(); }, {once:true});
+    }
+  }
   // 이전/다음 이동 버튼
   var prevBtn=document.createElement('button');prevBtn.type='button';prevBtn.textContent='‹';
   prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
@@ -30145,6 +30181,24 @@ function _updateGalSelectionBar(){
   var bulkBtn=document.getElementById('gal-sel-bulk-btn');
   if(bulkBtn){ bulkBtn.style.display = (n>0) ? '' : 'none'; bulkBtn.textContent = '🎨 선택한 '+n+'개에 프리셋 일괄 적용'; }
 }
+// 갤러리 영상 카드 lazy-loading용 공용 IntersectionObserver (카드마다 새로 만들지 않고 하나 재사용)
+var _galVideoIO=null;
+function _galVideoLazyObserve(vEl, src){
+  if(!('IntersectionObserver' in window)){ vEl.src=src; vEl.preload='metadata'; return; } // 구형 브라우저는 그냥 바로 로드
+  if(!_galVideoIO){
+    _galVideoIO=new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){
+          var el=en.target;
+          if(el.dataset.lazySrc){ el.src=el.dataset.lazySrc; el.preload='metadata'; delete el.dataset.lazySrc; }
+          _galVideoIO.unobserve(el);
+        }
+      });
+    }, {rootMargin:'400px 0px'}); // 화면에 닿기 전에 미리 조금 로드해서 스크롤 시 뚝뚝 끊기지 않게
+  }
+  vEl.dataset.lazySrc=src;
+  _galVideoIO.observe(vEl);
+}
 function renderGalleryGrid(items){
   var hs=gE('hist-s');
   var oldGrid=document.getElementById('gallery-grid-wrap');
@@ -30193,15 +30247,18 @@ function renderGalleryGrid(items){
     var isVid=item.wf==='video'||item.wf==='shorts'||String(src).includes('.mp4')||String(src).includes('.webm');
     if(isVid){
       var v=document.createElement('video');
-      v.src=src;v.muted=true;v.preload='metadata';v.style.cssText='width:100%;height:100%;object-fit:cover'; // 전체 영상을 미리 안 받고 화면에 보일 때만
-      // ⚠️ 버그 대응(갤러리 버벅임): 깨진 blob 영상이 많이 쌓여있으면, 카드에 마우스를 올릴
-      // 때마다 v.play()가 실패하면서 처리되지 않은 프로미스 거부(Uncaught NotSupportedError)가
-      // 계속 쌓이고, 마우스가 여러 카드 위를 훑고 지나갈 때마다 이게 반복돼서 스크롤/호버가
-      // 버벅이는 원인이 됨. 재생 실패를 조용히 무시하고, 한 번 에러난(=재생 불가능한) 영상은
-      // 다시 재생을 시도하지 않도록 플래그로 막음.
+      v.muted=true;v.preload='none';v.style.cssText='width:100%;height:100%;object-fit:cover';
+      // ⚠️ 버그 수정(갤러리 버벅임의 핵심 원인): 사진은 loading='lazy'로 화면에 보일 때만
+      // 불러오게 돼있었는데, 영상은 그런 브라우저 기능이 없어서(video엔 loading='lazy'가
+      // 안 먹힘) v.src를 카드 만들자마자 즉시 할당해왔음 — 그러면 화면 밖(스크롤 안 한 부분)에
+      // 있는 영상 카드까지 전부 즉시 메타데이터 로딩을 시도함. 쇼츠 영상은 개당 수십MB일 수
+      // 있어서, 갤러리에 영상이 여러 개면 스크롤도 안 했는데 동시에 여러 대용량 파일을 열려고
+      // 해서 버벅임의 핵심 원인이 됐음. 이제 IntersectionObserver로 실제 화면(또는 그 근처)에
+      // 들어올 때만 src를 할당하도록 함 — 사진의 lazy loading과 동일한 효과.
+      _galVideoLazyObserve(v, src);
       var _vBroken=false;
       v.onerror=function(){ _vBroken=true; };
-      v.onmouseenter=function(){ if(!_vBroken) v.play().catch(function(){ _vBroken=true; }); };
+      v.onmouseenter=function(){ if(!_vBroken && v.src) v.play().catch(function(){ _vBroken=true; }); };
       v.onmouseleave=function(){ if(!_vBroken){ v.pause(); try{v.currentTime=0;}catch(e){} } };
       card.appendChild(v);
     } else {
@@ -31537,7 +31594,11 @@ document.addEventListener('DOMContentLoaded',function(){try{
   loadHistFromStorage();
   _loadMaskAnnotations();
   _shortsLoadGalleryMeta();
-  _shortsRestoreVideosFromIDB();
+  // ⚠️ 버그 수정("갤러리 버벅임 — 자동저장되는 쇼츠 영상 용량 때문인가?"): 예전엔 여기서
+  // 갤러리를 열어보지도 않은 시점(앱이 켜지자마자)에 저장된 쇼츠 영상을 최대 30개까지 전부
+  // IndexedDB에서 꺼내 재생 가능한 상태(blob URL)로 만들어놨음 — 영상 하나가 수십MB인 경우가
+  // 흔해서, 갤러리를 볼 생각이 없어도 앱을 켜는 순간부터 불필요하게 무거워졌음. 이제 실제로
+  // 갤러리 패널을 열 때(openPanel('gallery') 안에서) 딱 그 시점에 한 번만 불러오도록 미룸.
 
   // 새로고침/재방문 전에 진행 중이던 VR 투어 작업이 있으면 복구 (결과를 놓치지 않도록 이어서 확인)
   try{
