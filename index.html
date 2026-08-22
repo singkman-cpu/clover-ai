@@ -3412,6 +3412,50 @@ function loadImgSafe(src, onload, onerror){
   });
 }
 
+// ⚠️ 요청 반영("메인화면 이미지들이 느려지는 게 해상도를 낮춰서 그런가?"): 확인해보니 반대로
+// im._thumb를 참조는 하면서 실제로 채워주는 코드가 없어서, 매번 원본 풀사이즈 이미지를 그대로
+// 그리고 있었음(느려지는 진짜 원인) — 여기서 실제로 작은 썸네일(최대 320px, 레티나 대비 타일
+// 표시 크기의 2배)을 백그라운드에서 한 번만 생성해 캐싱함. 이후 순서변경·역할변경 등으로 화면이
+// 다시 그려질 때마다 이 작은 썸네일을 쓰게 되어 훨씬 빨라지고, 늘려서 흐릿한 게 아니라 딱 맞는
+// 크기로 리샘플링돼서 오히려 더 또렷하게 보임.
+// ⚠️ 요청 반영("메인화면 이미지들이 느려지는 게 해상도를 낮춰서 그런가?") + 버그 발견: 사이드바
+// 목록 쪽 코드(아래 16651줄 부근)에는 이미 이 함수를 콜백과 함께 호출하는 코드가 있었는데, 정작
+// 함수 자체가 정의돼 있지 않아서(typeof 체크에 걸려 계속 조용히 무시됨) 썸네일 캐싱이 한 번도
+// 동작한 적이 없었음 — 그래서 순서변경·역할변경 등으로 화면이 다시 그려질 때마다 매번 원본
+// 풀사이즈 이미지를 그대로 그려서 느려졌던 것(일부러 해상도를 낮춘 게 아니라 오히려 반대).
+// 여기서 실제로 작은 썸네일(최대 320px)을 백그라운드에서 한 번만 생성해 캐싱하고, 완료되면
+// 콜백을 호출함(기존 호출부와 호환) — 늘려서 흐린 게 아니라 딱 맞는 크기로 리샘플링돼서 오히려
+// 더 또렷하게 보임.
+function _shortsEnsureThumb(im, cb){
+  if(!im.img){ return; }
+  if(im._thumb){ if(cb)cb(); return; }
+  if(im._thumbPending){ if(cb) im._thumbCbs=(im._thumbCbs||[]).concat(cb); return; }
+  im._thumbPending=true;
+  if(cb) im._thumbCbs=[cb];
+  var img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=function(){
+    try{
+      var maxDim=320;
+      var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+      var scale=Math.min(1, maxDim/Math.max(w,h));
+      var cv=document.createElement('canvas');
+      cv.width=Math.max(1,Math.round(w*scale)); cv.height=Math.max(1,Math.round(h*scale));
+      cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+      im._thumb=cv.toDataURL('image/jpeg',0.75);
+    }catch(e){ im._thumbFailed=true; /* CORS 등으로 실패하면 그냥 원본 계속 사용 */ }
+    im._thumbPending=false;
+    if(im._thumb && im._tileDomId){
+      var el=document.getElementById(im._tileDomId);
+      if(el) el.src=im._thumb; // 메인화면 그리드에 이미 떠있는 타일이면 지금 바로 작은 썸네일로 교체
+    }
+    (im._thumbCbs||[]).forEach(function(f){ try{f();}catch(e){} });
+    im._thumbCbs=[];
+  };
+  img.onerror=function(){ im._thumbPending=false; im._thumbFailed=true; im._thumbCbs=[]; };
+  img.src=im.img;
+}
+
 function renderMain(callWf, preserveScroll){
   // ⚠️ 재설계: 예전엔 "공간 컨셉 디자인"/"AI 견적"을 "space"로 별칭 처리해서 같은 히스토리를
   // 공유했는데, 그러면 세 탭의 메인화면이 전부 똑같이 보이는 문제가 있었음(다른 탭들은 전부
@@ -16185,7 +16229,11 @@ function _shortsBuildTimeline(slides){
   var opts=G_SHORTS.opts;
   var ENDING_HOLD=SHORTS_TIMING.endingHold;
   var WIPE_DUR=SHORTS_TIMING.wipeDur, FADE_DUR=SHORTS_TIMING.transDur;
-  var useSlider = opts.beforeAfter!==false;
+  // ⚠️ 요청 반영: 슬라이더/페이드 2가지뿐이던 전환 효과에 "컷(효과 없음)"을 추가함.
+  // 예전 boolean(opts.beforeAfter)만 저장된 세션과도 호환되도록 폴백 처리.
+  var transMode = opts.transitionMode || (opts.beforeAfter!==false ? 'slider' : 'fade');
+  var useSlider = transMode==='slider';
+  var useCut = transMode==='cut';
   var timeline=[];
   var t=0;
   function _slideDuration(slide){
@@ -16207,6 +16255,11 @@ function _shortsBuildTimeline(slides){
       var dHard=_slideDuration(slide);
       timeline.push({type:'hold',idx:i,start:t,end:t+dHard});
       t+=dHard;
+    } else if(useCut){
+      // 컷: 전환 구간 자체가 없음 — 바로 다음 장면 hold로 이어짐(효과 없이 바로 넘어감)
+      var dCut=_shortsHoldDuration(slide.role);
+      timeline.push({type:'hold',idx:i,start:t,end:t+dCut});
+      t+=dCut;
     } else if(useSlider && !slide.noSlider){
       timeline.push({type:'wipe',from:i-1,to:i,start:t,end:t+WIPE_DUR});
       t+=WIPE_DUR;
@@ -16546,7 +16599,26 @@ function sbShorts(p){
 
   // 이미지 목록 — 순서대로 나열하면 그 순서 그대로 쇼츠가 구성된다 (같은 역할을 여러 개 넣어도 됨)
   var listLabel=dv('ss');
+  listLabel.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px';
   listLabel.innerHTML='<div class="lbl">이미지 <span class="lbl-en">'+images.length+'개 · 위에서부터 순서대로</span></div>';
+  // ⚠️ 요청 반영("쇼츠 전체 리셋 버튼이 없다") — 확인해보니 원본에도 없던 기능이라 새로 추가함.
+  // 이미지·역할지정·BGM·영상클립·완성된 결과물까지 전부 지우고 쇼츠 작업을 처음부터 다시
+  // 시작할 수 있게 함(임시저장된 draft도 같이 지워서 새로고침해도 안 돌아오게 함).
+  if(images.length){
+    var resetAllBtn=document.createElement('button');resetAllBtn.type='button';
+    resetAllBtn.textContent='↺ 전체 리셋';
+    resetAllBtn.style.cssText='flex-shrink:0;padding:5px 11px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
+    resetAllBtn.onclick=function(){
+      if(!confirm('쇼츠에 올린 이미지, 역할 지정, 배경음악, 영상 클립을 전부 지우고 처음부터 다시 시작할까요?')) return;
+      G_SHORTS.images=[];
+      G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
+      G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null;
+      G._shortsPreviewIdx=0;
+      try{ localStorage.removeItem(_shortsDraftKey()); }catch(e){}
+      renderMain('shorts');
+    };
+    listLabel.appendChild(resetAllBtn);
+  }
   p.appendChild(listLabel);
 
   images.forEach(function(im, idx){
@@ -17082,19 +17154,36 @@ function sbShorts(p){
   endVidWrap.appendChild(evNote);
   p.appendChild(endVidWrap);
 
-  // Before/After 슬라이더 on/off
+  // 장면 전환 효과 선택 — 슬라이더 / 페이드 / 컷(효과 없음)
+  // ⚠️ 요청 반영("슬라이더랑 페이드 말고, 그냥 효과 없이 다음 이미지로 넘어가는 것도 만들어줘"):
+  // 기존엔 체크박스 하나로 슬라이더 on/off(off면 자동으로 페이드)만 골랐는데, 이제 opts.transitionMode
+  // ('slider'|'fade'|'cut')로 3가지를 명시적으로 고를 수 있게 함. 기존 저장된 세션 호환을 위해
+  // transitionMode가 없으면 예전 beforeAfter 값을 보고 자동으로 정해줌(마이그레이션).
+  if(!opts.transitionMode) opts.transitionMode = (opts.beforeAfter!==false ? 'slider' : 'fade');
   var baWrap=dv('ss');
-  var baLabel=document.createElement('label');
-  baLabel.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);cursor:pointer;padding:8px 10px;background:var(--c2);border-radius:8px';
-  var baCk=document.createElement('input');baCk.type='checkbox';baCk.checked=opts.beforeAfter!==false;
-  baCk.style.cssText='width:14px;height:14px;accent-color:var(--ac);flex-shrink:0';
-  baCk.onchange=function(){opts.beforeAfter=baCk.checked;renderSB();renderMain('shorts');};
-  baLabel.appendChild(baCk);
-  var baTextWrap=dv('');
-  baTextWrap.innerHTML='<div>Before / After 슬라이더</div><div style="font-size:10px;color:var(--m2);margin-top:2px">'+
-    (opts.beforeAfter!==false ? '장면이 바뀔 때마다 우→좌 슬라이더로 자연스럽게 넘어갑니다' : '슬라이더 없이 모든 장면을 페이드 인/아웃으로 전환합니다')+'</div>';
-  baLabel.appendChild(baTextWrap);
-  baWrap.appendChild(baLabel);
+  baWrap.innerHTML='<div class="lbl">장면 전환 효과</div>';
+  var transRow=dv('');transRow.style.cssText='display:flex;gap:6px;margin-top:6px';
+  var TRANS_MODES=[
+    {k:'slider',l:'슬라이더',d:'우→좌로 화면을 밀며 전환'},
+    {k:'fade',l:'페이드',d:'서서히 겹쳐지며 전환'},
+    {k:'cut',l:'컷(효과 없음)',d:'효과 없이 바로 다음 사진으로'}
+  ];
+  TRANS_MODES.forEach(function(tm){
+    var btn=mk('button','');btn.type='button';btn.textContent=tm.l;
+    var isSel=opts.transitionMode===tm.k;
+    btn.style.cssText='flex:1;padding:8px 4px;border-radius:8px;border:1px solid '+(isSel?'var(--ac)':'var(--bd2)')+';background:'+(isSel?'var(--acg)':'var(--c2)')+';color:'+(isSel?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    btn.onclick=function(){
+      opts.transitionMode=tm.k;
+      opts.beforeAfter = (tm.k==='slider'); // 예전 필드도 같이 맞춰서 다른 곳에서 참조해도 어긋나지 않게 함
+      renderSB();renderMain('shorts');
+    };
+    transRow.appendChild(btn);
+  });
+  baWrap.appendChild(transRow);
+  var baDesc=dv('');baDesc.style.cssText='font-size:10px;color:var(--m2);margin-top:6px';
+  var _curTm=TRANS_MODES.find(function(x){return x.k===opts.transitionMode;})||TRANS_MODES[0];
+  baDesc.textContent=_curTm.d;
+  baWrap.appendChild(baDesc);
   p.appendChild(baWrap);
 
   // 이미지 채우기 방식 — 크롭(꽉 채우기, 기본) vs 레터박스(위아래 검은 여백, 전체 보이기)
@@ -18649,6 +18738,8 @@ function _shortsRenderCanvas(ub){
     var videoLost = im.isVideo && !im.videoUrl; // 새로고침 등으로 실제 영상 소스(blob)를 잃어버린 경우
     var _tileImgSrc = im._thumb || im.img; // 캐시된 작은 썸네일이 있으면 그걸 먼저 씀(훨씬 빠름)
     var _tileImgId = 'shorts-tile-img-'+idx+'-'+(im.id||idx);
+    im._tileDomId = _tileImgId; // 썸네일 생성이 끝나면 이 id로 찾아서 바로 교체해줌
+    _shortsEnsureThumb(im); // 아직 썸네일이 없으면 백그라운드에서 생성 시작(없어도 원본으로 우선 표시됨)
     tile.innerHTML='<img id="'+_tileImgId+'" src="'+_tileImgSrc+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none" onerror="this.style.display=\'none\';this.nextElementSibling.nextElementSibling.nextElementSibling.style.display=\'flex\'">'+
       (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+((im.trimEnd!=null&&im.trimStart!=null)?(im.trimEnd-im.trimStart):(im.duration||0)).toFixed(1)+'s</div>':'')+
       '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+(usable?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">'+(idx+1)+'</div>'+
