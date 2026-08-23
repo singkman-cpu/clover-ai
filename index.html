@@ -28830,7 +28830,9 @@ function admAnalytics(c){
     {k:'snap_banner_click', l:'🏙️ SNAP (관공서·분양마케팅 배너)'}
   ];
   var since=new Date(); since.setDate(since.getDate()-30); since.setHours(0,0,0,0);
-  _supa.from('analytics_events').select('event_type,created_at').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
+  // ⚠️ 요청 반영("누가 방문하고 누가 SNAP 클릭했는지도 보고싶다"): profiles 테이블과 조인해서
+  // 로그인한 회원이면 이메일을 같이 가져옴(비로그인 방문자는 user_id가 없어서 "비로그인"으로 표시).
+  _supa.from('analytics_events').select('event_type,created_at,user_id,profiles!user_id(email)').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
     .then(function(res){
       if(res.error){
         c.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">analytics_events 테이블을 아직 못 찾았어요. Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
@@ -28874,6 +28876,48 @@ function admAnalytics(c){
           '</tr>';
         }).join('')+
       '</tbody></table></div>';
+
+      // ⚠️ 요청 반영: 이벤트별로 "누가" 했는지 회원별 집계 표를 추가함(비로그인은 하나로 묶음).
+      var userMap={}; // key: user_id(없으면 'anon') -> {email, counts:{eventType:n}}
+      rows.forEach(function(r){
+        var uid=r.user_id||'anon';
+        if(!userMap[uid]) userMap[uid]={email:r.user_id?(r.profiles&&r.profiles.email)||'(탈퇴/알수없음)':'👤 비로그인 방문자', counts:{}};
+        userMap[uid].counts[r.event_type]=(userMap[uid].counts[r.event_type]||0)+1;
+      });
+      var userList=Object.keys(userMap).map(function(uid){return {uid:uid, email:userMap[uid].email, counts:userMap[uid].counts};});
+      // 사이트 방문 많은 순으로 정렬(로그인 회원 먼저, 비로그인은 맨 아래로)
+      userList.sort(function(a,b){
+        if(a.uid==='anon') return 1; if(b.uid==='anon') return -1;
+        var at=Object.values(a.counts).reduce(function(s,n){return s+n;},0);
+        var bt=Object.values(b.counts).reduce(function(s,n){return s+n;},0);
+        return bt-at;
+      });
+      html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 8px">👥 누가 방문·클릭했나 (최근 30일)</div>';
+      html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)">'+
+        '<th style="padding:6px 8px;text-align:left">회원</th>'+
+        EVENT_DEFS.map(function(ev){return '<th style="padding:6px 8px;text-align:center">'+ev.l+'</th>';}).join('')+
+      '</tr></thead><tbody>'+
+        userList.map(function(u){
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:'+(u.uid==='anon'?'var(--m2)':'var(--t2)')+'">'+u.email+'</td>'+
+            EVENT_DEFS.map(function(ev){var n=u.counts[ev.k]||0; return '<td style="padding:5px 8px;text-align:center;color:'+(n?'var(--t2)':'var(--m1)')+'">'+n+'</td>';}).join('')+
+          '</tr>';
+        }).join('')+
+      '</tbody></table></div>';
+
+      // ⚠️ 요청 반영: 시간순으로 "누가 언제 뭘 했는지" 그대로 보고 싶을 수도 있어서, 최근 이벤트
+      // 원본 목록(최대 200개)도 같이 보여줌.
+      html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 8px">🕓 최근 이벤트 목록 (최대 200개)</div>';
+      html+='<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2);position:sticky;top:0;background:var(--card)">'+
+        '<th style="padding:6px 8px;text-align:left">일시</th><th style="padding:6px 8px;text-align:left">이벤트</th><th style="padding:6px 8px;text-align:left">회원</th></tr></thead><tbody>'+
+        rows.slice(0,200).map(function(r){
+          var evDef=EVENT_DEFS.find(function(e){return e.k===r.event_type;});
+          var email=r.user_id?((r.profiles&&r.profiles.email)||'(탈퇴/알수없음)'):'👤 비로그인';
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+(r.created_at||'').slice(0,16).replace('T',' ')+'</td>'+
+            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:r.event_type)+'</td>'+
+            '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
+        }).join('')+
+      '</tbody></table></div>';
+
       c.innerHTML=html;
     })
     .catch(function(e){ c.innerHTML='<div style="color:#fca5a5">조회 실패: '+(e&&e.message||e)+'</div>'; });
