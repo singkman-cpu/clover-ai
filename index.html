@@ -511,7 +511,7 @@ select option{background:var(--c2)}
     <button class="nbtn" id="btn-faq" onclick="openMd('faq')">FAQ</button>
     <button class="nbtn" id="btn-bugreport" onclick="openBugReportModal()" style="background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.4);color:#f59e0b;font-weight:700">🐛 버그 제보</button>
     <button class="nbtn" id="btn-bizinfo" onclick="openMd('bizinfo')">사업자정보</button>
-    <a class="nbtn" id="btn-snap" href="https://www.snapdesign.co.kr" target="_blank" rel="noopener" title="최종 제출용 고퀄리티 3D 투시도·조감도가 필요하신가요?" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none">🏙️ SNAP</a>
+    <a class="nbtn" id="btn-snap" href="https://www.snapdesign.co.kr" target="_blank" rel="noopener" title="최종 제출용 고퀄리티 3D 투시도·조감도가 필요하신가요?" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none" onclick="_trackEvent('snap_topnav_click')">🏙️ SNAP</a>
     <button class="nbtn" id="btn-account" onclick="openMd('account')">계정</button>
     <button class="nbtn up" id="btn-pricing" onclick="openMd('pricing')">크레딧 충전</button>
   </div>
@@ -595,7 +595,7 @@ select option{background:var(--c2)}
           <div class="hc" data-wf="proposal"><div class="hc-ic">&#128196;</div><div class="hc-t">제안서 제작</div><div class="hc-d">클라이언트용 PDF 제안서</div></div>
           <div class="hc" style="cursor:default;border-style:dashed;display:flex;align-items:center;justify-content:center"><div style="font-size:11px;color:var(--m1);text-align:center;line-height:1.9">추천 워크플로우<br><span style="color:var(--m2)">현장&#8594;변환&#8594;편집&#8594;업스케일&#8594;VR투어</span></div></div>
         </div>
-        <a href="https://www.snapdesign.co.kr" target="_blank" rel="noopener" id="home-snap-banner"
+        <a href="https://www.snapdesign.co.kr" target="_blank" rel="noopener" id="home-snap-banner" onclick="_trackEvent('snap_banner_click')"
            style="display:flex;align-items:center;gap:14px;max-width:860px;width:100%;margin:16px auto 0;padding:16px 20px;border-radius:12px;border:1px solid rgba(0,229,204,.22);background:linear-gradient(90deg, rgba(0,229,204,.07), rgba(0,229,204,.02));text-decoration:none;color:inherit;transition:border-color .15s ease,transform .15s ease">
           <span style="font-size:24px;flex-shrink:0">🏙️</span>
           <span style="flex:1;text-align:left;font-size:12.5px;color:var(--m2);line-height:1.55">
@@ -6608,7 +6608,14 @@ function makePi(q, g){
         }
         return;
       }
-      // 구조 보존이 중요한 한국 아파트 핵심 4종은 Nano Banana Pro로 자동 전환 (디테일·구조 정확도 우수)
+      // ⚠️ 요청 반영("벚꽃만개 프리셋이 너무 만개라서 50~80% 정도로 조절하고 싶다"): 재질 선택
+      // 팝업과 같은 방식으로, 이 프리셋을 고르면 개화 강도(은은하게/적당히/만개)를 먼저 물어보고,
+      // 선택한 강도에 맞춰 해당 문장만 다른 버전으로 바꿔치기함(나머지 긴 프롬프트는 그대로 재사용).
+      if(_t3.selK==='cherry_blossom_full'){
+        renderSB();
+        setTimeout(function(){ _showBloomIntensityPopup(_t3); }, 100);
+        return;
+      }
       // ⚠️ 요청 반영: "고급 실사화"를 Seedream 5.0 Pro 전용 프리셋으로 새로 만듦(1K 40cr) — 다른
       // 프리셋을 고르거나 선택 해제하면 아래 "Pro 강제 대상 아님" 분기에서 자동으로 되돌아감.
       if(_t3.selK==='hq_real_pro'){
@@ -10449,6 +10456,27 @@ function _compositeBudgetCaption(imgUrl, captionText, cb){
 //   );
 //   alter table user_workspace_state enable row level security;
 //   create policy "own state" on user_workspace_state for all using (auth.uid()=user_id) with check (auth.uid()=user_id);
+// ⚠️ 요청 반영("SNAP 버튼, 관공서/분양마케팅 배너 클릭이랑 사이트 방문 횟수를 관리자모드에서
+// 보고싶다"): 이벤트 하나를 Supabase analytics_events 테이블에 기록함. 실패해도 사용자 경험에
+// 영향 없게 조용히 무시함(분석 실패가 실제 기능을 막으면 안 되므로).
+function _trackEvent(eventType){
+  try{
+    if(!_supa) return;
+    _supa.from('analytics_events').insert({event_type:eventType, user_id:(_supaUser?_supaUser.id:null)})
+      .then(function(){}).catch(function(){});
+  }catch(e){}
+}
+// 페이지 방문은 세션(탭)당 한 번만 기록 — 새로고침/재방문마다 계속 쌓이면 숫자가 뻥튀기되므로.
+(function(){
+  try{
+    if(!sessionStorage.getItem('clover_visit_tracked')){
+      sessionStorage.setItem('clover_visit_tracked','1');
+      // _supa가 아직 초기화 전일 수 있어 살짝 지연
+      setTimeout(function(){ _trackEvent('page_visit'); }, 1500);
+    }
+  }catch(e){}
+})();
+
 function _saveWorkspaceState(tabKey, data){
   if(!(_supa && _supaUser)) return;
   _supa.from('user_workspace_state').upsert({user_id:_supaUser.id, tab_key:tabKey, data:data, updated_at:new Date().toISOString()}, {onConflict:'user_id,tab_key'})
@@ -28749,6 +28777,7 @@ function buildAdminDashboard(){
   var b=gE('adm-b');if(!b)return;
   var tabs=[
     {k:'dashboard',l:'📊 대시보드'},
+    {k:'analytics',l:'📈 방문·클릭 통계'},
     {k:'members',l:'👥 회원 관리'},
     {k:'credit',l:'💰 크레딧 지급'},
     {k:'coupon',l:'🎫 쿠폰 관리'},
@@ -28777,6 +28806,7 @@ function admRenderTab(){
   var c=gE('adm-content');if(!c)return;
   c.innerHTML='<div style="text-align:center;padding:20px;color:var(--m2)">불러오는 중...</div>';
   if(_adminTab==='dashboard') admDashboard(c);
+  else if(_adminTab==='analytics') admAnalytics(c);
   else if(_adminTab==='members') admMembers(c);
   else if(_adminTab==='credit') admCreditGive(c);
   else if(_adminTab==='coupon') admCoupon(c);
@@ -28784,6 +28814,66 @@ function admRenderTab(){
   else if(_adminTab==='beforeAfter') admBeforeAfter(c);
   else if(_adminTab==='logs') admLogs(c);
   else if(_adminTab==='mail') admMail(c);
+}
+
+// ⚠️ 요청 반영("SNAP 버튼·관공서/분양마케팅 배너 클릭이랑 사이트 방문 횟수를 관리자모드에서
+// 보고싶다"): analytics_events 테이블에서 이벤트를 읽어와 오늘/이번달 집계와 최근 30일 일별
+// 추이를 보여줌. 테이블이 아직 없으면(맨 처음 배포 시) 안내 문구를 보여줌.
+function admAnalytics(c){
+  if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
+  var EVENT_DEFS=[
+    {k:'page_visit', l:'🌐 사이트 방문'},
+    {k:'snap_topnav_click', l:'🏙️ SNAP (상단 버튼)'},
+    {k:'snap_banner_click', l:'🏙️ SNAP (관공서·분양마케팅 배너)'}
+  ];
+  var since=new Date(); since.setDate(since.getDate()-30); since.setHours(0,0,0,0);
+  _supa.from('analytics_events').select('event_type,created_at').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
+    .then(function(res){
+      if(res.error){
+        c.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">analytics_events 테이블을 아직 못 찾았어요. Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
+          '<pre style="background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:12px;font-size:10.5px;color:var(--t2);overflow-x:auto;margin-top:10px;white-space:pre-wrap">create table analytics_events (\n  id bigint generated always as identity primary key,\n  event_type text not null,\n  user_id uuid references auth.users(id),\n  created_at timestamptz not null default now()\n);\nalter table analytics_events enable row level security;\ncreate policy "anyone can insert" on analytics_events for insert to anon, authenticated with check (true);\ncreate policy "admin can read" on analytics_events for select to authenticated using (\n  exists(select 1 from profiles where profiles.id=auth.uid() and profiles.role=\'admin\')\n);</pre>';
+        return;
+      }
+      var rows=res.data||[];
+      var todayStr=new Date().toISOString().slice(0,10);
+      var monthStr=new Date().toISOString().slice(0,7);
+      var dayMap={}; // 'YYYY-MM-DD' -> {eventType: count}
+      var todayCount={}, monthCount={}, totalCount={};
+      rows.forEach(function(r){
+        var d=(r.created_at||'').slice(0,10);
+        if(!dayMap[d]) dayMap[d]={};
+        dayMap[d][r.event_type]=(dayMap[d][r.event_type]||0)+1;
+        totalCount[r.event_type]=(totalCount[r.event_type]||0)+1;
+        if(d===todayStr) todayCount[r.event_type]=(todayCount[r.event_type]||0)+1;
+        if(d.slice(0,7)===monthStr) monthCount[r.event_type]=(monthCount[r.event_type]||0)+1;
+      });
+      var html='<div style="font-size:11px;color:var(--m2);margin-bottom:14px">최근 30일 집계 (관리자 화면을 볼 때마다 다시 조회돼요)</div>';
+      // 오늘 / 이번달 요약 카드
+      html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">';
+      EVENT_DEFS.forEach(function(ev){
+        html+='<div style="background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:12px">'+
+          '<div style="font-size:11px;color:var(--m2);margin-bottom:8px">'+ev.l+'</div>'+
+          '<div style="font-size:20px;font-weight:800;color:var(--ac)">'+(todayCount[ev.k]||0)+'<span style="font-size:10px;color:var(--m2);font-weight:400"> 오늘</span></div>'+
+          '<div style="font-size:13px;font-weight:700;color:var(--t2);margin-top:2px">'+(monthCount[ev.k]||0)+'<span style="font-size:10px;color:var(--m2);font-weight:400"> 이번달</span></div>'+
+          '<div style="font-size:11px;color:var(--m1);margin-top:4px">최근 30일 합계 '+(totalCount[ev.k]||0)+'</div>'+
+        '</div>';
+      });
+      html+='</div>';
+      // 최근 30일 일별 표
+      var days=[]; for(var i=0;i<30;i++){ var dt=new Date(); dt.setDate(dt.getDate()-i); days.push(dt.toISOString().slice(0,10)); }
+      html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)">'+
+        '<th style="padding:6px 8px;text-align:left">날짜</th>'+
+        EVENT_DEFS.map(function(ev){return '<th style="padding:6px 8px;text-align:center">'+ev.l+'</th>';}).join('')+
+      '</tr></thead><tbody>'+
+        days.map(function(d){
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--t2)">'+d+(d===todayStr?' <span style="color:var(--ac)">(오늘)</span>':'')+'</td>'+
+            EVENT_DEFS.map(function(ev){var n=(dayMap[d]&&dayMap[d][ev.k])||0; return '<td style="padding:5px 8px;text-align:center;color:'+(n?'var(--t2)':'var(--m1)')+'">'+n+'</td>';}).join('')+
+          '</tr>';
+        }).join('')+
+      '</tbody></table></div>';
+      c.innerHTML=html;
+    })
+    .catch(function(e){ c.innerHTML='<div style="color:#fca5a5">조회 실패: '+(e&&e.message||e)+'</div>'; });
 }
 
 function admDashboard(c){
@@ -29328,6 +29418,52 @@ function admLogs(c){
   });
 }
 
+
+// ⚠️ 요청 반영("벚꽃만개 프리셋이 너무 만개라서 50~80% 정도로 조절하고 싶다"): 벚꽃 개화
+// 강도를 고르는 팝업. 프리셋 원문(100% 만개 기준)에서 개화 묘사 문장 하나만 강도별 버전으로
+// 바꿔치기함 — 나머지 수천 단어짜리 구조 보존 지시문은 그대로 재사용해서 안전하게 처리.
+var _BLOOM_FULL_SENTENCE = 'Transform the SAME trees and plants already visible in this photo into full, spectacular cherry blossom bloom — dense clusters of soft pink and white blossoms covering the branches, with a few delicate petals drifting in the air and gently scattered on the ground/pathway below. This should look more vivid and celebratory than an ordinary spring day — a peak-bloom cherry blossom festival moment.';
+var _BLOOM_VARIANTS = {
+  light: {label:'🌸 은은하게 (약 50%)', desc:'가지에 꽃과 여린 잎이 섞여 보이는 초중반 개화',
+    text:'Transform the SAME trees and plants already visible in this photo into an early-to-mid cherry blossom bloom, roughly 50% of full bloom — a natural mix of blossom clusters and still-visible bare branches or fresh green buds, soft pink and white blossoms present but not yet dense or overwhelming, only a few petals lightly scattered on the ground. This should look like a gentler, earlier moment of the cherry blossom season — pleasant and clearly springtime, but NOT the dense, overwhelming peak-bloom festival look.'},
+  medium: {label:'🌸🌸 적당히 (약 70%)', desc:'대부분 꽃이 폈지만 살짝 여백이 남은 개화',
+    text:'Transform the SAME trees and plants already visible in this photo into a lush cherry blossom bloom, roughly 70% of full bloom — most branches covered in soft pink and white blossom clusters with a little bare branch or fresh green still visible here and there (not fully dense), a moderate amount of delicate petals drifting and scattered on the ground/pathway below. This should look vividly springtime and clearly in bloom, just short of the very deepest peak-bloom festival look.'},
+  full: {label:'🌸🌸🌸 만개 (100%, 기본값)', desc:'가지가 꽃으로 가득 찬 절정의 만개',
+    text:_BLOOM_FULL_SENTENCE}
+};
+function _showBloomIntensityPopup(tab){
+  if(gE('bloom-picker-ov')) gE('bloom-picker-ov').remove();
+  var ov=document.createElement('div');
+  ov.id='bloom-picker-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  var box=document.createElement('div');
+  box.style.cssText='background:var(--card);border-radius:16px;padding:22px;max-width:420px;width:100%;border:1px solid var(--bd2)';
+  box.innerHTML='<div style="font-size:15px;font-weight:800;color:var(--t);margin-bottom:6px">벚꽃 개화 강도를 골라주세요</div>'+
+    '<div style="font-size:12px;color:var(--m2);margin-bottom:16px;line-height:1.6">기본은 만개(100%)예요. 사진 속 나무·화단은 그대로 두고 개화 정도만 조절해요.</div>';
+  var btnWrap=document.createElement('div');
+  btnWrap.style.cssText='display:flex;flex-direction:column;gap:8px';
+  ['light','medium','full'].forEach(function(vk){
+    var v=_BLOOM_VARIANTS[vk];
+    var btn=document.createElement('button');btn.type='button';
+    btn.style.cssText='text-align:left;padding:12px 14px;border-radius:10px;border:1px solid '+(vk==='full'?'var(--ac)':'var(--bd2)')+';background:'+(vk==='full'?'var(--acg)':'var(--c2)')+';color:var(--t);cursor:pointer;font-family:inherit';
+    btn.innerHTML='<div style="font-size:13px;font-weight:700">'+v.label+'</div><div style="font-size:11px;color:var(--m2);margin-top:2px">'+v.desc+'</div>';
+    btn.onclick=function(){
+      tab.prompt = (tab.prompt||'').indexOf(_BLOOM_FULL_SENTENCE)!==-1
+        ? tab.prompt.replace(_BLOOM_FULL_SENTENCE, v.text)
+        : (tab.prompt||'') + ' ' + v.text; // 혹시 원문 문장을 못 찾으면 안전하게 덧붙임
+      ov.remove();
+    };
+    btnWrap.appendChild(btn);
+  });
+  box.appendChild(btnWrap);
+  var cancelBtn=document.createElement('button');cancelBtn.type='button';
+  cancelBtn.textContent='취소';
+  cancelBtn.style.cssText='width:100%;margin-top:10px;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:none;color:var(--m2);font-size:12px;cursor:pointer;font-family:inherit';
+  cancelBtn.onclick=function(){ ov.remove(); };
+  box.appendChild(cancelBtn);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+}
 
 function _showMaterialPickerPopup(selK){
   // texture_seamless, texture_normal_map은 소재 선택 팝업 불필요 — 바로 실행
@@ -30081,7 +30217,10 @@ function openPanel(id){
     if(!confirm('선택한 '+n+'개 항목을 삭제할까요?')) return;
     G._galSelected.forEach(function(iid){ deleteHistItem(iid); });
     G._galSelected.clear();
-    renderMain(G.wf);
+    // ⚠️ 버그 수정(치명적, "갤러리에서 삭제하면 다른 화면으로 넘어간다"): renderMain(G.wf)를
+    // 호출하면 현재 작업 중이던 워크플로우(공간 컨셉 등)의 메인 화면으로 통째로 다시 그려져서,
+    // 갤러리 화면을 벗어나 엉뚱한 화면으로 튕겨나가는 것처럼 보였음. 갤러리는 별도 그리드
+    // 렌더러(renderGalleryGrid)만 다시 그리면 충분해서 renderMain 호출 자체가 불필요했음.
     renderGalleryGrid(G._curFilteredItems||items);
   };
   selBar.appendChild(selDelBtn);
