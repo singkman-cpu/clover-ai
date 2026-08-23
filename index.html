@@ -10466,17 +10466,40 @@ function _trackEvent(eventType){
       .then(function(){}).catch(function(){});
   }catch(e){}
 }
-// ⚠️ 요청 반영("하루에 10번 접속해도 오늘 하루 1번으로 남았으면 좋겠다"): 세션(탭)당 1회가
-// 아니라 하루(날짜)당 1회로 바꿈 — localStorage에 오늘 날짜를 저장해두고, 저장된 날짜가 오늘과
-// 다르면(=날짜가 바뀌었으면) 그때만 다시 기록함. 같은 날 앱을 여러 번 껐다 켜도 중복 집계 안 됨.
+// ⚠️ 요청 반영("같은 계정으로 로그인했으면 브라우저 달라도 하루 1번만 잡히게 해달라"): 로컬
+// 저장소(localStorage) 기준은 브라우저/기기별로 따로 저장되기 때문에, 같은 사람이 PC·폰·시크릿
+// 창 등 여러 환경으로 들어오면 계정이 같아도 매번 새로 잡혔음. 로그인 회원은 로컬 저장소 대신
+// 서버(analytics_events)에 "오늘 이 계정으로 이미 방문 기록이 있는지" 직접 물어보고, 없을 때만
+// 기록하도록 바꿔서 브라우저/기기가 달라도 계정 기준 하루 1번만 잡히게 함.
+var _visitTrackChecked=false;
+function _trackVisitOncePerDay(userId){
+  if(_visitTrackChecked) return; // 같은 세션에서 중복 체크 방지
+  _visitTrackChecked=true;
+  try{
+    var todayStart=new Date(); todayStart.setHours(0,0,0,0);
+    _supa.from('analytics_events').select('id').eq('user_id',userId).eq('event_type','page_visit')
+      .gte('created_at', todayStart.toISOString()).limit(1)
+      .then(function(res){
+        if(res.data && res.data.length) return; // 오늘 이미 기록됨 — 건너뜀
+        _trackEvent('page_visit');
+      }).catch(function(){});
+  }catch(e){}
+}
+// 비로그인 방문자는 계정이 없어서 서버 조회로 식별할 방법이 없음 — 기존처럼 로컬 저장소(날짜)
+// 기준으로만 처리함(같은 브라우저 안에서는 하루 1번, 다른 브라우저면 각각 잡히는 건 어쩔 수 없음).
+// 로그인 여부가 아직 결정되기 전에 먼저 실행되면 로그인 회원도 여기로 잘못 잡힐 수 있어서, 로그인
+// 상태가 확정될 시간을 준 뒤 그때까지도 로그인이 안 됐으면(=진짜 비로그인) 그제서야 기록함.
 (function(){
   try{
-    var todayStr=new Date().toISOString().slice(0,10);
-    if(localStorage.getItem('clover_visit_tracked_date')!==todayStr){
-      localStorage.setItem('clover_visit_tracked_date', todayStr);
-      // _supa가 아직 초기화 전일 수 있어 살짝 지연
-      setTimeout(function(){ _trackEvent('page_visit'); }, 1500);
-    }
+    setTimeout(function(){
+      if(_visitTrackChecked) return; // 그 사이 로그인 회원으로 이미 처리됐으면 건너뜀
+      _visitTrackChecked=true;
+      var todayStr=new Date().toISOString().slice(0,10);
+      if(localStorage.getItem('clover_visit_tracked_date')!==todayStr){
+        localStorage.setItem('clover_visit_tracked_date', todayStr);
+        _trackEvent('page_visit');
+      }
+    }, 2500); // Supabase 로그인 상태 확인이 끝날 시간을 충분히 줌
   }catch(e){}
 })();
 
@@ -28859,19 +28882,35 @@ function admAnalytics(c){
 
 function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
     (function(){
-      var todayStr=new Date().toISOString().slice(0,10);
-      var monthStr=new Date().toISOString().slice(0,7);
-      var dayMap={}; // 'YYYY-MM-DD' -> {eventType: count}
+      // ⚠️ 버그 수정(치명적, "새벽에 접속한 적 없는데 새벽 시각으로 찍힘"): Supabase에 저장된
+      // created_at은 UTC(세계표준시) 기준인데, 지금까지 변환 없이 그 문자열을 그대로 잘라서
+      // 보여주고 있었음. 한국은 UTC보다 9시간 빠르므로(UTC+9), 예를 들어 실제로 낮 2시(14:04
+      // KST)에 접속해도 UTC로는 05:04라서 화면엔 "05:04"로 찍혀 마치 새벽에 접속한 것처럼
+      // 보였음. UTC 인스턴트에 9시간을 더한 뒤 UTC getter로 값을 읽는 방식으로 "한국 시간
+      // 기준"의 연/월/일/시/분을 뽑아냄(브라우저의 로컬 시간대에 의존하지 않아 항상 정확함).
+      function _pad2(n){ return n<10?'0'+n:''+n; }
+      function _kst(iso){
+        var d=new Date(new Date(iso).getTime() + 9*60*60*1000);
+        return {
+          date: d.getUTCFullYear()+'-'+_pad2(d.getUTCMonth()+1)+'-'+_pad2(d.getUTCDate()),
+          time: _pad2(d.getUTCHours())+':'+_pad2(d.getUTCMinutes()),
+          _d: d
+        };
+      }
+      var nowKst=_kst(new Date().toISOString());
+      var todayStr=nowKst.date;
+      var monthStr=todayStr.slice(0,7);
+      var dayMap={}; // 'YYYY-MM-DD'(KST 기준) -> {eventType: count}
       var todayCount={}, monthCount={}, totalCount={};
       rows.forEach(function(r){
-        var d=(r.created_at||'').slice(0,10);
+        var d=_kst(r.created_at).date;
         if(!dayMap[d]) dayMap[d]={};
         dayMap[d][r.event_type]=(dayMap[d][r.event_type]||0)+1;
         totalCount[r.event_type]=(totalCount[r.event_type]||0)+1;
         if(d===todayStr) todayCount[r.event_type]=(todayCount[r.event_type]||0)+1;
         if(d.slice(0,7)===monthStr) monthCount[r.event_type]=(monthCount[r.event_type]||0)+1;
       });
-      var html='<div style="font-size:11px;color:var(--m2);margin-bottom:14px">최근 30일 집계 (관리자 화면을 볼 때마다 다시 조회돼요)</div>';
+      var html='<div style="font-size:11px;color:var(--m2);margin-bottom:14px">최근 30일 집계 (한국 시간 KST 기준, 관리자 화면을 볼 때마다 다시 조회돼요)</div>';
       // 오늘 / 이번달 요약 카드
       html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">';
       EVENT_DEFS.forEach(function(ev){
@@ -28883,8 +28922,8 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         '</div>';
       });
       html+='</div>';
-      // 최근 30일 일별 표
-      var days=[]; for(var i=0;i<30;i++){ var dt=new Date(); dt.setDate(dt.getDate()-i); days.push(dt.toISOString().slice(0,10)); }
+      // 최근 30일 일별 표 — 오늘(KST)부터 하루씩 거슬러 올라가며 날짜 생성
+      var days=[]; for(var i=0;i<30;i++){ var dt=new Date(nowKst._d.getTime()); dt.setUTCDate(dt.getUTCDate()-i); days.push(dt.getUTCFullYear()+'-'+_pad2(dt.getUTCMonth()+1)+'-'+_pad2(dt.getUTCDate())); }
       html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)">'+
         '<th style="padding:6px 8px;text-align:left">날짜</th>'+
         EVENT_DEFS.map(function(ev){return '<th style="padding:6px 8px;text-align:center">'+ev.l+'</th>';}).join('')+
@@ -28925,13 +28964,14 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
 
       // ⚠️ 요청 반영: 시간순으로 "누가 언제 뭘 했는지" 그대로 보고 싶을 수도 있어서, 최근 이벤트
       // 원본 목록(최대 200개)도 같이 보여줌.
-      html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 8px">🕓 최근 이벤트 목록 (최대 200개)</div>';
+      html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 8px">🕓 최근 이벤트 목록 (최대 200개, 한국 시간)</div>';
       html+='<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2);position:sticky;top:0;background:var(--card)">'+
         '<th style="padding:6px 8px;text-align:left">일시</th><th style="padding:6px 8px;text-align:left">이벤트</th><th style="padding:6px 8px;text-align:left">회원</th></tr></thead><tbody>'+
         rows.slice(0,200).map(function(r){
           var evDef=EVENT_DEFS.find(function(e){return e.k===r.event_type;});
           var email=r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인';
-          return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+(r.created_at||'').slice(0,16).replace('T',' ')+'</td>'+
+          var kt=_kst(r.created_at);
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+kt.date+' '+kt.time+'</td>'+
             '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:r.event_type)+'</td>'+
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
         }).join('')+
@@ -33213,6 +33253,7 @@ function initSupabase(){
         if(window.location.hash&&window.location.hash.indexOf('access_token')!==-1){
           history.replaceState(null,'',window.location.pathname);
         }
+        _trackVisitOncePerDay(session.user.id); // ⚠️ 로그인 회원은 여기서 계정 기준으로 기록(브라우저 무관)
       } else if(event==='SIGNED_OUT'){
         _supaUser=null;
         onSupaLogout();
