@@ -28830,16 +28830,35 @@ function admAnalytics(c){
     {k:'snap_banner_click', l:'🏙️ SNAP (관공서·분양마케팅 배너)'}
   ];
   var since=new Date(); since.setDate(since.getDate()-30); since.setHours(0,0,0,0);
-  // ⚠️ 요청 반영("누가 방문하고 누가 SNAP 클릭했는지도 보고싶다"): profiles 테이블과 조인해서
-  // 로그인한 회원이면 이메일을 같이 가져옴(비로그인 방문자는 user_id가 없어서 "비로그인"으로 표시).
-  _supa.from('analytics_events').select('event_type,created_at,user_id,profiles!user_id(email)').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
+  // ⚠️ 버그 수정("400 에러, 이메일 조인 안 됨"): profiles!user_id(email) 임베드 문법은 두 테이블
+  // 사이에 Supabase가 인식하는 FK 관계가 있어야 동작하는데, analytics_events.user_id는
+  // auth.users를 참조하고 있어서(profiles가 아니라) 자동 조인이 실패했음(400 에러). SQL을 더
+  // 안 건드리고, 두 테이블을 각각 따로 조회해서 코드에서 직접 합치는 방식으로 바꿔 이 문제
+  // 자체를 회피함 — 테이블 FK 구조가 어떻든 항상 안전하게 동작함.
+  _supa.from('analytics_events').select('event_type,created_at,user_id').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
     .then(function(res){
       if(res.error){
-        c.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">analytics_events 테이블을 아직 못 찾았어요. Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
-          '<pre style="background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:12px;font-size:10.5px;color:var(--t2);overflow-x:auto;margin-top:10px;white-space:pre-wrap">create table analytics_events (\n  id bigint generated always as identity primary key,\n  event_type text not null,\n  user_id uuid references auth.users(id),\n  created_at timestamptz not null default now()\n);\nalter table analytics_events enable row level security;\ncreate policy "anyone can insert" on analytics_events for insert to anon, authenticated with check (true);\ncreate policy "admin can read" on analytics_events for select to authenticated using (\n  exists(select 1 from profiles where profiles.id=auth.uid() and profiles.role=\'admin\')\n);</pre>';
+        c.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">analytics_events 조회에 실패했어요: <b>'+(res.error.message||'')+'</b><br>테이블이 없다면 Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
+          '<pre style="background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:12px;font-size:10.5px;color:var(--t2);overflow-x:auto;margin-top:10px;white-space:pre-wrap">create table if not exists analytics_events (\n  id bigint generated always as identity primary key,\n  event_type text not null,\n  user_id uuid references auth.users(id),\n  created_at timestamptz not null default now()\n);\nalter table analytics_events enable row level security;\ndrop policy if exists "anyone can insert" on analytics_events;\ncreate policy "anyone can insert" on analytics_events for insert to anon, authenticated with check (true);\ndrop policy if exists "admin can read" on analytics_events;\ncreate policy "admin can read" on analytics_events for select to authenticated using (\n  exists(select 1 from profiles where profiles.id=auth.uid() and profiles.role=\'admin\')\n);</pre>';
         return;
       }
       var rows=res.data||[];
+      // 로그인 회원 이메일은 profiles 테이블에서 따로 조회해서 user_id 기준으로 매핑함
+      var uids=Array.from(new Set(rows.map(function(r){return r.user_id;}).filter(Boolean)));
+      var emailByUid={};
+      var _afterProfiles=function(){ _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS); };
+      if(uids.length){
+        _supa.from('profiles').select('id,email').in('id', uids).then(function(pres){
+          (pres.data||[]).forEach(function(p){ emailByUid[p.id]=p.email; });
+          _afterProfiles();
+        }).catch(function(){ _afterProfiles(); });
+      } else { _afterProfiles(); }
+    })
+    .catch(function(e){ c.innerHTML='<div style="color:#fca5a5">조회 실패: '+(e&&e.message||e)+'</div>'; });
+}
+
+function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
+    (function(){
       var todayStr=new Date().toISOString().slice(0,10);
       var monthStr=new Date().toISOString().slice(0,7);
       var dayMap={}; // 'YYYY-MM-DD' -> {eventType: count}
@@ -28881,7 +28900,7 @@ function admAnalytics(c){
       var userMap={}; // key: user_id(없으면 'anon') -> {email, counts:{eventType:n}}
       rows.forEach(function(r){
         var uid=r.user_id||'anon';
-        if(!userMap[uid]) userMap[uid]={email:r.user_id?(r.profiles&&r.profiles.email)||'(탈퇴/알수없음)':'👤 비로그인 방문자', counts:{}};
+        if(!userMap[uid]) userMap[uid]={email:r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인 방문자', counts:{}};
         userMap[uid].counts[r.event_type]=(userMap[uid].counts[r.event_type]||0)+1;
       });
       var userList=Object.keys(userMap).map(function(uid){return {uid:uid, email:userMap[uid].email, counts:userMap[uid].counts};});
@@ -28911,7 +28930,7 @@ function admAnalytics(c){
         '<th style="padding:6px 8px;text-align:left">일시</th><th style="padding:6px 8px;text-align:left">이벤트</th><th style="padding:6px 8px;text-align:left">회원</th></tr></thead><tbody>'+
         rows.slice(0,200).map(function(r){
           var evDef=EVENT_DEFS.find(function(e){return e.k===r.event_type;});
-          var email=r.user_id?((r.profiles&&r.profiles.email)||'(탈퇴/알수없음)'):'👤 비로그인';
+          var email=r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인';
           return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+(r.created_at||'').slice(0,16).replace('T',' ')+'</td>'+
             '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:r.event_type)+'</td>'+
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
@@ -28919,8 +28938,7 @@ function admAnalytics(c){
       '</tbody></table></div>';
 
       c.innerHTML=html;
-    })
-    .catch(function(e){ c.innerHTML='<div style="color:#fca5a5">조회 실패: '+(e&&e.message||e)+'</div>'; });
+    })();
 }
 
 function admDashboard(c){
