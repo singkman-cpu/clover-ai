@@ -31513,10 +31513,18 @@ function chargeCr(amount){
   }
   if(!_supaUser){ alert('로그인 후 이용해주세요.'); openMd('account'); return; }
   if(res){ res.style.color='var(--t2)'; res.textContent='결제 준비 중...'; }
+  // ⚠️ 버그 수정(치명적, "로그인 돼있는데도 결제 서버가 401 로그인이 필요해요라고 함"): 지금까지
+  // Authorization 헤더에 SUPA_KEY(고정된 익명 키)를 보내고 있었는데, 서버(toss-payment 함수)는
+  // 이 값으로 supabase.auth.getUser()를 호출해서 "누가 결제하는지" 확인하려고 함 — 익명 키는
+  // 특정 사용자를 가리키지 않는 값이라 항상 실패해서 401이 났던 것. 로그인된 사용자의 진짜
+  // 세션 토큰(access_token)을 먼저 가져와서 그걸 보내야 서버가 사용자를 제대로 식별함.
+  _supa.auth.getSession().then(function(sr){
+    var token = sr && sr.data && sr.data.session && sr.data.session.access_token;
+    if(!token){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ 로그인 세션을 확인할 수 없어요. 다시 로그인해주세요.';} return; }
   // 1) 서버에 먼저 주문 생성 요청 — 서버가 "진짜 판매가"를 기준으로 orderId를 만들어줌
   //    (여기서 클라이언트가 금액을 조작해도 서버가 CREDIT_PACKAGES 목록과 대조해서 걸러냄)
   fetch(SUPA_URL+'/functions/v1/toss-payment',{
-    method:'POST', headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+    method:'POST', headers:{'Authorization':'Bearer '+token,'apikey':SUPA_KEY,'Content-Type':'application/json'},
     body:JSON.stringify({action:'create-order', credits:amount})
   }).then(function(r){return r.json();}).then(function(d){
     if(d.error){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ '+d.error;} return; }
@@ -31534,6 +31542,7 @@ function chargeCr(amount){
       if(res){res.style.color='#f59e0b';res.textContent='⚠️ 결제 취소 또는 실패: '+(e&&e.message||'');}
     });
   }).catch(function(){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ 결제 준비 중 오류가 발생했어요.';} });
+  }).catch(function(){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ 로그인 세션 확인 중 오류가 발생했어요.';} });
 }
 // 결제 성공/실패 후 successUrl·failUrl로 돌아왔을 때 처리 (페이지 로드 시 한 번 확인)
 (function(){
@@ -31541,14 +31550,20 @@ function chargeCr(amount){
   if(params.get('tossSuccess')==='1'){
     var paymentKey=params.get('paymentKey'), orderId=params.get('orderId'), amount=params.get('amount');
     if(paymentKey && orderId && amount){
+      // ⚠️ 위와 같은 이유로 여기도 진짜 세션 토큰을 써야 함 — confirm(결제 승인)도 서버가
+      // "누구 결제인지" 확인해야 크레딧을 맞는 사람에게 지급할 수 있음.
+      (_supa ? _supa.auth.getSession() : Promise.resolve({data:{}})).then(function(sr){
+        var token = sr && sr.data && sr.data.session && sr.data.session.access_token;
+        if(!token){ alert('⚠️ 로그인 세션이 만료됐어요. 다시 로그인 후 크레딧 관리에서 확인해주세요.'); history.replaceState({}, '', location.pathname); return; }
       fetch(SUPA_URL+'/functions/v1/toss-payment',{
-        method:'POST', headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
+        method:'POST', headers:{'Authorization':'Bearer '+token,'apikey':SUPA_KEY,'Content-Type':'application/json'},
         body:JSON.stringify({action:'confirm', paymentKey:paymentKey, orderId:orderId, amount:parseInt(amount,10)})
       }).then(function(r){return r.json();}).then(function(d){
         if(d.error){ alert('⚠️ 결제 확인 중 문제가 발생했어요: '+d.error); }
         else { alert('✓ '+(d.credits||0).toLocaleString()+'cr이 충전됐어요! 화면을 새로고침할게요.'); history.replaceState({}, '', location.pathname); location.reload(); return; }
         history.replaceState({}, '', location.pathname);
       }).catch(function(){ alert('⚠️ 결제 확인 중 네트워크 오류가 발생했어요. 고객센터로 문의해주세요.'); history.replaceState({}, '', location.pathname); });
+      });
     }
   } else if(params.get('tossFail')==='1'){
     alert('결제가 취소되었거나 실패했어요.');
@@ -31622,7 +31637,11 @@ function buildPricing(){
           'Business':'· 레퍼런스 6개\n· 동시 렌더 6개\n· ⚡ 렌더링 우선순위 처리\n· 쇼츠·제안서 제작 무료'
         }[p.n]||'').replace(/\n/g,'<br>')+
       '</div>'+
-      '<button style="width:100%;padding:8px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;background:'+(isFree?'rgba(255,255,255,.06)':pc)+';border:1px solid '+pc+';color:'+(isFree?'var(--t2)':'#000')+'" onclick="alert(\'결제 시스템 준비 중입니다.\')">'+
+      // ⚠️ 버그 수정(치명적, "충전 버튼 누르면 결제 시스템 준비 중이라고만 뜬다"): 이 "요금제"
+      // 모달의 버튼은 실제 결제 함수(chargeCr)를 호출하지 않고 그냥 alert만 띄우는 완성 안 된
+      // 자리표시자(stub)였음 — "크레딧 관리" 모달(다른 진입점)은 chargeCr을 제대로 호출해서
+      // 정상 동작했지만, 이 모달은 별도로 만들어진 뒤 실제 결제 연동이 안 붙어있었음.
+      '<button style="width:100%;padding:8px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;background:'+(isFree?'rgba(255,255,255,.06)':pc)+';border:1px solid '+pc+';color:'+(isFree?'var(--t2)':'#000')+'" '+(isFree?'':'onclick="closeMd(\'pricing\');chargeCr('+p.cr+')"')+'>'+
       (isFree?'가입 시 자동 지급':'충전하기')+'</button>'+
       '</div>';
   });
