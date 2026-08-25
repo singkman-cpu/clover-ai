@@ -16310,6 +16310,16 @@ function _shortsHoldDuration(role){
   if(role && h[role]!=null) return h[role];
   return h['default']!=null ? h['default'] : SHORTS_TIMING.holdAfter;
 }
+// ⚠️ 요청 반영("몇 초짜리인지 숫자만 봐선 헷갈린다, 색깔로 구별하면 썸네일 테두리만 보고 바로 알 수
+// 있지 않냐"): "장면별 머무는 시간" 설정의 4가지 그룹(현장사진/AI디자인/빈 페이지/그 외 장면)에 각각
+// 고유한 색을 지정 — 이 색을 사이드바 썸네일 테두리 + 설정 패널 라벨 양쪽에 똑같이 써서, 어떤
+// 이미지가 몇 초 그룹에 속하는지 색만 보고 바로 매칭할 수 있게 함. 지정 안 된 역할(도면·3D모델 등)은
+// 전부 '그 외 장면(default)' 그룹 색으로 통일.
+var SHORTS_HOLD_COLORS={site:'#f59e0b', ai_design:'#00e5cc', blank:'#60a5fa', 'default':'#c084fc'};
+function _shortsHoldColor(role){
+  if(role==='site'||role==='ai_design'||role==='blank') return SHORTS_HOLD_COLORS[role];
+  return SHORTS_HOLD_COLORS['default'];
+}
 
 function _shortsBuildTimeline(slides){
   var opts=G_SHORTS.opts;
@@ -16800,7 +16810,8 @@ function sbShorts(p){
     moveWrap.appendChild(upBtn);moveWrap.appendChild(downBtn);
     row.appendChild(moveWrap);
 
-    var thumb=dv('');thumb.style.cssText='width:44px;height:44px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bd2);position:relative';
+    var _holdColor=_shortsHoldColor(im.type==='blank'?'blank':resolved);
+    var thumb=dv('');thumb.style.cssText='width:44px;height:44px;border-radius:6px;overflow:hidden;flex-shrink:0;background:var(--bd2);position:relative;border:3px solid '+_holdColor+';box-shadow:0 0 0 1px rgba(0,0,0,.35)';
     var _sbThumbId='shorts-sb-thumb-'+idx+'-'+(im.id||idx);
     thumb.innerHTML='<img id="'+_sbThumbId+'" src="'+(im._thumb||im.img)+'" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover">'+
       (im.isVideo?'<div style="position:absolute;bottom:0;right:0;font-size:7px;font-weight:800;color:#fff;background:rgba(139,92,246,.9);padding:1px 3px;border-radius:3px 0 0 0">🎬</div>':'');
@@ -16892,7 +16903,7 @@ function sbShorts(p){
     var appliedSec = _shortsHoldDuration(appliedRole);
     var appliedRoleLabel = appliedRole ? _shortsRoleLabel(appliedRole) : '그 외 장면(역할 미지정)';
     var durIndicator=dv('');
-    durIndicator.style.cssText='font-size:10px;margin-top:3px;color:'+(appliedRole?'var(--ac)':'#f59e0b');
+    durIndicator.style.cssText='font-size:10px;margin-top:3px;color:'+_shortsHoldColor(appliedRole)+';font-weight:600';
     durIndicator.textContent='→ 이 장면은 '+appliedSec.toFixed(1)+'초 적용돼요 ('+appliedRoleLabel+')';
     info.appendChild(durIndicator);
 
@@ -17583,6 +17594,7 @@ function sbShorts(p){
     {role:'default', l:'🗂 그 외 장면(도면·조감도 등)'}
   ];
   HOLD_ROWS.forEach(function(hr){
+    var _hc=_shortsHoldColor(hr.role);
     var row=dv('');row.style.cssText='margin-bottom:10px';
     var top=dv('');top.style.cssText='display:flex;justify-content:space-between;font-size:11.5px;color:var(--t2);margin-bottom:4px';
     var _fmtHoldSec=function(v){
@@ -17594,7 +17606,10 @@ function sbShorts(p){
     };
     var curVal=(opts.holdByRole&&opts.holdByRole[hr.role]!=null)?opts.holdByRole[hr.role]:2.5;
     var valSpan=mk('span','');valSpan.style.cssText='color:var(--ac);font-weight:700';valSpan.textContent=_fmtHoldSec(curVal)+'초';
-    var nameSpan=mk('span','');nameSpan.textContent=hr.l;
+    // 왼쪽 사이드바 썸네일 테두리 색과 똑같은 색 점을 라벨 앞에 붙여서, 이 슬라이더가 어떤
+    // 색 테두리를 가진 이미지들에 적용되는지 한눈에 매칭할 수 있게 함.
+    var nameSpan=mk('span','');nameSpan.style.cssText='display:inline-flex;align-items:center;gap:6px';
+    nameSpan.innerHTML='<span style="width:9px;height:9px;border-radius:50%;background:'+_hc+';flex-shrink:0;display:inline-block"></span>'+hr.l;
     top.appendChild(nameSpan);top.appendChild(valSpan);
     row.appendChild(top);
     var rng=document.createElement('input');
@@ -31598,7 +31613,10 @@ function chargeCr(amount){
   if(!amount||amount<100){msg('100cr 이상 입력해 주세요.', true);return;}
   if(!TOSS_CLIENT_KEY){
     // 결제 연동 전(키 미설정): 기존처럼 선택 표시만
-    msg('✓ '+amount.toLocaleString()+'cr 패키지 선택됨 — 결제 시스템 연동 후 이용 가능합니다.');
+    // ⚠️ 요청 반영("충전하기 누르면 그냥 메인화면만 보이고 아무 설명 없다, 정식 오픈하면 가능하다는
+    // 안내 메세지가 있어야지"): 문구를 "정식 오픈 후 충전이 가능합니다"로 명확히 바꿔서, 지금은
+    // 미리보기 단계이고 아직 실제 결제/충전이 안 된다는 걸 헷갈리지 않게 알림.
+    msg('✓ '+amount.toLocaleString()+'cr 패키지 선택됨 — 정식 오픈 후 충전이 가능해요. 지금은 요금제 미리보기 단계예요.');
     var cards=document.querySelectorAll('[onclick^="chargeCr"]');
     cards.forEach(function(c){ c.style.borderColor='var(--bd)'; c.style.background='var(--c2)'; });
     var sel=document.querySelector('[onclick="chargeCr('+amount+')"]');
