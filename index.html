@@ -31566,6 +31566,12 @@ function chargeCr(amount){
   }).catch(function(){ msg('⚠️ 로그인 세션 확인 중 오류가 발생했어요.', true); });
 }
 // 결제 성공/실패 후 successUrl·failUrl로 돌아왔을 때 처리 (페이지 로드 시 한 번 확인)
+// ⚠️ 버그 수정(치명적, "Uncaught ReferenceError: _supa is not defined"): 이 코드가 문서 앞쪽에서
+// 즉시 실행되는데, _supa 변수는 훨씬 뒤쪽(로그인 처리 스크립트)에서 선언돼서, 이 코드가 실행되는
+// 시점엔 아직 _supa라는 이름 자체가 존재하지 않아 에러가 났음(결제는 성공했는데 크레딧 지급
+// 단계에서 죽어버림). window의 load 이벤트(모든 스크립트가 다 실행된 뒤)까지 미뤄서 _supa가
+// 확실히 준비된 다음에 실행되도록 함.
+window.addEventListener('load', function(){
 (function(){
   var params=new URLSearchParams(location.search);
   if(params.get('tossSuccess')==='1'){
@@ -31573,7 +31579,7 @@ function chargeCr(amount){
     if(paymentKey && orderId && amount){
       // ⚠️ 위와 같은 이유로 여기도 진짜 세션 토큰을 써야 함 — confirm(결제 승인)도 서버가
       // "누구 결제인지" 확인해야 크레딧을 맞는 사람에게 지급할 수 있음.
-      (_supa ? _supa.auth.getSession() : Promise.resolve({data:{}})).then(function(sr){
+      (typeof _supa!=='undefined' && _supa ? _supa.auth.getSession() : Promise.resolve({data:{}})).then(function(sr){
         var token = sr && sr.data && sr.data.session && sr.data.session.access_token;
         if(!token){ alert('⚠️ 로그인 세션이 만료됐어요. 다시 로그인 후 크레딧 관리에서 확인해주세요.'); history.replaceState({}, '', location.pathname); return; }
       fetch(SUPA_URL+'/functions/v1/toss-payment',{
@@ -31598,6 +31604,7 @@ function chargeCr(amount){
     history.replaceState({}, '', location.pathname);
   }
 })();
+});
 function buildFaq(){
   var b=gE('faq-b');if(!b)return;b.innerHTML='';
   var cats=[
