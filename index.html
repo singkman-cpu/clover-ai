@@ -31501,10 +31501,18 @@ var TOSS_CLIENT_KEY = 'test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm'; // ⚠️ 토스
                           // "결제위젯 연동 키 > 클라이언트 키"를 여기 넣으세요 (test_ck_... 또는 live_ck_...)
 function chargeCr(amount){
   var res=gE('cr-charge-res');
-  if(!amount||amount<100){if(res)res.textContent='100cr 이상 입력해 주세요.';return;}
+  // ⚠️ 버그 수정("요금제 모달에서 충전하면 아무 반응 없이 그냥 메인화면만 보임"): 상태 메시지를
+  // 보여주는 cr-charge-res 요소는 "크레딧 관리" 모달에만 있고 "요금제" 모달에는 없음 — 그래서
+  // 요금제 모달에서 충전할 땐 res가 항상 null이라 에러가 나도 화면에 아무것도 안 뜨고 조용히
+  // 묻혔음. res가 없을 땐 alert로라도 반드시 보여주도록 공용 헬퍼로 통일함.
+  function msg(text, isError){
+    if(res){ res.style.color = isError ? '#f59e0b' : 'var(--ac)'; res.textContent = text; }
+    else if(isError){ alert(text); }
+  }
+  if(!amount||amount<100){msg('100cr 이상 입력해 주세요.', true);return;}
   if(!TOSS_CLIENT_KEY){
     // 결제 연동 전(키 미설정): 기존처럼 선택 표시만
-    if(res){ res.style.color='var(--ac)'; res.textContent='✓ '+amount.toLocaleString()+'cr 패키지 선택됨 — 결제 시스템 연동 후 이용 가능합니다.'; }
+    msg('✓ '+amount.toLocaleString()+'cr 패키지 선택됨 — 결제 시스템 연동 후 이용 가능합니다.');
     var cards=document.querySelectorAll('[onclick^="chargeCr"]');
     cards.forEach(function(c){ c.style.borderColor='var(--bd)'; c.style.background='var(--c2)'; });
     var sel=document.querySelector('[onclick="chargeCr('+amount+')"]');
@@ -31512,7 +31520,7 @@ function chargeCr(amount){
     return;
   }
   if(!_supaUser){ alert('로그인 후 이용해주세요.'); openMd('account'); return; }
-  if(res){ res.style.color='var(--t2)'; res.textContent='결제 준비 중...'; }
+  msg('결제 준비 중...');
   // ⚠️ 버그 수정(치명적, "로그인 돼있는데도 결제 서버가 401 로그인이 필요해요라고 함"): 지금까지
   // Authorization 헤더에 SUPA_KEY(고정된 익명 키)를 보내고 있었는데, 서버(toss-payment 함수)는
   // 이 값으로 supabase.auth.getUser()를 호출해서 "누가 결제하는지" 확인하려고 함 — 익명 키는
@@ -31520,14 +31528,14 @@ function chargeCr(amount){
   // 세션 토큰(access_token)을 먼저 가져와서 그걸 보내야 서버가 사용자를 제대로 식별함.
   _supa.auth.getSession().then(function(sr){
     var token = sr && sr.data && sr.data.session && sr.data.session.access_token;
-    if(!token){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ 로그인 세션을 확인할 수 없어요. 다시 로그인해주세요.';} return; }
+    if(!token){ msg('⚠️ 로그인 세션을 확인할 수 없어요. 다시 로그인해주세요.', true); return; }
   // 1) 서버에 먼저 주문 생성 요청 — 서버가 "진짜 판매가"를 기준으로 orderId를 만들어줌
   //    (여기서 클라이언트가 금액을 조작해도 서버가 CREDIT_PACKAGES 목록과 대조해서 걸러냄)
   fetch(SUPA_URL+'/functions/v1/toss-payment',{
     method:'POST', headers:{'Authorization':'Bearer '+token,'apikey':SUPA_KEY,'Content-Type':'application/json'},
     body:JSON.stringify({action:'create-order', credits:amount})
   }).then(function(r){return r.json();}).then(function(d){
-    if(d.error){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ '+d.error;} return; }
+    if(d.error){ msg('⚠️ '+d.error, true); return; }
     try{ sessionStorage.setItem('clover_pending_order', JSON.stringify(d)); }catch(e){}
     var payment = TossPayments(TOSS_CLIENT_KEY).payment({ customerKey: _supaUser.id });
     payment.requestPayment({
@@ -31539,10 +31547,10 @@ function chargeCr(amount){
       failUrl: location.origin+location.pathname+'?tossFail=1',
       customerEmail: _supaUser.email||undefined,
     }).catch(function(e){
-      if(res){res.style.color='#f59e0b';res.textContent='⚠️ 결제 취소 또는 실패: '+(e&&e.message||'');}
+      msg('⚠️ 결제 취소 또는 실패: '+(e&&e.message||''), true);
     });
-  }).catch(function(){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ 결제 준비 중 오류가 발생했어요.';} });
-  }).catch(function(){ if(res){res.style.color='#f59e0b';res.textContent='⚠️ 로그인 세션 확인 중 오류가 발생했어요.';} });
+  }).catch(function(){ msg('⚠️ 결제 준비 중 오류가 발생했어요.', true); });
+  }).catch(function(){ msg('⚠️ 로그인 세션 확인 중 오류가 발생했어요.', true); });
 }
 // 결제 성공/실패 후 successUrl·failUrl로 돌아왔을 때 처리 (페이지 로드 시 한 번 확인)
 (function(){
@@ -31641,7 +31649,7 @@ function buildPricing(){
       // 모달의 버튼은 실제 결제 함수(chargeCr)를 호출하지 않고 그냥 alert만 띄우는 완성 안 된
       // 자리표시자(stub)였음 — "크레딧 관리" 모달(다른 진입점)은 chargeCr을 제대로 호출해서
       // 정상 동작했지만, 이 모달은 별도로 만들어진 뒤 실제 결제 연동이 안 붙어있었음.
-      '<button style="width:100%;padding:8px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;background:'+(isFree?'rgba(255,255,255,.06)':pc)+';border:1px solid '+pc+';color:'+(isFree?'var(--t2)':'#000')+'" '+(isFree?'':'onclick="closeMd(\'pricing\');chargeCr('+p.cr+')"')+'>'+
+      '<button style="width:100%;padding:8px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;background:'+(isFree?'rgba(255,255,255,.06)':pc)+';border:1px solid '+pc+';color:'+(isFree?'var(--t2)':'#000')+'" '+(isFree?'':'onclick="chargeCr('+p.cr+')"')+'>'+
       (isFree?'가입 시 자동 지급':'충전하기')+'</button>'+
       '</div>';
   });
