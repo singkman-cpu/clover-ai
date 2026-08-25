@@ -31534,7 +31534,16 @@ function chargeCr(amount){
   fetch(SUPA_URL+'/functions/v1/toss-payment',{
     method:'POST', headers:{'Authorization':'Bearer '+token,'apikey':SUPA_KEY,'Content-Type':'application/json'},
     body:JSON.stringify({action:'create-order', credits:amount})
-  }).then(function(r){return r.json();}).then(function(d){
+  }).then(function(r){
+    // ⚠️ 진단 강화: 어떤 에러인지 계속 못 잡아서, 실제 HTTP 상태코드와 응답 본문을 그대로
+    // 콘솔에 찍음 — 다음엔 스크린샷 한 장으로 바로 원인을 알 수 있게.
+    return r.text().then(function(t){
+      console.log('[토스결제] create-order 응답 status='+r.status, t);
+      var d; try{ d=JSON.parse(t); }catch(e){ d={error:'서버가 JSON이 아닌 응답을 보냄(status '+r.status+'): '+t.slice(0,200)}; }
+      if(!r.ok && !d.error){ d.error='서버 오류 (status '+r.status+')'; }
+      return d;
+    });
+  }).then(function(d){
     if(d.error){ msg('⚠️ '+d.error, true); return; }
     try{ sessionStorage.setItem('clover_pending_order', JSON.stringify(d)); }catch(e){}
     var payment = TossPayments(TOSS_CLIENT_KEY).payment({ customerKey: _supaUser.id });
@@ -31549,7 +31558,7 @@ function chargeCr(amount){
     }).catch(function(e){
       msg('⚠️ 결제 취소 또는 실패: '+(e&&e.message||''), true);
     });
-  }).catch(function(){ msg('⚠️ 결제 준비 중 오류가 발생했어요.', true); });
+  }).catch(function(e){ console.error('[토스결제] create-order 네트워크 오류', e); msg('⚠️ 결제 준비 중 오류가 발생했어요: '+(e&&e.message||e), true); });
   }).catch(function(){ msg('⚠️ 로그인 세션 확인 중 오류가 발생했어요.', true); });
 }
 // 결제 성공/실패 후 successUrl·failUrl로 돌아왔을 때 처리 (페이지 로드 시 한 번 확인)
@@ -31566,11 +31575,18 @@ function chargeCr(amount){
       fetch(SUPA_URL+'/functions/v1/toss-payment',{
         method:'POST', headers:{'Authorization':'Bearer '+token,'apikey':SUPA_KEY,'Content-Type':'application/json'},
         body:JSON.stringify({action:'confirm', paymentKey:paymentKey, orderId:orderId, amount:parseInt(amount,10)})
-      }).then(function(r){return r.json();}).then(function(d){
+      }).then(function(r){
+        return r.text().then(function(t){
+          console.log('[토스결제] confirm 응답 status='+r.status, t);
+          var d; try{ d=JSON.parse(t); }catch(e){ d={error:'서버가 JSON이 아닌 응답을 보냄(status '+r.status+'): '+t.slice(0,200)}; }
+          if(!r.ok && !d.error){ d.error='서버 오류 (status '+r.status+')'; }
+          return d;
+        });
+      }).then(function(d){
         if(d.error){ alert('⚠️ 결제 확인 중 문제가 발생했어요: '+d.error); }
         else { alert('✓ '+(d.credits||0).toLocaleString()+'cr이 충전됐어요! 화면을 새로고침할게요.'); history.replaceState({}, '', location.pathname); location.reload(); return; }
         history.replaceState({}, '', location.pathname);
-      }).catch(function(){ alert('⚠️ 결제 확인 중 네트워크 오류가 발생했어요. 고객센터로 문의해주세요.'); history.replaceState({}, '', location.pathname); });
+      }).catch(function(e){ console.error('[토스결제] confirm 네트워크 오류', e); alert('⚠️ 결제 확인 중 네트워크 오류가 발생했어요: '+(e&&e.message||e)); history.replaceState({}, '', location.pathname); });
       });
     }
   } else if(params.get('tossFail')==='1'){
