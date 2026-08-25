@@ -16668,6 +16668,30 @@ function sbShorts(p){
   note.innerHTML='&#127916; 이미지만 추가하면 역할·순서·전환·텍스트를 <strong style="color:var(--ac)">자동으로 구성</strong>해서<br>바로 SNS에 올릴 수 있는 9:16 쇼츠를 만들어드립니다.';
   p.appendChild(note);
 
+  // ⚠️ 요청 반영("이미지 만들어서 쇼츠로 딱 만들어서 금방 인스타에 올릴 수 있게, 더 자연스럽고
+  // 편하게"): 결과 이미지에 "쇼츠로 만들기" 버튼을 추가한 것과 짝을 이루는 기능 — 아직 사진을
+  // 하나도 안 넣은 상태라면, 지금까지 즐겨찾기(♡) 해둔 완성 사진들을 한 번에 다 불러와서 바로
+  // 시작할 수 있게 함. "마음에 들어서 즐겨찾기 해둔 것들"이니 쇼츠 재료로도 딱 맞는 경우가 많고,
+  // 이러면 사진을 하나하나 다시 찾아 올릴 필요 없이 버튼 한 번으로 여러 장을 채울 수 있음.
+  if(!images.length){
+    var favCands=[];
+    ['space','render','spaceset','edit','budget'].forEach(function(wf){
+      (G.HIST[wf]||[]).forEach(function(it){ if(it.fav && it.result) favCands.push(it); });
+    });
+    if(favCands.length){
+      var quickBtn=document.createElement('button');quickBtn.type='button';
+      quickBtn.style.cssText='width:100%;padding:10px;border-radius:9px;border:1px dashed var(--ac);background:rgba(0,229,204,.06);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:4px';
+      quickBtn.textContent='⭐ 즐겨찾기 '+favCands.length+'장으로 빠르게 시작';
+      quickBtn.onclick=function(){
+        favCands.forEach(function(it){
+          G_SHORTS.images.push({id:Date.now()+Math.random()+it.id, img:it.result, orig:it.orig||null, role:'auto', autoRole:null, source:it.wf});
+        });
+        renderSB(); renderMain('shorts');
+      };
+      p.appendChild(quickBtn);
+    }
+  }
+
   // ⚠️ 요청 반영("저장버튼 안 누르고 자동저장되면 안 돼?"): 수동 버튼 대신, 변경이 있을 때마다
   // (렌더될 때마다) 살짝 지연 후 자동으로 클라우드에 저장되도록 바꿈 — 공간 컨셉 디자인의
   // 참고 이미지 자동저장과 같은 방식.
@@ -23525,6 +23549,56 @@ function addHistEl(item, scroll, targetHs, atBottom){
     sebar.className='se-bar';
     sebar.addEventListener('click',function(e){e.stopPropagation();},false);
     sebar.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+
+    // ⚠️ 요청 반영("전문가 말고 일반인도 계속 쓰게 만들 방법"): 현장사진 디자인에서 방 하나
+    // 만들고 끝나는 경우가 많아서, "같은 스타일 그대로 다른 방도" 버튼을 추가함 — 방금 쓴
+    // 프롬프트·프리셋(스타일)은 그대로 이어받고 사진만 새로 올리게 해서, 스타일을 처음부터
+    // 다시 고르는 수고 없이 바로 두 번째 생성으로 이어지게 함(현장사진 디자인 결과에만 노출).
+    if(item.result && item.wf==='space'){
+      var ssame=mk('button','se-btn');ssame.type='button';ssame.innerHTML='&#127968; 다른 방도 같은 스타일로';ssame.title='이 스타일 그대로 유지하고, 다른 방 사진을 올려서 이어서 만들기';
+      ssame.style.cssText='background:rgba(0,229,204,.15);border-color:var(--ac);color:var(--ac);padding:4px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid;font-family:inherit';
+      ssame.addEventListener('click',function(e){
+        e.stopPropagation();
+        var tab=getTab('space');
+        // 스타일(프롬프트·프리셋·해상도·엔진)만 이어받고, 사진(inputImg)은 비워서 새로 올리게 함
+        if(item.savedPrompt!==undefined) tab.prompt=item.savedPrompt;
+        if(item.savedSelK!==undefined)   tab.selK=item.savedSelK;
+        if(item.savedRes)                tab.resolution=item.savedRes;
+        if(item.savedEng)                G.eng=item.savedEng;
+        tab.inputImg=null; tab.status='idle';
+        G.wf='space';
+        renderMain('space');
+        setTimeout(function(){
+          var stl=gE('stl'); if(stl){ stl.style.color='var(--ac)'; stl.textContent='✓ 같은 스타일이 적용됐어요 — 이번엔 다른 방 사진을 올려주세요!'; }
+          var ub=gE('ub-main'); if(ub) ub.scrollIntoView({behavior:'smooth',block:'center'});
+        }, 80);
+      },false);
+      ssame.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      sebar.appendChild(ssame);
+    }
+
+    // ⚠️ 요청 반영("이미지 만들고 바로 쇼츠로 만들어서 인스타에 올리고 싶다"): 지금까지 이미지
+    // 결과물에서 쇼츠로 바로 보내는 버튼이 없어서, 쇼츠 만들려면 "쇼츠 제작" 탭에서 사진을 처음
+    // 부터 다시 올려야 했음 — 그 마찰을 없애기 위해 결과 이미지를 클릭 한 번에 쇼츠 재료로
+    // 보내는 버튼을 추가함(영상/쇼츠/VR투어 자체 결과물에는 안 보이게 함 — 원본 이미지가 있는
+    // 결과물에만 의미가 있으므로).
+    if(item.result && item.wf!=='video' && item.wf!=='shorts' && item.wf!=='world3d'){
+      var ssho=mk('button','se-btn');ssho.type='button';ssho.innerHTML='&#127916; 쇼츠로 만들기';ssho.title='이 사진을 쇼츠 재료로 보내기 (SNS용 짧은 영상)';
+      ssho.style.cssText='background:rgba(244,63,94,.12);border-color:rgba(244,63,94,.4);color:#fb7185;padding:4px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid;font-family:inherit';
+      ssho.addEventListener('click',function(e){
+        e.stopPropagation();
+        if(!G_SHORTS.images) G_SHORTS.images=[];
+        G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.result, orig:item.orig||null, role:'auto', autoRole:null, source:item.wf});
+        G.wf='shorts';
+        renderMain('shorts');
+        if(typeof renderSB==='function') renderSB();
+        setTimeout(function(){
+          alert('✓ 쇼츠 재료에 추가됐어요!\n\n마음에 드는 사진이 더 있으면 즐겨찾기 해두신 것들을 아래 "⭐ 즐겨찾기로 빠르게 시작" 버튼으로 한 번에 더 채우실 수 있어요.\n사진 1장만으로도 바로 "쇼츠 생성하기"를 누르면 완성돼요.');
+        }, 150);
+      },false);
+      ssho.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      sebar.appendChild(ssho);
+    }
 
     // 영상
     var svid=mk('button','se-btn');svid.type='button';svid.innerHTML='&#9654; 영상';svid.title='영상 탭으로';
