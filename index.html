@@ -1517,7 +1517,12 @@ function _proposalOpenImageEditPicker(sc, field, onDone){
 // 웜톤 배경 + 골드 악센트 + 둥근 모서리 이미지로 클라이언트에게 보내는 문서다운 고급스러운 톤을 지향한다.
 // ── 제안서 PDF 생성 (표지 1페이지 + 장면 3개씩 묶은 내용 페이지들) ──────────
 var PROPOSAL_PAGE_W=1240, PROPOSAL_PAGE_H=1754; // A4 비율(약 150dpi)
-var PROPOSAL_SCENES_PER_PAGE=2;
+// ⚠️ 요청 반영("미리보기에서는 사진이 컸는데 생성하기 누르면 한 페이지에 여러 장면이 끼여들어가
+// 작아진다"): 기존엔 A4 한 페이지에 공간 2개씩 욱여넣어서, 실시간 미리보기(공간 하나가 화면 폭
+// 전체를 쓰는 큼직한 카드)와 실제 PDF(반으로 쪼개진 작은 사진)가 서로 다르게 보였음. 공간 하나당
+// 페이지 하나를 통째로 쓰도록 바꿔서 사진이 훨씬 크게 들어가고, 미리보기와 실제 결과물의 느낌이
+// 일치하게 함.
+var PROPOSAL_SCENES_PER_PAGE=1;
 var PROPOSAL_FONT="Pretendard,-apple-system,sans-serif";
 
 // 제안서 비주얼 스타일 15종 — accent(포인트색)/ink(제목)/muted(보조텍스트)/bg(배경)/divider(선)/desc(본문설명)
@@ -1544,7 +1549,15 @@ var PROPOSAL_STYLES=[
   // ↓ 건축 도면(청사진) 감성 — 인테리어·건축 업종 제안서와 특히 잘 맞고 요즘 포트폴리오 사이트에서도 자주 보이는 톤
   {key:'blueprint',label:'아키텍처 블루프린트', accent:'#5ec8e8', accent2:'#9fd8ec', ink:'#eaf4fa', muted:'#7fa0b5', bg:'#0d1b2e', divider:'#28405c', desc:'#c8dbe8', dark:true,  deco:'grid',     coverOverlay:['6,14,26'],       coverText:'#ffffff', popular:true},
   {key:'lavender',label:'디지털 라벤더',        accent:'#9575cd', accent2:'#7986cb', ink:'#2a2140', muted:'#9a8fb5', bg:'#f7f5fc', divider:'#e5e0f2', desc:'#4a4066', dark:false, deco:'blob',     coverOverlay:['25,15,40'],      coverText:'#ffffff'},
-  {key:'charcoal',label:'차콜 프리미엄',        accent:'#d4af37', accent2:'#b0b0b0', ink:'#e8e8e8', muted:'#8a8a8a', bg:'#1a1a1c', divider:'#2e2e30', desc:'#c0c0c0', dark:true,  deco:'lines',    coverOverlay:['8,8,9'],         coverText:'#d4af37'}
+  {key:'charcoal',label:'차콜 프리미엄',        accent:'#d4af37', accent2:'#b0b0b0', ink:'#e8e8e8', muted:'#8a8a8a', bg:'#1a1a1c', divider:'#2e2e30', desc:'#c0c0c0', dark:true,  deco:'lines',    coverOverlay:['8,8,9'],         coverText:'#d4af37'},
+  // ↓ 요청 반영("인테리어·건축 디자인에 맞게 더 세련되고 퀄리티있는 프리셋 추가") — 실제 건축사무소·
+  // 고급 인테리어 브랜드 포트폴리오에서 자주 쓰이는 톤 5종을 추가함. 기존 15종과 색감이 겹치지
+  // 않도록 확인하며 골랐고, deco(장식 엔진)는 검증된 기존 엔진을 재사용해 안전하게 새 조합만 냄.
+  {key:'loft',    label:'인더스트리얼 로프트',  accent:'#b5651d', accent2:'#5c5f66', ink:'#2a2a28', muted:'#8f8b82', bg:'#eeece6', divider:'#d8d4c8', desc:'#4a473f', dark:false, deco:'frame',    coverOverlay:['20,18,15'],      coverText:'#ffffff'},
+  {key:'japandi', label:'재패니즈 우드',        accent:'#8a6a4a', accent2:'#6b7561', ink:'#2f2a24', muted:'#a39683', bg:'#f6f1e8', divider:'#e6ddc9', desc:'#524a3d', dark:false, deco:'lines',    coverOverlay:['18,15,10'],      coverText:'#ffffff'},
+  {key:'monochrome',label:'모노크롬 아키텍처',  accent:'#111111', accent2:'#8a8a8a', ink:'#0a0a0a', muted:'#8a8a8a', bg:'#ffffff', divider:'#dddddd', desc:'#333333', dark:false, deco:'marble',   coverOverlay:['5,5,5'],         coverText:'#ffffff', popular:true},
+  {key:'copper',  label:'코퍼 인더스트리얼',    accent:'#c1793f', accent2:'#3a3f47', ink:'#211f1c', muted:'#948b7d', bg:'#f4efe7', divider:'#e2d7c4', desc:'#4a4238', dark:false, deco:'geo',      coverOverlay:['25,18,10'],      coverText:'#ffffff'},
+  {key:'greige',  label:'그레이지 럭셔리',      accent:'#a99a87', accent2:'#8f8375', ink:'#2e2b27', muted:'#a89c8d', bg:'#f5f2ec', divider:'#e6ded2', desc:'#544e45', dark:false, deco:'lines',    coverOverlay:['20,18,15'],      coverText:'#ffffff', popular:true}
 ];
 function _proposalTheme(key){
   return PROPOSAL_STYLES.find(function(s){return s.key===key;}) || PROPOSAL_STYLES[0];
@@ -1689,15 +1702,24 @@ function _proposalDrawTOCPage(data, totalPages, loaded){
   // ⚠️ 요청 반영: "목차 내용이 별로 없으면 페이지가 너무 텅 비어 보인다"는 지적 — 특히 공간이
   // 1~2개뿐인 제안서는 목차에 글자 두 줄만 있고 나머지가 새하얗게 비어서 허전했음. 각 공간 항목에
   // 실제 완성 이미지를 작은 썸네일 카드로 같이 보여줘서, 항목이 적어도 페이지가 꽉 차 보이게
-  // 하고 목차 자체도 더 보기 좋게 만듦.
-  var rowH = scenes.length<=3 ? 148 : (scenes.length<=5 ? 100 : 56);
-  var thumbSize = scenes.length<=3 ? 120 : (scenes.length<=5 ? 76 : 0);
+  // 하고 목차 자체도 더 보기 좋게 만듦. 공간이 1~2개뿐일 땐 썸네일을 훨씬 크게 키우고, 목록
+  // 블록 전체를 세로 중앙에 배치해서(예전엔 위에 붙어있고 아래가 통째로 빔) 페이지가 꽉 차 보이게 함.
+  var rowH = scenes.length<=2 ? 260 : (scenes.length<=3 ? 148 : (scenes.length<=5 ? 100 : 56));
+  var thumbSize = scenes.length<=2 ? 220 : (scenes.length<=3 ? 120 : (scenes.length<=5 ? 76 : 0));
   // 예산 페이지가 있으면 목차에도 한 줄 추가(공간 목록 다음, 마무리 페이지 전)
   var tocEntries=scenes.map(function(sc,i){ return {num:i+1, label:sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(i+1), page:Math.floor(i/PROPOSAL_SCENES_PER_PAGE)+3, thumbKey:'a'+i}; });
   var contentPageCount=Math.ceil(scenes.length/PROPOSAL_SCENES_PER_PAGE);
-  var hasBudget = scenes.some(function(sc){return sc.budgetSnapshot;});
+  var hasBudget = scenes.some(function(sc){return sc.budgetSnapshot;}) && data.includeBudgetPage!==false;
   if(hasBudget) tocEntries.push({num:'', label:'견적 요약', page:contentPageCount+3, isSpecial:true});
-  tocEntries.push({num:'', label:'마무리 인사', page:totalPages, isSpecial:true});
+  if(data.includeClosing!==false) tocEntries.push({num:'', label:'마무리 인사', page:totalPages, isSpecial:true});
+
+  // 전체 목록 블록 높이를 먼저 계산해서, 공간이 적을 땐 위쪽 제목 아래 남는 공간 한가운데로
+  // 살짝 내려서 배치함 — 페이지 아래쪽이 텅 빈 채로 안 남게 함.
+  var totalBlockH = tocEntries.reduce(function(sum,e){ return sum + ((thumbSize>0 && !e.isSpecial) ? rowH : 56); }, 0);
+  var availableH = (H-140) - y; // 페이지 번호 영역(H-140쯤) 위까지 쓸 수 있는 세로 공간
+  if(scenes.length<=2 && totalBlockH < availableH){
+    y += Math.round((availableH - totalBlockH) / 2.4); // 완전 중앙보다 살짝 위쪽에 무게중심(자연스러운 균형)
+  }
 
   tocEntries.forEach(function(entry){
     var thumbImg = (thumbSize>0 && !entry.isSpecial && loaded) ? loaded[entry.thumbKey] : null;
@@ -1920,7 +1942,9 @@ function _buildProposalPDF(data, cb){
   var remaining=toLoad.length;
   function finish(){
     var pageCanvases=[];
-    var hasBudget = scenes.some(function(sc){return sc.budgetSnapshot;});
+    var hasBudget = scenes.some(function(sc){return sc.budgetSnapshot;}) && data.includeBudgetPage!==false;
+    var includeToc = data.includeToc!==false;
+    var includeClosing = data.includeClosing!==false;
     var chunks=[];
     for(var i=0;i<scenes.length;i+=PROPOSAL_SCENES_PER_PAGE){
       var group=[];
@@ -1929,17 +1953,25 @@ function _buildProposalPDF(data, cb){
       }
       chunks.push(group);
     }
-    // 표지 + 목차 + 내용페이지들 + (견적 요약, 있으면) + 마무리 페이지
-    var totalPages=chunks.length+3+(hasBudget?1:0);
-    pageCanvases.push(_proposalDrawCoverPage(data, loaded.hero, loaded.logo));
-    pageCanvases.push(_proposalDrawTOCPage(data, totalPages, loaded));
+    // 표지 + (목차, 켜져있으면) + 내용페이지들 + (견적 요약, 있으면) + (마무리 페이지, 켜져있으면)
+    // ⚠️ 요청 반영("완성된 제안서에서 필요없는 페이지를 통으로 삭제하고 싶다"): 목차·견적 요약·
+    // 마무리 페이지를 각각 켜고 끌 수 있게 함 — 꺼진 페이지는 아예 생성하지 않고, 그만큼 뒤 페이지
+    // 번호가 자연스럽게 한 칸씩 당겨짐(빈 페이지가 남거나 번호가 어긋나지 않게).
+    var pagesBeforeContent = 1 + (includeToc?1:0); // 표지 + (목차)
+    var totalPages = pagesBeforeContent + chunks.length + (hasBudget?1:0) + (includeClosing?1:0);
+    var pageMeta=[]; // 각 페이지가 실제로 무엇인지(표지/목차/어떤 공간/견적/마무리) 기록 —
+    // 완성 화면에서 "이 페이지 삭제"를 누르면 이 메타로 무엇을 껐다/지웠다를 판단함.
+    pageCanvases.push(_proposalDrawCoverPage(data, loaded.hero, loaded.logo)); pageMeta.push({kind:'cover'});
+    if(includeToc){ pageCanvases.push(_proposalDrawTOCPage(data, totalPages, loaded)); pageMeta.push({kind:'toc'}); }
     chunks.forEach(function(chunk, ci){
-      pageCanvases.push(_proposalDrawContentPage(chunk, loaded, data, ci+2, totalPages, loaded.logo));
+      pageCanvases.push(_proposalDrawContentPage(chunk, loaded, data, pagesBeforeContent+ci, totalPages, loaded.logo));
+      pageMeta.push({kind:'content', sceneIdx:chunk[0].idx});
     });
     if(hasBudget){
-      pageCanvases.push(_proposalDrawBudgetPage(data, chunks.length+2, totalPages));
+      pageCanvases.push(_proposalDrawBudgetPage(data, pagesBeforeContent+chunks.length, totalPages));
+      pageMeta.push({kind:'budget'});
     }
-    pageCanvases.push(_proposalDrawClosingPage(data, totalPages));
+    if(includeClosing){ pageCanvases.push(_proposalDrawClosingPage(data, totalPages)); pageMeta.push({kind:'closing'}); }
 
     var pdf=new window.jspdf.jsPDF({unit:'mm', format:'a4', orientation:'portrait'});
     pageCanvases.forEach(function(canvas, i){
@@ -1947,7 +1979,7 @@ function _buildProposalPDF(data, cb){
       if(i>0)pdf.addPage();
       pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
     });
-    cb(pdf, pageCanvases);
+    cb(pdf, pageCanvases, pageMeta);
   }
   if(remaining===0){ finish(); return; }
   toLoad.forEach(function(spec){
@@ -1955,6 +1987,39 @@ function _buildProposalPDF(data, cb){
     img.onload=function(){ loaded[spec.key]=img; remaining--; if(remaining<=0)finish(); };
     img.onerror=function(){ remaining--; if(remaining<=0)finish(); };
     img.src=spec.src;
+  });
+}
+
+// G_PROPOSAL.scenes/opts를 그대로 읽어서 PDF를 (다시) 만드는 공용 함수. 최초 "제안서 생성하기"
+// 버튼과, 완성 화면에서 "이 페이지 삭제" 후 재생성하는 흐름이 이 함수 하나를 같이 씀 — 로직이
+// 두 곳에 따로 있으면 나중에 한쪽만 고치고 잊어버리기 쉬워서 하나로 합침.
+function _proposalGeneratePDF(onDone){
+  var scenes=G_PROPOSAL.scenes, opts=G_PROPOSAL.opts;
+  if(!scenes || !scenes.length) return;
+  var parsedDesc=_proposalParseDescription(opts.description);
+  _buildProposalPDF({
+    client:opts.client,
+    spaceLabel:(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l||'공간',
+    summary:opts.summary,
+    company:opts.company,
+    contact:opts.contact,
+    logo:opts.logo,
+    budgetText:parsedDesc.budgetManwon?_proposalFormatBudget(parsedDesc.budgetManwon):null,
+    scenes:scenes,
+    _tone:parsedDesc.tone,
+    styleKey:opts.styleKey||'gold',
+    customColors: opts.useCustomColors ? opts.customColors : null,
+    includeToc: opts.includeToc!==false,
+    includeBudgetPage: opts.includeBudgetPage!==false,
+    includeClosing: opts.includeClosing!==false
+  }, function(pdf, pageCanvases, pageMeta){
+    G_PROPOSAL.resultPdf=pdf;
+    G_PROPOSAL.resultPages=pageCanvases.map(function(c){return c.toDataURL('image/jpeg',0.9);});
+    G_PROPOSAL.resultPageMeta=pageMeta;
+    G_PROPOSAL.resultUrl=G_PROPOSAL.resultPages[0]; // 갤러리 썸네일 = 표지
+    G_PROPOSAL._savedKey=null;
+    _draftClear(_proposalDraftKey()); // 완성됐으니 임시저장은 이제 필요 없음
+    if(onDone) onDone();
   });
 }
 
@@ -2125,7 +2190,10 @@ function _proposalDrawContentPage(chunk, loaded, data, pageIndex, totalPages, lo
   ctx.beginPath();ctx.moveTo(pad,80);ctx.lineTo(W-pad,80);ctx.stroke();
 
   var y=112;
-  var maxImgH=440; // 페이지 안에 들어가야 하니 최대 높이만 캡을 두고, 그 안에서 원본 비율 그대로 유지
+  // ⚠️ 페이지당 공간 1개로 바뀌면서(PROPOSAL_SCENES_PER_PAGE=1) 한 페이지를 통째로 쓸 수 있게
+  // 됨 — 예전엔 페이지 하나에 최대 2개가 들어가야 해서 사진 높이를 440px로 좁게 캡해뒀는데,
+  // 이제 그 제한을 풀어서(760px) 사진이 훨씬 크고 시원하게, 미리보기와 비슷한 비중으로 보이게 함.
+  var maxImgH=chunk.length>1?440:760; // chunk.length>1은 옛 데이터 호환용 안전장치
   var innerW=W-pad*2;
 
   chunk.forEach(function(entry, ci){
@@ -17897,6 +17965,34 @@ function _proposalRenderCanvas(ub){
       pageNum.style.cssText='position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px';
       pageNum.textContent=(pi+1)+' / '+(G_PROPOSAL.resultPages?G_PROPOSAL.resultPages.length:1);
       pageWrap.appendChild(pageNum);
+      // ⚠️ 요청 반영("완성된 제안서에서 필요없는 페이지(목차 등)를 통으로 삭제하고 싶다"): 페이지마다
+      // 🗑 삭제 버튼을 달아서, 누르면 그 페이지 종류에 맞게 데이터를 바꾸고(목차/견적/마무리는
+      // 꺼짐 표시, 공간 페이지는 그 장면 자체를 삭제) PDF를 통째로 다시 만들어서 페이지 번호가
+      // 항상 딱 맞게 자동으로 다시 매겨지게 함. 표지는 문서 정체성상 삭제 대상에서 제외.
+      var meta=(G_PROPOSAL.resultPageMeta||[])[pi];
+      if(meta && meta.kind!=='cover'){
+        var delBtn=document.createElement('button');delBtn.type='button';delBtn.textContent='🗑';
+        delBtn.title='이 페이지 삭제';
+        delBtn.style.cssText='position:absolute;top:8px;left:8px;width:30px;height:30px;border-radius:8px;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center';
+        delBtn.onclick=function(){
+          var opts=G_PROPOSAL.opts, scenes=G_PROPOSAL.scenes;
+          if(meta.kind==='content'){
+            if(scenes.length<=1){ alert('공간이 최소 1개는 있어야 해요. 이 장면을 지우려면 다른 장면을 먼저 추가해주세요.'); return; }
+            if(!confirm('이 공간 페이지를 삭제할까요? (장면 자체가 제안서에서 빠져요)')) return;
+            scenes.splice(meta.sceneIdx,1);
+          } else {
+            var kindLabel={toc:'목차', budget:'견적 요약', closing:'마무리 인사'}[meta.kind]||'이';
+            if(!confirm(kindLabel+' 페이지를 삭제할까요?')) return;
+            if(meta.kind==='toc') opts.includeToc=false;
+            else if(meta.kind==='budget') opts.includeBudgetPage=false;
+            else if(meta.kind==='closing') opts.includeClosing=false;
+          }
+          pageWrap.style.opacity='0.35';
+          delBtn.disabled=true; delBtn.textContent='…';
+          _proposalGeneratePDF(function(){ renderMain('proposal'); });
+        };
+        pageWrap.appendChild(delBtn);
+      }
       vidWrap.appendChild(pageWrap);
     });
 
@@ -18762,26 +18858,8 @@ function sbProposal(p){
   }
   genBtn.onclick=function(){
     if(!scenes.length)return;
-    genBtn.disabled=true;genBtn.textContent='생성 중... (PDF '+(2+Math.ceil(scenes.length/PROPOSAL_SCENES_PER_PAGE))+'페이지)';
-    var parsedDesc=_proposalParseDescription(opts.description);
-    _buildProposalPDF({
-      client:opts.client,
-      spaceLabel:(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l||'공간',
-      summary:opts.summary,
-      company:opts.company,
-      contact:opts.contact,
-      logo:opts.logo,
-      budgetText:parsedDesc.budgetManwon?_proposalFormatBudget(parsedDesc.budgetManwon):null,
-      scenes:scenes,
-      _tone:parsedDesc.tone,
-      styleKey:opts.styleKey||'gold',
-      customColors: opts.useCustomColors ? opts.customColors : null
-    }, function(pdf, pageCanvases){
-      G_PROPOSAL.resultPdf=pdf;
-      G_PROPOSAL.resultPages=pageCanvases.map(function(c){return c.toDataURL('image/jpeg',0.9);});
-      G_PROPOSAL.resultUrl=G_PROPOSAL.resultPages[0]; // 갤러리 썸네일 = 표지
-      G_PROPOSAL._savedKey=null;
-      _draftClear(_proposalDraftKey()); // 완성됐으니 임시저장은 이제 필요 없음
+    genBtn.disabled=true;genBtn.textContent='생성 중... (PDF '+(1+(opts.includeToc!==false?1:0)+Math.ceil(scenes.length/PROPOSAL_SCENES_PER_PAGE))+'페이지~)';
+    _proposalGeneratePDF(function(){
       genBtn.disabled=false;
       genBtn.innerHTML='✨ 제안서 생성하기 <span style="font-size:11px;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 8px;margin-left:4px;font-weight:700">무료 FREE</span>';
       renderMain('proposal');
