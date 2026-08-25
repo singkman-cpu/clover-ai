@@ -1431,6 +1431,87 @@ function _proposalOpenAddScenePicker(){
   document.body.appendChild(pickOverlay);
 }
 
+// ⚠️ 요청 반영("이미지 한 장만 선택해도 비포/애프터로 되던데 지금 수정할 수 있는 게 글 내용밖에
+// 없다, 이미지 각각 수정할 수 있게 해줘"): 장면 목록에서 BEFORE·AFTER 썸네일을 각각 따로 눌러서
+// 바꿀 수 있는 작은 피커. 내 컴퓨터에서 새로 업로드하거나, 이미 만든 결과물(갤러리)에서 골라
+// 이 장면의 사진 한 장만 교체한다. onDone(newUrlOrNull)로 결과를 돌려주고, BEFORE는 null을 넘기면
+// 아예 빼서 AFTER 한 장짜리 장면으로 바꿀 수 있게 함.
+function _proposalOpenImageEditPicker(sc, field, onDone){
+  var already=document.getElementById('proposal-img-edit-overlay');
+  if(already) return;
+  var isOrig = field==='orig';
+  var ov=dv('');
+  ov.id='proposal-img-edit-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10002;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.onclick=function(e){ if(e.target===ov) document.body.removeChild(ov); };
+  var card=dv('');
+  card.style.cssText='background:var(--card);border-radius:14px;padding:16px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto';
+  card.onclick=function(e){e.stopPropagation();};
+  var title=dv('');title.style.cssText='font-size:13px;font-weight:800;color:var(--t);margin-bottom:10px';
+  title.textContent=(isOrig?'🏚 BEFORE(현장사진)':'✨ AFTER(완성본)')+' 사진 바꾸기';
+  card.appendChild(title);
+
+  var uploadBox=dv('');
+  uploadBox.style.cssText='width:100%;height:90px;border-radius:9px;border:1.5px dashed var(--bd2);background:var(--c2);display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;cursor:pointer;margin-bottom:10px';
+  var uploadHint=dv('');uploadHint.style.cssText='font-size:11px;color:var(--m2)';uploadHint.textContent='탭해서 내 사진 업로드 (또는 드래그)';
+  uploadBox.appendChild(uploadHint);
+  var fileIn=document.createElement('input');fileIn.type='file';fileIn.accept='image/*';
+  fileIn.style.cssText='position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%';
+  uploadBox.appendChild(fileIn);
+  function _finish(url){ onDone(url); if(ov.parentNode) document.body.removeChild(ov); }
+  fileIn.onchange=function(){
+    var f=fileIn.files[0]; if(!f)return;
+    var reader=new FileReader();
+    reader.onload=function(){ _finish(reader.result); };
+    reader.readAsDataURL(f);
+  };
+  uploadBox.addEventListener('dragover',function(e){ e.preventDefault(); uploadBox.style.borderColor='var(--ac)'; });
+  uploadBox.addEventListener('dragleave',function(){ uploadBox.style.borderColor='var(--bd2)'; });
+  uploadBox.addEventListener('drop',function(e){
+    e.preventDefault();
+    var f=e.dataTransfer.files&&e.dataTransfer.files[0];
+    if(!f||!f.type.startsWith('image/'))return;
+    var reader=new FileReader();
+    reader.onload=function(){ _finish(reader.result); };
+    reader.readAsDataURL(f);
+  });
+  card.appendChild(uploadBox);
+
+  if(isOrig && sc.orig){
+    var rmBtn=mk('button','');rmBtn.type='button';rmBtn.textContent='✕ BEFORE 사진 빼기 (AFTER 한 장만 남기기)';
+    rmBtn.style.cssText='width:100%;margin-bottom:14px;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
+    rmBtn.onclick=function(){ _finish(null); };
+    card.appendChild(rmBtn);
+  }
+
+  var galLabel=dv('');galLabel.style.cssText='font-size:11px;color:var(--t2);font-weight:700;margin-bottom:8px';
+  galLabel.textContent='또는 내가 만든 결과물에서 선택';
+  card.appendChild(galLabel);
+
+  var candidates=_proposalGatherCandidates([]);
+  if(!candidates.length){
+    var noGal=dv('');noGal.style.cssText='font-size:12px;color:var(--m2);text-align:center;padding:16px';
+    noGal.textContent='아직 만든 결과물이 없어요.';
+    card.appendChild(noGal);
+  } else {
+    var grid=dv('');grid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:6px';
+    candidates.slice(0,90).forEach(function(cand){
+      var cell=dv('');cell.style.cssText='cursor:pointer;border-radius:7px;overflow:hidden;border:1px solid var(--bd2);aspect-ratio:1';
+      var img=document.createElement('img');img.src=cand.result;img.loading='lazy';
+      img.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
+      cell.appendChild(img);
+      cell.addEventListener('mouseenter',function(){cell.style.borderColor='var(--ac)';});
+      cell.addEventListener('mouseleave',function(){cell.style.borderColor='var(--bd2)';});
+      cell.onclick=function(){ _finish(cand.result); };
+      grid.appendChild(cell);
+    });
+    card.appendChild(grid);
+  }
+
+  ov.appendChild(card);
+  document.body.appendChild(ov);
+}
+
 // 실제 제안서 이미지를 캔버스에 그려서 콜백으로 넘긴다.
 // scenes 배열 길이에 맞춰 캔버스 높이를 동적으로 계산하는 멀티신 버전.
 // 웜톤 배경 + 골드 악센트 + 둥근 모서리 이미지로 클라이언트에게 보내는 문서다운 고급스러운 톤을 지향한다.
@@ -1442,22 +1523,27 @@ var PROPOSAL_FONT="Pretendard,-apple-system,sans-serif";
 // 제안서 비주얼 스타일 15종 — accent(포인트색)/ink(제목)/muted(보조텍스트)/bg(배경)/divider(선)/desc(본문설명)
 // dark:true인 테마는 배경이 어두워서 표지의 사진 오버레이 톤도 그에 맞게 살짝 조정함
 // coverOverlay: 표지 사진 위에 깔리는 그라디언트 색(테마마다 달라야 진짜 다르게 보임) / coverText: 표지 제목 글자색
+// ⚠️ 요청 반영("제안서 디자인 스타일이 너무 별로다, 요새 유행하는 스타일로 해줘"): 2010년대 느낌의
+// 원색 그라디언트·비비드 네온·과한 파스텔 캔디톤을 걷어내고, 요즘 건축·인테리어 포트폴리오/브랜드
+// 문서에서 실제로 자주 쓰이는 톤(웜 뉴트럴 에디토리얼, 톤다운 테라코타·세이지, 스위스 그리드,
+// 아키텍처 블루프린트, 뉴브루탈리즘, 다크 럭셔리)으로 색상·이름을 다시 잡음. deco(장식 엔진)는
+// 기존 것을 그대로 재사용해서 그림 로직은 안전하게 유지하고, 톤만 세련되게 바꿈.
 var PROPOSAL_STYLES=[
-  {key:'gold',    label:'골드 에디토리얼',      accent:'#c9a468', accent2:'#c9a468', ink:'#2a2723', muted:'#9a927f', bg:'#faf7f2', divider:'#e4ddd0', desc:'#55504a', dark:false, deco:'lines',    coverOverlay:['10,9,7'],        coverText:'#ffffff'},
-  {key:'gradient',label:'비비드 그라디언트 드림', accent:'#8b5cf6', accent2:'#ec4899', ink:'#2a1a3a', muted:'#8a7a9a', bg:'#fdf5ff', divider:'#e8d5f5', desc:'#4a3a5a', dark:false, deco:'gradient', coverOverlay:['30,15,50','60,15,40'], coverText:'#ffffff'},
-  {key:'geo',     label:'지오메트릭 팝',        accent:'#ff6b35', accent2:'#2ec4b6', ink:'#1a1a2e', muted:'#8a8a9a', bg:'#fffdf9', divider:'#eeeae0', desc:'#333344', dark:false, deco:'geo',      coverOverlay:['20,20,35'],      coverText:'#ffffff'},
-  {key:'neon',    label:'다크 네온',            accent:'#00e5cc', accent2:'#ff2d95', ink:'#f0f5f5', muted:'#7a9a98', bg:'#0a0e14', divider:'#1e2830', desc:'#c5d5d3', dark:true,  deco:'neon',     coverOverlay:['5,10,15'],       coverText:'#00e5cc'},
-  {key:'pastel',  label:'파스텔 마카롱',        accent:'#ff9ec4', accent2:'#a8d8c9', ink:'#4a3540', muted:'#b09aa3', bg:'#fef8fb', divider:'#f5dfe8', desc:'#6b5560', dark:false, deco:'blob',     coverOverlay:['60,30,45'],      coverText:'#ffffff'},
-  {key:'brutal',  label:'모던 브루탈리즘',      accent:'#000000', accent2:'#ffe600', ink:'#000000', muted:'#666666', bg:'#ffffff', divider:'#000000', desc:'#1a1a1a', dark:false, deco:'frame',    coverOverlay:['0,0,0'],         coverText:'#ffe600'},
+  {key:'gold',    label:'웜 에디토리얼',        accent:'#b9895a', accent2:'#b9895a', ink:'#2a2723', muted:'#9a927f', bg:'#faf7f2', divider:'#e4ddd0', desc:'#55504a', dark:false, deco:'lines',    coverOverlay:['10,9,7'],        coverText:'#ffffff'},
+  {key:'gradient',label:'미드나잇 그라디언트',  accent:'#33507a', accent2:'#3f7f83', ink:'#101826', muted:'#6f8aa0', bg:'#f4f7fa', divider:'#dde6ee', desc:'#2c3c4c', dark:false, deco:'gradient', coverOverlay:['12,20,30','15,35,40'], coverText:'#ffffff'},
+  {key:'geo',     label:'테라코타 지오메트릭',  accent:'#c96f4a', accent2:'#7c9473', ink:'#2a2420', muted:'#9a8f80', bg:'#faf6ef', divider:'#ecdfd0', desc:'#4a4038', dark:false, deco:'geo',      coverOverlay:['22,16,10'],      coverText:'#ffffff'},
+  {key:'neon',    label:'다크 아카이브',        accent:'#2f8f6e', accent2:'#c9a468', ink:'#eef2ef', muted:'#7f9a90', bg:'#0c1210', divider:'#1c2622', desc:'#c3d0cb', dark:true,  deco:'neon',     coverOverlay:['5,10,8'],        coverText:'#c9a468'},
+  {key:'pastel',  label:'소프트 클레이',        accent:'#c99f96', accent2:'#9fb08f', ink:'#3a332f', muted:'#a89b8f', bg:'#f7f1ea', divider:'#ece1d4', desc:'#5c5148', dark:false, deco:'blob',     coverOverlay:['40,32,28'],      coverText:'#ffffff'},
+  {key:'brutal',  label:'뉴브루탈리즘',        accent:'#000000', accent2:'#ffe600', ink:'#000000', muted:'#666666', bg:'#ffffff', divider:'#000000', desc:'#1a1a1a', dark:false, deco:'frame',    coverOverlay:['0,0,0'],         coverText:'#ffe600'},
   {key:'earth',   label:'어스톤 오가닉',        accent:'#c1633d', accent2:'#8a9b6e', ink:'#3d2b1f', muted:'#a68a72', bg:'#f7f0e6', divider:'#e8d9c8', desc:'#5c4a3a', dark:false, deco:'blob',     coverOverlay:['30,20,12'],      coverText:'#ffffff'},
   {key:'marble',  label:'럭셔리 마블',          accent:'#b8935a', accent2:'#8a7560', ink:'#2a2723', muted:'#9a927f', bg:'#f5f2ec', divider:'#e4ddd0', desc:'#4a4540', dark:false, deco:'marble',   coverOverlay:['12,11,9'],       coverText:'#ffffff'},
-  {key:'retro',   label:'레트로 스탬프',        accent:'#e0812f', accent2:'#2a7a6f', ink:'#3a2a1a', muted:'#9a8a70', bg:'#f5efdc', divider:'#e0d4b0', desc:'#5a4a30', dark:false, deco:'stamp',    coverOverlay:['35,25,10'],      coverText:'#f5efdc'},
-  {key:'minimal', label:'미니멀 라인아트',      accent:'#333333', accent2:'#333333', ink:'#1a1a1a', muted:'#999999', bg:'#ffffff', divider:'#eeeeee', desc:'#444444', dark:false, deco:'grid',     coverOverlay:['15,15,15'],      coverText:'#ffffff'},
-  // ↓ 신규 5종 — 색상 다양성 확대 요청 반영
+  {key:'retro',   label:'아카이브 스탬프',      accent:'#a8763e', accent2:'#2f4a45', ink:'#332a1e', muted:'#9c8b74', bg:'#f3ecda', divider:'#e2d5b8', desc:'#5a4c38', dark:false, deco:'stamp',    coverOverlay:['28,22,12'],      coverText:'#f3ecda'},
+  {key:'minimal', label:'스위스 미니멀',        accent:'#333333', accent2:'#333333', ink:'#1a1a1a', muted:'#999999', bg:'#ffffff', divider:'#eeeeee', desc:'#444444', dark:false, deco:'grid',     coverOverlay:['15,15,15'],      coverText:'#ffffff'},
   {key:'ocean',   label:'딥오션 블루',          accent:'#2b7de9', accent2:'#0ea5c4', ink:'#0a1f33', muted:'#6a8aa5', bg:'#f0f6fb', divider:'#d5e5f0', desc:'#2a4560', dark:false, deco:'gradient', coverOverlay:['5,20,40','5,35,50'], coverText:'#ffffff'},
   {key:'forest',  label:'포레스트 그린',        accent:'#2f8f5b', accent2:'#8bc34a', ink:'#0f2818', muted:'#6a9080', bg:'#f2f8f3', divider:'#d8ead9', desc:'#2a4a35', dark:false, deco:'blob',     coverOverlay:['10,25,15'],      coverText:'#ffffff'},
-  {key:'sunset',  label:'선셋 코랄',            accent:'#ff7849', accent2:'#ffb347', ink:'#3a1f14', muted:'#b08a70', bg:'#fff6ee', divider:'#ffe0c8', desc:'#5a3a2a', dark:false, deco:'gradient', coverOverlay:['45,20,10','55,25,10'], coverText:'#ffffff'},
-  {key:'lavender',label:'라벤더 미스트',        accent:'#9575cd', accent2:'#7986cb', ink:'#2a2140', muted:'#9a8fb5', bg:'#f7f5fc', divider:'#e5e0f2', desc:'#4a4066', dark:false, deco:'blob',     coverOverlay:['25,15,40'],      coverText:'#ffffff'},
+  // ↓ 건축 도면(청사진) 감성 — 인테리어·건축 업종 제안서와 특히 잘 맞고 요즘 포트폴리오 사이트에서도 자주 보이는 톤
+  {key:'blueprint',label:'아키텍처 블루프린트', accent:'#5ec8e8', accent2:'#9fd8ec', ink:'#eaf4fa', muted:'#7fa0b5', bg:'#0d1b2e', divider:'#28405c', desc:'#c8dbe8', dark:true,  deco:'grid',     coverOverlay:['6,14,26'],       coverText:'#ffffff'},
+  {key:'lavender',label:'디지털 라벤더',        accent:'#9575cd', accent2:'#7986cb', ink:'#2a2140', muted:'#9a8fb5', bg:'#f7f5fc', divider:'#e5e0f2', desc:'#4a4066', dark:false, deco:'blob',     coverOverlay:['25,15,40'],      coverText:'#ffffff'},
   {key:'charcoal',label:'차콜 프리미엄',        accent:'#d4af37', accent2:'#b0b0b0', ink:'#e8e8e8', muted:'#8a8a8a', bg:'#1a1a1c', divider:'#2e2e30', desc:'#c0c0c0', dark:true,  deco:'lines',    coverOverlay:['8,8,9'],         coverText:'#d4af37'}
 ];
 function _proposalTheme(key){
@@ -18239,17 +18325,47 @@ function sbProposal(p){
       var dragHandle=dv('');dragHandle.textContent='⠿';
       dragHandle.style.cssText='cursor:grab;color:var(--m2);font-size:14px;flex-shrink:0;user-select:none;touch-action:none';
       row.appendChild(dragHandle);
+      // ⚠️ 요청 반영("이미지 각각 수정할 수 있게 해줘"): BEFORE·AFTER 썸네일을 각각 클릭하면
+      // _proposalOpenImageEditPicker가 열려서 그 사진 한 장만 바로 교체(또는 BEFORE는 제거)할
+      // 수 있게 함. 연필 배지를 살짝 얹어서 "눌러서 바꿀 수 있다"는 걸 눈에 띄게 알려줌.
+      function _mkEditableThumb(url, w, radius, field){
+        var box=dv('');box.style.cssText='position:relative;width:'+w+'px;height:56px;flex-shrink:0;cursor:pointer;border-radius:'+radius+';overflow:hidden';
+        var img=document.createElement('img');img.src=url;img.loading='lazy';
+        img.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
+        box.appendChild(img);
+        var pencil=dv('');pencil.textContent='✎';
+        pencil.style.cssText='position:absolute;bottom:1px;right:1px;width:14px;height:14px;border-radius:4px;background:rgba(0,0,0,.65);color:#fff;font-size:8px;display:flex;align-items:center;justify-content:center;line-height:1';
+        box.appendChild(pencil);
+        box.title=(field==='orig'?'BEFORE':'AFTER')+' 사진 바꾸기';
+        box.onclick=function(){
+          _proposalOpenImageEditPicker(sc, field, function(newUrl){
+            sc[field]=newUrl;
+            renderSB(); renderMain('proposal');
+          });
+        };
+        return box;
+      }
       var thumbWrap=dv('');thumbWrap.style.cssText='display:flex;align-items:center;gap:2px;flex-shrink:0';
       if(sc.orig){
-        var thumbB=document.createElement('img');thumbB.src=sc.orig;thumbB.loading='lazy';
-        thumbB.style.cssText='width:40px;height:56px;object-fit:cover;border-radius:6px 0 0 6px;flex-shrink:0';
-        thumbWrap.appendChild(thumbB);
+        thumbWrap.appendChild(_mkEditableThumb(sc.orig, 40, '6px 0 0 6px', 'orig'));
         var arrowSep=dv('');arrowSep.textContent='→';arrowSep.style.cssText='font-size:10px;color:var(--m2);flex-shrink:0';
         thumbWrap.appendChild(arrowSep);
+      } else {
+        // BEFORE 사진이 없는(AFTER 한 장짜리) 장면엔 "+ BEFORE" 버튼을 붙여서, 나중에라도
+        // 비포/애프터 비교로 바꾸고 싶으면 바로 추가할 수 있게 함.
+        var addBeforeBtn=dv('');addBeforeBtn.textContent='+BEFORE';
+        addBeforeBtn.style.cssText='width:36px;height:56px;flex-shrink:0;border-radius:6px 0 0 6px;border:1.5px dashed var(--bd2);display:flex;align-items:center;justify-content:center;font-size:8px;color:var(--m2);cursor:pointer;text-align:center;line-height:1.2';
+        addBeforeBtn.onclick=function(){
+          _proposalOpenImageEditPicker(sc, 'orig', function(newUrl){
+            sc.orig=newUrl;
+            renderSB(); renderMain('proposal');
+          });
+        };
+        thumbWrap.appendChild(addBeforeBtn);
+        var arrowSep2=dv('');arrowSep2.textContent='→';arrowSep2.style.cssText='font-size:10px;color:var(--m2);flex-shrink:0';
+        thumbWrap.appendChild(arrowSep2);
       }
-      var thumb=document.createElement('img');thumb.src=sc.result;thumb.loading='lazy';
-      thumb.style.cssText='width:'+(sc.orig?'40px':'56px')+';height:56px;object-fit:cover;border-radius:'+(sc.orig?'0 6px 6px 0':'7px')+';flex-shrink:0';
-      thumbWrap.appendChild(thumb);
+      thumbWrap.appendChild(_mkEditableThumb(sc.result, sc.orig?40:56, sc.orig?'0 6px 6px 0':'7px', 'result'));
       row.appendChild(thumbWrap);
       var labelIn=document.createElement('input');labelIn.type='text';
       labelIn.placeholder='장면 이름 (거실, 주방...)';
