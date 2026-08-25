@@ -3427,11 +3427,14 @@ function selectWF(wf){
           Object.assign(G_SHORTS.opts, d.opts||{});
         } else {
           _draftClear(_shortsDraftKey());
-          // ⚠️ 버그 수정(치명적, "'아니요'를 눌렀는데도 이전 작업이 계속 불러와진다"): 이 로컬
-          // 저장분은 지웠는데, 아래(mkShortsCreation 안, _loadWorkspaceState('shorts_images'))에
-          // 있는 완전히 별개의 클라우드 자동 복원 로직이 이 "아니요" 선택과 무관하게 그 뒤에
-          // 또 한 번 조용히(확인창 없이) 복원해버리고 있었음 — 사용자가 방금 명시적으로 거절
-          // 했다는 걸 플래그로 남겨서, 그 자동 복원도 이번 세션에서는 건너뛰게 함.
+          // ⚠️ 버그 수정(치명적, "'아니요'를 눌렀는데도 이전 작업이 계속 불러와진다" + "새로고침하면
+          // 또 불러올까요 뜨고 계속 뜨네"): 로컬 저장분은 지웠지만, 클라우드(user_workspace_state,
+          // tab_key='shorts_images')에 남은 예전 작업분은 그대로였음 — ①같은 세션 안에서는 이
+          // "아니요" 선택과 무관하게 곧이어 조용히(확인창 없이) 복원해버렸고, ②새로고침하면
+          // G._shortsDraftDeclined(메모리 값)도 초기화돼서 클라우드에 남은 그 예전 데이터를 보고
+          // 확인창이 매번 다시 떴음. "아니요"를 누르는 순간 클라우드 저장분도 빈 값으로 즉시
+          // 덮어써서, 이후엔 로컬이든 클라우드든 다시 뜰 근거 자체가 없게 함.
+          if(typeof _saveWorkspaceState==='function') _saveWorkspaceState('shorts_images', {images:[], opts:G_SHORTS.opts});
           G._shortsDraftDeclined = true;
         }
       } else if(typeof _shortsCloudLoadDraft==='function'){
@@ -3444,6 +3447,7 @@ function selectWF(wf){
             Object.assign(G_SHORTS.opts, cloudDraft.data.opts||{});
             renderSB(); renderMain('shorts');
           } else {
+            if(typeof _saveWorkspaceState==='function') _saveWorkspaceState('shorts_images', {images:[], opts:G_SHORTS.opts});
             G._shortsDraftDeclined = true; // 위와 같은 이유
           }
         });
@@ -3460,6 +3464,7 @@ function selectWF(wf){
           Object.assign(G_PROPOSAL.opts, dp.opts||{});
         } else {
           _draftClear(_proposalDraftKey());
+          _deleteWorkspaceState('proposal_scenes'); // 클라우드에 남은 예전 작업분도 같이 지워서, 새로고침해도 다시 안 물어보게 함
           G._proposalDraftDeclined = true; // 클라우드 자동 복원도 이번 세션에선 같이 건너뜀 (쇼츠와 동일한 이유)
         }
       }
@@ -4073,9 +4078,18 @@ function mkRef(p,cnt,title){
 // 빠져있었음. 어디든 재사용할 수 있는 공용 헬퍼로 만들어서 한 번에 적용함 — 박스를 포커스 가능하게
 // 만들고(tabIndex), 그 박스에 포커스가 있는 상태에서 Ctrl+V 하면 문서 전역 붙여넣기(메인 이미지용)로
 // 새지 않고 정확히 이 박스에만 들어가게 함.
+// ⚠️ 버그 수정("컨셉확장 기준 사진 칸은 Ctrl+V가 안 된다"): 위 tabIndex+onpaste 방식만으로는,
+// 이 박스들 대부분이 "비어있으면 클릭 즉시 파일선택창을 연다"는 onclick도 같이 갖고 있어서 —
+// 포커스를 주려고 클릭하는 순간 그 클릭이 파일선택창을 열어버려 붙여넣기를 시도할 새도 없이
+// 흐름이 끊겼음(원래 사용자가 불편해했던 "한번 누르고 취소하고 붙여넣기" 그 패턴 자체). 그래서
+// 클릭(포커스 이동) 시점에 "직전에 상호작용한 박스"를 전역으로 기억해뒀다가, 문서 전체 Ctrl+V
+// 리스너가 그 기억을 최우선으로 확인해서 그 박스로 바로 붙여넣게 함 — 박스가 실제로 DOM 포커스를
+// 유지하고 있는지와 무관하게 항상 동작함(아파트 컨셉 간편모드의 "붙여넣기 대상 방" 지정과 같은 원리).
+window._lastPasteTarget = null;
 function _wirePasteTarget(el, onImageFile){
   if(!el) return;
   el.tabIndex=0;
+  el.addEventListener('mousedown', function(){ window._lastPasteTarget = onImageFile; });
   el.onpaste=function(e){
     e.preventDefault();
     e.stopPropagation();
@@ -4083,7 +4097,7 @@ function _wirePasteTarget(el, onImageFile){
     for(var k=0;k<items.length;k++){
       if(items[k].type && items[k].type.indexOf('image')===0){
         var f=items[k].getAsFile();
-        if(f){ onImageFile(f); }
+        if(f){ window._lastPasteTarget=null; onImageFile(f); }
         return;
       }
     }
@@ -10709,6 +10723,15 @@ function _saveWorkspaceState(tabKey, data){
   _supa.from('user_workspace_state').upsert({user_id:_supaUser.id, tab_key:tabKey, data:data, updated_at:new Date().toISOString()}, {onConflict:'user_id,tab_key'})
     .then(function(r){ if(r.error) console.warn('[작업상태 동기화] 저장 실패(테이블이 없을 수 있음):', r.error.message); })
     .catch(function(e){ console.warn('[작업상태 동기화] 저장 오류:', e); });
+}
+// ⚠️ 버그 수정("작업 안 불러온다고 눌렀는데 새로고침하면 또 불러올까요 뜬다"): 로컬 임시저장은
+// _draftClear로 지웠지만, 클라우드(user_workspace_state)에 저장된 예전 작업분은 그대로 남아있어서
+// 새로고침할 때마다 "다른 기기에서 작업하던 내용이 있어요"가 계속 다시 떴었음 — "아니요"를 누르면
+// 로컬뿐 아니라 클라우드에 남은 것도 같이 지워서, 다음에 새로고침해도 다시 안 뜨게 함.
+function _deleteWorkspaceState(tabKey){
+  if(!(_supa && _supaUser)) return;
+  _supa.from('user_workspace_state').delete().eq('user_id',_supaUser.id).eq('tab_key',tabKey)
+    .then(function(){}).catch(function(){});
 }
 function _loadWorkspaceState(tabKey, cb){
   if(!(_supa && _supaUser)){ cb(null); return; }
@@ -18490,6 +18513,7 @@ function sbProposal(p){
           if(data.opts) G_PROPOSAL.opts = Object.assign({}, G_PROPOSAL.opts, data.opts);
           renderSB(); renderMain('proposal');
         } else {
+          _deleteWorkspaceState('proposal_scenes'); // 다시 새로고침해도 안 다시 뜨게, 클라우드 저장분도 같이 지움
           G._proposalDraftDeclined = true;
         }
       });
@@ -31931,7 +31955,9 @@ function chargeCr(amount){
   // 묻혔음. res가 없을 땐 alert로라도 반드시 보여주도록 공용 헬퍼로 통일함.
   function msg(text, isError){
     if(res){ res.style.color = isError ? '#f59e0b' : 'var(--ac)'; res.textContent = text; }
-    else if(isError){ alert(text); }
+    else { alert(text); } // ⚠️ 버그 수정("충전하기 눌러도 여전히 아무 반응 없다"): 위 주석대로 res
+    // 없을 때 alert로 보여주게 고쳤다고 되어있었는데, 정작 '정상 안내' 메시지(isError=false)는
+    // else if(isError)에 안 걸려서 여전히 조용히 묻히고 있었음 — 에러 여부와 상관없이 항상 뜨게 함.
   }
   if(!amount||amount<100){msg('100cr 이상 입력해 주세요.', true);return;}
   if(!TOSS_CLIENT_KEY){
@@ -33140,6 +33166,29 @@ document.addEventListener('DOMContentLoaded',function(){try{
   if(sbtmInit)sbtmInit.style.display='none';
 
   document.addEventListener('paste',function(e){
+    // ⚠️ 버그 수정("붙여넣기 되게 하라고 했는데 왜 여기는 안 돼" — 컨셉확장 기준 사진 칸 등):
+    // _wirePasteTarget으로 연결된 박스 중 상당수는 "비어있으면 클릭 즉시 파일선택창을 연다"는
+    // onclick도 같이 갖고 있어서, 포커스를 주려던 클릭이 그 순간 파일선택창부터 열어버려
+    // DOM 포커스가 실제로 그 박스에 남아있지 않을 수 있음 — 그래서 포커스 여부와 무관하게,
+    // 방금 사용자가 상호작용한 박스를 최우선으로 확인해서 그리로 바로 붙여넣음(아래 textarea/
+    // input 포커스 검사보다도 먼저 처리 — file input에 포커스가 가 있어도 안 막히게).
+    if(window._lastPasteTarget){
+      var _items0=e.clipboardData&&e.clipboardData.items;
+      if(_items0){
+        for(var _i0=0;_i0<_items0.length;_i0++){
+          if(_items0[_i0].type && _items0[_i0].type.indexOf('image')===0){
+            var _f0=_items0[_i0].getAsFile();
+            if(_f0){
+              var _tgt0=window._lastPasteTarget;
+              window._lastPasteTarget=null;
+              _tgt0(_f0);
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+      }
+    }
     // textarea/input에 포커스 중이면 텍스트 붙여넣기 허용
     var tag=(document.activeElement||{}).tagName||'';
     if(tag==='TEXTAREA'||tag==='INPUT') return;
