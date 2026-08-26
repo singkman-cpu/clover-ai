@@ -11097,6 +11097,7 @@ function mkMultiRoomSpace(p){
     idbSaveDraft(_multiRoomDraftKey(), {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
     idbSaveDraft(_autoRoomDraftKey(), {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity, autoRoomSelected:spTab.autoRoomSelected}).catch(function(){});
     renderSB();
+    renderMain(G.wf); // ⚠️ 버그 수정(같은 클래스): 사이드바만 갱신하고 메인화면(오른쪽 미리보기)은 안 새로 그려서, 리셋했는데도 오른쪽엔 방금 지운 사진들이 그대로 남아있는 것처럼 보일 수 있었음
   };
   p.appendChild(resetAllBtn);
 
@@ -18488,6 +18489,8 @@ function sbProposal(p){
       G_PROPOSAL._savedKey=null;
       G_PROPOSAL.opts=Object.assign({}, G_PROPOSAL.opts, {client:'',description:'',summary:'',includeToc:true,includeBudgetPage:true,includeClosing:true});
       _draftClear(_proposalDraftKey());
+      _deleteWorkspaceState('proposal_scenes'); // ⚠️ 버그 수정("리셋해도 새로고침하면 다시 생김"과 같은 클래스): 로컬만 지우고 클라우드 저장분은 안 지워서 새로고침하면 부활할 수 있었음
+      G._proposalDraftDeclined = true; // 이번 세션에는 방금 지운 걸 자동복원이 다시 덮어쓰지 않게
       renderSB(); renderMain('proposal');
     };
     resetAllWrap.appendChild(resetAllBtn);
@@ -28610,6 +28613,53 @@ function _submitBugReport(){
   // 보이면 send-mail 함수가 attachments를 전달하도록 되어있는지 서버 쪽에서 한 번 확인해주세요.)
   var attachments=_bugReportImgs.map(function(im,i){ return {filename:(im.name||('capture'+(i+1)+'.jpg')), content:im.base64}; });
 
+  // ⚠️ 요청 반영("버그 제보가 이메일로만 가서, 관리자 모드에서 목록으로 보고 처리 상태를 추적하고
+  // 싶다"): 이메일 발송과 별개로, Supabase bug_reports 테이블에도 항상 저장함 — 이메일 발송이
+  // 어쩌다 실패해도(스팸 처리 등) 제보 자체는 DB에 남아서 안전하고, 관리자 모드의 "🐛 버그 제보함"
+  // 탭에서 목록으로 보고 처리完료 체크까지 할 수 있게 함. 이 저장은 이메일 발송 성공 여부와
+  // 무관하게 독립적으로 진행(하나가 실패해도 다른 하나는 정상 동작).
+  // 필요한 테이블(Supabase SQL 편집기에서 한 번 실행):
+  //   create table public.bug_reports (
+  //     id bigint generated always as identity primary key,
+  //     user_id uuid references auth.users(id),
+  //     user_email text, description text, image_urls jsonb default '[]'::jsonb,
+  //     status text not null default 'open', admin_note text,
+  //     created_at timestamptz default now()
+  //   );
+  //   alter table public.bug_reports enable row level security;
+  //   create policy "누구나 삽입 가능" on public.bug_reports for insert with check (true);
+  //   create policy "관리자만 조회 가능" on public.bug_reports for select using (
+  //     exists(select 1 from public.profiles where id=auth.uid() and role='admin')
+  //   );
+  //   create policy "관리자만 수정 가능" on public.bug_reports for update using (
+  //     exists(select 1 from public.profiles where id=auth.uid() and role='admin')
+  //   );
+  (function(){
+    try{
+      if(!_supa){ return; }
+      var imgs=_bugReportImgs.slice();
+      function _saveRow(imageUrls){
+        _supa.from('bug_reports').insert({
+          user_id: (_supaUser && _supaUser.id) || null,
+          user_email: userEmail || null,
+          description: desc.slice(0,2000),
+          image_urls: imageUrls,
+          status: 'open'
+        }).then(function(){}).catch(function(){});
+      }
+      if(!imgs.length){ _saveRow([]); return; }
+      if(!(_supa && _supaUser)){ _saveRow(imgs.map(function(im){return im.dataUrl;})); return; } // 로그인 안 했으면 스토리지 업로드가 불가하니 원본 데이터URL 그대로 저장
+      var urls=new Array(imgs.length);
+      var remain=imgs.length;
+      imgs.forEach(function(im,i){
+        _uploadDataUrlIfNeeded(im.dataUrl, 'bugreport', function(u){
+          urls[i]=u; remain--;
+          if(remain<=0) _saveRow(urls);
+        });
+      });
+    }catch(e){ console.warn('[버그 제보] DB 저장 실패(이메일은 별개로 정상 전송됨):', e); }
+  })();
+
   fetch(SUPA_URL+'/functions/v1/send-mail',{
     method:'POST',
     headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},
@@ -29246,6 +29296,7 @@ function buildAdminDashboard(){
     {k:'presetThumb',l:'🖼 프리셋 썸네일'},
     {k:'beforeAfter',l:'📷 비포/애프터'},
     {k:'logs',l:'📋 지급 이력'},
+    {k:'bugReports',l:'🐛 버그 제보함'},
     {k:'mail',l:'📧 단체 메일'}
   ];
   var tabBar='<div style="display:flex;border-bottom:1px solid var(--bd);background:var(--c2)">';
@@ -29275,6 +29326,7 @@ function admRenderTab(){
   else if(_adminTab==='presetThumb') admPresetThumb(c);
   else if(_adminTab==='beforeAfter') admBeforeAfter(c);
   else if(_adminTab==='logs') admLogs(c);
+  else if(_adminTab==='bugReports') admBugReports(c);
   else if(_adminTab==='mail') admMail(c);
 }
 
@@ -29956,6 +30008,73 @@ function admLogs(c){
     if(!rows.length){c.innerHTML='<div style="color:var(--m2);text-align:center;padding:20px">이력 없음</div>';return;}
     c.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px 8px;text-align:left">회원</th><th style="padding:6px 4px;text-align:center">수량</th><th style="padding:6px 8px;text-align:left">사유</th><th style="padding:6px 4px;text-align:center">일시</th></tr></thead><tbody>'+
       rows.map(function(l){var ip=l.amount>0;var em=l.profiles?l.profiles.email:'unknown';return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t2)">'+em+'</td><td style="padding:6px 4px;text-align:center;font-weight:700;color:'+(ip?'var(--ac)':'#fca5a5)')+'">'+(ip?'+':'')+l.amount+'cr</td><td style="padding:6px 8px;color:var(--m2)">'+(l.reason||'-')+'</td><td style="padding:6px 4px;text-align:center;color:var(--m2)">'+(l.created_at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table></div>';
+  });
+}
+
+// ⚠️ 요청 반영("버그 제보가 이메일로만 가서, 관리자 모드에서 목록으로 보고 처리 상태를 추적하고
+// 싶다"): 상단 "🐛 버그 제보" 모달에서 보낸 제보가 이메일과 별개로 bug_reports 테이블에도
+// 저장되는데(그 테이블이 아직 없으면 이 탭이 SQL 생성문을 안내함), 그걸 목록으로 보여주고
+// 미해결/처리완료 상태를 토글할 수 있게 함. 최신순, 미해결이 눈에 잘 띄도록 상단에 먼저 정렬.
+var _admBugFilter='open';
+function admBugReports(c){
+  if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
+  var filterBar='<div style="display:flex;gap:6px;margin-bottom:12px">'+
+    [['open','🔴 미해결'],['resolved','✅ 처리완료'],['all','전체']].map(function(f){
+      var on=_admBugFilter===f[0];
+      return '<button onclick="_admBugFilter=\''+f[0]+'\';admBugReports(gE(\'adm-content\'))" style="padding:6px 12px;border-radius:7px;border:1px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'transparent')+';color:'+(on?'var(--ac)':'var(--m2)')+';font-size:11.5px;font-weight:'+(on?'700':'400')+';cursor:pointer;font-family:inherit">'+f[1]+'</button>';
+    }).join('')+'</div>';
+  c.innerHTML=filterBar+'<div id="adm-bug-list" style="color:var(--m2);text-align:center;padding:20px">불러오는 중...</div>';
+  var req=_supa.from('bug_reports').select('*').order('created_at',{ascending:false}).limit(100);
+  if(_admBugFilter!=='all') req=req.eq('status',_admBugFilter);
+  req.then(function(res){
+    var list=gE('adm-bug-list'); if(!list) return;
+    if(res.error){
+      list.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">bug_reports 조회에 실패했어요: <b>'+(res.error.message||'')+'</b><br>테이블이 없다면 Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
+        '<pre style="background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:12px;font-size:10.5px;color:var(--t2);overflow-x:auto;margin-top:10px;white-space:pre-wrap">create table public.bug_reports (\n  id bigint generated always as identity primary key,\n  user_id uuid references auth.users(id),\n  user_email text, description text, image_urls jsonb default \'[]\'::jsonb,\n  status text not null default \'open\', admin_note text,\n  created_at timestamptz default now()\n);\nalter table public.bug_reports enable row level security;\ncreate policy "누구나 삽입 가능" on public.bug_reports for insert with check (true);\ncreate policy "관리자만 조회 가능" on public.bug_reports for select using (\n  exists(select 1 from public.profiles where id=auth.uid() and role=\'admin\')\n);\ncreate policy "관리자만 수정 가능" on public.bug_reports for update using (\n  exists(select 1 from public.profiles where id=auth.uid() and role=\'admin\')\n);</pre>';
+      return;
+    }
+    var rows=res.data||[];
+    if(!rows.length){ list.innerHTML='<div style="color:var(--m2);text-align:center;padding:20px">'+(_admBugFilter==='open'?'미해결 제보가 없어요 🎉':'제보가 없어요')+'</div>'; return; }
+    list.innerHTML='';
+    rows.forEach(function(r){
+      var card=document.createElement('div');
+      var isOpen=r.status!=='resolved';
+      card.style.cssText='background:var(--c2);border:1px solid '+(isOpen?'rgba(245,158,11,.35)':'var(--bd)')+';border-radius:10px;padding:12px 14px;margin-bottom:10px';
+      var top=document.createElement('div');
+      top.style.cssText='display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px';
+      var meta=document.createElement('div');
+      meta.innerHTML='<div style="font-size:11.5px;font-weight:700;color:var(--t2)">'+(r.user_email||'익명')+'</div><div style="font-size:10px;color:var(--m2)">'+(r.created_at||'').slice(0,16).replace('T',' ')+'</div>';
+      top.appendChild(meta);
+      var toggleBtn=document.createElement('button');
+      toggleBtn.type='button';
+      toggleBtn.textContent=isOpen?'✅ 처리완료로 표시':'↩️ 미해결로 되돌리기';
+      toggleBtn.style.cssText='flex-shrink:0;padding:5px 10px;border-radius:6px;border:1px solid '+(isOpen?'var(--acb)':'var(--bd2)')+';background:'+(isOpen?'var(--acg)':'transparent')+';color:'+(isOpen?'var(--ac)':'var(--m2)')+';font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap';
+      (function(id,newStatus){
+        toggleBtn.onclick=function(){
+          toggleBtn.disabled=true; toggleBtn.textContent='처리 중...';
+          _supa.from('bug_reports').update({status:newStatus}).eq('id',id).then(function(){ admBugReports(gE('adm-content')); });
+        };
+      })(r.id, isOpen?'resolved':'open');
+      top.appendChild(toggleBtn);
+      card.appendChild(top);
+      var desc=document.createElement('div');
+      desc.style.cssText='font-size:12.5px;color:var(--t);line-height:1.6;white-space:pre-wrap;margin-bottom:10px';
+      desc.textContent=r.description||'(내용 없음)';
+      card.appendChild(desc);
+      var urls=Array.isArray(r.image_urls)?r.image_urls:[];
+      if(urls.length){
+        var thumbRow=document.createElement('div');
+        thumbRow.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+        urls.forEach(function(u){
+          var a=document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener';
+          a.style.cssText='display:block;width:64px;height:64px;border-radius:7px;overflow:hidden;border:1px solid var(--bd2)';
+          a.innerHTML='<img src="'+u+'" style="width:100%;height:100%;object-fit:cover;display:block">';
+          thumbRow.appendChild(a);
+        });
+        card.appendChild(thumbRow);
+      }
+      list.appendChild(card);
+    });
   });
 }
 
