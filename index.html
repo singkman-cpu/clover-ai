@@ -16806,7 +16806,7 @@ function _shortsRenderLivePreview(container){
     var _effBottom = firstSlide.skipBottomText ? '' : G_SHORTS.opts.bottomText;
     if(_effFitModePv==='contain'&&(_effTop||_effBottom)){
       _shortsDrawLetterboxText(ctx,1080,1920,window._shortsPreviewImg,_effTop,_effBottom,G_SHORTS.opts.fontFamily,G_SHORTS.opts.topTextColor,G_SHORTS.opts.bottomTextColor,G_SHORTS.opts.topCharColors,G_SHORTS.opts.bottomCharColors,G_SHORTS.opts.topTextScale,G_SHORTS.opts.bottomTextScale);
-      if(firstSlide.label && _labelsShown) _shortsDrawSlideLabelBadge(ctx,1080,1920,window._shortsPreviewImg,firstSlide.label,G_SHORTS.opts.fontFamily,G_SHORTS.opts.textPos,!!_effTop,!!_effBottom);
+      if(firstSlide.label && _labelsShown) _shortsDrawSlideLabelBadge(ctx,1080,1920,window._shortsPreviewImg,firstSlide.label,G_SHORTS.opts.fontFamily,G_SHORTS.opts.textPos,!!_effTop,!!_effBottom,G_SHORTS.opts.labelStyle);
     } else if(firstSlide.label && _labelsShown){
       _shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos,G_SHORTS.opts.fontFamily,window._shortsPreviewImg,_effFitModePv);
     }
@@ -17866,6 +17866,23 @@ function sbShorts(p){
   };
   labelToggleWrap.appendChild(labelToggleTxt); labelToggleWrap.appendChild(labelToggleBtn);
   p.appendChild(labelToggleWrap);
+
+  // ⚠️ 요청 반영("인스타 릴스(@mog_design_studio)처럼 빨간 지도핀 아이콘 + 방 이름 라벨"): 장면
+  // 라벨을 텍스트만 보여줄지, 왼쪽에 빨간 핀 아이콘을 같이 붙여서 보여줄지 고를 수 있는 스타일 선택.
+  var labelStyleWrap=dv('ss');
+  labelStyleWrap.style.cssText='margin-bottom:8px';
+  var labelStyleTitle=dv('');labelStyleTitle.style.cssText='font-size:12px;color:var(--t2);margin-bottom:6px;font-weight:600';
+  labelStyleTitle.textContent='라벨 스타일';
+  labelStyleWrap.appendChild(labelStyleTitle);
+  var labelStyleRow=dv('chips');
+  [['text','텍스트만'],['pin','📍 핀 마커']].forEach(function(opt){
+    var on=(opts.labelStyle||'text')===opt[0];
+    var b=mk('button','chip'+(on?' on':''));b.type='button';b.textContent=opt[1];
+    b.onclick=function(){ opts.labelStyle=opt[0]; renderSB(); renderMain('shorts'); };
+    labelStyleRow.appendChild(b);
+  });
+  labelStyleWrap.appendChild(labelStyleRow);
+  p.appendChild(labelStyleWrap);
 
   // 화면 문구 폰트 선택
   var fontWrap=dv('ss');
@@ -20722,7 +20739,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed)
   var _effBottom = slide.skipBottomText ? '' : (opts&&opts.bottomText);
   if(_effFitMode==='contain'&&(_effTop||_effBottom)){
     _shortsDrawLetterboxText(ctx,W,H,img,_effTop,_effBottom,opts&&opts.fontFamily,opts.topTextColor,opts.bottomTextColor,opts.topCharColors,opts.bottomCharColors,opts.topTextScale,opts.bottomTextScale,revealCount);
-    if(slide.label && opts.showSlideLabels!==false) _shortsDrawSlideLabelBadge(ctx,W,H,img,slide.label,opts&&opts.fontFamily,opts&&opts.textPos,!!_effTop,!!_effBottom);
+    if(slide.label && opts.showSlideLabels!==false) _shortsDrawSlideLabelBadge(ctx,W,H,img,slide.label,opts&&opts.fontFamily,opts&&opts.textPos,!!_effTop,!!_effBottom,opts&&opts.labelStyle);
   } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
     _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,img,_effFitMode);
   }
@@ -20772,7 +20789,7 @@ function _shortsDrawBlankText(ctx, W, H, text, color, fontKey, revealCount){
   }
   ctx.restore();
 }
-function _shortsDrawSlideLabelBadge(ctx, W, H, img, label, fontKey, pos, hasTopText, hasBottomText){
+function _shortsDrawSlideLabelBadge(ctx, W, H, img, label, fontKey, pos, hasTopText, hasBottomText, labelStyle){
   if(!img||!label) return;
   pos = pos || 'bottom-left';
   var iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
@@ -20799,6 +20816,33 @@ function _shortsDrawSlideLabelBadge(ctx, W, H, img, label, fontKey, pos, hasTopT
   var ty = vert==='top' ? visTop+margin+fs/2 : (vert==='middle' ? (visTop+visBottom)/2 : visBottom-margin-fs/2);
   ty = Math.max(visTop+safeGap, Math.min(visBottom-safeGap, ty)); // 사진 영역 밖(검은 바)으로 절대 안 나가게, 여유 있게
   var tx = align==='left' ? margin : (align==='right' ? W-margin : W/2);
+  // ⚠️ 요청 반영("인스타 릴스처럼 빨간 지도핀 아이콘 + 방 이름"): labelStyle==='pin'이면 텍스트
+  // 왼쪽에 빨간 지도핀(물방울 모양) 아이콘을 같이 그림 — @mog_design_studio 릴스에서 본 것과
+  // 같은 스타일(둥근 핀 머리 + 뾰족한 아래 끝, 흰 구멍). 텍스트는 그대로 흰색+그림자.
+  if(labelStyle==='pin'){
+    var pinH=fs*1.15, pinR=pinH*0.34;
+    // 핀의 "뾰족한 끝"이 텍스트의 세로 중앙에 오도록 핀 중심을 텍스트 기준선 위쪽에 배치
+    var pinCx = align==='left' ? tx+pinR : (align==='right' ? tx-(_measureLabelW(ctx,label)+pinR*2+fs*0.28) : tx-(_measureLabelW(ctx,label)/2)-pinR*2-fs*0.15);
+    var pinTipY = ty; // 텍스트 중앙 높이에 핀 끝이 오도록
+    var pinCy = pinTipY - pinR*1.55;
+    ctx.save();
+    ctx.shadowColor='rgba(0,0,0,.55)'; ctx.shadowBlur=fs*0.12; ctx.shadowOffsetY=fs*0.03;
+    ctx.fillStyle='#e11d2e';
+    ctx.beginPath();
+    // 물방울(핀) 모양: 원 + 아래로 뾰족한 삼각형을 부드럽게 이어서 근사
+    ctx.arc(pinCx, pinCy, pinR, Math.PI*0.15, Math.PI*0.85, true);
+    ctx.quadraticCurveTo(pinCx-pinR*0.95, pinCy+pinR*1.0, pinCx, pinTipY);
+    ctx.quadraticCurveTo(pinCx+pinR*0.95, pinCy+pinR*1.0, pinCx+pinR*Math.cos(Math.PI*0.15), pinCy+pinR*Math.sin(Math.PI*0.15));
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(pinCx, pinCy, pinR*0.38, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+    // 핀 폭만큼 텍스트 시작 위치를 오른쪽으로 밀어줌(핀+여백만큼)
+    var pinTextShift = pinR*2 + fs*0.28;
+    if(align==='left') tx = tx + pinTextShift;
+    else if(align==='center') tx = tx + pinTextShift/2;
+  }
   // 배경 박스 없이, 텍스트에만 그림자를 줘서 사진 위에서도 잘 읽히게 함
   ctx.shadowColor='rgba(0,0,0,.85)';
   ctx.shadowBlur=Math.round(W*0.015);
@@ -20807,6 +20851,9 @@ function _shortsDrawSlideLabelBadge(ctx, W, H, img, label, fontKey, pos, hasTopT
   ctx.textAlign=align;ctx.textBaseline='middle';
   ctx.fillText(label, tx, ty);
   ctx.restore();
+}
+function _measureLabelW(ctx, label){
+  try{ return ctx.measureText(label).width; }catch(e){ return 0; }
 }
 
 // 이전 장면(fromSlide) → 다음 장면(toSlide) 슬라이더 전환
@@ -24120,6 +24167,16 @@ function addHistEl(item, scroll, targetHs, atBottom){
       sebar.appendChild(sest);
     }
 
+    // ⚠️ 요청 반영: "비포/애프터 영상으로 제작" 원클릭 버튼 — VR/쇼핑/견적과 같은 조건(before+after
+    // 둘 다 있는 이미지 결과)일 때만 노출.
+    if(item.orig && item.result && item.wf!=='video' && item.wf!=='world3d' && item.wf!=='shorts'){
+      var sbav=mk('button','se-btn');sbav.type='button';sbav.innerHTML='&#127916; 비포/애프터 영상';sbav.title='이 전후 사진으로 변신 영상 바로 만들기';
+      sbav.style.cssText='background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.4);color:#c4b5fd;padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
+      sbav.addEventListener('click',function(e){e.stopPropagation();sendToVideoBeforeAfter(item);},false);
+      sbav.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      sebar.appendChild(sbav);
+    }
+
     // 공유 (카카오톡/메일) — 우측 하단 액션 바 맨 끝
     var ssh=mk('button','se-btn');ssh.type='button';ssh.innerHTML='&#128228; 공유';ssh.title='카카오톡/메일로 공유';
     ssh.style.cssText='background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.18);color:var(--t2);padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
@@ -24634,6 +24691,35 @@ function _sendToBudgetEstimate(resultUrl, roomLabel, categoryKey){
   G.HIST.budget.unshift({id:Date.now()+Math.random(), orig:null, result:resultUrl, origThumb:null, tags:['견적용'], ai:'', cx:50, fav:false, wf:'budget', preview:true});
   selectWF('budget');
   if(window.innerWidth<=768){ setTimeout(function(){ mobTab('budget'); }, 200); }
+}
+// ⚠️ 요청 반영("현장사진 디자인에서 비포/애프터 만들고 나면, 영상 탭 가서 Start/End 모드 찾고
+// 프리셋 고르고 하는 게 너무 번거롭다 — 결과 바로 밑에 '비포/애프터 영상으로 제작' 버튼 하나로
+// 끝내고 싶다"): before(orig)/after(result)가 둘 다 있는 결과에서 한 번에 영상 탭으로 넘어가면서
+// Start/End 모드 + 두 이미지 + "비포/애프터 변신" 프리셋(프롬프트 자동)까지 전부 세팅해줌 —
+// 사용자는 영상 탭에서 크레딧을 확인하고 "생성하기"만 누르면 됨.
+function sendToVideoBeforeAfter(item){
+  if(!item || !item.orig || !item.result) return;
+  var tab=getTab('video');
+  tab.inputImg=item.orig;
+  tab.endImg=item.result;
+  tab.status='idle';
+  G.vidMode='startend';
+  // Kling 3.0 Pro 추천: start/end(첫/끝 프레임) 지정 영상 생성에 특히 강하다고 알려진 모델이면서,
+  // 다른 고화질 엔진(Seedance 등)보다 가격도 저렴해서 기본값으로 지정함 — 영상 탭에서 언제든 바꿀 수 있음.
+  G.vidEng='kling3';
+  try{ localStorage.setItem('clover_vidEng','kling3'); }catch(e){}
+  var bap = PS_VIDEO.find(function(p){return p.k==='before_after_transform';});
+  if(bap){ tab.selK=bap.k; tab.prompt=bap.pt; }
+  if(!G.HIST.video)G.HIST.video=[];
+  G.HIST.video=G.HIST.video.filter(function(x){return !x.preview;});
+  selectWF('video');
+  if(window.innerWidth<=768){
+    setTimeout(function(){ mobTab('video'); }, 200);
+  }
+  setTimeout(function(){
+    var stEl=gE('stl');
+    if(stEl) stEl.textContent='💡 Before/After 사진이 자동으로 채워졌어요. 크레딧 확인하고 생성하기를 눌러주세요.';
+  }, 250);
 }
 function sendToWf(wf, item){
   if(!item)return;
