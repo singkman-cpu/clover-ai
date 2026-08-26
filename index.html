@@ -2826,7 +2826,7 @@ var EL=[
   {k:'seedream',n:'Seedream v4.5',t:'Cheap',d:'경제적',lg:'s'}
 ];
 var EV=[
-  {k:'kling3',       n:'Kling 3.0 Pro',     cost:70,  t:'Cinematic',    d:'$0.84/5초 · 1080p · 시네마틱 · 오디오', lg:'k', res:['720p','1080p'], audio:true, maxDur:15},
+  {k:'kling3',       n:'Kling 3.0 Pro',     cost:70,  t:'Cinematic',    d:'$0.84/5초 · 1080p · 시네마틱 · 오디오', lg:'k', res:['720p','1080p'], audio:true, maxDur:15, minDur:3},
   {k:'veo31',        n:'Veo 3.1 Fast',       cost:114, t:'Quality',      d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true, maxDur:8},
   {k:'seedance2',    n:'Seedance 2.0',       cost:190, t:'Premium,Best', d:'480p/720p/1080p (해상도별 크레딧 다름) · 최고품질 · 오디오', lg:'s', res:['480p','720p','1080p'], audio:true, maxDur:15},
   {k:'seedance2mini',n:'Seedance 2.0 Mini',  cost:95,  t:'Fast,Cheap',   d:'$0.73/5초 · 480p/720p · 빠르고 저렴 · 오디오', lg:'m', res:['480p','720p'], audio:true, maxDur:15},
@@ -3798,6 +3798,18 @@ function renderMain(callWf, preserveScroll){
       window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
       hs.innerHTML='';
       var info=WF_INFO[wf]||WF_INFO.space;
+      // ⚠️ 요청 반영("비포/애프터 영상 만들기 눌렀는데 또 업로드하라는 것처럼 보인다"): Start/End
+      // 프레임이 이미 둘 다 채워진 상태에서 이 빈 화면(메인 캔버스)에 여전히 "클릭해서 업로드"
+      // 문구가 나가서, 마치 뭘 더 올려야 하는 것처럼 보였음 — 실제로는 다 준비된 상태라 왼쪽 아래
+      // "영상 생성" 버튼만 누르면 되는데 그게 안 보이니 헷갈렸던 것. 이미 두 프레임이 다 있으면
+      // 문구를 "생성 버튼을 눌러주세요"로 바꿔서 다음 행동을 명확히 알려줌.
+      if(wf==='video' && G.vidMode==='startend' && getTab('video').inputImg && getTab('video').endImg){
+        info = {
+          icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+          title:'Before/After 사진 <span>준비 완료</span>',
+          sub:'왼쪽 아래 크레딧을 확인하고 "영상 생성" 버튼을 눌러주세요'
+        };
+      }
       var icon=document.querySelectorAll('#cub-icon')[hsIdx]||document.getElementById('cub-icon');
       var title=document.querySelectorAll('#cub-title')[hsIdx]||document.getElementById('cub-title');
       var sub=document.querySelectorAll('#cub-sub')[hsIdx]||document.getElementById('cub-sub');
@@ -7574,7 +7586,10 @@ function getCost(){
     // Veo31: 6초=220cr 기준, 초당 37cr 추가
     // Seedance: 5초=360cr 기준, 초당 72cr 추가
     if(eng==='kling3'){
-      base = 200 + Math.max(0, dur-5)*40;
+      // ⚠️ 버그 수정: dur<5일 때 Math.max(0, dur-5)가 0이 돼서 3~4초짜리도 5초(200cr)와 똑같이
+      // 청구되고 있었음 — fal.ai는 초당 정액 과금이라(200cr=5초 기준 40cr/초) 짧을수록 실제로도
+      // 싸야 함. 5초를 기준점으로 위아래 모두 선형으로 계산하도록 통일(200=5*40과 정확히 같음).
+      base = dur*40;
     } else if(eng==='veo31'){
       // ⚠️ 버그 수정(치명적, 과다청구): Veo 3.1 Fast는 실제로 6/7/8초짜리 영상만 만들 수 있어서
       // (runVeo31의 vDur 계산과 동일하게) 8초를 넘겨 선택해도 실제로는 8초짜리만 나오는데,
@@ -14895,6 +14910,15 @@ function sbVideo(p){
     // 현재 선택된 해상도가 지원 안 되면 첫 번째로
     if(resOpts.indexOf(G.vres)<0) G.vres=resOpts[resOpts.length-1>0?resOpts.length-1:0];
     mkChips(p,'해상도',resOpts,'vres');
+    // ⚠️ 요청 반영("720이랑 1080 금액이 똑같네??"): fal.ai 공식 문서 확인 결과, Kling 3.0 Pro API는
+    // 애초에 해상도를 지정하는 파라미터 자체가 없음(출력 해상도는 입력 이미지 비율/화질을 따라감,
+    // 그래서 720p/1080p를 눌러도 실제로 보내는 요청이 똑같아서 가격도 동일함) — 버그가 아니라
+    // 이 모델 자체의 한계라, 사용자가 헷갈리지 않도록 안내 문구를 추가함.
+    if(engKey==='kling3'){
+      var resNote=dv('');resNote.style.cssText='font-size:10.5px;color:var(--m2);margin:-2px 0 8px;line-height:1.5';
+      resNote.textContent='ℹ️ Kling 3.0 Pro는 API 자체에 해상도 지정 옵션이 없어요(입력 이미지 화질을 따라감) — 그래서 720p/1080p를 선택해도 결과·가격이 동일해요. 정말 해상도를 지정하고 싶으면 Veo나 Seedance를 사용해주세요.';
+      p.appendChild(resNote);
+    }
   })();
   var dw=dv('sl-w'),dr=dv('sl-row');
   var dlb=mk('span','sl-lbl');dlb.textContent='영상 길이';
@@ -14906,9 +14930,14 @@ function sbVideo(p){
   var _dEngData=(EV||[]).find(function(e){return e.k===(G.vidEng||'kling3');})||{};
   var _dMax=_dEngData.maxDur||15;
   if((G.vdur||5)>_dMax) G.vdur=_dMax;
+  // ⚠️ 요청 반영("Kling 5초 미만은 안 돼??"): fal.ai 공식 문서(Kling 3.0 Pro) 확인 결과 실제로는
+  // 3~15초까지 지원하는데, 슬라이더가 모든 엔진에 대해 최소 5초로 고정돼 있었음 — Kling처럼 최소
+  // 길이가 더 짧은 엔진은 min을 그 값으로 낮춰서, 3~4초짜리 짧고 저렴한 영상도 만들 수 있게 함.
+  var _dMin=_dEngData.minDur||5;
+  if((G.vdur||5)<_dMin) G.vdur=_dMin;
   var dvl=mk('span','sl-v');dvl.textContent=G.vdur+'s';
-  var drng=mk('input','');drng.type='range';drng.min=5;drng.max=_dMax;drng.value=Math.max(5,Math.min(_dMax,G.vdur||5));slBg(drng,Math.max(5,Math.min(_dMax,G.vdur||5)),5,_dMax);
-  drng.oninput=function(){G.vdur=+drng.value;dvl.textContent=G.vdur+'s';slBg(drng,G.vdur,5,_dMax);updBtn();};
+  var drng=mk('input','');drng.type='range';drng.min=_dMin;drng.max=_dMax;drng.value=Math.max(_dMin,Math.min(_dMax,G.vdur||_dMin));slBg(drng,Math.max(_dMin,Math.min(_dMax,G.vdur||_dMin)),_dMin,_dMax);
+  drng.oninput=function(){G.vdur=+drng.value;dvl.textContent=G.vdur+'s';slBg(drng,G.vdur,_dMin,_dMax);updBtn();};
   dr.appendChild(dlb);dr.appendChild(dvl);dw.appendChild(dr);dw.appendChild(drng);p.appendChild(dw);
 }
 function sbUpscale(p){
