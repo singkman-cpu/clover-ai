@@ -4777,6 +4777,31 @@ window._checkAndApplyFloorEngineOverride=_checkAndApplyFloorEngineOverride;
 // 이 스크립트 어디서든 window 경유 없이 이름으로 직접 호출해도 항상 안전하므로, 아래 모든
 // 호출부를 window.을 거치지 않는 직접 호출(_checkAndApplyFloorEngineOverride(tab))로 바꿔서
 // 이 에러 자체가 다시는 안 나게 함.
+// ⚠️ 요청 반영("프리셋을 700개 넘게 만들어놨는데 활용을 잘 못 한다, 찾아쓰기 좋게 해달라"): 즐겨찾기·
+// 최근 사용 프리셋을 브라우저에 기억해두는 공용 헬퍼. 프리셋 개수가 워낙 많아서 검색/카테고리만으론
+// "내가 자주 쓰는 것"에 매번 다시 도달하기 번거로웠음 — 이제 별표 한 번이면 사이드바 맨 위에 항상
+// 고정으로 뜨고, 최근 쓴 것도 자동으로 기억해서 따로 뭘 안 해도 위에 떠 있게 함.
+function _favPresetKeys(){
+  try{ return JSON.parse(localStorage.getItem('clover_fav_presets')||'[]'); }catch(e){ return []; }
+}
+function _isFavPreset(k){ return _favPresetKeys().indexOf(k)!==-1; }
+function _toggleFavPreset(k){
+  var arr=_favPresetKeys();
+  var i=arr.indexOf(k);
+  if(i!==-1) arr.splice(i,1); else arr.unshift(k);
+  try{ localStorage.setItem('clover_fav_presets', JSON.stringify(arr.slice(0,200))); }catch(e){}
+}
+function _recentPresetKeys(){
+  try{ return JSON.parse(localStorage.getItem('clover_recent_presets')||'[]'); }catch(e){ return []; }
+}
+function _recordRecentPreset(k){
+  if(!k) return;
+  var arr=_recentPresetKeys();
+  var i=arr.indexOf(k);
+  if(i!==-1) arr.splice(i,1);
+  arr.unshift(k);
+  try{ localStorage.setItem('clover_recent_presets', JSON.stringify(arr.slice(0,10))); }catch(e){}
+}
 function mkPre(p,list){
   if(!list||!list.length)return;
   var w=dv('ss');w.innerHTML='<div class="lbl">스타일 프리셋 <span class="lbl-en">단일 선택</span></div>';
@@ -4892,7 +4917,7 @@ function _showPresetBrowseModal(list, panelEl, renderableGroups){
     var isSel = getTab(G.wf).selK===q.k;
     var card=mk('button','');card.type='button';
     card.dataset.cardKey=q.k;
-    card.style.cssText='display:flex;align-items:flex-start;gap:10px;padding:12px 12px;border-radius:12px;width:100%;'+
+    card.style.cssText='display:flex;align-items:flex-start;gap:10px;padding:12px 12px;border-radius:12px;width:100%;position:relative;'+
       'background:'+(isSel?'var(--acg,var(--acg))':'var(--c2,#171e20)')+';border:'+(isSel?'2px solid var(--ac)':'1px solid rgba(255,255,255,.1)')+
       ';color:var(--t);cursor:pointer;font-family:inherit;text-align:left;min-height:'+(isSmallScreen?'70px':'64px');
     var _thumbUrl2 = window.PRESET_THUMBS && window.PRESET_THUMBS[q.k];
@@ -4905,6 +4930,20 @@ function _showPresetBrowseModal(list, panelEl, renderableGroups){
       '<div style="font-size:'+(isSmallScreen?'13.5px':'12.5px')+';font-weight:700;line-height:1.35">'+q.l+typeBadgeHtml+(isSel?' <span style="color:var(--ac)">✓</span>':'')+'</div>'+
       (desc?'<div style="font-size:10.5px;color:var(--t2);line-height:1.4;margin-top:3px">'+desc+'</div>':'')+
       '</div>';
+    // ⚠️ 요청 반영("즐겨찾기"): 전체보기 모달에서도 별표로 바로 즐겨찾기 토글 가능하게
+    var favBtn2=dv('');
+    var _isFav2=_isFavPreset(q.k);
+    favBtn2.textContent=_isFav2?'★':'☆';
+    favBtn2.title=_isFav2?'즐겨찾기 해제':'즐겨찾기에 추가';
+    favBtn2.style.cssText='position:absolute;top:6px;right:6px;font-size:14px;line-height:1;padding:2px 4px;cursor:pointer;color:'+(_isFav2?'#fbbf24':'rgba(255,255,255,.3)');
+    favBtn2.onclick=function(e){
+      e.stopPropagation(); e.preventDefault();
+      _toggleFavPreset(q.k);
+      var nowFav2=_isFavPreset(q.k);
+      favBtn2.textContent=nowFav2?'★':'☆';
+      favBtn2.style.color=nowFav2?'#fbbf24':'rgba(255,255,255,.3)';
+    };
+    card.appendChild(favBtn2);
     if(!isSel){
       card.addEventListener('mouseenter',function(){card.style.borderColor='var(--ac)';});
       card.addEventListener('mouseleave',function(){card.style.borderColor='rgba(255,255,255,.1)';});
@@ -6794,6 +6833,25 @@ function makePi(q, g){
       trendChip.style.cssText='position:absolute;top:4px;right:4px;font-size:8.5px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:rgba(239,68,68,.85);color:#fff;pointer-events:none';
       pi.appendChild(trendChip);
     }
+    // ⚠️ 요청 반영("즐겨찾기 만들어줘"): 타일 좌상단에 별표를 얹어서 눌러서 바로 즐겨찾기 토글 —
+    // 카드 선택(클릭)과 겹치지 않게 stopPropagation, 눌러도 이 타일 위치 그대로 즉시 별만 채워지게
+    // 해서(전체 리렌더 없이) 반응이 빠르게 느껴지게 함.
+    var favBtn=dv('');
+    var _isFav=_isFavPreset(q.k);
+    favBtn.textContent=_isFav?'★':'☆';
+    favBtn.title=_isFav?'즐겨찾기 해제':'즐겨찾기에 추가';
+    favBtn.style.cssText='position:absolute;top:2px;left:2px;z-index:2;font-size:13px;line-height:1;padding:2px 4px;cursor:pointer;color:'+(_isFav?'#fbbf24':'rgba(255,255,255,.35)')+';text-shadow:0 1px 2px rgba(0,0,0,.6)';
+    favBtn.onclick=function(e){
+      e.stopPropagation(); e.preventDefault();
+      _toggleFavPreset(q.k);
+      var nowFav=_isFavPreset(q.k);
+      favBtn.textContent=nowFav?'★':'☆';
+      favBtn.title=nowFav?'즐겨찾기 해제':'즐겨찾기에 추가';
+      favBtn.style.color=nowFav?'#fbbf24':'rgba(255,255,255,.35)';
+      // 즐겨찾기 섹션 자체는 사이드바 맨 위에 별도로 있어서, 그 목록이 갱신되도록만 다시 그림
+      renderSB();
+    };
+    pi.appendChild(favBtn);
     pi.onclick=function(){
       var _tab=getTab(G.wf);
       // 프리셋 변경 실행취소용 — 바꾸기 전 상태(선택된 프리셋+프롬프트)를 기억해둠
@@ -6802,6 +6860,7 @@ function makePi(q, g){
       G.selKHist[G.wf].push({selK:_tab.selK, prompt:_tab.prompt});
       if(G.selKHist[G.wf].length>20) G.selKHist[G.wf].shift();
       _tab.selK=_tab.selK===q.k?null:q.k;
+      if(_tab.selK) _recordRecentPreset(_tab.selK); // 최근 사용 기록 (선택 해제할 때는 기록 안 함)
       w.querySelectorAll('.pi').forEach(function(x){
         var on=false;
         list.forEach(function(qq){if(qq.k===getTab(G.wf).selK&&qq.l===x.querySelector('.pi-l').textContent)on=true;});
@@ -7326,6 +7385,26 @@ function makePi(q, g){
 
     w.appendChild(heroWrap);
   }
+
+  // ⚠️ 요청 반영("즐겨찾기·최근 사용 만들어줘"): 아래 "요즘 뜨는 트렌드" 추천보다도 위에, 내가
+  // 직접 골라둔 즐겨찾기와 마지막으로 쓴 프리셋을 먼저 보여줌 — 700개 넘는 프리셋 중에서도
+  // "내가 자주/최근에 쓰는 것"은 검색 없이 한 번에 바로 다시 찾을 수 있게 함.
+  function _buildQuickAccessSection(title, keys, emptyHint){
+    var validItems = keys.map(function(k){ return list.find(function(x){return x.k===k;}); }).filter(Boolean);
+    if(!validItems.length) return null;
+    var wrap=dv('');wrap.style.cssText='margin-bottom:14px';
+    var head=dv('');head.style.cssText='font-size:13.5px;font-weight:800;color:var(--t);margin-bottom:8px;display:flex;align-items:center;gap:6px';
+    head.textContent=title;
+    wrap.appendChild(head);
+    var grid=dv('');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:9px';
+    validItems.forEach(function(q){ makePi(q, grid); });
+    wrap.appendChild(grid);
+    return wrap;
+  }
+  var favSection = _buildQuickAccessSection('⭐ 즐겨찾기', _favPresetKeys());
+  if(favSection) w.appendChild(favSection);
+  var recentSection = _buildQuickAccessSection('🕐 최근 사용', _recentPresetKeys());
+  if(recentSection) w.appendChild(recentSection);
 
   // 카테고리 전체 목록은 기본으로 접어두고, 자주 찾는 프리셋 몇 개만 먼저 보여줌 —
   // 700개 넘는 프리셋이 사이드바에 한꺼번에 쫙 펼쳐져 있으면 "정리가 안 된 사이트"처럼 보이기 쉬워서,
