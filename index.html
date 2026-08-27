@@ -7775,61 +7775,6 @@ function mkResolution(p){
   var ro=getResObj();
   info.textContent=ro.w+'×'+ro.h+' px';
   w.appendChild(info);
-  // ⚠️ 요청 반영(정정, 이전 안내가 틀렸음): "AI편집을 2K로 했더니 픽셀 수(1536×2752)는 원본
-  // (768×1376)보다 커졌는데 오히려 화질은 더 안 좋아졌다"는 정확한 사례를 확인함 — 지난번엔
-  // "선택한 해상도가 원본보다 작으면 화질이 떨어진다"고 안내했는데 이건 틀렸음. 실제로는 반대에
-  // 가까움: 이 편집 모델은 "화질 좋게 확대하는" 전용 업스케일러가 아니라 "지시대로 다시 그리는"
-  // 모델이라서, 원본보다 훨씬 큰 해상도로 편집을 시키면 없던 픽셀을 새로 채우면서 디테일이
-  // 부드럽게 뭉개지는(업스케일+편집을 한 번에 하려다 생기는) 경향이 있음 — 그래서 픽셀 수는
-  // 늘어도 오히려 흐릿해 보일 수 있음. 그래서 안내를 "원본 해상도에 가장 가까운 해상도로 편집하고,
-  // 확대가 필요하면 그건 전용 '업스케일' 탭에서 따로 하라"로 바꿈.
-  if(G.wf==='edit' && getTab('edit').inputImg){
-    var _editSrcImg = getTab('edit').inputImg;
-    if(!G._editSrcDimCache) G._editSrcDimCache = {};
-    var _cachedDim = G._editSrcDimCache[_editSrcImg];
-    if(_cachedDim === undefined){
-      G._editSrcDimCache[_editSrcImg] = null; // 로딩 중 표시(다시 요청 안 하게)
-      var _dimProbe = new Image();
-      _dimProbe.onload = function(){
-        G._editSrcDimCache[_editSrcImg] = {w:_dimProbe.naturalWidth, h:_dimProbe.naturalHeight};
-        if(G.wf==='edit') renderSB(); // 크기 알아낸 뒤 다시 그려서 정확한 안내가 뜨게 함
-      };
-      _dimProbe.onerror = function(){ G._editSrcDimCache[_editSrcImg] = false; };
-      _dimProbe.src = _editSrcImg;
-    } else if(_cachedDim){
-      var _srcLongSide = Math.max(_cachedDim.w, _cachedDim.h);
-      // 원본 긴 변에 가장 가까우면서 그 이상인 해상도를 "적정값"으로 추천(너무 작아서 디테일이
-      // 뭉개지지도, 너무 커서 불필요하게 업스케일되지도 않게)
-      var _bestFit = RES_OPTS.find(function(r){ return r.w >= _srcLongSide; }) || RES_OPTS[RES_OPTS.length-1];
-      var _curK = getResObj().k;
-      var resNote2=dv('');
-      if(_curK !== _bestFit.k){
-        var _isBigger = getResObj().w > _bestFit.w;
-        resNote2.style.cssText='font-size:10.5px;color:#f59e0b;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:7px;padding:7px 9px;margin-top:6px;line-height:1.6';
-        resNote2.innerHTML='⚠️ 원본 사진이 <b>'+_cachedDim.w+'×'+_cachedDim.h+'px</b>예요 — '+
-          (_isBigger
-            ? '지금 고른 <b>'+_curK+'</b>은 원본보다 훨씬 큰 해상도라, 없는 디테일을 새로 채우다가 오히려 부드럽게(살짝 흐리게) 뭉개질 수 있어요.'
-            : '지금 고른 <b>'+_curK+'</b>은 원본보다 작은 해상도라, 디테일이 뭉개질 수 있어요.')+
-          ' 원본 크기에 가장 가까운 <b style="color:var(--ac)">'+_bestFit.k+'</b>로 편집하고, 화질을 더 키우고 싶으면 편집 후 <b style="color:var(--ac)">업스케일</b> 탭에서 확대하는 걸 권장드려요 — 업스케일은 확대·화질 개선 전용 기능이라 이 편집 모델보다 확대 결과가 훨씬 자연스러워요.';
-      } else {
-        resNote2.style.cssText='font-size:10px;color:var(--ac);background:rgba(0,229,204,.08);border:1px solid rgba(0,229,204,.25);border-radius:7px;padding:6px 9px;margin-top:6px';
-        resNote2.textContent='✅ 원본('+_cachedDim.w+'×'+_cachedDim.h+'px)에 잘 맞는 해상도예요 — 화질 저하 없이 편집돼요. 더 키우고 싶으면 편집 후 업스케일 탭을 이용해주세요.';
-      }
-      w.appendChild(resNote2);
-    }
-  }
-  // ⚠️ 요청 반영: "공간컨셉에서 렌더링된 걸 AI편집에서 1K로 수정했더니 화질이 많이 안 좋아서
-  // 2K로 다시 하니 괜찮았다 — 이런 내용을 미리 알려줘서 크레딧 낭비 안 되게 해달라" — AI 편집은
-  // 특히 "이미 디테일 있는 렌더링 이미지를 다시 수정"하는 경우가 많아서, 여기서만 이 안내를
-  // 보여줌(1K/2K는 결과 파일 크기가 아니라 AI가 실제로 그리는 픽셀 예산이라, 소스가 디테일
-  // 많은 이미지면 1K에서 뭉개지기 쉬움). 위의 실제 크기 비교 안내가 더 정확하지만, 소스 크기를
-  // 아직 못 읽었을 때(로딩 중)를 위한 일반 안내로 계속 남겨둠.
-  if(G.wf==='edit'){
-    var resNote=dv('');
-    resNote.style.cssText='font-size:10.5px;color:#f59e0b;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:7px;padding:7px 9px;margin-top:6px;line-height:1.55';
-    resNote.innerHTML='💡 1K/2K는 결과 "파일 크기"가 아니라 AI가 실제로 그리는 <b>해상도 자체</b>예요 — 이미 디테일이 많은 렌더링 이미지(가구 질감, 소품 등)를 수정할 땐 1K에서 뭉개질 수 있어요. <b>소스가 이미 고화질이면 2K로 편집하시는 걸 권장</b>드려요 — 1K로 했다가 마음에 안 들어서 2K로 다시 하면 크레딧이 두 번 나가니, 처음부터 2K로 시작하시는 게 나을 수 있어요.';
-    w.appendChild(resNote);
-  }
   p.appendChild(w);
 }
 
