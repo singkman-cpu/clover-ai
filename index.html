@@ -4109,6 +4109,14 @@ function mkRef(p,cnt,title){
 window._lastPasteTarget = null;
 function _wirePasteTarget(el, onImageFile){
   if(!el) return;
+  // ⚠️ 방어 코드 추가("뭘 하고 나면 딜레이가 생기고 다른 거 눌러도 계속 띵띵 소리가 난다" 조사
+  // 중 발견한 위험 요소): 같은 DOM 요소에 이 함수가 실수로 여러 번 호출되면(예: 어떤 화면을
+  // 재렌더할 때 새 박스를 만들지 않고 기존 박스를 재사용하면서 매번 다시 연결하는 경우)
+  // addEventListener가 매번 새로 쌓여서, 클릭 한 번에 리스너가 여러 개 동시에 실행되는 문제가
+  // 생길 수 있음 — 이미 연결된 요소는 표시를 남겨서 두 번째부터는 조용히 건너뛰게(중복 연결
+  // 자체를 원천 차단) 만듦.
+  if(el._pasteWired) return;
+  el._pasteWired = true;
   el.tabIndex=0;
   el.addEventListener('mousedown', function(){ window._lastPasteTarget = onImageFile; });
   el.onpaste=function(e){
@@ -10843,16 +10851,29 @@ function _trackEvent(eventType){
 // 창 등 여러 환경으로 들어오면 계정이 같아도 매번 새로 잡혔음. 로그인 회원은 로컬 저장소 대신
 // 서버(analytics_events)에 "오늘 이 계정으로 이미 방문 기록이 있는지" 직접 물어보고, 없을 때만
 // 기록하도록 바꿔서 브라우저/기기가 달라도 계정 기준 하루 1번만 잡히게 함.
+// ⚠️ 요청 반영("8월25일 방문 144건 이상하다"): 실제로 봤더니 snap@snapdesign.co.kr 한 명이
+// 같은 분 안에 방문 기록이 여러 번(22:12에 3번, 22:11에 3번...) 중복으로 찍혀있었음 — 원인은
+// "오늘 이미 기록됐는지 서버에 물어보고, 없으면 기록한다"는 로직이 원자적이지 않아서(체크와
+// 기록 사이에 시차가 있음) 생기는 경쟁 상태(race condition)였음. 브라우저를 짧은 시간 안에
+// 여러 번 새로고침하면, 그 여러 번의 "확인" 요청이 서로 결과를 기다리는 동안 아직 아무도
+// DB에 기록을 안 남긴 상태라 다들 "오늘 처음이네" 판단하고 각자 따로 기록해버림. 이제 서버에
+// 물어보기 전에 먼저 로컬 저장소로 "이 계정, 오늘 이미 확인했는지"부터 빠르게(동기적으로) 걸러서,
+// 같은 브라우저에서 반복 새로고침해도 서버 요청 자체가 안 나가게 막음 — 기기가 다르면(로컬
+// 저장소가 다르니) 여전히 서버가 계정 기준으로 잡아줌.
 var _visitTrackChecked=false;
 function _trackVisitOncePerDay(userId){
   if(_visitTrackChecked) return; // 같은 세션에서 중복 체크 방지
   _visitTrackChecked=true;
   try{
+    var _todayStr=new Date().toISOString().slice(0,10);
+    var _localKey='clover_visit_checked_'+userId+'_'+_todayStr;
+    if(localStorage.getItem(_localKey)) return; // 이 브라우저에서 오늘 이미 확인/기록했음 — 서버에 물어보지도 않음
+    localStorage.setItem(_localKey, '1'); // 먼저 잠가서, 짧은 시간 안에 또 새로고침해도 여기서 바로 걸러지게 함
     var todayStart=new Date(); todayStart.setHours(0,0,0,0);
     _supa.from('analytics_events').select('id').eq('user_id',userId).eq('event_type','page_visit')
       .gte('created_at', todayStart.toISOString()).limit(1)
       .then(function(res){
-        if(res.data && res.data.length) return; // 오늘 이미 기록됨 — 건너뜀
+        if(res.data && res.data.length) return; // 오늘 이미 기록됨(다른 기기 등) — 건너뜀
         _trackEvent('page_visit');
       }).catch(function(){});
   }catch(e){}
