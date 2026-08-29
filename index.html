@@ -11404,15 +11404,76 @@ function mkMultiRoomSpace(p){
   var listBox=dv('');listBox.style.cssText='display:flex;flex-direction:column;gap:10px';
   spTab.multiRoomImages.forEach(function(room,idx){
     var cardWrap=dv('');cardWrap.style.cssText='background:var(--c2);border-radius:9px;padding:10px';
-    var row=dv('');row.style.cssText='display:flex;align-items:center;gap:8px';
-    var thumbCol=dv('');thumbCol.style.cssText='display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0';
+
+    // ── 요청 반영("원본 넣고 바로 옆에 참고 넣고, 그다음 원본 옆에 참고 — 한눈에 보기 편하게"):
+    // 예전엔 원본 사진(위 줄)과 이 공간 전용 참고 이미지(아래 줄, 접혀있어서 잘 안 보임)가
+    // 서로 떨어진 자리에 있어서 어떤 참고가 어떤 방과 짝인지 한눈에 안 들어왔음. 이제 원본과
+    // 참고를 같은 줄에 나란히(화살표로 연결) 크게 배치해서, 방 카드 하나만 봐도 "이 사진 →
+    // 이 스타일로" 관계가 바로 보이게 함. 순서·공간종류·삭제 같은 조작 버튼은 그 아래 별도
+    // 줄로 내려서 파악해야 할 정보(사진 짝)와 조작(버튼)을 시각적으로 분리함.
+    var pairRow=dv('');pairRow.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px';
+
+    var thumbCol=dv('');thumbCol.style.cssText='display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:0';
     var thumb=document.createElement('img');thumb.src=room.img;
-    thumb.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:7px;cursor:pointer';
+    thumb.style.cssText='width:100%;aspect-ratio:1;max-width:88px;object-fit:cover;border-radius:8px;cursor:pointer;border:1.5px solid var(--bd2)';
     _wireImgPreview(thumb, room.img, 'spaceset');
     thumbCol.appendChild(thumb);
-    var thumbLbl=dv('');thumbLbl.style.cssText='font-size:8.5px;color:var(--m2);white-space:nowrap';thumbLbl.textContent='내 방 사진(원본)';
+    var thumbLbl=dv('');thumbLbl.style.cssText='font-size:9px;color:var(--t2);font-weight:700;white-space:nowrap';thumbLbl.textContent='📷 내 방 사진(원본)';
     thumbCol.appendChild(thumbLbl);
-    row.appendChild(thumbCol);
+    pairRow.appendChild(thumbCol);
+
+    var arrowCol=dv('');arrowCol.style.cssText='font-size:16px;color:var(--m2);flex-shrink:0;padding-top:14px';arrowCol.textContent='→';
+    pairRow.appendChild(arrowCol);
+
+    // 이 공간 전용 참고 이미지 슬롯 — 원본 바로 옆으로 이동
+    var refCol=dv('');refCol.style.cssText='display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:0';
+    var refSlot=dv('');refSlot.style.cssText='width:100%;aspect-ratio:1;max-width:88px;border-radius:8px;position:relative;cursor:pointer;overflow:hidden;border:1.5px dashed var(--bd2);background:var(--card)';
+    var refFileInp=document.createElement('input');refFileInp.type='file';refFileInp.accept='image/*';refFileInp.style.display='none';
+    function renderRoomRefSlot(){
+      refSlot.innerHTML='';
+      if(room.refImg){
+        refSlot.style.border='1.5px solid var(--acb)';
+        var rImgEl=document.createElement('img');rImgEl.src=room.refImg;rImgEl.style.cssText='width:100%;height:100%;object-fit:cover';
+        refSlot.appendChild(rImgEl);
+        var rDelBtn=document.createElement('button');rDelBtn.type='button';rDelBtn.textContent='✕';
+        rDelBtn.style.cssText='position:absolute;top:-4px;right:-4px;width:17px;height:17px;border-radius:50%;background:rgba(0,0,0,.75);color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0';
+        rDelBtn.onclick=function(e){ e.stopPropagation(); room.refImg=null; renderRoomRefSlot(); };
+        refSlot.appendChild(rDelBtn);
+        _wireImgPreview(rImgEl, room.refImg, 'spaceset');
+      } else {
+        refSlot.style.border='1.5px dashed var(--bd2)';
+        refSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--m2)">+</div>';
+      }
+    }
+    refSlot.onclick=function(e){ if(!room.refImg){ e.stopPropagation(); refFileInp.click(); } };
+    refFileInp.onchange=function(){
+      var f=refFileInp.files&&refFileInp.files[0]; if(!f) return;
+      var reader=new FileReader();
+      reader.onload=function(){
+        _downscaleForMemorySafety(reader.result, function(resized){ room.refImg=resized; renderRoomRefSlot(); });
+      };
+      reader.readAsDataURL(f);
+    };
+    _wirePasteTarget(refSlot, function(f){
+      var reader=new FileReader();
+      reader.onload=function(){
+        _downscaleForMemorySafety(reader.result, function(resized){ room.refImg=resized; renderRoomRefSlot(); });
+      };
+      reader.readAsDataURL(f);
+    });
+    renderRoomRefSlot();
+    refCol.appendChild(refSlot);refCol.appendChild(refFileInp);
+    var refLbl=dv('');refLbl.style.cssText='font-size:9px;color:var(--t2);font-weight:700;white-space:nowrap';refLbl.textContent='🎨 이 방 전용 참고(선택)';
+    refCol.appendChild(refLbl);
+    pairRow.appendChild(refCol);
+
+    cardWrap.appendChild(pairRow);
+
+    var refHintEl=dv('');refHintEl.style.cssText='font-size:9.5px;color:var(--m2);line-height:1.4;margin:-2px 0 8px;text-align:center';
+    refHintEl.textContent=room.refImg ? '✅ 전체 공통 참고 + 이 방 전용 참고, 둘 다 보고 만들어져요' : '비워두면 전체 공통 참고 이미지로만 만들어져요';
+    cardWrap.appendChild(refHintEl);
+
+    var row=dv('');row.style.cssText='display:flex;align-items:center;gap:8px';
     var orderCol=dv('');orderCol.style.cssText='display:flex;flex-direction:column;gap:2px;flex-shrink:0';
     var upBtn=mk('button','');upBtn.type='button';upBtn.innerHTML='▲';upBtn.title='위로 이동';
     upBtn.style.cssText='width:20px;height:16px;border-radius:4px;border:1px solid var(--bd2);background:var(--card);color:'+(idx===0?'var(--m1)':'var(--t2)')+';cursor:'+(idx===0?'default':'pointer')+';font-size:8px;line-height:1;padding:0';
@@ -11452,57 +11513,6 @@ function mkMultiRoomSpace(p){
     delBtn.onclick=function(){ spTab.multiRoomImages=spTab.multiRoomImages.filter(function(r){return r.id!==room.id;}); renderSB(); };
     row.appendChild(delBtn);
     cardWrap.appendChild(row);
-
-    // ── 이 공간 전용 참고 이미지(선택) ────────────────────────────────
-    // ⚠️ 요청 반영: 전체 공통 참고 이미지 1장만으로는 방마다 원하는 느낌이 다를 때 아쉬울 수
-    // 있어서, 방마다 개별 참고 이미지를 선택적으로 추가할 수 있게 함. 넣으면 "전체 참고 +
-    // 이 방 전용 참고"를 같이 보고 만들어지고(통일감은 유지하면서 이 방만 더 정확하게), 안
-    // 넣은 방은 지금처럼 전체 참고 이미지 하나로만 만들어짐 — 방마다 유동적으로 넣거나 안
-    // 넣거나 자유롭게 섞어 쓸 수 있음.
-    // ⚠️ 보완: 슬롯이 28px밖에 안 돼서 거의 안 보인다는 피드백 — 56px로 키우고 라벨도 명확하게.
-    var refRow=dv('');refRow.style.cssText='display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--bd2)';
-    var refSlot=dv('');refSlot.style.cssText='width:56px;height:56px;border-radius:7px;position:relative;cursor:pointer;flex-shrink:0;overflow:hidden;border:1.5px dashed var(--bd2);background:var(--card)';
-    var refFileInp=document.createElement('input');refFileInp.type='file';refFileInp.accept='image/*';refFileInp.style.display='none';
-    function renderRoomRefSlot(){
-      refSlot.innerHTML='';
-      if(room.refImg){
-        refSlot.style.border='1.5px solid var(--acb)';
-        var rImgEl=document.createElement('img');rImgEl.src=room.refImg;rImgEl.style.cssText='width:100%;height:100%;object-fit:cover';
-        refSlot.appendChild(rImgEl);
-        var rDelBtn=document.createElement('button');rDelBtn.type='button';rDelBtn.textContent='✕';
-        rDelBtn.style.cssText='position:absolute;top:-4px;right:-4px;width:17px;height:17px;border-radius:50%;background:rgba(0,0,0,.75);color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0';
-        rDelBtn.onclick=function(e){ e.stopPropagation(); room.refImg=null; renderRoomRefSlot(); };
-        refSlot.appendChild(rDelBtn);
-        _wireImgPreview(rImgEl, room.refImg, 'spaceset');
-      } else {
-        refSlot.style.border='1.5px dashed var(--bd2)';
-        refSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--m2)">+</div>';
-      }
-    }
-    refSlot.onclick=function(e){ if(!room.refImg){ e.stopPropagation(); refFileInp.click(); } };
-    refFileInp.onchange=function(){
-      var f=refFileInp.files&&refFileInp.files[0]; if(!f) return;
-      var reader=new FileReader();
-      reader.onload=function(){
-        _downscaleForMemorySafety(reader.result, function(resized){ room.refImg=resized; renderRoomRefSlot(); });
-      };
-      reader.readAsDataURL(f);
-    };
-    _wirePasteTarget(refSlot, function(f){
-      var reader=new FileReader();
-      reader.onload=function(){
-        _downscaleForMemorySafety(reader.result, function(resized){ room.refImg=resized; renderRoomRefSlot(); });
-      };
-      reader.readAsDataURL(f);
-    });
-    renderRoomRefSlot();
-    refRow.appendChild(refSlot);refRow.appendChild(refFileInp);
-    var refTextCol=dv('');refTextCol.style.cssText='flex:1';
-    var refTitleEl=dv('');refTitleEl.style.cssText='font-size:11.5px;font-weight:700;color:var(--t)';refTitleEl.textContent='이 공간만의 전용 참고 이미지';
-    var refSubEl=dv('');refSubEl.style.cssText='font-size:10px;color:var(--m2);margin-top:2px;line-height:1.4';refSubEl.textContent='선택사항 — 넣으면 전체 참고 + 이 사진 둘 다 보고 만들어져요. 안 넣으면 전체 참고 이미지로만 만들어져요.';
-    refTextCol.appendChild(refTitleEl);refTextCol.appendChild(refSubEl);
-    refRow.appendChild(refTextCol);
-    cardWrap.appendChild(refRow);
 
     listBox.appendChild(cardWrap);
   });
