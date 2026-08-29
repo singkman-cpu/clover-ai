@@ -11593,7 +11593,13 @@ function mkMultiRoomSpace(p){
   // 생성되므로 전부 과금 대상(더 이상 1번 공간 무료 처리 없음).
   var totalCost = Math.round(n*20*_resMult2);
   var isRunning=st&&st.running;
-  var missingRef = !spTab.multiRoomRefDesignImg;
+  // ⚠️ 요청 반영("참고 이미지 안 넣으면 왜 생성이 아예 안 되냐"): 예전엔 위쪽 "전체 공통 참고
+  // 이미지"가 무조건 있어야만 생성 버튼이 눌렸음 — 그런데 방마다 "이 방 전용 참고 이미지"를
+  // 따로 넣을 수 있는 기능이 있는데도, 공통 참고가 없으면 방별 전용 참고가 있어도 소용없이
+  // 막혀있었음. 이제 "공통 참고가 있거나, 등록된 방 전부가 각자 전용 참고를 갖고 있으면"
+  // 생성 가능하게 완화함 — 방마다 다른 스타일 참고를 따로 넣는 방식만으로도 쓸 수 있게 됨.
+  var _allRoomsHaveOwnRef = n>0 && spTab.multiRoomImages.every(function(r){ return !!r.refImg; });
+  var missingRef = !spTab.multiRoomRefDesignImg && !_allRoomsHaveOwnRef;
   goBtn.disabled=!!isRunning || n<1 || missingRef;
   goBtn.innerHTML=isRunning?'생성 중...':'🏠 세트로 생성 시작 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCost+'cr</span>';
   goBtn.onclick=_multiRoomRun;
@@ -11603,7 +11609,7 @@ function mkMultiRoomSpace(p){
   goWrap.appendChild(_aiLimitNote1);
   if(missingRef){
     var needRef=dv('');needRef.style.cssText='font-size:10.5px;color:#f59e0b;text-align:center;margin-top:6px';
-    needRef.textContent='⚠️ 위에 참고 디자인 이미지를 먼저 올려주세요 (필수)';
+    needRef.textContent='⚠️ 위에 공통 참고 디자인 이미지를 올리거나, 아래 방마다 전용 참고 이미지를 각각 넣어주세요';
     goWrap.appendChild(needRef);
   } else if(n<1){
     var needMore=dv('');needMore.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';
@@ -11657,9 +11663,15 @@ function _multiRoomRun(){
   var spTab=getTab('spaceset');
   var n=spTab.multiRoomImages.length;
   if(n<1){ alert('공간 사진을 최소 1개는 넣어주세요.'); return; }
-  // ⚠️ 재설계: 참고 디자인 이미지가 필수 입력값이 됨 — 이게 없으면 애초에 "이런 느낌으로
-  // 통일해줘"라고 할 기준 자체가 없으므로 실행 자체를 막음.
-  if(!spTab.multiRoomRefDesignImg){ alert('참고 디자인 이미지를 먼저 올려주세요 (필수).'); return; }
+  // ⚠️ 요청 반영("참고 이미지 안 넣으면 왜 생성이 아예 안 되냐"): 공통 참고 이미지가 없어도,
+  // 등록된 방 전부가 각자 "이 방 전용 참고 이미지"를 갖고 있으면 그걸로 충분히 "어떤 느낌으로"
+  // 통일할지 기준이 서므로 실행을 막지 않음 — 공통 참고도 없고 방별 전용 참고도 없는 방이
+  // 하나라도 있을 때만 막음.
+  var _allRoomsHaveOwnRef1 = n>0 && spTab.multiRoomImages.every(function(r){ return !!r.refImg; });
+  if(!spTab.multiRoomRefDesignImg && !_allRoomsHaveOwnRef1){
+    alert('공통 참고 디자인 이미지를 올리거나, 아래 방마다 전용 참고 이미지를 각각 넣어주세요.');
+    return;
+  }
   if(!_supaUser){ openMd('account'); return; }
   var _resMultCheck1 = spTab.multiRoomResolution==='4K' ? 2.0 : spTab.multiRoomResolution==='2K' ? 1.5 : 1.0;
   var totalCost = Math.round(n*20*_resMultCheck1);
@@ -11842,7 +11854,7 @@ function _multiRoomGenerateStep(pos){
   var room=rooms[idx];
   var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label, !!room.refImg);
   var origRefs = getTab('space').refs;
-  var refsToUse = room.refImg ? [spTab.multiRoomRefDesignImg, room.refImg] : [spTab.multiRoomRefDesignImg];
+  var refsToUse = [spTab.multiRoomRefDesignImg, room.refImg].filter(Boolean); // 공통 참고 없이 방 전용 참고만 있는 경우도 지원(null 제거)
   // ⚠️ 버그 수정("실내에서 창밖으로 이 건물 자신의 외벽이 보이는데 건축 외관 참고 사진이랑 마감재가
   // 다르다"): 방금 프롬프트에 "이 건물 자신의 외벽이 보이면 건축 외관 참고 사진의 마감재를
   // 적용하라"는 지시를 추가했는데, 정작 그 건축 외관 사진 자체가 실내 공간을 생성할 때 참고
@@ -11892,7 +11904,11 @@ function _multiRoomRetryOne(idx){
   var spTab=getTab('spaceset');
   var st=spTab.multiRoomState;
   if(!st) return;
-  if(!spTab.multiRoomRefDesignImg){ alert('참고 디자인 이미지가 없어요. 위에서 다시 올려주세요.'); return; }
+  var _room1ForRetry = spTab.multiRoomImages[idx];
+  if(!spTab.multiRoomRefDesignImg && !(_room1ForRetry && _room1ForRetry.refImg)){
+    alert('공통 참고 디자인 이미지가 없어요. 위에서 다시 올리거나, 이 방에 전용 참고 이미지를 넣어주세요.');
+    return;
+  }
   // ⚠️ 직전 결과를 바로 지우지 않고 prevUrl로 보관해둠 — 재생성이 끝나면 "직전 버전 vs 새 버전"을
   // Before/After 슬라이더로 비교해볼 수 있게 하기 위함(마음에 드는 쪽을 골라서 다운로드 가능).
   var prevResult = st.results[idx];
@@ -11903,7 +11919,7 @@ function _multiRoomRetryOne(idx){
   var room=rooms[idx];
   var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label, !!room.refImg);
   var origRefs=getTab('space').refs;
-  var refsToUse = room.refImg ? [spTab.multiRoomRefDesignImg, room.refImg] : [spTab.multiRoomRefDesignImg];
+  var refsToUse = [spTab.multiRoomRefDesignImg, room.refImg].filter(Boolean); // 공통 참고 없이 방 전용 참고만 있는 경우도 지원(null 제거)
   // ⚠️ _multiRoomGenerateStep과 동일한 이유로: 이 방이 실내 공간이면, 이 세트의 건축 외관 사진도
   // 같이 첨부해서 "창밖으로 이 건물 자신의 외벽이 보이면 그 마감재를 적용하라"는 지시가 실제로
   // 작동하게 함.
