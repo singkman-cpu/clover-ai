@@ -3656,7 +3656,14 @@ function loadImgSafe(src, onload, onerror){
 function _shortsEnsureThumb(im, cb){
   if(!im.img){ return; }
   if(im.isVideo || im.type==='blank'){ if(cb)cb(); return; } // 영상·빈 페이지는 원본을 그대로 씀(이미 가벼움)
-  if(im._thumb){ if(cb)cb(); return; }
+  // ⚠️ 버그 수정("아직도 뿌옇게 보인다"): 위 로직(화면 배율 반영, 압축률 0.88)을 고쳐도, 예전에
+  // 이미 만들어져서 세션/로컬저장소/갤러리에 저장돼있던 저화질 _thumb 캐시는 그대로 남아있어서
+  // 계속 흐리게 보였음 — "이미 _thumb가 있으면 무조건 재사용"하던 조건이 새 코드가 적용될 기회
+  // 자체를 막고 있었던 것. 이제 썸네일을 만들 때마다 이 버전 번호(_thumbV)를 같이 저장해두고,
+  // 버전이 다르거나 아예 없는(예전에 만들어진) 캐시는 "낡은 것"으로 보고 강제로 다시 만듦 —
+  // 나중에 썸네일 생성 방식을 또 개선하면 이 숫자만 올리면 예전 캐시가 전부 자동으로 갱신됨.
+  var THUMB_VERSION=2;
+  if(im._thumb && im._thumbV===THUMB_VERSION){ if(cb)cb(); return; }
   if(im._thumbPending){ if(cb) im._thumbCbs=(im._thumbCbs||[]).concat(cb); return; }
   im._thumbPending=true;
   if(cb) im._thumbCbs=[cb];
@@ -3675,6 +3682,7 @@ function _shortsEnsureThumb(im, cb){
       cv.width=Math.max(1,Math.round(w*scale)); cv.height=Math.max(1,Math.round(h*scale));
       cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
       im._thumb=cv.toDataURL('image/jpeg',0.88); // ⚠️ 0.75→0.88로 올림(압축으로 뿌옇게 보이던 것 개선)
+      im._thumbV=THUMB_VERSION;
     }catch(e){ im._thumbFailed=true; /* CORS 등으로 실패하면 그냥 원본 계속 사용 */ }
     im._thumbPending=false;
     if(im._thumb && im._tileDomId){
@@ -16949,7 +16957,7 @@ function _shortsBuildSlides(){
     if(im.type==='blank'){
       slides.push({type:'blank', img:im.img||null, label:'', bgColor:im.bgColor||'#0a0a0a', blankText:im.blankText||'',
         textColor:im.blankTextColor||'#ffffff', role:'blank', duration:im.duration, noSlider:!!im.noSlider,
-        skipTopText:true, skipBottomText:true});
+        skipTopText:true, skipBottomText:true, customHold:im.customHold});
       return;
     }
     var r=_shortsResolvedRole(im);
@@ -16964,7 +16972,7 @@ function _shortsBuildSlides(){
     slides.push({type:'slide', img:im.img, label:lbl, role:r, zoom:im.coverZoom||1, offX:im.coverOffX||0, offY:im.coverOffY||0,
       isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.trimStart||0):0,
       skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
-      noSlider:!!im.noSlider});
+      noSlider:!!im.noSlider, customHold:im.customHold});
   });
   if(opts.ending){
     slides.push({type:'ending',label:'',img:SHORTS_ENDING_IMG});
@@ -16979,7 +16987,10 @@ function _shortsBuildSlides(){
 // 엔딩으로 들어갈 때는 설정과 무관하게 항상 컷(슬라이더도 페이드도 없음) — 브랜드 엔딩은 깔끔하게 딱 끊어져야 하므로.
 // 역할별로 화면에 머무는 시간(초)을 계산 — opts.holdByRole에 지정된 값이 있으면 그걸 쓰고,
 // 없는 역할(도면/3D모델/조감도 등)은 'default' 값을 쓴다.
-function _shortsHoldDuration(role){
+function _shortsHoldDuration(role, customHold){
+  // ⚠️ 요청 반영("1번은 1초, 5번은 1.5초처럼 장면마다 개별로 초수를 바꾸고 싶다"): 그룹(역할)별
+  // 공통 시간 설정보다 이 장면에 직접 지정한 값이 있으면 그게 항상 우선함.
+  if(customHold!=null && customHold!=='') return +customHold;
   var h=(G_SHORTS.opts&&G_SHORTS.opts.holdByRole)||{};
   if(role && h[role]!=null) return h[role];
   return h['default']!=null ? h['default'] : SHORTS_TIMING.holdAfter;
@@ -17009,7 +17020,7 @@ function _shortsBuildTimeline(slides){
   function _slideDuration(slide){
     if(slide.type==='ending') return ENDING_HOLD;
     if(slide.isVideo) return slide.duration||5;
-    return _shortsHoldDuration(slide.role);
+    return _shortsHoldDuration(slide.role, slide.customHold);
   }
   slides.forEach(function(slide,i){
     if(i===0){
@@ -17041,19 +17052,19 @@ function _shortsBuildTimeline(slides){
       t+=dHard;
     } else if(useCut){
       // 컷: 전환 구간 자체가 없음 — 바로 다음 장면 hold로 이어짐(효과 없이 바로 넘어감)
-      var dCut=_shortsHoldDuration(slide.role);
+      var dCut=_shortsHoldDuration(slide.role, slide.customHold);
       timeline.push({type:'hold',idx:i,start:t,end:t+dCut});
       t+=dCut;
     } else if(useSlider && !slide.noSlider){
       timeline.push({type:'wipe',from:i-1,to:i,start:t,end:t+WIPE_DUR});
       t+=WIPE_DUR;
-      var d=_shortsHoldDuration(slide.role);
+      var d=_shortsHoldDuration(slide.role, slide.customHold);
       timeline.push({type:'hold',idx:i,start:t,end:t+d});
       t+=d;
     } else {
       timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+FADE_DUR});
       t+=FADE_DUR;
-      var d2=_shortsHoldDuration(slide.role);
+      var d2=_shortsHoldDuration(slide.role, slide.customHold);
       timeline.push({type:'hold',idx:i,start:t,end:t+d2});
       t+=d2;
     }
@@ -17600,12 +17611,43 @@ function sbShorts(p){
     // ── "지금 실제로 몇 초 적용되는지" 바로 보여주는 표시 — 라벨(제목)과 실제 적용 역할이
     // 다를 수 있어서(자동인식 실패 시 '그 외 장면'으로 빠짐) 헷갈리지 않게 명확히 알려줌
     var appliedRole = resolved; // = _shortsResolvedRole(im) 값 (역할이 지정 안 됐으면 null)
-    var appliedSec = _shortsHoldDuration(appliedRole);
+    var appliedSec = _shortsHoldDuration(appliedRole, im.customHold);
     var appliedRoleLabel = appliedRole ? _shortsRoleLabel(appliedRole) : '그 외 장면(역할 미지정)';
     var durIndicator=dv('');
     durIndicator.style.cssText='font-size:10px;margin-top:3px;color:'+_shortsHoldColor(appliedRole)+';font-weight:600';
-    durIndicator.textContent='→ 이 장면은 '+appliedSec.toFixed(1)+'초 적용돼요 ('+appliedRoleLabel+')';
+    durIndicator.textContent='→ 이 장면은 '+appliedSec.toFixed(1)+'초 적용돼요 ('+(im.customHold!=null&&im.customHold!==''?'이 장면만 직접 지정':appliedRoleLabel)+')';
     info.appendChild(durIndicator);
+
+    // ⚠️ 요청 반영("1번은 1초, 5번은 1.5초처럼 장면마다 개별로 초수를 바꾸고 싶다"): 그룹(역할)
+    // 공통 시간 설정 말고, 이 장면 하나만 따로 몇 초로 고정하고 싶을 때를 위한 입력창. 비워두면
+    // 지금처럼 그룹 설정(위 문구에 나온 그 역할의 공통 시간)을 그대로 따름.
+    var customHoldRow=dv('');customHoldRow.style.cssText='display:flex;align-items:center;gap:6px;margin-top:5px';
+    var customHoldLbl=dv('');customHoldLbl.style.cssText='font-size:10.5px;color:var(--m2);white-space:nowrap';customHoldLbl.textContent='이 장면만 몇 초로:';
+    var customHoldInput=document.createElement('input');
+    customHoldInput.type='number';customHoldInput.step='0.1';customHoldInput.min='0.3';customHoldInput.max='15';
+    customHoldInput.value=(im.customHold!=null&&im.customHold!=='')?im.customHold:'';
+    customHoldInput.placeholder='그룹값';
+    customHoldInput.style.cssText='width:64px;padding:4px 6px;background:var(--card);border:1px solid var(--bd2);border-radius:5px;color:var(--t);font-size:11px;font-family:inherit';
+    (function(item, inputEl, indicatorEl, roleForLabel){
+      inputEl.oninput=function(){
+        var v=inputEl.value;
+        item.customHold = (v==='') ? null : Math.max(0.3, Math.min(15, +v));
+        var sec=_shortsHoldDuration(roleForLabel, item.customHold);
+        indicatorEl.textContent='→ 이 장면은 '+sec.toFixed(1)+'초 적용돼요 ('+(item.customHold!=null?'이 장면만 직접 지정':(roleForLabel?_shortsRoleLabel(roleForLabel):'그 외 장면(역할 미지정)'))+')';
+        renderMain('shorts');
+      };
+    })(im, customHoldInput, durIndicator, appliedRole);
+    var customHoldResetBtn=mk('button','');customHoldResetBtn.type='button';customHoldResetBtn.textContent='초기화';
+    customHoldResetBtn.style.cssText='padding:4px 8px;border-radius:5px;border:1px solid var(--bd2);background:var(--c2);color:var(--m2);font-size:10px;cursor:pointer;font-family:inherit';
+    customHoldResetBtn.onclick=function(){
+      im.customHold=null;
+      customHoldInput.value='';
+      var sec=_shortsHoldDuration(appliedRole, null);
+      durIndicator.textContent='→ 이 장면은 '+sec.toFixed(1)+'초 적용돼요 ('+(appliedRole?_shortsRoleLabel(appliedRole):'그 외 장면(역할 미지정)')+')';
+      renderMain('shorts');
+    };
+    customHoldRow.appendChild(customHoldLbl);customHoldRow.appendChild(customHoldInput);customHoldRow.appendChild(customHoldResetBtn);
+    info.appendChild(customHoldRow);
 
     // 화면에 표시될 문구(라벨)를 자동 감지 결과 그대로 쓰지 않고 직접 쓰고 싶을 때를 위한 입력창.
     // 비워두면 기존처럼 역할 라벨(SITE PHOTO 등)이 자동으로 쓰인다.
