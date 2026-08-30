@@ -20786,7 +20786,40 @@ function _shortsGenerate(){
         if(dlBtn)dlBtn.onclick=doDownload;
         if(dlWrap){dlWrap.style.display='';}
         if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
-        if(progTxt){
+        // ⚠️ 요청 반영("미리보기 만료 처리하지 말고 영상 렌더링이나 제대로 되게 해"): 위에서
+        // 실제로 인코더 멈춤이 감지됐다면(_shortsEncoderStalled), 지금까지는 그래도 "✅ 완성!"
+        // 이라고 표시하고 화면이 멈춘/일부만 녹화된 영상을 정상 결과인 것처럼 그대로 보여주고
+        // 있었음 — 이제는 그 경우 명확하게 실패로 안내하고, 화질을 한 단계 낮춰서 바로 다시
+        // 시도할 수 있는 버튼을 제공함(4K→FHD→HD 순으로 자동으로 낮아짐, HD에서도 실패하면
+        // 더 낮출 데가 없으니 크롬 그래픽 가속 끄기를 안내).
+        if(_shortsEncoderStalled){
+          var _qOrder=['4K','FHD','HD'];
+          var _curQ=opts.quality||'FHD';
+          var _curQIdx=_qOrder.indexOf(_curQ);
+          var _nextQ=(_curQIdx>=0 && _curQIdx<_qOrder.length-1)?_qOrder[_curQIdx+1]:null;
+          if(progTxt){
+            progTxt.textContent='⚠️ 인코더가 렌더링 도중 멈췄어요 — 이 결과물은 화면이 끊겼을 수 있어요.';
+            progTxt.style.color='#f87171';
+          }
+          if(progWrap){
+            var _stallRetryBox=document.createElement('div');
+            _stallRetryBox.style.cssText='margin-top:8px;display:flex;flex-direction:column;align-items:center;gap:8px';
+            var _stallMsg=document.createElement('div');
+            _stallMsg.style.cssText='font-size:11.5px;color:var(--m2);text-align:center;line-height:1.6';
+            _stallMsg.textContent=_nextQ
+              ? '현재 화질('+_curQ+')에서 그래픽 인코더가 못 따라갔어요. 화질을 '+_nextQ+'로 낮추면 대부분 해결돼요.'
+              : '가장 낮은 화질에서도 멈췄어요 — 크롬 설정(chrome://settings/system)에서 "그래픽 가속 사용"을 끄고 다시 시도해보세요.';
+            _stallRetryBox.appendChild(_stallMsg);
+            if(_nextQ){
+              var _retryBtn=document.createElement('button');_retryBtn.type='button';
+              _retryBtn.textContent='🔁 '+_nextQ+' 화질로 다시 만들기';
+              _retryBtn.style.cssText='padding:10px 20px;border-radius:10px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit';
+              _retryBtn.onclick=function(){ opts.quality=_nextQ; _shortsGenerate(); };
+              _stallRetryBox.appendChild(_retryBtn);
+            }
+            progWrap.appendChild(_stallRetryBox);
+          }
+        } else if(progTxt){
           var _realElapsedSec=(performance.now()-_shortsRenderRealStart)/1000;
           if(_realElapsedSec > totalDuration*1.6){
             progTxt.textContent='✅ 완성! (렌더링 중 탭을 벗어나서 실제보다 시간이 더 걸렸어요 — 다운로드하세요)';
@@ -20884,6 +20917,25 @@ function _shortsGenerate(){
         if(G.wf==='shorts')renderMain('shorts');
       };
       recorder.start(100); // 100ms 단위로 chunk
+      // ⚠️⚠️⚠️ 버그 수정(치명적, 진짜 원인 확정): "_shortsEncoderStalled" 변수와 실시간 청크
+      // 시간 추적(recorder._lastChunkTime)까지 다 만들어져 있었는데, 정작 그 값을 주기적으로
+      // 확인해서 실제로 "멈췄다"고 판단하는 코드 자체가 어디에도 없었음 — 그래서 인코더가
+      // 렌더링 도중에 죽어도 이 플래그는 영원히 false로 남아있었고, onstop에서 "정상 완성"으로
+      // 처리돼서 화면 멈춘/손상된 영상이 그대로 "✅ 완성!"으로 갤러리에 저장되고 사용자에게
+      // 보여지고 있었음(재생 시도할 때만 blob 로드 실패로 뒤늦게 드러남). 이제 1초마다 실제로
+      // 확인해서, 녹화가 진행 중인데 2.5초 넘게 새 데이터가 안 들어오면(정상이면 100ms마다
+      // 들어와야 함) 인코더가 죽은 것으로 판단하고, 남은 시간 다 기다리지 않고 그 자리에서
+      // 바로 멈춰서 "실패로 확정"하고 갤러리 오염을 막음.
+      var _stallCheckIv=setInterval(function(){
+        if(recorder.state!=='recording') { clearInterval(_stallCheckIv); return; }
+        var _sinceLastChunk = performance.now() - recorder._lastChunkTime;
+        if(recorder._chunkCount>0 && _sinceLastChunk > 2500){
+          _shortsEncoderStalled = true;
+          clearInterval(_stallCheckIv);
+          try{ recorder.stop(); }catch(e){}
+        }
+      }, 1000);
+      recorder.addEventListener('stop', function(){ clearInterval(_stallCheckIv); }, {once:true});
       return recorder;
     }
 
