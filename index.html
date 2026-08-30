@@ -33527,6 +33527,30 @@ document.addEventListener('DOMContentLoaded',function(){try{
     saveHistToStorage();
   });
 
+  // ⚠️ 요청 반영("콘솔에 계속 똑같은 blob 링크가 죽어있다"): 콘솔을 다시 보니 여러 스크린샷에
+  // 걸쳐 완전히 똑같은 blob 주소(893e-7a2caf2dc661 등)가 계속 반복되고 있었음 — 이건 매번 새로
+  // 생성된 쇼츠 영상이 아니라, 예전 세션에 저장된 갤러리 항목 중 하나가 죽은 blob 링크를 그대로
+  // 물고 있는 것으로 보임(blob 링크는 그 링크를 만든 세션이 끝나면 영원히 죽어서, 문자열 자체가
+  // 어디엔가 저장돼있다면 새로고침해도 계속 똑같은 죽은 주소로 다시 시도하게 됨). 정확히 어느
+  // 저장 경로에서 이게 새는지 하나하나 다 찾기보다, 더 확실하게: 화면 어디서든 blob: 주소를 가진
+  // 이미지·영상이 로드 실패하면 그 즉시 전역적으로 감지해서 화면에서 치우고 관련 데이터에서도
+  // 지움 — 이러면 원인이 어디였든 상관없이 이 죽은 항목이 다시는 안 나타남. (error 이벤트는
+  // 버블링이 안 되는 이벤트라 캡처 단계에서 잡아야 함.)
+  document.addEventListener('error', function(e){
+    var el=e.target;
+    if(!el || (el.tagName!=='IMG' && el.tagName!=='VIDEO')) return;
+    var src=el.currentSrc || el.src || '';
+    if(src.indexOf('blob:')!==0) return; // blob: 주소가 아니면(일반 네트워크 오류 등) 건드리지 않음
+    console.warn('[자동 정리] 죽은 blob 링크 발견 → 정리함:', src.slice(0,60));
+    var card=el.closest('.h-item') || el.closest('[id^="hi-"]');
+    if(card) card.style.display='none';
+    try{
+      Object.keys(G.HIST||{}).forEach(function(wf){
+        G.HIST[wf]=(G.HIST[wf]||[]).filter(function(x){ return x.result!==src && x.orig!==src; });
+      });
+    }catch(err){}
+  }, true);
+
   // ── 30초마다 자동 저장 ────────────────────────────────────────
   setInterval(function(){
     saveHistToStorage();
