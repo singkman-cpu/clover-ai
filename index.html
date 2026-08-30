@@ -19557,7 +19557,15 @@ function _shortsRenderCanvas(ub){
     var vidWrap=document.createElement('div');
     vidWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:14px;max-width:340px;width:100%';
     var video=document.createElement('video');
-    video.src=G_SHORTS.resultUrl;video.controls=true;video.loop=true;video.playsInline=true;
+    // ⚠️ 버그 수정(진짜 원인 재확인): 지난 시도(재렌더링 중 취소)는 원인이 아니었음 — 실제로는
+    // G_SHORTS.resultUrl(맨 처음 딱 한 번 만든 blob 링크 문자열)을 이 결과 화면이 새로 그려질
+    // 때마다 계속 재사용하고 있었는데, blob 링크는 원래 계속 재사용해도 되는 게 정상이지만
+    // 혹시 모를 상황(다른 코드가 우연히 같은 blob을 건드리는 경우 등)에 대비해 더 안전하게
+    // 바꿈: 실제 파일 데이터(G_SHORTS.resultBlob, 이건 절대 안 사라짐)가 남아있으면 그걸로
+    // 매번 새 blob 링크를 즉석에서 새로 만들어 쓰고, 옛날 링크 문자열에는 의존하지 않음 —
+    // 이러면 예전 링크가 어떤 이유로든 죽어있어도 항상 방금 만든 새 링크로 보여줄 수 있음.
+    var _freshSrc = G_SHORTS.resultBlob ? URL.createObjectURL(G_SHORTS.resultBlob) : G_SHORTS.resultUrl;
+    video.src=_freshSrc;video.controls=true;video.loop=true;video.playsInline=true;
     video.style.cssText='width:100%;max-width:260px;aspect-ratio:9/16;border-radius:16px;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.5)';
     // ⚠️ 요청 반영("영상이 까맣게 안 뜨고 blob 로드 실패 에러만 난다"): blob 주소(브라우저가 그때
     // 그때 임시로 만드는 파일 링크)는 새로고침하거나, 다른 원인으로 그 사이 사라지면 다시 살릴
@@ -19571,12 +19579,12 @@ function _shortsRenderCanvas(ub){
       vidWrap.innerHTML='';
       var errBox=document.createElement('div');
       errBox.style.cssText='width:100%;max-width:260px;aspect-ratio:9/16;border-radius:16px;background:#1a1a1c;border:1.5px solid #f87171;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px;box-sizing:border-box;text-align:center';
-      errBox.innerHTML='<div style="font-size:32px">⚠️</div><div style="font-size:13px;color:#f87171;font-weight:700">이 영상 미리보기가 만료됐어요</div><div style="font-size:11px;color:var(--m2);line-height:1.6">브라우저를 새로고침하거나 다른 작업을 하고 오면, 방금 만든 영상 링크가 사라질 수 있어요(브라우저 자체 특성이라 되살릴 방법이 없어요). 다운로드해두신 파일이 있다면 그건 그대로 정상이에요 — 미리보기만 다시 만들면 돼요.</div>';
+      errBox.innerHTML='<div style="font-size:32px">⚠️</div><div style="font-size:13px;color:#f87171;font-weight:700">이 영상 미리보기가 만료됐어요</div><div style="font-size:11px;color:var(--m2);line-height:1.6">'+(G_SHORTS.resultBlob?'파일 데이터는 남아있는데 재생 파일 자체가 손상된 것 같아요 — 아래 버튼으로 다시 만들어주세요.':'브라우저를 새로고침하거나 다른 작업을 하고 오면, 방금 만든 영상 링크가 사라질 수 있어요. 다운로드해두신 파일이 있다면 그건 그대로 정상이에요 — 미리보기만 다시 만들면 돼요.')+'</div>';
       vidWrap.insertBefore(errBox, vidWrap.firstChild);
       var regenBtn=document.createElement('button');regenBtn.type='button';
       regenBtn.textContent='🔁 영상 다시 만들기';
       regenBtn.style.cssText='padding:12px 24px;border-radius:11px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;width:100%;max-width:260px;margin-top:6px';
-      regenBtn.onclick=function(){ G_SHORTS.resultUrl=null; _shortsGenerate(); };
+      regenBtn.onclick=function(){ G_SHORTS.resultUrl=null; G_SHORTS.resultBlob=null; _shortsGenerate(); };
       vidWrap.appendChild(regenBtn);
     };
     vidWrap.appendChild(video);
