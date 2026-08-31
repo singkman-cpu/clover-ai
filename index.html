@@ -17460,7 +17460,7 @@ function sbShorts(p){
       if(!confirm('쇼츠에 올린 이미지, 역할 지정, 배경음악, 영상 클립을 전부 지우고 처음부터 다시 시작할까요?')) return;
       G_SHORTS.images=[];
       G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
-      G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null;
+      G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null; G_SHORTS.lastEncoderError=null;
       G._shortsPreviewIdx=0;
       try{ localStorage.removeItem(_shortsDraftKey()); }catch(e){}
       // ⚠️ 버그 수정("리셋해도 새로고침하면 다시 생김"): 쇼츠 이미지 목록은 다른 기기에서 이어보기
@@ -19579,12 +19579,12 @@ function _shortsRenderCanvas(ub){
       vidWrap.innerHTML='';
       var errBox=document.createElement('div');
       errBox.style.cssText='width:100%;max-width:260px;aspect-ratio:9/16;border-radius:16px;background:#1a1a1c;border:1.5px solid #f87171;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px;box-sizing:border-box;text-align:center';
-      errBox.innerHTML='<div style="font-size:32px">⚠️</div><div style="font-size:13px;color:#f87171;font-weight:700">이 영상 미리보기가 만료됐어요</div><div style="font-size:11px;color:var(--m2);line-height:1.6">'+(G_SHORTS.resultBlob?'파일 데이터는 남아있는데 재생 파일 자체가 손상된 것 같아요 — 아래 버튼으로 다시 만들어주세요.':'브라우저를 새로고침하거나 다른 작업을 하고 오면, 방금 만든 영상 링크가 사라질 수 있어요. 다운로드해두신 파일이 있다면 그건 그대로 정상이에요 — 미리보기만 다시 만들면 돼요.')+'</div>';
+      errBox.innerHTML='<div style="font-size:32px">⚠️</div><div style="font-size:13px;color:#f87171;font-weight:700">이 영상 미리보기가 만료됐어요</div><div style="font-size:11px;color:var(--m2);line-height:1.6">'+(G_SHORTS.resultBlob?'파일 데이터는 남아있는데 재생 파일 자체가 손상된 것 같아요 — 아래 버튼으로 다시 만들어주세요.':'브라우저를 새로고침하거나 다른 작업을 하고 오면, 방금 만든 영상 링크가 사라질 수 있어요. 다운로드해두신 파일이 있다면 그건 그대로 정상이에요 — 미리보기만 다시 만들면 돼요.')+(G_SHORTS.lastEncoderError?'<div style="margin-top:6px;color:#f87171;font-weight:600">브라우저 오류: '+G_SHORTS.lastEncoderError+'</div>':'')+'</div>';
       vidWrap.insertBefore(errBox, vidWrap.firstChild);
       var regenBtn=document.createElement('button');regenBtn.type='button';
       regenBtn.textContent='🔁 영상 다시 만들기';
       regenBtn.style.cssText='padding:12px 24px;border-radius:11px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;width:100%;max-width:260px;margin-top:6px';
-      regenBtn.onclick=function(){ G_SHORTS.resultUrl=null; G_SHORTS.resultBlob=null; _shortsGenerate(); };
+      regenBtn.onclick=function(){ G_SHORTS.resultUrl=null; G_SHORTS.resultBlob=null; G_SHORTS.lastEncoderError=null; _shortsGenerate(); };
       vidWrap.appendChild(regenBtn);
     };
     vidWrap.appendChild(video);
@@ -19659,7 +19659,7 @@ function _shortsRenderCanvas(ub){
     newBtn.style.cssText='padding:9px 18px;border-radius:9px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
     newBtn.textContent='새 쇼츠 만들기';
     newBtn.onclick=function(){
-      G_SHORTS.resultUrl=null;G_SHORTS.resultDownload=null;
+      G_SHORTS.resultUrl=null;G_SHORTS.resultDownload=null;G_SHORTS.lastEncoderError=null;
       renderMain('shorts');
     };
     vidWrap.appendChild(newBtn);
@@ -20831,6 +20831,13 @@ function _shortsGenerate(){
         // 있으면 그 원문 그대로 보여줘서, 막연한 "인코더가 못 따라갔다" 추측이 아니라 실제
         // 브라우저가 낸 에러를 바로 확인할 수 있게 함.
         if(_shortsEncoderStalled){
+          // ⚠️ 버그 수정(치명적, "화면엔 계속 두루뭉술한 메시지만 뜬다"): 바로 이 함수 끝부분에서
+          // renderMain('shorts')를 호출해 사이드바 DOM 전체를 새로 그리는데, 그러면 방금 progTxt에
+          // 써넣은 이 실제 에러 메시지도 함께 통째로 사라짐(사이드바가 완전히 새 HTML로 교체되므로).
+          // 그래서 지금까지 recorder.onerror로 진짜 원인을 잡아도 화면엔 한 번도 안 보이고 있었음.
+          // DOM이 아니라 G_SHORTS(전역 JS 객체, 재렌더링과 무관하게 그대로 유지됨)에도 저장해두고,
+          // 중앙 미리보기의 오류 안내 박스가 이 값을 읽어서 끝까지 보여주게 함.
+          G_SHORTS.lastEncoderError = recorder._realError || null;
           if(progTxt){
             progTxt.textContent=recorder._realError
               ? '⚠️ 영상 생성 실패 — 브라우저 오류: '+recorder._realError
@@ -20838,6 +20845,7 @@ function _shortsGenerate(){
             progTxt.style.color='#f87171';
           }
         } else if(progTxt){
+          G_SHORTS.lastEncoderError = null;
           var _realElapsedSec=(performance.now()-_shortsRenderRealStart)/1000;
           if(_realElapsedSec > totalDuration*1.6){
             progTxt.textContent='✅ 완성! (렌더링 중 탭을 벗어나서 실제보다 시간이 더 걸렸어요 — 다운로드하세요)';
