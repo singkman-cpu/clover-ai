@@ -21002,13 +21002,29 @@ function _shortsCreateTickerWorker(intervalMs){
 }
 function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone, videoCache, videoTrack){
   console.log('[쇼츠 녹화 진단] runRenderLoop 시작 — totalFrames:', totalFrames, '| FPS:', FPS, '| slides:', slides.length);
+  // ⚠️⚠️⚠️ 버그 수정(진짜 원인 확정 — 실제 크로미움/Mozilla 버그 리포트로 교차 확인함,
+  // https://bugzilla.mozilla.org/show_bug.cgi?id=1277476 등): 지금까지는 Web Worker 내부
+  // 타이머(setInterval)의 메시지 신호에 맞춰 tick()을 실행해서 그리기+requestFrame()을
+  // 호출했는데, 이 방식은 렌더링(총 22초)이 계속 정상적으로 진행되고 tick 로그도 프레임 0~666
+  // 까지 실시간으로 정확히 찍히는데도 MediaRecorder의 start/dataavailable/onstop 이벤트이
+  // 전부 rec.stop() 호출 시점 직전에야 한꺼번에 몰려서 발생하고, 최종 청크가 0개(0바이트)로
+  // 끝나는 문제가 있었음. 원인은 Worker의 postMessage는 브라우저의 "페인트/컴포지팅" 파이프
+  // 라인과 아무 관계가 없는 일반 매크로태스크라서, canvas.captureStream(0)+track.requestFrame()
+  // 로 "지금 이 프레임을 가져가라"고 신호를 보내도 실제로 브라우저가 그 프레임을 컴포지팅해서
+  // MediaRecorder 인코더로 넘기는 건 화면이 실제로 "페인트"되는 타이밍(requestAnimationFrame
+  // 콜백 직후)에만 확실히 일어난다는 것 — Worker 기반 루프는 22초 내내 이 페인트 타이밍을 한
+  // 번도 자연스럽게 만들어내지 못했고, 그래서 예약된 프레임 캡처 요청들이 전부 밀려 있다가
+  // 렌더 루프가 끝나 메인 스레드가 비로소 한가해지는 그 순간에야 브라우저가 뒤늦게 따라잡으려
+  // 했지만 이미 rec.stop()이 호출된 뒤라 아무 것도 못 건진 것. 이제 requestAnimationFrame으로
+  // 직접 루프를 돌려서, 그리기+requestFrame() 호출이 항상 실제 페인트 콜백 안에서 일어나게
+  // 바꿈 — Worker 타이머는 더 이상 프레임 캡처 타이밍에 쓰지 않는다.
   var frame=0;
   var startTime=null;
-  var interval=null, worker=null, stopped=false;
+  var stopped=false;
+  var rafId=null;
   function cleanup(){
     if(stopped) return; stopped=true;
-    if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
-    if(interval){ clearInterval(interval); interval=null; }
+    if(rafId!=null){ try{cancelAnimationFrame(rafId);}catch(e){} rafId=null; }
   }
   function tick(){
     if(stopped) return;
@@ -21024,6 +21040,9 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
     var t=frame/FPS;
     try{
       _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
+      // ⚠️ requestAnimationFrame 콜백 "안에서" 그린 직후 바로 호출해야 브라우저가 이 프레임을
+      // 실제로 컴포지팅해서 MediaRecorder가 캡처함(위 설명 참고) — 콜백 밖(예: Worker 메시지
+      // 핸들러)에서 호출하면 캡처가 안 되고 0바이트로 끝남.
       if(videoTrack) videoTrack.requestFrame(); // 방금 그린 프레임을 바로 캡처하도록 명시적으로 요청
     }catch(err){
       console.warn('[쇼츠 렌더] 프레임 '+frame+' 그리기 실패, 건너뜀:', err);
@@ -21032,21 +21051,9 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
     if(frame%Math.max(1,Math.round(FPS/5))===0){
       onProgress(frame/totalFrames);
     }
-    // 이번 프레임을 다 그린 뒤에야 다음 신호를 요청함 — 신호가 미리 쌓일 방법이 없음.
-    if(worker){ worker.postMessage('next'); } else if(!stopped && !interval){ interval=setTimeout(tick,1000/FPS); }
+    if(!stopped){ rafId=requestAnimationFrame(tick); }
   }
-  worker=_shortsCreateTickerWorker(1000/FPS);
-  console.log('[쇼츠 녹화 진단] 티커 워커 생성 결과:', worker?'성공(워커 사용)':'실패(폴백 setTimeout 사용)');
-  if(worker){
-    worker.onmessage=tick;
-    worker.onerror=function(){ // 워커가 도중에 문제 생기면 기존 방식으로 안전하게 전환
-      if(worker){ try{worker.terminate();}catch(e){} try{URL.revokeObjectURL(worker._blobUrl);}catch(e){} worker=null; }
-      if(!stopped) tick();
-    };
-    worker.postMessage('next'); // 첫 신호 요청
-  } else {
-    tick(); // 폴백: 워커를 못 만드는 환경 — setTimeout 재귀 방식(setInterval보다 밀림 누적이 적음)
-  }
+  rafId=requestAnimationFrame(tick);
 }
 
 // ── 프레임 렌더링 ─────────────────────────────────────────────────
