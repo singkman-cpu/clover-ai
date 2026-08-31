@@ -20800,7 +20800,16 @@ function _shortsGenerate(){
         recorder._realError = (ev && ev.error) ? (ev.error.name+': '+ev.error.message) : String(ev);
         console.error('[쇼츠 렌더] MediaRecorder 오류:', recorder._realError);
       };
-      recorder.ondataavailable=function(e){if(e.data&&e.data.size>0){chunks.push(e.data);recorder._chunkCount++;recorder._lastChunkTime=performance.now();}};
+      // ⚠️ 진단 로그 추가: recorder가 실제로 시작되는지(state), dataavailable 이벤트 자체가
+      // 아예 안 오는 건지 아니면 이벤트는 오는데 매번 0바이트인 건지를 구분하기 위함 — 처음
+      // 5번은 무조건 찍고, 그 이후엔 30번마다 한 번씩만 찍어서 로그가 너무 많아지지 않게 함.
+      recorder.onstart=function(){ console.log('[쇼츠 렌더 진단] recorder 시작됨, state=', recorder.state, 'mimeType=', mimeType); };
+      var _diagEventNo=0;
+      recorder.ondataavailable=function(e){
+        _diagEventNo++;
+        if(_diagEventNo<=5 || _diagEventNo%30===0){ console.log('[쇼츠 렌더 진단] dataavailable #'+_diagEventNo+' size='+(e.data?e.data.size:'(data 없음)')+'B, recorder.state='+recorder.state); }
+        if(e.data&&e.data.size>0){chunks.push(e.data);recorder._chunkCount++;recorder._lastChunkTime=performance.now();}
+      };
       recorder.onstop=function(){
         _shortsCleanupRenderGuards();
         var blob=new Blob(chunks,{type:mimeType});
@@ -21000,6 +21009,14 @@ function _shortsGenerate(){
         // 장면 전환 스윽~ 효과음은 사용자 요청으로 제거함 (아래 함수 자체는 남겨두되 호출만 안 함)
         // _shortsScheduleSwooshes(audioCtx,dest,timeline,audioCtx.currentTime);
         var combined=new MediaStream([].concat(vidStream.getVideoTracks(),dest.stream.getAudioTracks()));
+        // ⚠️ 진단 로그 추가: "인코더가 못 따라간다"는 가정으로 여러 번 고쳐도 안 됐고, 이제
+        // MediaRecorder의 error 이벤트조차 안 뜨는 걸 확인함 — 즉 인코더가 죽는 게 아니라 아예
+        // 처음부터 스트림에 데이터가 없을 가능성이 큼. 스트림/트랙 자체가 비어있거나 죽은 상태로
+        // 시작하는지 바로 눈으로 확인할 수 있게 콘솔에 남김.
+        console.log('[쇼츠 렌더 진단] video 트랙:', combined.getVideoTracks().length,
+          combined.getVideoTracks().map(function(t){return t.readyState+'/enabled='+t.enabled+'/muted='+t.muted;}),
+          'audio 트랙:', combined.getAudioTracks().length,
+          combined.getAudioTracks().map(function(t){return t.readyState+'/enabled='+t.enabled+'/muted='+t.muted;}));
         var rec=beginRecord(combined);
         var _stallWarned=false;
         runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
