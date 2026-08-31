@@ -20583,20 +20583,51 @@ function _shortsGenerate(){
       cb(cv);
     }catch(e){ cb(img); } // 캔버스 오염(CORS) 등으로 실패하면 원본 그대로 사용
   }
+  // ⚠️⚠️⚠️ 버그 수정(치명적, "영상이 계속 0KB로 나온다" — 초수 기능이랑 무관하게 원래부터 있던
+  // 문제였음을 확인 후 다시 원인을 찾음): 이미지를 crossOrigin='anonymous'로 불러오면 화면에는
+  // 정상적으로 보이지만(onload는 그냥 성공함), 실제 서버가 CORS 헤더를 안 보내주는 경우 그
+  // 이미지로 캔버스에 그림을 그리는 순간 캔버스 자체가 "오염(tainted)"됨 — 이러면 화면엔 멀쩡히
+  // 보이는데 canvas.captureStream()으로 녹화를 시도하면 브라우저가 그 프레임을 인코딩하지 않고
+  // 조용히 건너뛰어서, 겉보기엔 정상 진행되는 것 같다가 결과 파일만 0KB로 나옴. 지금까지는 이
+  // 오염 여부를 "리사이즈할 때 canvas 예외가 나는지"로만 확인했는데, 리사이즈가 필요 없는(작은)
+  // 이미지는 이 검사 자체를 건너뛰어서 오염된 채로 그대로 녹화 캔버스에 그려지고 있었음. 이제
+  // 크기와 무관하게 모든 이미지를 실제로 1x1 픽셀만 읽어봐서 오염 여부를 명확히 검사하고,
+  // 오염됐으면 blob으로 안전하게 다시 불러옴(같은 출처 데이터라 오염되지 않음).
+  function _testTaint(img, cb){
+    try{
+      var tc=document.createElement('canvas'); tc.width=1; tc.height=1;
+      var tcx=tc.getContext('2d');
+      tcx.drawImage(img,0,0,1,1);
+      tcx.getImageData(0,0,1,1); // drawImage만으론 오염돼도 안 던짐 — 실제로 픽셀을 읽어야 확실히 드러남
+      cb(true); // 안전
+    }catch(e){ cb(false); } // 오염됨
+  }
+  function _reloadViaBlob(url, onDone){
+    fetch(url).then(function(r){return r.blob();}).then(function(b){
+      var bu=URL.createObjectURL(b);
+      var img2=new Image();
+      img2.onload=function(){ _capImgSize(img2, onDone); };
+      img2.onerror=function(){ onDone(null); };
+      img2.src=bu;
+    }).catch(function(){ onDone(null); });
+  }
   function loadNext(){
     if(loaded>=imgUrls.length){loadEndVideo();return;}
     var url=imgUrls[loaded];
     var img=new Image();
     img.crossOrigin='anonymous';
-    img.onload=function(){ _capImgSize(img, function(finalImg){ imgCache[url]=finalImg; loaded++; loadNext(); }); };
+    img.onload=function(){
+      _testTaint(img, function(safe){
+        if(safe){
+          _capImgSize(img, function(finalImg){ imgCache[url]=finalImg; loaded++; loadNext(); });
+        } else {
+          // 화면엔 잘 보이지만 캔버스는 오염되는 경우 — blob으로 안전하게 다시 불러옴
+          _reloadViaBlob(url, function(finalImg){ if(finalImg) imgCache[url]=finalImg; loaded++; loadNext(); });
+        }
+      });
+    };
     img.onerror=function(){
-      // blob 경유 재시도
-      fetch(url).then(function(r){return r.blob();}).then(function(b){
-        var bu=URL.createObjectURL(b);
-        var img2=new Image();
-        img2.onload=function(){ _capImgSize(img2, function(finalImg){ imgCache[url]=finalImg; loaded++; loadNext(); }); };
-        img2.src=bu;
-      }).catch(function(){loaded++;loadNext();});
+      _reloadViaBlob(url, function(finalImg){ if(finalImg) imgCache[url]=finalImg; loaded++; loadNext(); });
     };
     img.src=url;
   }
