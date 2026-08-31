@@ -4788,7 +4788,15 @@ function _openPresetBrowseFromTopbar(){
     return false;
   }
   if(tryOpen()) return;
-  // 아직 현장사진 디자인 탭을 한 번도 안 열어서 프리셋 목록이 준비 안 된 경우 — 탭을 먼저 열고 몇 번 재시도
+  // ⚠️ 버그 수정("갤러리·즐겨찾기·커뮤니티·프로젝트·프리셋전체보기 눌렀다가 닫기 누르면 왜
+  // 현장사진 업로드 화면이 뜨지? 처음 시작할 때 이 버튼 눌렀다가 닫으면 첫 화면(홈)이 떠야지"):
+  // 프리셋 목록이 아직 준비 안 됐으면(현장사진 디자인 탭을 한 번도 안 연 첫 방문 등) 아래에서
+  // selectWF('space')로 그 탭을 강제로 한 번 열어서 프리셋을 미리 불러오는데, 이게 G.wf를
+  // 'space'로 바꿔버림 — 그래서 나중에 프리셋 창을 닫으면 그 뒤에 남아있는 "현장사진 업로드"
+  // 화면이 그대로 보였던 것. 처음부터 홈 화면이었을 때만(아직 아무 작업도 선택 안 한 상태)
+  // "닫을 때 다시 홈으로 돌아가야 한다"는 걸 기억해뒀다가, 프리셋 창의 닫기 버튼에서 되돌림.
+  var _wasHome = !G.wf;
+  if(_wasHome) window._presetBrowseShouldGoHome = true;
   selectWF('space');
   var tries=0;
   var iv=setInterval(function(){
@@ -4802,6 +4810,14 @@ function _openPresetBrowseFromTopbar(){
 // 어떤 스코프 상황에서도 상단 툴바 버튼(onclick="_openPresetBrowseFromTopbar()")이 항상 이 함수를
 // 찾을 수 있게 함.
 window._openPresetBrowseFromTopbar = _openPresetBrowseFromTopbar;
+// 프리셋 창을 닫을 때, 원래 홈 화면이었는데 프리셋 목록 로드 때문에 어쩔 수 없이 작업 탭으로
+// 전환됐던 경우에만 홈으로 되돌림 — 원래 어떤 작업 중이었다면(이 값이 false) 절대 안 건드림.
+function _presetBrowseMaybeGoHome(){
+  if(window._presetBrowseShouldGoHome){
+    window._presetBrowseShouldGoHome=false;
+    goHome();
+  }
+}
 // ⚠️ 매우 중요한 버그 수정 발견: 이 함수(및 window 노출)는 원래 훨씬 아래(자재 팔레트 근처)에
 // 정의돼 있었는데, 실수로 mkPre() 함수 몸통 안에 중첩되어 들어가 있었음(mkPre의 닫는 중괄호
 // 위치가 어긋나서 그 뒤 수천 줄이 mkPre 안에 갇혀버린 구조적 버그). 그래서 이 함수는 mkPre가
@@ -4926,11 +4942,11 @@ function _showPresetBrowseModal(list, panelEl, renderableGroups){
   var popoutBtn=mk('button','');popoutBtn.type='button';popoutBtn.textContent='🖥️ 새 창으로 열기';
   popoutBtn.title='다른 모니터로 옮길 수 있는 별도 창으로 엽니다';
   popoutBtn.style.cssText='margin-left:auto;background:var(--acg);border:1px solid var(--acb);color:var(--ac);padding:7px 13px;border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit';
-  popoutBtn.onclick=function(){ overlay.remove(); _openPresetBrowseInNewWindow(); };
+  popoutBtn.onclick=function(){ overlay.remove(); _openPresetBrowseInNewWindow(); _presetBrowseMaybeGoHome(); };
   headTop.appendChild(popoutBtn);
   var closeBtn=mk('button','');closeBtn.type='button';closeBtn.textContent='✕ 닫기';
   closeBtn.style.cssText='background:var(--c2,rgba(255,255,255,.06));border:1px solid rgba(255,255,255,.12);color:var(--t);padding:7px 13px;border-radius:9px;font-size:12.5px;cursor:pointer;font-family:inherit';
-  closeBtn.onclick=function(){ overlay.remove(); };
+  closeBtn.onclick=function(){ overlay.remove(); _presetBrowseMaybeGoHome(); };
   headTop.appendChild(closeBtn);
   head.appendChild(headTop);
 
@@ -5006,6 +5022,9 @@ function _showPresetBrowseModal(list, panelEl, renderableGroups){
     card.onclick=function(){
       var target=panelEl.querySelector('.pi[data-k="'+q.k+'"]');
       if(target) target.click();
+      // 프리셋을 실제로 하나 골랐다는 건 이 작업(탭)을 계속하겠다는 뜻이므로, 닫을 때
+      // 홈으로 돌려보내는 예약은 취소함(그대로 이 작업 화면에 남아있어야 함).
+      window._presetBrowseShouldGoHome=false;
       // 예전엔 클릭하자마자 모달이 닫혀버려서 불편했음 — 이제 선택만 반영하고 계속 둘러볼 수 있게
       // 열어둔 채로, 방금 고른 카드에 선택됨 표시(테두리+체크)만 다시 그림.
       render();
@@ -17627,13 +17646,15 @@ function sbShorts(p){
           else { item.customDuration=Math.min(30,Math.max(0.3,v)); }
         }
         function _refreshEstOnly(){
-          var estEl=document.getElementById('shorts-est-wrap');
-          if(!estEl) return;
+          var estEls=document.querySelectorAll('[id="shorts-est-wrap"]');
+          if(!estEls.length) return;
           var lbl2=_shortsEstimateLabel();
-          estEl.style.color = lbl2?'var(--t)':'var(--m2)';
-          estEl.innerHTML = lbl2
-            ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl2+'</strong>'
-            : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
+          estEls.forEach(function(estEl){
+            estEl.style.color = lbl2?'var(--t)':'var(--m2)';
+            estEl.innerHTML = lbl2
+              ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl2+'</strong>'
+              : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
+          });
         }
         inp.oninput=function(){ _applyVal(); _refreshEstOnly(); };
         inp.onchange=function(){ _applyVal(); _refreshEstOnly(); renderMain('shorts'); };
@@ -17692,13 +17713,21 @@ function sbShorts(p){
           else { item.customDuration=Math.min(30,Math.max(0.3,v)); }
         }
         function _refreshEstOnly(){
-          var estEl=document.getElementById('shorts-est-wrap');
-          if(!estEl) return;
+          // ⚠️ 버그 수정("초수 바꿔도 예상 길이가 안 바뀐다"): 데스크톱/모바일용 사이드바가
+          // 각각 따로 그려지면서 id="shorts-est-wrap"인 요소가 화면에 2개(둘 다 DOM엔 있고
+          // CSS로 하나만 보이게 함) 동시에 존재함 — document.getElementById는 그중 "첫 번째"
+          // 요소 하나만 찾아서 갱신하는데, 하필 그게 화면에 안 보이는(mobile 전용 등) 쪽이면
+          // 실제 보이는 화면은 그대로라 "안 바뀐다"고 느껴짐. 같은 id를 가진 요소를 전부 찾아서
+          // 다 같이 갱신하도록 고침.
+          var estEls=document.querySelectorAll('[id="shorts-est-wrap"]');
+          if(!estEls.length) return;
           var lbl2=_shortsEstimateLabel();
-          estEl.style.color = lbl2?'var(--t)':'var(--m2)';
-          estEl.innerHTML = lbl2
-            ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl2+'</strong>'
-            : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
+          estEls.forEach(function(estEl){
+            estEl.style.color = lbl2?'var(--t)':'var(--m2)';
+            estEl.innerHTML = lbl2
+              ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl2+'</strong>'
+              : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
+          });
         }
         inp.oninput=function(){ _applyVal(); _refreshEstOnly(); };
         inp.onchange=function(){ _applyVal(); _refreshEstOnly(); renderMain('shorts'); };
@@ -31622,7 +31651,7 @@ function openPanel(id){
   closeBtn.textContent='✕ 닫기';
   closeBtn.title='갤러리/즐겨찾기 닫고 원래 화면으로';
   closeBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;order:99';
-  closeBtn.onclick=function(){ renderMain(G.wf); };
+  closeBtn.onclick=function(){ if(G.wf){ renderMain(G.wf); } else { goHome(); } };
   searchBar.appendChild(closeBtn);
   var popoutBtn=document.createElement('button');
   popoutBtn.type='button';
@@ -32568,7 +32597,7 @@ function _renderCommunityGrid(posts){
   var closeBtn=document.createElement('button');
   closeBtn.type='button';closeBtn.textContent='✕ 닫기';
   closeBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
-  closeBtn.onclick=function(){ renderMain(G.wf); };
+  closeBtn.onclick=function(){ if(G.wf){ renderMain(G.wf); } else { goHome(); } };
   bar.appendChild(closeBtn);
   hs.appendChild(bar);
   if(!posts.length){
@@ -32582,7 +32611,7 @@ function _renderCommunityGrid(posts){
   grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;width:100%;padding:8px';
   posts.forEach(function(p){
     var card=document.createElement('div');
-    card.style.cssText='position:relative;border-radius:16px;overflow:hidden;background:var(--card);aspect-ratio:4/3;border:1px solid var(--bd);box-shadow:0 3px 14px rgba(0,0,0,.28)';
+    card.style.cssText='position:relative;border-radius:16px;overflow:hidden;background:var(--card);aspect-ratio:4/3;border:1px solid var(--bd);box-shadow:0 3px 14px rgba(0,0,0,.28);cursor:pointer';
     var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
     if(isVid){
       var v=document.createElement('video');
@@ -32611,9 +32640,54 @@ function _renderCommunityGrid(posts){
     likeBtn.innerHTML='🤍 <span>'+(p.like_count||0)+'</span>';
     likeBtn.onclick=function(e){ e.stopPropagation(); _communityToggleLike(p, likeBtn); };
     card.appendChild(likeBtn);
+    // ⚠️ 요청 반영("커뮤니티 갤러리 이미지 클릭하면 큰 화면으로 보이게 해줘야지"): 좋아요
+    // 버튼(위에서 stopPropagation 처리됨)이 아닌 카드 아무 곳이나 클릭하면 큰 화면으로 봄.
+    card.onclick=function(){ _openCommunityLightbox(p, isVid); };
     grid.appendChild(card);
   });
   hs.appendChild(grid);
+}
+
+// 커뮤니티 갤러리 이미지를 화면 전체 크기로 크게 보여주는 라이트박스. 배경 클릭이나 ✕, Esc로 닫힘.
+function _openCommunityLightbox(p, isVid){
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px';
+  var mediaWrap=document.createElement('div');
+  mediaWrap.style.cssText='max-width:min(92vw,720px);max-height:88vh;position:relative';
+  if(isVid){
+    var v=document.createElement('video');
+    v.src=p.image_url;v.controls=true;v.autoplay=true;v.loop=true;
+    v.style.cssText='max-width:100%;max-height:88vh;border-radius:12px;display:block';
+    mediaWrap.appendChild(v);
+  } else {
+    var img=document.createElement('img');
+    img.src=p.image_url;
+    img.style.cssText='max-width:100%;max-height:88vh;border-radius:12px;display:block;object-fit:contain';
+    mediaWrap.appendChild(img);
+  }
+  if(p.show_nickname && p.nickname){
+    var nickTag=document.createElement('div');
+    nickTag.style.cssText='position:absolute;bottom:12px;left:12px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:600;padding:5px 10px;border-radius:20px';
+    nickTag.textContent='👤 '+p.nickname;
+    mediaWrap.appendChild(nickTag);
+  }
+  if(p.like_count>0){
+    var likeTag=document.createElement('div');
+    likeTag.style.cssText='position:absolute;bottom:12px;right:12px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:700;padding:5px 10px;border-radius:20px';
+    likeTag.textContent='❤️ '+p.like_count;
+    mediaWrap.appendChild(likeTag);
+  }
+  var closeBtn=document.createElement('button');
+  closeBtn.type='button';closeBtn.textContent='✕';
+  closeBtn.style.cssText='position:absolute;top:-16px;right:-16px;width:34px;height:34px;border-radius:50%;border:none;background:var(--ac,#00e5cc);color:#03211d;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.4)';
+  function close(){ ov.remove(); document.removeEventListener('keydown', onKey); }
+  closeBtn.onclick=close;
+  mediaWrap.appendChild(closeBtn);
+  ov.appendChild(mediaWrap);
+  ov.onclick=function(e){ if(e.target===ov) close(); };
+  function onKey(e){ if(e.key==='Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
 }
 
 function _communityToggleLike(post, btn){
@@ -32682,7 +32756,7 @@ function _renderMyCommunityGrid(posts){
   var closeBtn=document.createElement('button');
   closeBtn.type='button';closeBtn.textContent='✕ 닫기';
   closeBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
-  closeBtn.onclick=function(){ renderMain(G.wf); };
+  closeBtn.onclick=function(){ if(G.wf){ renderMain(G.wf); } else { goHome(); } };
   bar.appendChild(closeBtn);
   hs.appendChild(bar);
 
