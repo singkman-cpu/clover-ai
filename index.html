@@ -20565,6 +20565,13 @@ function _shortsGenerate(){
   var progTxt=gE('shorts-prog-txt');
   var dlWrap=gE('shorts-dl-wrap');
   var genBtn=gE('shorts-gen-btn');
+  // ⚠️ 버그 수정(치명적, "화질 낮춰서 재시도했더니 경고 메시지가 겹겹이 쌓여서 더 복잡해 보인다"):
+  // 지금까지는 실패 시 진단 메시지(용량 경고/손상 경고/저장 안 됨 안내 등)를 progWrap에 그냥
+  // appendChild만 하고 다음 시도 때 지우질 않아서, 재시도할 때마다 예전 메시지 위에 새 메시지가
+  // 계속 쌓였음. 이제 이런 진단 메시지에는 전부 공통 클래스(shorts-diag-box)를 붙여두고, 생성을
+  // 새로 시작할 때마다 그 클래스를 가진 예전 메시지를 전부 지우고 시작하게 함.
+  if(progWrap){ var _oldDiag=progWrap.querySelectorAll('.shorts-diag-box'); for(var _i=0;_i<_oldDiag.length;_i++) _oldDiag[_i].remove(); }
+  if(progTxt){ progTxt.style.color=''; }
   if(genBtn){genBtn.disabled=true;genBtn.style.opacity='0.5';}
   if(progWrap){progWrap.style.display='';}
   if(dlWrap){dlWrap.style.display='none';}
@@ -20605,6 +20612,7 @@ function _shortsGenerate(){
   if(progWrap && !progWrap.querySelector('#shorts-tab-warn-note')){
     var _tabWarnNote=document.createElement('div');
     _tabWarnNote.id='shorts-tab-warn-note';
+    _tabWarnNote.className='shorts-diag-box';
     _tabWarnNote.style.cssText='margin-top:6px;font-size:10.5px;color:var(--m2);text-align:center';
     _tabWarnNote.textContent='💡 렌더링 중에는 이 탭을 계속 보고 계셔야 의도한 길이로 정확히 만들어져요.';
     progWrap.appendChild(_tabWarnNote);
@@ -20778,6 +20786,20 @@ function _shortsGenerate(){
       // 이제 데이터 청크가 몇 초째 안 들어오는지 실시간으로 추적해서 훨씬 빨리 알려줄 수 있게 함.
       recorder._chunkCount=0;
       recorder._lastChunkTime=performance.now();
+      // ⚠️ 버그 수정(치명적, 진짜 원인 확정 — "화질을 낮춰도 매번 0KB로 끝난다"): 지금까지
+      // MediaRecorder의 'error' 이벤트를 전혀 듣고 있지 않았음 — chunk가 처음부터 하나도 안
+      // 들어오는 경우(화질과 무관하게 매번 그러는 경우)는 "인코더가 못 따라가서 밀리는" 게
+      // 아니라, MediaRecorder가 시작 직후 즉시 내부 오류를 내고 죽는 경우일 가능성이 훨씬
+      // 큼(예: 스트림/트랙 문제, 코덱 초기화 실패 등) — 그런데 이 오류를 아무도 듣고 있지
+      // 않아서 콘솔에조차 안 남고 조용히 사라졌고, 그저 몇 초 뒤 스톨 감지에 의해 뒤늦게
+      // "인코더가 못 따라감"이라는 부정확한 추측성 메시지로만 사용자에게 보여지고 있었음.
+      // 이제 실제 브라우저가 주는 에러 메시지를 그대로 잡아서 기록하고, 최종 실패 안내에
+      // 그 진짜 이유를 그대로 보여줌 — 다음에 또 실패하면 정확히 뭐가 문제인지 바로 알 수 있음.
+      recorder._realError=null;
+      recorder.onerror=function(ev){
+        recorder._realError = (ev && ev.error) ? (ev.error.name+': '+ev.error.message) : String(ev);
+        console.error('[쇼츠 렌더] MediaRecorder 오류:', recorder._realError);
+      };
       recorder.ondataavailable=function(e){if(e.data&&e.data.size>0){chunks.push(e.data);recorder._chunkCount++;recorder._lastChunkTime=performance.now();}};
       recorder.onstop=function(){
         _shortsCleanupRenderGuards();
@@ -20802,32 +20824,18 @@ function _shortsGenerate(){
         // 있었음 — 이제는 그 경우 명확하게 실패로 안내하고, 화질을 한 단계 낮춰서 바로 다시
         // 시도할 수 있는 버튼을 제공함(4K→FHD→HD 순으로 자동으로 낮아짐, HD에서도 실패하면
         // 더 낮출 데가 없으니 크롬 그래픽 가속 끄기를 안내).
+        // ⚠️ 요청 반영("FHD로 다시 만들기 버튼 필요 없다, 복잡해졌다"): 화질을 단계별로 자동
+        // 낮춰서 재시도하는 버튼(4K→FHD→HD)을 없앰 — 화면에 이미 있는 "쇼츠 생성하기" 버튼으로
+        // 그냥 다시 누르면 되니 중복이었고, 재시도할 때마다 이 박스가 위에 하나씩 더 쌓이면서
+        // 오히려 화면만 복잡하게 만들었음. 대신 recorder.onerror로 새로 잡게 된 "진짜 원인"이
+        // 있으면 그 원문 그대로 보여줘서, 막연한 "인코더가 못 따라갔다" 추측이 아니라 실제
+        // 브라우저가 낸 에러를 바로 확인할 수 있게 함.
         if(_shortsEncoderStalled){
-          var _qOrder=['4K','FHD','HD'];
-          var _curQ=opts.quality||'FHD';
-          var _curQIdx=_qOrder.indexOf(_curQ);
-          var _nextQ=(_curQIdx>=0 && _curQIdx<_qOrder.length-1)?_qOrder[_curQIdx+1]:null;
           if(progTxt){
-            progTxt.textContent='⚠️ 인코더가 렌더링 도중 멈췄어요 — 이 결과물은 화면이 끊겼을 수 있어요.';
+            progTxt.textContent=recorder._realError
+              ? '⚠️ 영상 생성 실패 — 브라우저 오류: '+recorder._realError
+              : '⚠️ 인코더가 렌더링 도중 멈췄어요 — 이 결과물은 화면이 끊겼을 수 있어요.';
             progTxt.style.color='#f87171';
-          }
-          if(progWrap){
-            var _stallRetryBox=document.createElement('div');
-            _stallRetryBox.style.cssText='margin-top:8px;display:flex;flex-direction:column;align-items:center;gap:8px';
-            var _stallMsg=document.createElement('div');
-            _stallMsg.style.cssText='font-size:11.5px;color:var(--m2);text-align:center;line-height:1.6';
-            _stallMsg.textContent=_nextQ
-              ? '현재 화질('+_curQ+')에서 그래픽 인코더가 못 따라갔어요. 화질을 '+_nextQ+'로 낮추면 대부분 해결돼요.'
-              : '가장 낮은 화질에서도 멈췄어요 — 크롬 설정(chrome://settings/system)에서 "그래픽 가속 사용"을 끄고 다시 시도해보세요.';
-            _stallRetryBox.appendChild(_stallMsg);
-            if(_nextQ){
-              var _retryBtn=document.createElement('button');_retryBtn.type='button';
-              _retryBtn.textContent='🔁 '+_nextQ+' 화질로 다시 만들기';
-              _retryBtn.style.cssText='padding:10px 20px;border-radius:10px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit';
-              _retryBtn.onclick=function(){ opts.quality=_nextQ; _shortsGenerate(); };
-              _stallRetryBox.appendChild(_retryBtn);
-            }
-            progWrap.appendChild(_stallRetryBox);
           }
         } else if(progTxt){
           var _realElapsedSec=(performance.now()-_shortsRenderRealStart)/1000;
@@ -20860,8 +20868,9 @@ function _shortsGenerate(){
             var _pw=gE('shorts-prog-wrap');
             if(!_pw)return;
             var _errBox=document.createElement('div');
+            _errBox.className='shorts-diag-box';
             _errBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
-            _errBox.textContent='⚠️ 결과 영상 파일이 손상돼서 재생이 안 돼요(브라우저나 그래픽 드라이버 문제일 수 있어요). 화질을 낮추거나, 크롬을 재시작·업데이트 확인 후 다시 만들어보세요.';
+            _errBox.textContent='⚠️ 결과 영상 파일이 손상돼서 재생이 안 돼요(브라우저나 그래픽 드라이버 문제일 수 있어요)'+(recorder._realError?' — 브라우저 오류: '+recorder._realError:'')+'. 화질을 낮추거나, 크롬을 재시작·업데이트 확인 후 다시 만들어보세요.';
             _pw.appendChild(_errBox);
             _pw.style.display='';
           }, {once:true});
@@ -20871,6 +20880,7 @@ function _shortsGenerate(){
               var _pw=gE('shorts-prog-wrap');
               if(!_pw)return;
               var _warnBox=document.createElement('div');
+              _warnBox.className='shorts-diag-box';
               _warnBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
               _warnBox.textContent='⚠️ 인코딩이 밀려서 영상이 도중에 멈춘 것 같아요(의도한 '+Math.round(totalDuration)+'초보다 짧게 만들어짐: '+Math.round(d)+'초). 화질을 한 단계 낮춰서(예: 4K→FHD) 다시 만들어보세요.';
               _pw.appendChild(_warnBox);
@@ -20887,8 +20897,9 @@ function _shortsGenerate(){
             var _pw2=gE('shorts-prog-wrap');
             if(_pw2){
               var _sizeBox=document.createElement('div');
+              _sizeBox.className='shorts-diag-box';
               _sizeBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
-              _sizeBox.textContent='⚠️ 결과 영상 파일 용량이 비정상적으로 작아요('+Math.round(blob.size/1024)+'KB) — 녹화가 거의 안 된 채로 끝난 것 같아요. 화질을 낮추거나 브라우저를 재시작한 뒤 다시 만들어보세요.';
+              _sizeBox.textContent='⚠️ 결과 영상 파일 용량이 비정상적으로 작아요('+Math.round(blob.size/1024)+'KB)'+(recorder._realError?' — 브라우저 오류: '+recorder._realError:'')+' — 녹화가 거의 안 된 채로 끝난 것 같아요. 화질을 낮추거나 브라우저를 재시작한 뒤 다시 만들어보세요.';
               _pw2.appendChild(_sizeBox);
               _pw2.style.display='';
             }
@@ -20907,6 +20918,7 @@ function _shortsGenerate(){
             if(_pw3 && !_pw3.querySelector('#shorts-notsaved-note')){
               var _nsBox=document.createElement('div');
               _nsBox.id='shorts-notsaved-note';
+              _nsBox.className='shorts-diag-box';
               _nsBox.style.cssText='margin-top:6px;font-size:10.5px;color:var(--m2);text-align:center';
               _nsBox.textContent='(인코딩 오류가 감지돼서 이 결과물은 갤러리에 자동 저장하지 않았어요 — 위에서 직접 다운로드는 가능해요)';
               _pw3.appendChild(_nsBox);
