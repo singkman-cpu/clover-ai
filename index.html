@@ -20776,7 +20776,7 @@ function _shortsGenerate(){
   }
   loadNext();
 
-  function startRender(forceMimeType, attemptIdx){
+  function startRender(forceMimeType, attemptIdx, skipAudio){
     attemptIdx = attemptIdx || 0;
     // ⚠️⚠️⚠️⚠️⚠️⚠️ 버그 수정(여섯 번째 시도 — 방향을 바꿈): 지금까지 Worker/rAF 타이밍,
     // 수동/자동 캡처 모드, AudioContext resume까지 전부 시도했는데도 "tick은 실시간 그대로
@@ -20873,13 +20873,26 @@ function _shortsGenerate(){
           setTimeout(function(){ startRender('video/webm', attemptIdx+1); }, 300);
           return;
         }
+        if(chunks.length===0 && !skipAudio){
+          // ⚠️ 요청 반영("코덱·해상도 다 바꿔도 계속 안 된다"): 코덱과(가능하면) 해상도까지
+          // 전부 시도해도 0바이트면, 마지막으로 "오디오 트랙 없이 비디오만" 녹화를 시도함 —
+          // 오디오(Web Audio)와 비디오(캔버스) 트랙을 한 MediaStream으로 합쳐서 녹화하는
+          // 조합 자체가 이 기기/브라우저에서 막혀있는 경우가 실제로 있어서, 이걸 마지막으로
+          // 점검함. 이 시도로 성공하면 이번 결과물엔 배경음악/효과음 없이 화면만 담김.
+          console.warn('[쇼츠 녹화 진단] 코덱·해상도를 다 바꿔도 0바이트 — 마지막으로 오디오 없이(영상만) 재시도합니다');
+          _shortsCleanupRenderGuards();
+          if(progTxt) progTxt.textContent='⚠️ 마지막으로 소리 없이(영상만) 다시 시도할게요...';
+          if(progFill) progFill.style.width='0%';
+          setTimeout(function(){ startRender('video/webm', attemptIdx+1, true); }, 300);
+          return;
+        }
         if(chunks.length===0){
-          // 코덱·해상도를 다 바꿔봐도 전부 0바이트면, 이 기기/브라우저의 영상 인코더 자체가
-          // 문제일 가능성이 커서 더 재시도해도 소용없음 — 명확한 원인 안내와 함께 실패로 종료.
-          console.error('[쇼츠 녹화 진단] 코덱(vp9/vp8/webm)·해상도를 전부 바꿔봐도 0바이트 — 이 기기/브라우저의 동영상 인코더에 문제가 있는 것으로 보임');
+          // 코덱·해상도·오디오 유무까지 다 바꿔봐도 전부 0바이트면, 이 기기/브라우저의 영상
+          // 인코더 자체가 문제일 가능성이 커서 더 재시도해도 소용없음 — 실패로 종료.
+          console.error('[쇼츠 녹화 진단] 코덱(vp9/vp8/webm)·해상도·오디오 유무를 전부 바꿔봐도 0바이트 — 이 기기/브라우저에서는 이 방식(canvas 녹화)의 동영상 생성 자체가 막혀있는 것으로 보임');
           _shortsCleanupRenderGuards();
           if(progTxt){
-            progTxt.innerHTML='❌ 녹화에 계속 실패했어요. 이 브라우저/기기의 동영상 인코더 문제로 보여요.<br><span style="font-size:11px">크롬 주소창에 chrome://settings/system 을 입력해 "하드웨어 가속 사용"을 꺼보거나, 크롬을 최신 버전으로 업데이트한 뒤 다시 시도해주세요. 시크릿 창이나 다른 브라우저(엣지·파이어폭스)에서도 한번 시도해보시면 원인 파악에 도움돼요.</span>';
+            progTxt.innerHTML='❌ 여러 방식(코덱 3종·저해상도·무음)으로 전부 시도했지만 계속 실패했어요. 이 기기/브라우저에서는 지금 방식으로 영상 생성이 안 되는 것 같아요.<br><span style="font-size:11px">크롬 주소창에 chrome://gpu 를 입력해 "Video Encode" 항목이 꺼져있는지 확인해보시고, chrome://settings/system 에서 "하드웨어 가속 사용"을 꺼보거나 크롬을 최신 버전으로 업데이트해보세요. 다른 브라우저(엣지·파이어폭스)나 다른 기기에서도 시도해보시면 원인 파악에 도움돼요.</span>';
             var _retryBtn=document.createElement('button');
             _retryBtn.type='button';
             _retryBtn.textContent='🔁 다시 렌더링';
@@ -20909,7 +20922,9 @@ function _shortsGenerate(){
         if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
         if(progTxt){
           var _realElapsedSec=(performance.now()-_shortsRenderRealStart)/1000;
-          if(_realElapsedSec > totalDuration*1.6){
+          if(skipAudio){
+            progTxt.textContent='✅ 완성! (이 기기에서 소리를 포함한 녹화가 계속 실패해서, 이번엔 소리 없이 화면만 만들어졌어요)';
+          } else if(_realElapsedSec > totalDuration*1.6){
             progTxt.textContent='✅ 완성! (렌더링 중 탭을 벗어나서 실제보다 시간이 더 걸렸어요 — 다운로드하세요)';
           } else {
             progTxt.textContent='✅ 완성! 메인 화면에서 바로 다운로드하세요.';
@@ -21010,7 +21025,13 @@ function _shortsGenerate(){
 
     // 오디오 처리 — BGM 유무와 무관하게 항상 AudioContext를 켠다.
     // (BGM이 없어도 장면 전환 효과음은 재생돼야 하므로)
+    // ⚠️ 요청 반영("코덱·해상도 다 바꿔봐도 계속 안 된다, 이전엔 됐었다고"): 오디오+비디오
+    // 트랙을 한 스트림으로 합쳐서 녹화하는 조합 자체가 이 기기에서 막혀있을 가능성을 마지막으로
+    // 점검하기 위해, skipAudio가 true로 넘어오면(모든 코덱·해상도 재시도가 끝난 뒤 최후의
+    // 수단으로 호출됨) 아예 오디오 설정을 시도하지 않고 바로 아래 catch 블록의 "오디오 없이
+    // 영상만" 경로로 넘어가게 함 — 오디오 트랙 없이 캡처하면 성공하는지 확인.
     try{
+      if(skipAudio) throw new Error('스킵됨: 오디오 없이 영상만 녹화 시도');
       audioCtx=new(window.AudioContext||window.webkitAudioContext)();
       dest=audioCtx.createMediaStreamDestination();
       var audioEl=null;
