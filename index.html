@@ -561,7 +561,7 @@ select option{background:var(--c2)}
       <div style="display:flex;gap:5px">
         <button class="tbb" id="btn-gallery" onclick="openPanel('gallery')">&#128247; 갤러리</button>
         <button class="tbb" id="btn-favs" onclick="openPanel('favs')">&#9733; 즐겨찾기</button>
-        <button class="tbb" id="btn-community" onclick="openCommunityPanel()" style="background:rgba(0,229,204,.1);border-color:rgba(0,229,204,.3);color:var(--ac)">&#127760; 커뮤니티</button>
+        <button class="tbb" id="btn-community" onclick="openCommunityPanel()" style="background:linear-gradient(90deg,rgba(0,229,204,.22),rgba(0,229,204,.08));border:1.5px solid var(--ac);color:var(--ac);font-weight:800;font-size:13px;padding:8px 16px;transform:scale(1.05)">&#127760; 커뮤니티</button>
         <button class="tbb" id="btn-projects" onclick="openMd('projects')">&#128193; 프로젝트</button>
         <button class="tbb" id="btn-preset-browse" onclick="_openPresetBrowseFromTopbar()" style="background:var(--acg);border-color:var(--acb);color:var(--ac);font-weight:700">&#128203; 프리셋 전체보기</button>
       </div>
@@ -17616,12 +17616,27 @@ function sbShorts(p){
       durOverrideInpBlank.value = im.customDuration>0 ? im.customDuration : '';
       durOverrideInpBlank.style.cssText='width:64px;padding:4px 6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:11px;font-family:inherit';
       (function(item,inp){
-        inp.onchange=function(){
+        // ⚠️ 요청 반영("초수 수정하면 예상 길이도 실시간으로 바뀌게 해달라") — 단, renderMain을
+        // 타이핑할 때마다(oninput) 부르면 그때마다 이 입력칸이 통째로 다시 그려지면서 커서/포커스가
+        // 날아가 숫자를 두 자리 이상 입력하기 어려워짐. 그래서 타이핑 중(oninput)에는 "예상 길이"
+        // 표시만 가볍게 바로 갱신하고, 입력을 끝냈을 때(onchange: 포커스 벗어나거나 Enter)만 전체
+        // 화면을 다시 그려서 위쪽 "→ 이 장면은 N초 적용돼요" 안내 문구 등 나머지도 맞춰줌.
+        function _applyVal(){
           var v=parseFloat(inp.value);
           if(!v || v<=0){ item.customDuration=null; }
           else { item.customDuration=Math.min(30,Math.max(0.3,v)); }
-          renderMain('shorts');
-        };
+        }
+        function _refreshEstOnly(){
+          var estEl=document.getElementById('shorts-est-wrap');
+          if(!estEl) return;
+          var lbl2=_shortsEstimateLabel();
+          estEl.style.color = lbl2?'var(--t)':'var(--m2)';
+          estEl.innerHTML = lbl2
+            ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl2+'</strong>'
+            : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
+        }
+        inp.oninput=function(){ _applyVal(); _refreshEstOnly(); };
+        inp.onchange=function(){ _applyVal(); _refreshEstOnly(); renderMain('shorts'); };
       })(im,durOverrideInpBlank);
       durOverrideRowBlank.appendChild(durOverrideLblBlank);
       durOverrideRowBlank.appendChild(durOverrideInpBlank);
@@ -17669,12 +17684,24 @@ function sbShorts(p){
       durOverrideInp.value = im.customDuration>0 ? im.customDuration : '';
       durOverrideInp.style.cssText='width:64px;padding:4px 6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:11px;font-family:inherit';
       (function(item,inp){
-        inp.onchange=function(){
+        // ⚠️ 요청 반영 — 위 빈 페이지 쪽과 동일한 이유로 oninput/onchange를 나눔(타이핑 중
+        // 포커스가 안 날아가게).
+        function _applyVal(){
           var v=parseFloat(inp.value);
           if(!v || v<=0){ item.customDuration=null; }
           else { item.customDuration=Math.min(30,Math.max(0.3,v)); }
-          renderMain('shorts');
-        };
+        }
+        function _refreshEstOnly(){
+          var estEl=document.getElementById('shorts-est-wrap');
+          if(!estEl) return;
+          var lbl2=_shortsEstimateLabel();
+          estEl.style.color = lbl2?'var(--t)':'var(--m2)';
+          estEl.innerHTML = lbl2
+            ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl2+'</strong>'
+            : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
+        }
+        inp.oninput=function(){ _applyVal(); _refreshEstOnly(); };
+        inp.onchange=function(){ _applyVal(); _refreshEstOnly(); renderMain('shorts'); };
       })(im,durOverrideInp);
       durOverrideRow.appendChild(durOverrideLbl);
       durOverrideRow.appendChild(durOverrideInp);
@@ -20822,8 +20849,10 @@ function _shortsGenerate(){
       recorder.onstop=function(){
         _sdbg('[쇼츠 녹화 진단] onstop 발생 — 최종 청크 개수:', chunks.length, '| 청크 총 용량(bytes):', chunks.reduce(function(s,c){return s+c.size;},0));
         // ⚠️ 0바이트로 끝났으면(이 mimeType/인코더가 이 기기에서 안 먹힌 것) 사용자에게 실패
-        // 화면을 보여주는 대신, 조용히 다른 코덱으로 처음부터 자동 재시도함. 최대 2번까지만
-        // (vp9 → vp8 → 기본 webm) 시도하고, 그래도 안 되면 그때는 진짜 실패로 안내함.
+        // 화면을 보여주는 대신, 조용히 다른 코덱으로 처음부터 자동 재시도함. vp9 → vp8 → webm
+        // 까지 다 실패하면, 마지막으로 해상도를 가장 낮은 HD로 낮춰서 한 번 더 시도함(고해상도
+        // 하드웨어 인코딩 자체가 이 기기에서 막혀있는 경우, 해상도를 낮추면 되는 경우가 실제로
+        // 있음). 그래도 안 되면 그때는 정말 이 기기/브라우저의 인코더 문제로 보고 실패 안내.
         var _mimeFallbacks=['video/webm;codecs=vp8','video/webm'];
         if(chunks.length===0 && attemptIdx < _mimeFallbacks.length){
           var _nextMime=_mimeFallbacks[attemptIdx];
@@ -20834,12 +20863,30 @@ function _shortsGenerate(){
           setTimeout(function(){ startRender(_nextMime, attemptIdx+1); }, 300);
           return;
         }
-        if(chunks.length===0){
-          // 코덱을 다 바꿔봐도 전부 0바이트면, 이 기기/브라우저의 영상 인코더 자체가 문제일
-          // 가능성이 커서 더 재시도해도 소용없음 — 명확한 원인 안내와 함께 실패로 종료.
-          console.error('[쇼츠 녹화 진단] 모든 코덱(vp9/vp8/webm)에서 0바이트 — 이 기기/브라우저의 동영상 인코더에 문제가 있는 것으로 보임');
+        if(chunks.length===0 && attemptIdx===_mimeFallbacks.length && (W>720)){
+          // 코덱을 3개 다 시도해도 안 되면, 마지막으로 가장 낮은 해상도(HD)로 한 번 더 시도.
+          console.warn('[쇼츠 녹화 진단] 코덱 3종 모두 0바이트 — 마지막으로 해상도를 HD로 낮춰서 재시도합니다');
           _shortsCleanupRenderGuards();
-          if(progTxt) progTxt.innerHTML='❌ 녹화에 계속 실패했어요. 이 브라우저/기기의 동영상 인코더 문제로 보여요.<br><span style="font-size:11px">크롬 주소창에 chrome://settings/system 을 입력해 "하드웨어 가속 사용"을 꺼보거나, 크롬을 최신 버전으로 업데이트한 뒤 다시 시도해주세요. (다른 기기·브라우저에서도 시도해보시면 원인 파악에 도움돼요)</span>';
+          if(progTxt) progTxt.textContent='⚠️ 마지막으로 화질을 낮춰서 다시 시도할게요...';
+          if(progFill) progFill.style.width='0%';
+          W=720; H=1280; // 가장 가벼운 해상도로 강제 조정
+          setTimeout(function(){ startRender('video/webm', attemptIdx+1); }, 300);
+          return;
+        }
+        if(chunks.length===0){
+          // 코덱·해상도를 다 바꿔봐도 전부 0바이트면, 이 기기/브라우저의 영상 인코더 자체가
+          // 문제일 가능성이 커서 더 재시도해도 소용없음 — 명확한 원인 안내와 함께 실패로 종료.
+          console.error('[쇼츠 녹화 진단] 코덱(vp9/vp8/webm)·해상도를 전부 바꿔봐도 0바이트 — 이 기기/브라우저의 동영상 인코더에 문제가 있는 것으로 보임');
+          _shortsCleanupRenderGuards();
+          if(progTxt){
+            progTxt.innerHTML='❌ 녹화에 계속 실패했어요. 이 브라우저/기기의 동영상 인코더 문제로 보여요.<br><span style="font-size:11px">크롬 주소창에 chrome://settings/system 을 입력해 "하드웨어 가속 사용"을 꺼보거나, 크롬을 최신 버전으로 업데이트한 뒤 다시 시도해주세요. 시크릿 창이나 다른 브라우저(엣지·파이어폭스)에서도 한번 시도해보시면 원인 파악에 도움돼요.</span>';
+            var _retryBtn=document.createElement('button');
+            _retryBtn.type='button';
+            _retryBtn.textContent='🔁 다시 렌더링';
+            _retryBtn.style.cssText='display:block;margin:10px auto 0;padding:8px 16px;border-radius:8px;border:1px solid var(--ac,#00e5cc);background:rgba(0,229,204,.12);color:var(--ac,#00e5cc);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+            _retryBtn.onclick=function(){ _shortsGenerate(); };
+            progTxt.appendChild(_retryBtn);
+          }
           if(progFill) progFill.style.width='0%';
           if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
           return;
@@ -31742,6 +31789,42 @@ function openPanel(id){
     _openBulkPresetApply(picked);
   };
   selBar.appendChild(selBulkBtn);
+  // ⚠️ 요청 반영("갤러리에서 한 개씩 눌러서 커뮤니티 공개하기엔 시간이 너무 오래 걸린다"):
+  // Ctrl+클릭/드래그로 여러 장 고른 뒤 한 번에 커뮤니티로 공개하는 버튼. 항상 즉시·익명으로
+  // 올라가고(번거로운 확인창 없음), 닉네임을 공개하고 싶으면 나중에 "커뮤니티 → 내 공개 작품
+  // 관리"에서 원하는 것만 골라 따로 켤 수 있음.
+  var selCommunityBtn=document.createElement('button');
+  selCommunityBtn.id='gal-sel-community-btn';
+  selCommunityBtn.style.cssText='background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.35);color:var(--ac);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:none';
+  selCommunityBtn.onclick=function(){
+    if(!_supa || !_supaUser){ alert('커뮤니티에 공개하려면 먼저 로그인해주세요.'); return; }
+    var n=G._galSelected.size;
+    if(!n) return;
+    var ids=Array.from(G._galSelected);
+    var allItemsNow=G._curFilteredItems||items;
+    var picked=ids.map(function(iid){return allItemsNow.find(function(x){return x.id===iid;});})
+      .filter(function(x){return x && x.wf!=='world3d' && !x.communityPostId && (x.result||x.orig);});
+    if(!picked.length){ alert('공개할 수 있는 항목이 없어요(이미 공개됐거나, VR 투어이거나, 이미지가 없는 항목만 선택되어 있어요).'); return; }
+    selCommunityBtn.disabled=true;
+    var origText=selCommunityBtn.textContent;
+    var done=0, failed=0;
+    picked.forEach(function(item){
+      _communityPublishItemSilent(item, function(ok){
+        done++;
+        if(!ok) failed++;
+        selCommunityBtn.textContent='공개 중... ('+done+'/'+picked.length+')';
+        if(done>=picked.length){
+          selCommunityBtn.disabled=false;
+          selCommunityBtn.textContent=origText;
+          saveHistToStorage();
+          G._galSelected.clear();
+          renderGalleryGrid(G._curFilteredItems||items);
+          alert((picked.length-failed)+'개 공개 완료'+(failed?(', '+failed+'개는 실패했어요'):'')+'. 전부 익명으로 공개됐어요 — 닉네임을 표시하고 싶으면 커뮤니티 탭의 "내 공개 작품 관리"에서 설정할 수 있어요.');
+        }
+      });
+    });
+  };
+  selBar.appendChild(selCommunityBtn);
   hs.appendChild(selBar);
   _updateGalSelectionBar();
 
@@ -32026,6 +32109,8 @@ function _updateGalSelectionBar(){
   if(cmpBtn) cmpBtn.style.display = (n===2) ? '' : 'none';
   var bulkBtn=document.getElementById('gal-sel-bulk-btn');
   if(bulkBtn){ bulkBtn.style.display = (n>0) ? '' : 'none'; bulkBtn.textContent = '🎨 선택한 '+n+'개에 프리셋 일괄 적용'; }
+  var commBtn=document.getElementById('gal-sel-community-btn');
+  if(commBtn && !commBtn.disabled){ commBtn.style.display = (n>0) ? '' : 'none'; commBtn.textContent = '🌍 선택한 '+n+'개 커뮤니티에 공개'; }
 }
 // 갤러리 영상 카드 lazy-loading용 공용 IntersectionObserver (카드마다 새로 만들지 않고 하나 재사용)
 var _galVideoIO=null;
@@ -32073,6 +32158,11 @@ function renderGalleryGrid(items){
       '.gal-card:hover .gal-actbar{opacity:1}'+
       '@media(hover:none){.gal-actbar{opacity:1}}'+ // 터치 기기는 호버가 없으니 항상 보이게
       '.gal-card.gal-selected{outline:3px solid var(--ac,#00e5cc);outline-offset:-3px}'+
+      // ⚠️ 요청 반영("공개된 이미지가 테두리에 우리 로고 컬러로 표시돼서 한눈에 티가 나게 해달라"):
+      // 커뮤니티에 공개 중인 카드는 항상(호버 안 해도) 브랜드 색 테두리가 보이도록 함.
+      '.gal-card.gal-public{box-shadow:0 0 0 3px var(--ac,#00e5cc) inset,0 3px 14px rgba(0,0,0,.28)}'+
+      '.gal-card.gal-public:hover{box-shadow:0 0 0 3px var(--ac,#00e5cc) inset,0 12px 30px rgba(0,0,0,.4)}'+
+      '.gal-public-badge{position:absolute;top:8px;right:8px;background:var(--ac,#00e5cc);color:#03211d;font-size:9.5px;font-weight:800;border-radius:20px;padding:3px 7px;z-index:6;box-shadow:0 2px 6px rgba(0,0,0,.3);display:flex;align-items:center;gap:3px;white-space:nowrap}'+
       '.gal-selchk{position:absolute;top:8px;left:8px;width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.85);background:rgba(20,20,22,.75);display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;z-index:7}'+
       '.gal-card.gal-selected .gal-selchk{background:var(--ac,#00e5cc);border-color:var(--ac,#00e5cc);color:#03211d}'+
       '#gallery-grid-wrap.gal-dragging{cursor:crosshair}'+
@@ -32164,8 +32254,19 @@ function renderGalleryGrid(items){
     // 즐겨찾기 표시 (항상 보이는 작은 별 — 호버 버튼과 별개)
     if(item.fav){
       var fv=document.createElement('div');
-      fv.style.cssText='position:absolute;top:8px;right:8px;color:gold;font-size:14px;text-shadow:0 1px 4px rgba(0,0,0,.6);z-index:4';
+      // 공개 배지와 같은 우상단 자리를 쓰므로, 공개 중인 카드에서는 배지 아래로 살짝 내려서 안 겹치게 함
+      fv.className='gal-fav-star';
+      fv.style.cssText='position:absolute;top:'+(item.communityPostId?'30px':'8px')+';right:8px;color:gold;font-size:14px;text-shadow:0 1px 4px rgba(0,0,0,.6);z-index:4';
       fv.textContent='★';card.appendChild(fv);
+    }
+    // ⚠️ 요청 반영("공개된 이미지가 테두리에 우리 로고 컬러로 표시돼서 한눈에 티가 나게 해달라"):
+    // 커뮤니티에 공개 중인 카드는 테두리(브랜드 색) + 우상단 배지로 항상(호버 안 해도) 표시함.
+    if(item.communityPostId){
+      card.classList.add('gal-public');
+      var pubBadge=document.createElement('div');
+      pubBadge.className='gal-public-badge';
+      pubBadge.textContent='🌍 공개중';
+      card.appendChild(pubBadge);
     }
     // 하단 액션 버튼 (즐겨찾기 + 삭제) — 호버 시에만 은은하게 나타나는 글래스모피즘 원형 버튼
     var actBar=document.createElement('div');
@@ -32353,15 +32454,53 @@ function renderGalleryGrid(items){
 
 // ══════════════════════════════════════════════════════════════
 // 🌍 커뮤니티 공개 갤러리 — 회원이 갤러리 카드에서 🌍 버튼으로 "공개"하면 다른 회원들이 볼 수
-// 있는 공용 피드에 올라감. 기본은 완전 익명 공개이고, 공개 다이얼로그에서 체크박스를 눌러야만
-// 닉네임이 함께 보임(체크 안 하면 그전과 동일하게 익명). 좋아요 기능이 있으며, 누구나(비로그인
+// 있는 공용 피드에 올라감. 매번 물어보면 번거롭다는 피드백에 따라 공개는 항상 즉시·완전
+// 익명으로 올라가고(닉네임 없음), 닉네임을 공개하고 싶으면 "커뮤니티 → 내 공개 작품 관리"
+// 화면에서 원하는 작품만 골라 나중에 따로 켤 수 있음. 좋아요 기능이 있으며, 누구나(비로그인
 // 포함) 피드를 볼 수 있음(공개/좋아요를 "하는" 것 자체는 로그인 필요).
 // ⚠️ 이 기능은 Supabase에 community_posts / community_likes 테이블과 RLS 정책이 미리 만들어져
 // 있어야 동작함(관리자가 Supabase SQL Editor에서 별도로 한 번 실행해야 하는 스크립트를 따로
 // 전달함) — 테이블이 없으면 아래 함수들은 실패 시 조용히 안내 문구만 보여주고 사이트의 다른
 // 기능에는 영향을 주지 않음.
+
+// 저수준 함수: UI(버튼 등) 갱신 없이 그냥 "이 항목을 즉시·익명으로 공개"만 함. 갤러리 카드
+// 하나짜리 버튼과, 여러 개를 한 번에 공개하는 일괄 처리 양쪽에서 재사용함.
+function _communityPublishItemSilent(item, cb){
+  if(!_supa || !_supaUser){ cb(false); return; }
+  if(item.communityPostId){ cb(true); return; } // 이미 공개돼 있으면 성공으로 간주(중복 공개 방지)
+  var src = item.result || item.orig;
+  if(!src){ cb(false); return; }
+  function doInsert(url){
+    _supa.from('community_posts').insert({user_id:_supaUser.id, image_url:url, source_item_id:String(item.id), is_public:true, show_nickname:false, nickname:null})
+      .select().then(function(res){
+        if(res.error || !res.data || !res.data[0]){ cb(false); return; }
+        item.communityPostId = res.data[0].id;
+        cb(true);
+      }).catch(function(){ cb(false); });
+  }
+  if(String(src).indexOf('http')===0){ doInsert(src); }
+  else { _uploadLocalImageForShare(src, function(url){ if(!url){ cb(false); return; } doInsert(url); }); }
+}
+
+// 갤러리 카드의 🌍 버튼 — 한 장짜리 공개/공개취소 토글. 이제 확인창 없이 바로 처리됨(항상 익명).
 function _communityPostForItem(item, btn){
   if(!_supa || !_supaUser){ alert('커뮤니티에 공개하려면 먼저 로그인해주세요.'); return; }
+  var card = btn ? btn.closest('.gal-card') : null;
+  function _syncCardPublicMark(isPublic){
+    if(!card) return;
+    card.classList.toggle('gal-public', isPublic);
+    var oldBadge=card.querySelector('.gal-public-badge');
+    if(oldBadge) oldBadge.remove();
+    if(isPublic){
+      var pubBadge=document.createElement('div');
+      pubBadge.className='gal-public-badge';
+      pubBadge.textContent='🌍 공개중';
+      card.appendChild(pubBadge);
+    }
+    // 즐겨찾기 별과 배지가 같은 우상단 자리를 쓰므로, 공개 상태가 바뀔 때 별 위치도 같이 조정
+    var starEl = card.querySelector('.gal-fav-star');
+    if(starEl) starEl.style.top = isPublic ? '30px' : '8px';
+  }
   if(item.communityPostId){
     // 이미 공개된 상태 → 눌러서 비공개로 전환(공개 취소)
     if(!confirm('커뮤니티 공개를 취소할까요? 다른 회원들이 더 이상 볼 수 없게 돼요.')) return;
@@ -32370,73 +32509,16 @@ function _communityPostForItem(item, btn){
       delete item.communityPostId;
       saveHistToStorage();
       if(btn){ btn.textContent='🌍'; btn.title='커뮤니티에 공개'; btn.style.color='rgba(255,255,255,.85)'; }
+      _syncCardPublicMark(false);
     });
     return;
   }
-  var src = item.result || item.orig;
-  if(!src){ alert('공개할 이미지가 없어요.'); return; }
-  _showCommunityPostDialog(function(choice){
-    if(!choice) return; // 취소함
-    function doInsert(url){
-      var payload={user_id:_supaUser.id, image_url:url, source_item_id:String(item.id), is_public:true,
-        show_nickname: !!choice.showNickname, nickname: choice.showNickname ? choice.nickname : null};
-      _supa.from('community_posts').insert(payload)
-        .select().then(function(res){
-          if(res.error || !res.data || !res.data[0]){
-            alert('커뮤니티 공개에 실패했어요.\n('+(res.error?res.error.message:'알 수 없는 오류')+')\n관리자에게 community_posts 테이블 설정을 확인해달라고 요청해주세요.');
-            return;
-          }
-          item.communityPostId = res.data[0].id;
-          saveHistToStorage();
-          if(btn){ btn.textContent='🌍'; btn.title='커뮤니티 공개 중 (눌러서 취소)'; btn.style.color='var(--ac,#00e5cc)'; }
-        }).catch(function(e){ alert('커뮤니티 공개 중 오류가 발생했어요: '+e.message); });
-    }
-    if(String(src).indexOf('http')===0){ doInsert(src); }
-    else { _uploadLocalImageForShare(src, function(url){ if(!url){ alert('이미지 업로드에 실패했어요.'); return; } doInsert(url); }); }
+  _communityPublishItemSilent(item, function(ok){
+    if(!ok){ alert('커뮤니티 공개에 실패했어요.\n관리자에게 community_posts 테이블 설정을 확인해달라고 요청해주세요.'); return; }
+    saveHistToStorage();
+    if(btn){ btn.textContent='🌍'; btn.title='커뮤니티 공개 중 (눌러서 취소)'; btn.style.color='var(--ac,#00e5cc)'; }
+    _syncCardPublicMark(true);
   });
-}
-
-// 공개하기 전에 "닉네임도 같이 공개할지" 물어보는 작은 확인창. 기본은 체크 해제(비공개/익명)
-// 상태로 뜨고, 사용자가 직접 체크해야만 닉네임이 함께 보임. 체크했는데 아직 저장된 닉네임이
-// 없으면 입력칸이 나타나고, 다음번 공개부터는 여기서 입력한 닉네임을 자동으로 기억해서 씀
-// (Supabase auth user_metadata에 저장 — 별도 테이블 필요 없음).
-function _showCommunityPostDialog(cb){
-  var savedNick = (_supaUser && _supaUser.user_metadata && _supaUser.user_metadata.nickname) || '';
-  var ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-  var box=document.createElement('div');
-  box.style.cssText='background:var(--card,#1c1f22);border:1px solid var(--bd2);border-radius:16px;padding:22px;max-width:360px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.5)';
-  box.innerHTML=
-    '<div style="font-size:16px;font-weight:800;color:var(--t);margin-bottom:6px">🌍 커뮤니티에 공개하기</div>'+
-    '<div style="font-size:12px;color:var(--t2);margin-bottom:16px;line-height:1.6">다른 회원들이 볼 수 있는 커뮤니티 갤러리에 올라가요. 기본은 완전 익명이고, 원하시면 닉네임도 함께 공개할 수 있어요.</div>'+
-    '<label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--t);cursor:pointer;margin-bottom:10px">'+
-      '<input type="checkbox" id="comm-nick-chk" style="width:16px;height:16px;cursor:pointer">'+
-      '닉네임도 함께 공개할게요'+
-    '</label>'+
-    '<input type="text" id="comm-nick-inp" placeholder="공개할 닉네임을 입력해주세요" maxlength="20" value="'+savedNick.replace(/"/g,'&quot;')+'" style="display:none;width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:13px;font-family:inherit;margin-bottom:14px;outline:none">'+
-    '<div style="display:flex;gap:8px;margin-top:6px">'+
-      '<button type="button" id="comm-cancel-btn" style="flex:1;padding:11px;border-radius:9px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">취소</button>'+
-      '<button type="button" id="comm-ok-btn" style="flex:1;padding:11px;border-radius:9px;border:none;background:var(--ac);color:#000;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit">공개하기</button>'+
-    '</div>';
-  ov.appendChild(box);
-  document.body.appendChild(ov);
-  var chk=box.querySelector('#comm-nick-chk');
-  var inp=box.querySelector('#comm-nick-inp');
-  chk.onchange=function(){ inp.style.display=chk.checked?'block':'none'; if(chk.checked) inp.focus(); };
-  function close(){ ov.remove(); }
-  ov.onclick=function(e){ if(e.target===ov) close(); };
-  box.querySelector('#comm-cancel-btn').onclick=function(){ close(); cb(null); };
-  box.querySelector('#comm-ok-btn').onclick=function(){
-    var showNickname=chk.checked;
-    var nickname=inp.value.trim();
-    if(showNickname && !nickname){ alert('공개할 닉네임을 입력해주세요.'); inp.focus(); return; }
-    if(showNickname && nickname!==savedNick && _supa && _supa.auth && _supa.auth.updateUser){
-      // 다음에도 재입력 안 해도 되게 저장 (실패해도 이번 공개 자체는 그대로 진행)
-      try{ _supa.auth.updateUser({data:{nickname:nickname}}); }catch(e){}
-    }
-    close();
-    cb({showNickname:showNickname, nickname:showNickname?nickname:null});
-  };
 }
 
 function openCommunityPanel(){
@@ -32468,12 +32550,20 @@ function openCommunityPanel(){
 function _renderCommunityGrid(posts){
   var hs=gE('hist-s');
   hs.innerHTML='';
+  var heroBar=document.createElement('div');
+  heroBar.style.cssText='width:100%;padding:20px 16px;text-align:center;flex-shrink:0;background:linear-gradient(180deg,rgba(0,229,204,.08),transparent)';
+  heroBar.innerHTML='<div style="font-size:22px;font-weight:800;color:var(--t);margin-bottom:4px">🌍 커뮤니티 갤러리</div>'+
+    '<div style="font-size:12.5px;color:var(--t2)">회원들이 직접 공개한 결과물 '+posts.length+'개</div>';
+  hs.appendChild(heroBar);
   var bar=document.createElement('div');
-  bar.style.cssText='width:100%;display:flex;gap:8px;padding:8px 10px;flex-shrink:0;align-items:center';
-  var title=document.createElement('div');
-  title.textContent='🌍 커뮤니티 갤러리 — 회원들이 공개한 결과물';
-  title.style.cssText='font-size:13px;font-weight:700;color:var(--t);flex:1';
-  bar.appendChild(title);
+  bar.style.cssText='width:100%;display:flex;gap:8px;padding:0 10px 10px;flex-shrink:0;align-items:center;justify-content:flex-end';
+  if(_supa && _supaUser){
+    var myBtn=document.createElement('button');
+    myBtn.type='button';myBtn.textContent='🔧 내 공개 작품 관리';
+    myBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid rgba(0,229,204,.35);background:rgba(0,229,204,.1);color:var(--ac);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    myBtn.onclick=function(){ openMyCommunityPostsPanel(); };
+    bar.appendChild(myBtn);
+  }
   var closeBtn=document.createElement('button');
   closeBtn.type='button';closeBtn.textContent='✕ 닫기';
   closeBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
@@ -32549,28 +32639,209 @@ function _communityToggleLike(post, btn){
   }).catch(function(){ btn.disabled=false; });
 }
 
+// ⚠️ 요청 반영("한 개씩 눌러서 공개하기엔 시간이 너무 많이 걸린다, 닉네임 공개 확인창도
+// 번거롭다"): 갤러리에서 공개는 이제 항상 즉시·익명으로 처리되고(위 _communityPostForItem),
+// 나중에 "닉네임을 공개하고 싶은 작품만" 또는 "공개를 취소하고 싶은 작품만" 여러 개 한 번에
+// 고를 수 있는 전용 관리 화면. 커뮤니티 탭의 "🔧 내 공개 작품 관리" 버튼으로 들어옴.
+function openMyCommunityPostsPanel(){
+  if(!_supa || !_supaUser){ alert('로그인 후 이용할 수 있어요.'); return; }
+  var hs=gE('hist-s');
+  var home=gE('home-s');
+  var cub=document.getElementById('canvas-upload-box');
+  if(home)home.style.display='none';
+  if(cub)cub.classList.remove('active');
+  if(!hs)return;
+  hs.style.display='flex';
+  window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
+  hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오는 중...</div>';
+  _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname').eq('user_id',_supaUser.id).order('created_at',{ascending:false}).limit(200)
+    .then(function(res){
+      if(res.error){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오지 못했어요.</div>'; return; }
+      _renderMyCommunityGrid(res.data||[]);
+    }).catch(function(){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오지 못했어요.</div>'; });
+}
+
+function _renderMyCommunityGrid(posts){
+  var hs=gE('hist-s');
+  hs.innerHTML='';
+  window._myCommPostsCache = posts; // 벌크 액션 참조용
+  if(!G._myCommSelected) G._myCommSelected=new Set(); else G._myCommSelected.clear();
+
+  var bar=document.createElement('div');
+  bar.style.cssText='width:100%;display:flex;gap:8px;padding:8px 10px;flex-shrink:0;align-items:center;flex-wrap:wrap';
+  var title=document.createElement('div');
+  title.textContent='🔧 내가 공개한 작품 관리 ('+posts.length+')';
+  title.style.cssText='font-size:13px;font-weight:700;color:var(--t);flex:1';
+  bar.appendChild(title);
+  var backBtn=document.createElement('button');
+  backBtn.type='button';backBtn.textContent='← 커뮤니티로';
+  backBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
+  backBtn.onclick=function(){ openCommunityPanel(); };
+  bar.appendChild(backBtn);
+  var closeBtn=document.createElement('button');
+  closeBtn.type='button';closeBtn.textContent='✕ 닫기';
+  closeBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
+  closeBtn.onclick=function(){ renderMain(G.wf); };
+  bar.appendChild(closeBtn);
+  hs.appendChild(bar);
+
+  if(!posts.length){
+    var empty=document.createElement('div');
+    empty.style.cssText='padding:40px;text-align:center;color:var(--t2);width:100%';
+    empty.textContent='아직 공개한 작품이 없어요. 갤러리에서 🌍 버튼(또는 여러 장 선택 후 일괄 공개)으로 공개해보세요!';
+    hs.appendChild(empty);
+    return;
+  }
+
+  var hint=document.createElement('div');
+  hint.style.cssText='width:100%;padding:0 10px 8px;font-size:11px;color:var(--t2)';
+  hint.textContent='이미지를 클릭해서 여러 개를 골라주세요 — 한 번에 닉네임 공개/비공개나 공개 취소를 할 수 있어요.';
+  hs.appendChild(hint);
+
+  var selBar=document.createElement('div');
+  selBar.style.cssText='width:100%;display:none;justify-content:flex-end;align-items:center;padding:0 10px 10px;gap:8px;flex-wrap:wrap';
+  var selCount=document.createElement('span');
+  selCount.style.cssText='font-size:11px;color:var(--ac,#00e5cc);font-weight:700;margin-right:auto';
+  selBar.appendChild(selCount);
+  var clearSelBtn=document.createElement('button');
+  clearSelBtn.type='button';clearSelBtn.textContent='선택 해제';
+  clearSelBtn.style.cssText='background:var(--c2);border:1px solid var(--bd2);color:var(--t2);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+  clearSelBtn.onclick=function(){ G._myCommSelected.clear(); _refreshMyCommSelUI(); };
+  selBar.appendChild(clearSelBtn);
+  var nickOnBtn=document.createElement('button');
+  nickOnBtn.type='button';nickOnBtn.textContent='👤 선택 항목 닉네임 공개';
+  nickOnBtn.style.cssText='background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.35);color:var(--ac);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+  nickOnBtn.onclick=function(){ _myCommBulkSetNickname(true); };
+  selBar.appendChild(nickOnBtn);
+  var nickOffBtn=document.createElement('button');
+  nickOffBtn.type='button';nickOffBtn.textContent='🙈 선택 항목 닉네임 비공개';
+  nickOffBtn.style.cssText='background:var(--c2);border:1px solid var(--bd2);color:var(--t);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+  nickOffBtn.onclick=function(){ _myCommBulkSetNickname(false); };
+  selBar.appendChild(nickOffBtn);
+  var unpubBtn=document.createElement('button');
+  unpubBtn.type='button';unpubBtn.textContent='🚫 선택 항목 공개 취소';
+  unpubBtn.style.cssText='background:rgba(255,80,80,.85);border:1px solid rgba(255,80,80,.9);color:#fff;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+  unpubBtn.onclick=function(){ _myCommBulkUnpublish(); };
+  selBar.appendChild(unpubBtn);
+  hs.appendChild(selBar);
+
+  if(!document.getElementById('mycomm-card-style')){
+    var st=document.createElement('style');st.id='mycomm-card-style';
+    st.textContent='.mycomm-card{position:relative;border-radius:14px;overflow:hidden;cursor:pointer;aspect-ratio:4/3;border:1px solid var(--bd);background:var(--card)}'+
+      '.mycomm-card.mycomm-selected{outline:3px solid var(--ac,#00e5cc);outline-offset:-3px}'+
+      '.mycomm-selchk{position:absolute;top:8px;left:8px;width:22px;height:22px;border-radius:50%;border:2px solid rgba(255,255,255,.85);background:rgba(20,20,22,.75);display:none;align-items:center;justify-content:center;font-size:13px;color:#fff;z-index:6}'+
+      '.mycomm-card.mycomm-selected .mycomm-selchk{display:flex;background:var(--ac,#00e5cc);border-color:var(--ac,#00e5cc);color:#03211d}';
+    document.head.appendChild(st);
+  }
+
+  var grid=document.createElement('div');
+  grid.id='mycomm-grid-wrap';
+  grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;width:100%;padding:8px';
+  posts.forEach(function(p){
+    var card=document.createElement('div');
+    card.className='mycomm-card';
+    card.dataset.postId=p.id;
+    var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
+    if(isVid){
+      card.innerHTML='<video src="'+p.image_url+'" muted style="width:100%;height:100%;object-fit:cover"></video>';
+    } else {
+      card.innerHTML='<img src="'+p.image_url+'" loading="lazy" style="width:100%;height:100%;object-fit:cover">';
+    }
+    var grad=document.createElement('div');
+    grad.style.cssText='position:absolute;left:0;right:0;bottom:0;height:40%;background:linear-gradient(transparent,rgba(0,0,0,.6));pointer-events:none';
+    card.appendChild(grad);
+    var badge=document.createElement('div');
+    badge.style.cssText='position:absolute;bottom:6px;left:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:20px;max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    badge.textContent = (p.show_nickname && p.nickname) ? ('👤 '+p.nickname) : '🙈 익명';
+    card.appendChild(badge);
+    var likeBadge=document.createElement('div');
+    likeBadge.style.cssText='position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:20px';
+    likeBadge.textContent='❤️ '+(p.like_count||0);
+    card.appendChild(likeBadge);
+    var chk=document.createElement('div');chk.className='mycomm-selchk';chk.textContent='✓';
+    card.appendChild(chk);
+    card.onclick=function(){
+      if(G._myCommSelected.has(p.id)) G._myCommSelected.delete(p.id); else G._myCommSelected.add(p.id);
+      _refreshMyCommSelUI();
+    };
+    grid.appendChild(card);
+  });
+  hs.appendChild(grid);
+
+  function _refreshMyCommSelUI(){
+    var n=G._myCommSelected.size;
+    selBar.style.display = n>0?'flex':'none';
+    selCount.textContent = n+'개 선택됨';
+    grid.querySelectorAll('.mycomm-card').forEach(function(c){
+      if(G._myCommSelected.has(c.dataset.postId)) c.classList.add('mycomm-selected');
+      else c.classList.remove('mycomm-selected');
+    });
+  }
+  window._refreshMyCommSelUI = _refreshMyCommSelUI; // 벌크 액션 완료 후에도 재사용
+}
+
+function _myCommBulkSetNickname(showNickname){
+  var ids=Array.from(G._myCommSelected||[]);
+  if(!ids.length) return;
+  var nickname=null;
+  if(showNickname){
+    var saved=(_supaUser.user_metadata && _supaUser.user_metadata.nickname) || '';
+    nickname=prompt('선택한 '+ids.length+'개 작품에 표시할 닉네임을 입력해주세요', saved);
+    if(nickname==null) return; // 취소
+    nickname=nickname.trim();
+    if(!nickname){ alert('닉네임을 입력해주세요.'); return; }
+    try{ _supa.auth.updateUser({data:{nickname:nickname}}); }catch(e){} // 다음에도 기억해서 씀
+  }
+  var payload = showNickname ? {show_nickname:true, nickname:nickname} : {show_nickname:false, nickname:null};
+  _supa.from('community_posts').update(payload).in('id',ids).eq('user_id',_supaUser.id).then(function(res){
+    if(res.error){ alert('변경에 실패했어요: '+res.error.message); return; }
+    openMyCommunityPostsPanel(); // 최신 상태로 새로고침
+  }).catch(function(e){ alert('오류가 발생했어요: '+e.message); });
+}
+
+function _myCommBulkUnpublish(){
+  var ids=Array.from(G._myCommSelected||[]);
+  if(!ids.length) return;
+  if(!confirm('선택한 '+ids.length+'개 작품의 커뮤니티 공개를 취소할까요? 다른 회원들이 더 이상 볼 수 없게 돼요.')) return;
+  _supa.from('community_posts').delete().in('id',ids).eq('user_id',_supaUser.id).then(function(res){
+    if(res.error){ alert('공개 취소에 실패했어요: '+res.error.message); return; }
+    // 갤러리 카드의 🌍 버튼 상태도 같이 맞춰줌 — 로컬 항목 중 이번에 취소된 게시물과
+    // 연결된 communityPostId가 있으면 지워서, 갤러리에서 다시 "공개 가능" 상태로 보이게 함.
+    try{
+      Object.keys(G.HIST||{}).forEach(function(wf){
+        (G.HIST[wf]||[]).forEach(function(item){
+          if(item.communityPostId && ids.indexOf(item.communityPostId)!==-1) delete item.communityPostId;
+        });
+      });
+      saveHistToStorage();
+    }catch(e){}
+    openMyCommunityPostsPanel(); // 최신 상태로 새로고침
+  }).catch(function(e){ alert('오류가 발생했어요: '+e.message); });
+}
+
 // ⚠️ 요청 반영("첫 화면 모달을 X로 닫거나 무료로 시작하기를 눌러도, 그다음 메인화면에서
 // 회원들이 올린 이미지를 보고 '나도 해보고 싶다'는 마음이 들게 해서 가입을 유도하자"): 홈
 // 화면(home-s) 맨 아래에 커뮤니티에 실제로 공개된 작품들을 가로 스크롤 쇼케이스로 보여줌.
 // 공개된 게시물이 없으면(=아직 아무도 공개 안 했거나 테이블 미설정) 조용히 아무것도 안 보여줌.
+// ⚠️ 요청 반영("가로 스크롤 스트립은 회원이 많아지면 계속 옆으로 넘겨야 해서 불편하다 — 여기서
+// 다 보여주려 하지 말고, 대신 상단 커뮤니티 탭 자체를 크고 눈에 띄게 만들어서 거기서 제대로
+// 보게 하자"): 홈 화면 쪽은 스크롤 없는 작은 미리보기 그리드(최대 6장) + 큼직한 CTA 버튼으로
+// 축소하고, 실제로 다 둘러보는 건 위쪽 "🌍 커뮤니티" 탭(이제 더 눈에 띄게 강조함)에서 하도록 유도.
 function _loadHomeCommunityShowcase(){
   var wrap=gE('home-community-showcase');
   if(!wrap || !_supa) return;
   _supa.from('community_posts').select('image_url,like_count,show_nickname,nickname').eq('is_public',true)
-    .order('like_count',{ascending:false}).order('created_at',{ascending:false}).limit(12)
+    .order('like_count',{ascending:false}).order('created_at',{ascending:false}).limit(6)
     .then(function(res){
       if(res.error || !res.data || !res.data.length) return; // 조용히 스킵
       wrap.style.display='block';
       wrap.innerHTML=
-        '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px">'+
-          '<div style="font-size:15px;font-weight:800;color:var(--t)">🔥 회원들이 실제로 만든 작품들</div>'+
-          '<button type="button" id="home-comm-more" style="background:none;border:none;color:var(--ac);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">전체보기 →</button>'+
-        '</div>';
-      var strip=document.createElement('div');
-      strip.style.cssText='display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity';
+        '<div style="font-size:15px;font-weight:800;color:var(--t);margin-bottom:12px;text-align:center">🔥 회원들이 실제로 만든 작품들</div>';
+      var teaserGrid=document.createElement('div');
+      teaserGrid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px';
       res.data.forEach(function(p){
         var card=document.createElement('div');
-        card.style.cssText='flex:0 0 160px;height:160px;border-radius:12px;overflow:hidden;position:relative;scroll-snap-align:start;box-shadow:0 3px 12px rgba(0,0,0,.3);cursor:pointer';
+        card.style.cssText='aspect-ratio:1/1;border-radius:12px;overflow:hidden;position:relative;box-shadow:0 3px 12px rgba(0,0,0,.3);cursor:pointer';
         var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
         if(isVid){
           card.innerHTML='<video src="'+p.image_url+'" muted loop style="width:100%;height:100%;object-fit:cover" onmouseenter="this.play().catch(function(){})" onmouseleave="this.pause()"></video>';
@@ -32590,11 +32861,15 @@ function _loadHomeCommunityShowcase(){
           card.appendChild(nickTag2);
         }
         card.onclick=function(){ openCommunityPanel(); };
-        strip.appendChild(card);
+        teaserGrid.appendChild(card);
       });
-      wrap.appendChild(strip);
-      var moreBtn=gE('home-comm-more');
-      if(moreBtn) moreBtn.onclick=function(){ openCommunityPanel(); };
+      wrap.appendChild(teaserGrid);
+      var ctaBtn=document.createElement('button');
+      ctaBtn.type='button';
+      ctaBtn.textContent='🌍 커뮤니티에서 더 많은 작품 둘러보기 →';
+      ctaBtn.style.cssText='display:block;width:100%;margin-top:14px;padding:13px;border-radius:12px;border:1.5px solid var(--ac);background:rgba(0,229,204,.12);color:var(--ac);font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit';
+      ctaBtn.onclick=function(){ openCommunityPanel(); };
+      wrap.appendChild(ctaBtn);
     }).catch(function(){}); // 실패해도 조용히 무시(홈 화면 다른 부분에 영향 없음)
 }
 
@@ -33849,18 +34124,32 @@ document.addEventListener('DOMContentLoaded',function(){try{
 
   // 화면 어디서든 blob: 주소를 가진 이미지·영상이 로드 실패하면(예: 예전 세션의 죽은 링크가
   // 저장 데이터에 남아있는 경우) 전역적으로 감지해서 화면에서 치우고 데이터에서도 지움.
+  // ⚠️ 버그 수정("쇼츠 자동생성 항목을 삭제했는데 삭제가 안 된다"): 이 리스너가 G.HIST에서는
+  // 항목을 지우고 있었지만 두 가지가 빠져있었음 — ① 카드 DOM을 찾는 선택자(.h-item,
+  // [id^="hi-"])가 지금 갤러리 카드가 실제로 쓰는 클래스(.gal-card)와 달라서 화면에서
+  // 실제로는 하나도 안 지워지고 있었음(그래서 까맣게 깨진 채로 계속 남아있었던 것). ②
+  // G.HIST만 메모리에서 고치고 saveHistToStorage()를 호출하지 않아서, 새로고침하면(또는
+  // 쇼츠는 clover_shorts_gallery 스냅샷에서) 지운 항목이 그대로 다시 로드되어 부활했음.
+  // 이제 실제 카드 클래스를 정확히 찾아서 화면에서도 즉시 사라지게 하고, 저장소에도 바로
+  // 반영해서 새로고침해도 다시 나타나지 않게 함.
   document.addEventListener('error', function(e){
     var el=e.target;
     if(!el || (el.tagName!=='IMG' && el.tagName!=='VIDEO')) return;
     var src=el.currentSrc || el.src || '';
     if(src.indexOf('blob:')!==0) return;
     console.warn('[자동 정리] 죽은 blob 링크 발견 → 정리함:', src.slice(0,60));
-    var card=el.closest('.h-item') || el.closest('[id^="hi-"]');
+    var card=el.closest('.gal-card') || el.closest('.h-item') || el.closest('[id^="hi-"]');
     if(card) card.style.display='none';
+    var _removedShorts=false;
     try{
       Object.keys(G.HIST||{}).forEach(function(wf){
-        G.HIST[wf]=(G.HIST[wf]||[]).filter(function(x){ return x.result!==src && x.orig!==src; });
+        var _before=G.HIST[wf]||[];
+        var _after=_before.filter(function(x){ return x.result!==src && x.orig!==src; });
+        if(_after.length!==_before.length && wf==='shorts') _removedShorts=true;
+        G.HIST[wf]=_after;
       });
+      saveHistToStorage();
+      if(_removedShorts && typeof _shortsSaveGalleryMeta==='function') _shortsSaveGalleryMeta();
     }catch(err){}
   }, true);
 
