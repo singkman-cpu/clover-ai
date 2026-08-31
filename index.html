@@ -20687,8 +20687,20 @@ function _shortsGenerate(){
     // 오디오 설정
     var audioCtx=null, bgmSource=null, dest=null;
     var streamWithAudio=null;
-    var vidStream=canvas.captureStream(FPS);
-    console.log('[쇼츠 녹화 진단] captureStream 완료 — video tracks:', vidStream.getVideoTracks().length, '| track readyState:', vidStream.getVideoTracks().map(function(t){return t.readyState;}));
+    // ⚠️⚠️⚠️ 버그 수정(치명적, 진짜 원인 확정 — 로그로 실제 확인함): captureStream(FPS)처럼
+    // 양수를 넘기면 브라우저가 "자동으로" 그 주기마다 캔버스를 알아서 캡처하는데, 4K처럼 매
+    // 프레임을 그리는 데 시간이 오래 걸리는 상황에서는 메인 스레드가 거의 계속 바빠서 브라우저가
+    // 이 자동 캡처를 실행할 틈 자체를 못 얻는 경우가 실제로 확인됨(22초 내내 tick은 정확히
+    // 진행됐는데, MediaRecorder의 start 이벤트는 그 22초가 다 지나고 stop()을 부른 뒤에야
+    // 뒤늦게 도착 — 즉 녹화 파이프라인이 그 시간 내내 프레임을 단 한 장도 못 가져간 것). 이제
+    // captureStream(0)으로 "자동 캡처 끔" 모드로 바꾸고, 프레임을 직접 다 그린 "바로 그 순간"에
+    // track.requestFrame()으로 "지금 이 프레임 가져가라"고 명시적으로 신호를 보냄 — 이러면
+    // 메인 스레드가 아무리 바빠도, 우리가 실제로 프레임을 다 그린 시점에 정확히 캡처가 일어나서
+    // 놓치는 일이 없음.
+    var vidStream=canvas.captureStream(0);
+    var _vidTrack=vidStream.getVideoTracks()[0];
+    var _canRequestFrame = _vidTrack && typeof _vidTrack.requestFrame==='function';
+    console.log('[쇼츠 녹화 진단] captureStream(수동 모드) 완료 — video tracks:', vidStream.getVideoTracks().length, '| requestFrame 지원:', _canRequestFrame);
 
     function beginRecord(stream){
       // ⚠️ 요청 반영("결과가 계속 0KB로 나온다, 원인을 코드만 봐서는 못 잡겠으니 실제로 어디서
@@ -20878,7 +20890,7 @@ function _shortsGenerate(){
           Object.keys(videoCache).forEach(function(vu){ try{videoCache[vu].pause();}catch(e){} });
           console.log('[쇼츠 녹화 진단] 렌더 루프 완료(오디오 있음) → rec.stop() 호출 — recorder.state:', rec.state);
           rec.stop();
-        },videoCache);
+        },videoCache,_canRequestFrame?_vidTrack:null);
       };
       if(opts.bgmUrl){
         audioEl=document.createElement('audio');
@@ -20908,7 +20920,7 @@ function _shortsGenerate(){
         Object.keys(videoCache).forEach(function(vu){ try{videoCache[vu].pause();}catch(e){} });
         console.log('[쇼츠 녹화 진단] 렌더 루프 완료(오디오 없음) → rec.stop() 호출 — recorder.state:', rec.state);
         rec.stop();
-      },videoCache);
+      },videoCache,_canRequestFrame?_vidTrack:null);
     }
   }
 }
@@ -20988,7 +21000,7 @@ function _shortsCreateTickerWorker(intervalMs){
     return worker;
   }catch(e){ return null; }
 }
-function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone, videoCache){
+function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone, videoCache, videoTrack){
   console.log('[쇼츠 녹화 진단] runRenderLoop 시작 — totalFrames:', totalFrames, '| FPS:', FPS, '| slides:', slides.length);
   var frame=0;
   var startTime=null;
@@ -21012,6 +21024,7 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
     var t=frame/FPS;
     try{
       _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
+      if(videoTrack) videoTrack.requestFrame(); // 방금 그린 프레임을 바로 캡처하도록 명시적으로 요청
     }catch(err){
       console.warn('[쇼츠 렌더] 프레임 '+frame+' 그리기 실패, 건너뜀:', err);
     }
