@@ -20687,20 +20687,22 @@ function _shortsGenerate(){
     // 오디오 설정
     var audioCtx=null, bgmSource=null, dest=null;
     var streamWithAudio=null;
-    // ⚠️⚠️⚠️ 버그 수정(치명적, 진짜 원인 확정 — 로그로 실제 확인함): captureStream(FPS)처럼
-    // 양수를 넘기면 브라우저가 "자동으로" 그 주기마다 캔버스를 알아서 캡처하는데, 4K처럼 매
-    // 프레임을 그리는 데 시간이 오래 걸리는 상황에서는 메인 스레드가 거의 계속 바빠서 브라우저가
-    // 이 자동 캡처를 실행할 틈 자체를 못 얻는 경우가 실제로 확인됨(22초 내내 tick은 정확히
-    // 진행됐는데, MediaRecorder의 start 이벤트는 그 22초가 다 지나고 stop()을 부른 뒤에야
-    // 뒤늦게 도착 — 즉 녹화 파이프라인이 그 시간 내내 프레임을 단 한 장도 못 가져간 것). 이제
-    // captureStream(0)으로 "자동 캡처 끔" 모드로 바꾸고, 프레임을 직접 다 그린 "바로 그 순간"에
-    // track.requestFrame()으로 "지금 이 프레임 가져가라"고 명시적으로 신호를 보냄 — 이러면
-    // 메인 스레드가 아무리 바빠도, 우리가 실제로 프레임을 다 그린 시점에 정확히 캡처가 일어나서
-    // 놓치는 일이 없음.
-    var vidStream=canvas.captureStream(0);
-    var _vidTrack=vidStream.getVideoTracks()[0];
-    var _canRequestFrame = _vidTrack && typeof _vidTrack.requestFrame==='function';
-    console.log('[쇼츠 녹화 진단] captureStream(수동 모드) 완료 — video tracks:', vidStream.getVideoTracks().length, '| requestFrame 지원:', _canRequestFrame);
+    // ⚠️⚠️⚠️⚠️ 버그 수정(치명적, 이전 두 번의 "진짜 원인 확정"이 전부 틀렸음 — 콘솔 로그로 재확인):
+    // ① captureStream(FPS) 자동 모드는 메인 스레드가 바빠서 브라우저가 자동 캡처를 못 돈다고
+    // 추정해서 captureStream(0)+track.requestFrame() 수동 모드로 바꿨었음. ② 그 다음엔 Worker
+    // 타이머가 페인트 파이프라인과 무관한 매크로태스크라서 requestFrame()이 무시된다고 추정해서
+    // requestAnimationFrame 기반으로 다시 바꿨음. 그런데 ②를 적용한 뒤에도 tick 로그는 22초
+    // 내내 정상 진행되는데 MediaRecorder의 start/dataavailable/onstop 이벤트가 여전히 rec.stop()
+    // 호출 직전에야 한꺼번에 몰려서 발생하고 청크 0개로 끝나는 게 동일하게 재현됨 — 즉 원인은
+    // "타이밍을 어떻게 신호하느냐"가 아니라 captureStream(0)+requestFrame() 조합 자체가 크로미움
+    // 실제 버그 리포트들(w3c/mediacapture-record #213, bugzilla 1277476 등)에서도 보고되는 것처럼
+    // MediaRecorder와 안정적으로 맞물리지 않는다는 것. 이제 다시 자동 캡처 모드
+    // (captureStream(FPS))로 되돌리되, ①에서 문제였던 "메인 스레드가 안 쉬어서 자동 캡처가 스케줄
+    // 안 됨"은 그 사이 그리기 루프를 requestAnimationFrame 기반으로 바꿔둔 덕분에(폴링 방식으로
+    // 프레임을 몰아서 그리지 않고 실제 페인트 콜백 사이사이에 메인 스레드가 정상적으로 쉬게 됨)
+    // 함께 해결됨 — 즉 "자동 캡처 + rAF 페이싱"의 새로운 조합.
+    var vidStream=canvas.captureStream(FPS);
+    console.log('[쇼츠 녹화 진단] captureStream(자동 모드, FPS='+FPS+') 완료 — video tracks:', vidStream.getVideoTracks().length);
 
     function beginRecord(stream){
       // ⚠️ 요청 반영("결과가 계속 0KB로 나온다, 원인을 코드만 봐서는 못 잡겠으니 실제로 어디서
@@ -20888,9 +20890,14 @@ function _shortsGenerate(){
           if(bgmGainNode){ try{bgmGainNode.gain.setValueAtTime(0.0001, audioCtx.currentTime);}catch(e){} }
           if(audioEl)audioEl.pause();
           Object.keys(videoCache).forEach(function(vu){ try{videoCache[vu].pause();}catch(e){} });
-          console.log('[쇼츠 녹화 진단] 렌더 루프 완료(오디오 있음) → rec.stop() 호출 — recorder.state:', rec.state);
-          rec.stop();
-        },videoCache,_canRequestFrame?_vidTrack:null);
+          // ⚠️ 자동 캡처는 다음 캡처 주기(최대 1/FPS초)가 지나야 마지막으로 그린 프레임을
+          // 실제로 가져가므로, 그리기가 끝나자마자 바로 stop()을 부르면 그 마지막 프레임이
+          // 잘려나갈 수 있음 — 한 프레임 주기만큼 여유를 두고 stop() 호출.
+          setTimeout(function(){
+            console.log('[쇼츠 녹화 진단] 렌더 루프 완료(오디오 있음) → rec.stop() 호출 — recorder.state:', rec.state);
+            rec.stop();
+          }, Math.ceil(1000/FPS)+50);
+        },videoCache,null);
       };
       if(opts.bgmUrl){
         audioEl=document.createElement('audio');
@@ -20918,9 +20925,11 @@ function _shortsGenerate(){
         _shortsCheckEncoderStall(rec, progWrap, function(){return _stallWarned2;}, function(v){_stallWarned2=v;_shortsEncoderStalled=v;});
       },function(){
         Object.keys(videoCache).forEach(function(vu){ try{videoCache[vu].pause();}catch(e){} });
-        console.log('[쇼츠 녹화 진단] 렌더 루프 완료(오디오 없음) → rec.stop() 호출 — recorder.state:', rec.state);
-        rec.stop();
-      },videoCache,_canRequestFrame?_vidTrack:null);
+        setTimeout(function(){
+          console.log('[쇼츠 녹화 진단] 렌더 루프 완료(오디오 없음) → rec.stop() 호출 — recorder.state:', rec.state);
+          rec.stop();
+        }, Math.ceil(1000/FPS)+50);
+      },videoCache,null);
     }
   }
 }
@@ -21002,22 +21011,11 @@ function _shortsCreateTickerWorker(intervalMs){
 }
 function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgCache, onProgress, onDone, videoCache, videoTrack){
   console.log('[쇼츠 녹화 진단] runRenderLoop 시작 — totalFrames:', totalFrames, '| FPS:', FPS, '| slides:', slides.length);
-  // ⚠️⚠️⚠️ 버그 수정(진짜 원인 확정 — 실제 크로미움/Mozilla 버그 리포트로 교차 확인함,
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=1277476 등): 지금까지는 Web Worker 내부
-  // 타이머(setInterval)의 메시지 신호에 맞춰 tick()을 실행해서 그리기+requestFrame()을
-  // 호출했는데, 이 방식은 렌더링(총 22초)이 계속 정상적으로 진행되고 tick 로그도 프레임 0~666
-  // 까지 실시간으로 정확히 찍히는데도 MediaRecorder의 start/dataavailable/onstop 이벤트이
-  // 전부 rec.stop() 호출 시점 직전에야 한꺼번에 몰려서 발생하고, 최종 청크가 0개(0바이트)로
-  // 끝나는 문제가 있었음. 원인은 Worker의 postMessage는 브라우저의 "페인트/컴포지팅" 파이프
-  // 라인과 아무 관계가 없는 일반 매크로태스크라서, canvas.captureStream(0)+track.requestFrame()
-  // 로 "지금 이 프레임을 가져가라"고 신호를 보내도 실제로 브라우저가 그 프레임을 컴포지팅해서
-  // MediaRecorder 인코더로 넘기는 건 화면이 실제로 "페인트"되는 타이밍(requestAnimationFrame
-  // 콜백 직후)에만 확실히 일어난다는 것 — Worker 기반 루프는 22초 내내 이 페인트 타이밍을 한
-  // 번도 자연스럽게 만들어내지 못했고, 그래서 예약된 프레임 캡처 요청들이 전부 밀려 있다가
-  // 렌더 루프가 끝나 메인 스레드가 비로소 한가해지는 그 순간에야 브라우저가 뒤늦게 따라잡으려
-  // 했지만 이미 rec.stop()이 호출된 뒤라 아무 것도 못 건진 것. 이제 requestAnimationFrame으로
-  // 직접 루프를 돌려서, 그리기+requestFrame() 호출이 항상 실제 페인트 콜백 안에서 일어나게
-  // 바꿈 — Worker 타이머는 더 이상 프레임 캡처 타이밍에 쓰지 않는다.
+  // ⚠️⚠️⚠️⚠️ 버그 수정(네 번째 시도 — 위쪽 captureStream 설명 참고): 이제 자동 캡처
+  // (captureStream(FPS))로 되돌렸으므로 이 루프는 더 이상 track.requestFrame()을 수동으로
+  // 호출하지 않는다 — 그냥 매 프레임 캔버스에 그리기만 하면 브라우저가 알아서 FPS 주기로
+  // 캡처해간다. 대신 그리기 호출 자체는 계속 requestAnimationFrame 안에서 실행해서(자동
+  // 캡처가 컴포지팅 타이밍과 잘 맞물리도록) 메인 스레드가 프레임 사이사이 정상적으로 쉬게 함.
   var frame=0;
   var startTime=null;
   var stopped=false;
@@ -21040,10 +21038,7 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
     var t=frame/FPS;
     try{
       _shortsRenderFrame(ctx,W,H,t,slides,timeline,opts,imgCache,videoCache);
-      // ⚠️ requestAnimationFrame 콜백 "안에서" 그린 직후 바로 호출해야 브라우저가 이 프레임을
-      // 실제로 컴포지팅해서 MediaRecorder가 캡처함(위 설명 참고) — 콜백 밖(예: Worker 메시지
-      // 핸들러)에서 호출하면 캡처가 안 되고 0바이트로 끝남.
-      if(videoTrack) videoTrack.requestFrame(); // 방금 그린 프레임을 바로 캡처하도록 명시적으로 요청
+      // (자동 캡처 모드라 여기서 별도로 캡처를 요청할 필요가 없음 — videoTrack 인자는 더 이상 쓰지 않음)
     }catch(err){
       console.warn('[쇼츠 렌더] 프레임 '+frame+' 그리기 실패, 건너뜀:', err);
     }
