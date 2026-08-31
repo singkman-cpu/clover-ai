@@ -20687,14 +20687,22 @@ function _shortsGenerate(){
   }
   loadNext();
 
-  function startRender(){
-    // 렌더링 도중 인코더 스톨이 감지되면 여기에 기록해서, 완료 후 onstop에서 이 값을 보고
-    // "결과가 확실히 깨졌다"는 걸 알고 갤러리에 저장하지 않고 바로 실패로 처리할 수 있게 함.
+  function startRender(forceMimeType, attemptIdx){
+    attemptIdx = attemptIdx || 0;
+    // ⚠️⚠️⚠️⚠️⚠️⚠️ 버그 수정(여섯 번째 시도 — 방향을 바꿈): 지금까지 Worker/rAF 타이밍,
+    // 수동/자동 캡처 모드, AudioContext resume까지 전부 시도했는데도 "tick은 실시간 그대로
+    // 끝까지 진행되는데 MediaRecorder의 start/dataavailable/onstop이 rec.stop() 직전에만
+    // 몰려서 발생하고 청크 0개로 끝난다"는 동일한 증상이 매번 재현됨 — 이건 우리가 신호를
+    // 주는 "타이밍"의 문제가 아니라, 이 브라우저/기기에서 video/webm;codecs=vp9 하드웨어
+    // 인코더 세션 자체가 조용히 죽어있거나(하드웨어 가속 문제) 처음부터 제대로 못 붙는
+    // 경우라는 뜻으로 봐야 함(같은 패턴이 CPU 부하가 낮을 때도 재현되므로 성능 문제가 아님).
+    // 이제 첫 시도가 0바이트로 끝나면, 더 널리 지원되는(하드웨어 가속 의존도가 낮은) 다른
+    // 코덱으로 조용히 자동 재시도함 — 사용자가 "다시 만들기"를 누르지 않아도 됨.
     var _shortsEncoderStalled=false;
     var canvas=document.createElement('canvas');
     canvas.width=W;canvas.height=H;
     var ctx=canvas.getContext('2d');
-    console.log('[쇼츠 녹화 진단] 캔버스 생성 — W:', W, 'H:', H, 'FPS:', FPS);
+    console.log('[쇼츠 녹화 진단] 캔버스 생성 — W:', W, 'H:', H, 'FPS:', FPS, '| 시도:', (attemptIdx+1), forceMimeType?('| 강제 mimeType: '+forceMimeType):'');
 
     // 오디오 설정
     var audioCtx=null, bgmSource=null, dest=null;
@@ -20723,9 +20731,12 @@ function _shortsGenerate(){
       // 생성, 청크 수신, 종료)를 전부 콘솔에 명시적으로 남김 — 다음에 또 실패하면 정확히 어느
       // 단계에서 멈췄는지 콘솔 로그만 보고 바로 알 수 있음.
       console.log('[쇼츠 녹화 진단] beginRecord 시작 — stream:', stream, '| video tracks:', stream.getVideoTracks().map(function(t){return {label:t.label,readyState:t.readyState,enabled:t.enabled};}), '| audio tracks:', stream.getAudioTracks().length);
-      var mimeType='video/webm;codecs=vp9';
-      if(!MediaRecorder.isTypeSupported(mimeType)){
-        mimeType=MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':'video/webm';
+      var mimeType=forceMimeType;
+      if(!mimeType){
+        mimeType='video/webm;codecs=vp9';
+        if(!MediaRecorder.isTypeSupported(mimeType)){
+          mimeType=MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':'video/webm';
+        }
       }
       console.log('[쇼츠 녹화 진단] 선택된 mimeType:', mimeType, '| vp9 지원여부:', MediaRecorder.isTypeSupported('video/webm;codecs=vp9'));
       var chunks=[];
@@ -20748,6 +20759,29 @@ function _shortsGenerate(){
       };
       recorder.onstop=function(){
         console.log('[쇼츠 녹화 진단] onstop 발생 — 최종 청크 개수:', chunks.length, '| 청크 총 용량(bytes):', chunks.reduce(function(s,c){return s+c.size;},0));
+        // ⚠️ 0바이트로 끝났으면(이 mimeType/인코더가 이 기기에서 안 먹힌 것) 사용자에게 실패
+        // 화면을 보여주는 대신, 조용히 다른 코덱으로 처음부터 자동 재시도함. 최대 2번까지만
+        // (vp9 → vp8 → 기본 webm) 시도하고, 그래도 안 되면 그때는 진짜 실패로 안내함.
+        var _mimeFallbacks=['video/webm;codecs=vp8','video/webm'];
+        if(chunks.length===0 && attemptIdx < _mimeFallbacks.length){
+          var _nextMime=_mimeFallbacks[attemptIdx];
+          console.warn('[쇼츠 녹화 진단] 이번 시도(mimeType='+mimeType+')는 0바이트 — 다른 코덱으로 자동 재시도합니다:', _nextMime);
+          _shortsCleanupRenderGuards();
+          if(progTxt) progTxt.textContent='⚠️ 이 방식으로는 녹화가 안 돼서, 다른 방식으로 다시 시도할게요...';
+          if(progFill) progFill.style.width='0%';
+          setTimeout(function(){ startRender(_nextMime, attemptIdx+1); }, 300);
+          return;
+        }
+        if(chunks.length===0){
+          // 코덱을 다 바꿔봐도 전부 0바이트면, 이 기기/브라우저의 영상 인코더 자체가 문제일
+          // 가능성이 커서 더 재시도해도 소용없음 — 명확한 원인 안내와 함께 실패로 종료.
+          console.error('[쇼츠 녹화 진단] 모든 코덱(vp9/vp8/webm)에서 0바이트 — 이 기기/브라우저의 동영상 인코더에 문제가 있는 것으로 보임');
+          _shortsCleanupRenderGuards();
+          if(progTxt) progTxt.innerHTML='❌ 녹화에 계속 실패했어요. 이 브라우저/기기의 동영상 인코더 문제로 보여요.<br><span style="font-size:11px">크롬 주소창에 chrome://settings/system 을 입력해 "하드웨어 가속 사용"을 꺼보거나, 크롬을 최신 버전으로 업데이트한 뒤 다시 시도해주세요. (다른 기기·브라우저에서도 시도해보시면 원인 파악에 도움돼요)</span>';
+          if(progFill) progFill.style.width='0%';
+          if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
+          return;
+        }
         _shortsCleanupRenderGuards();
         var blob=new Blob(chunks,{type:mimeType});
         var url=URL.createObjectURL(blob);
