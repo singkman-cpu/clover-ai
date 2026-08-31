@@ -32688,7 +32688,7 @@ function openCommunityPanel(){
     hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">커뮤니티 기능을 지금은 사용할 수 없어요.</div>';
     return;
   }
-  _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname').eq('is_public',true).order('created_at',{ascending:false}).limit(60)
+  _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname,caption').eq('is_public',true).order('created_at',{ascending:false}).limit(60)
     .then(function(res){
       if(res.error){
         hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%;line-height:1.6">🌍 커뮤니티 갤러리를 아직 사용할 수 없어요.<br><span style="font-size:11px;opacity:.7">(관리자가 community_posts 테이블을 아직 설정하지 않았을 수 있어요)</span></div>';
@@ -32750,6 +32750,17 @@ function _renderCommunityGrid(posts){
     var grad=document.createElement('div');
     grad.style.cssText='position:absolute;left:0;right:0;bottom:0;height:40%;background:linear-gradient(transparent,rgba(0,0,0,.6));pointer-events:none';
     card.appendChild(grad);
+    // ⚠️ 요청 반영("무슨 건물인지·무슨 인테리어인지 간단히 적을 수 있게 해달라"): 공개자가 남긴
+    // 짧은 설명 문구가 있으면 카드 위쪽에 표시(2줄까지, 넘치면 ...).
+    if(p.caption){
+      var capGrad=document.createElement('div');
+      capGrad.style.cssText='position:absolute;left:0;right:0;top:0;height:46%;background:linear-gradient(rgba(0,0,0,.65),transparent);pointer-events:none';
+      card.appendChild(capGrad);
+      var capTag=document.createElement('div');
+      capTag.style.cssText='position:absolute;top:8px;left:8px;right:8px;color:#fff;font-size:11px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,.6);z-index:5';
+      capTag.textContent=p.caption;
+      card.appendChild(capTag);
+    }
     // 공개자가 직접 체크해서 닉네임을 공개한 경우에만 표시 — 기본은 아무 표시도 안 함(익명)
     if(p.show_nickname && p.nickname){
       var nickTag=document.createElement('div');
@@ -32852,7 +32863,7 @@ function openMyCommunityPostsPanel(){
   hs.style.display='flex';
   window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
   hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오는 중...</div>';
-  _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname').eq('user_id',_supaUser.id).order('created_at',{ascending:false}).limit(200)
+  _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname,caption').eq('user_id',_supaUser.id).order('created_at',{ascending:false}).limit(200)
     .then(function(res){
       if(res.error){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오지 못했어요.</div>'; return; }
       _renderMyCommunityGrid(res.data||[]);
@@ -32948,6 +32959,33 @@ function _renderMyCommunityGrid(posts){
     var grad=document.createElement('div');
     grad.style.cssText='position:absolute;left:0;right:0;bottom:0;height:40%;background:linear-gradient(transparent,rgba(0,0,0,.6));pointer-events:none';
     card.appendChild(grad);
+    // ⚠️ 요청 반영("무슨 건물인지·무슨 인테리어인지 간단히 적을 수 있게 해달라"): 내 공개 작품
+    // 관리 화면에서 각 작품에 짧은 설명 문구를 달거나 수정할 수 있는 ✏️ 버튼.
+    var capGrad=document.createElement('div');
+    capGrad.style.cssText='position:absolute;left:0;right:0;top:0;height:50%;background:linear-gradient(rgba(0,0,0,.6),transparent);pointer-events:none';
+    card.appendChild(capGrad);
+    var capTag=document.createElement('div');
+    capTag.style.cssText='position:absolute;top:6px;left:6px;right:26px;color:#fff;font-size:10.5px;font-weight:600;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,.6);z-index:5';
+    capTag.textContent = p.caption || '문구 없음';
+    capTag.style.opacity = p.caption ? '1' : '.55';
+    card.appendChild(capTag);
+    var capEditBtn=document.createElement('button');
+    capEditBtn.type='button';capEditBtn.textContent='✏️';
+    capEditBtn.title='설명 문구 추가/수정';
+    capEditBtn.style.cssText='position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.55);color:#fff;font-size:10px;cursor:pointer;z-index:6;display:flex;align-items:center;justify-content:center;padding:0';
+    capEditBtn.onclick=function(e){
+      e.stopPropagation();
+      var next=prompt('이 작품이 어떤 공간/건물인지 간단히 적어주세요 (예: "강원도 목조주택 거실", "카페 인테리어" — 비워두면 삭제)', p.caption||'');
+      if(next==null) return; // 취소
+      next=next.trim().slice(0,80);
+      _supa.from('community_posts').update({caption: next||null}).eq('id',p.id).eq('user_id',_supaUser.id).then(function(res){
+        if(res.error){ alert('문구 저장에 실패했어요: '+res.error.message); return; }
+        p.caption=next||null;
+        capTag.textContent = p.caption || '문구 없음';
+        capTag.style.opacity = p.caption ? '1' : '.55';
+      }).catch(function(err){ alert('오류가 발생했어요: '+err.message); });
+    };
+    card.appendChild(capEditBtn);
     var badge=document.createElement('div');
     badge.style.cssText='position:absolute;bottom:6px;left:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;font-weight:700;padding:3px 7px;border-radius:20px;max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
     badge.textContent = (p.show_nickname && p.nickname) ? ('👤 '+p.nickname) : '🙈 익명';
