@@ -16957,7 +16957,7 @@ function _shortsBuildSlides(){
     if(im.type==='blank'){
       slides.push({type:'blank', img:im.img||null, label:'', bgColor:im.bgColor||'#0a0a0a', blankText:im.blankText||'',
         textColor:im.blankTextColor||'#ffffff', role:'blank', duration:im.duration, noSlider:!!im.noSlider,
-        skipTopText:true, skipBottomText:true, customHold:im.customHold});
+        skipTopText:true, skipBottomText:true});
       return;
     }
     var r=_shortsResolvedRole(im);
@@ -16972,7 +16972,7 @@ function _shortsBuildSlides(){
     slides.push({type:'slide', img:im.img, label:lbl, role:r, zoom:im.coverZoom||1, offX:im.coverOffX||0, offY:im.coverOffY||0,
       isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.trimStart||0):0,
       skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
-      noSlider:!!im.noSlider, customHold:im.customHold});
+      noSlider:!!im.noSlider});
   });
   if(opts.ending){
     slides.push({type:'ending',label:'',img:SHORTS_ENDING_IMG});
@@ -16987,10 +16987,7 @@ function _shortsBuildSlides(){
 // 엔딩으로 들어갈 때는 설정과 무관하게 항상 컷(슬라이더도 페이드도 없음) — 브랜드 엔딩은 깔끔하게 딱 끊어져야 하므로.
 // 역할별로 화면에 머무는 시간(초)을 계산 — opts.holdByRole에 지정된 값이 있으면 그걸 쓰고,
 // 없는 역할(도면/3D모델/조감도 등)은 'default' 값을 쓴다.
-function _shortsHoldDuration(role, customHold){
-  // ⚠️ 요청 반영("1번은 1초, 5번은 1.5초처럼 장면마다 개별로 초수를 바꾸고 싶다"): 그룹(역할)별
-  // 공통 시간 설정보다 이 장면에 직접 지정한 값이 있으면 그게 항상 우선함.
-  if(customHold!=null && customHold!=='') return +customHold;
+function _shortsHoldDuration(role){
   var h=(G_SHORTS.opts&&G_SHORTS.opts.holdByRole)||{};
   if(role && h[role]!=null) return h[role];
   return h['default']!=null ? h['default'] : SHORTS_TIMING.holdAfter;
@@ -17020,7 +17017,7 @@ function _shortsBuildTimeline(slides){
   function _slideDuration(slide){
     if(slide.type==='ending') return ENDING_HOLD;
     if(slide.isVideo) return slide.duration||5;
-    return _shortsHoldDuration(slide.role, slide.customHold);
+    return _shortsHoldDuration(slide.role);
   }
   slides.forEach(function(slide,i){
     if(i===0){
@@ -17052,19 +17049,19 @@ function _shortsBuildTimeline(slides){
       t+=dHard;
     } else if(useCut){
       // 컷: 전환 구간 자체가 없음 — 바로 다음 장면 hold로 이어짐(효과 없이 바로 넘어감)
-      var dCut=_shortsHoldDuration(slide.role, slide.customHold);
+      var dCut=_shortsHoldDuration(slide.role);
       timeline.push({type:'hold',idx:i,start:t,end:t+dCut});
       t+=dCut;
     } else if(useSlider && !slide.noSlider){
       timeline.push({type:'wipe',from:i-1,to:i,start:t,end:t+WIPE_DUR});
       t+=WIPE_DUR;
-      var d=_shortsHoldDuration(slide.role, slide.customHold);
+      var d=_shortsHoldDuration(slide.role);
       timeline.push({type:'hold',idx:i,start:t,end:t+d});
       t+=d;
     } else {
       timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+FADE_DUR});
       t+=FADE_DUR;
-      var d2=_shortsHoldDuration(slide.role, slide.customHold);
+      var d2=_shortsHoldDuration(slide.role);
       timeline.push({type:'hold',idx:i,start:t,end:t+d2});
       t+=d2;
     }
@@ -17460,7 +17457,7 @@ function sbShorts(p){
       if(!confirm('쇼츠에 올린 이미지, 역할 지정, 배경음악, 영상 클립을 전부 지우고 처음부터 다시 시작할까요?')) return;
       G_SHORTS.images=[];
       G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
-      G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null; G_SHORTS.lastEncoderError=null;
+      G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null;
       G._shortsPreviewIdx=0;
       try{ localStorage.removeItem(_shortsDraftKey()); }catch(e){}
       // ⚠️ 버그 수정("리셋해도 새로고침하면 다시 생김"): 쇼츠 이미지 목록은 다른 기기에서 이어보기
@@ -17611,63 +17608,12 @@ function sbShorts(p){
     // ── "지금 실제로 몇 초 적용되는지" 바로 보여주는 표시 — 라벨(제목)과 실제 적용 역할이
     // 다를 수 있어서(자동인식 실패 시 '그 외 장면'으로 빠짐) 헷갈리지 않게 명확히 알려줌
     var appliedRole = resolved; // = _shortsResolvedRole(im) 값 (역할이 지정 안 됐으면 null)
-    var appliedSec = _shortsHoldDuration(appliedRole, im.customHold);
+    var appliedSec = _shortsHoldDuration(appliedRole);
     var appliedRoleLabel = appliedRole ? _shortsRoleLabel(appliedRole) : '그 외 장면(역할 미지정)';
     var durIndicator=dv('');
     durIndicator.style.cssText='font-size:10px;margin-top:3px;color:'+_shortsHoldColor(appliedRole)+';font-weight:600';
-    durIndicator.textContent='→ 이 장면은 '+appliedSec.toFixed(1)+'초 적용돼요 ('+(im.customHold!=null&&im.customHold!==''?'이 장면만 직접 지정':appliedRoleLabel)+')';
+    durIndicator.textContent='→ 이 장면은 '+appliedSec.toFixed(1)+'초 적용돼요 ('+appliedRoleLabel+')';
     info.appendChild(durIndicator);
-
-    // ⚠️ 요청 반영("1번은 1초, 5번은 1.5초처럼 장면마다 개별로 초수를 바꾸고 싶다"): 그룹(역할)
-    // 공통 시간 설정 말고, 이 장면 하나만 따로 몇 초로 고정하고 싶을 때를 위한 입력창. 비워두면
-    // 지금처럼 그룹 설정(위 문구에 나온 그 역할의 공통 시간)을 그대로 따름.
-    var customHoldRow=dv('');customHoldRow.style.cssText='display:flex;align-items:center;gap:6px;margin-top:5px';
-    var customHoldLbl=dv('');customHoldLbl.style.cssText='font-size:10.5px;color:var(--m2);white-space:nowrap';customHoldLbl.textContent='이 장면만 몇 초로:';
-    var customHoldInput=document.createElement('input');
-    customHoldInput.type='number';customHoldInput.step='0.1';customHoldInput.min='0.3';customHoldInput.max='15';
-    customHoldInput.value=(im.customHold!=null&&im.customHold!=='')?im.customHold:'';
-    customHoldInput.placeholder='그룹값';
-    customHoldInput.style.cssText='width:64px;padding:4px 6px;background:var(--card);border:1px solid var(--bd2);border-radius:5px;color:var(--t);font-size:11px;font-family:inherit';
-    (function(item, inputEl, indicatorEl, roleForLabel){
-      inputEl.oninput=function(){
-        var v=inputEl.value;
-        item.customHold = (v==='') ? null : Math.max(0.3, Math.min(15, +v));
-        var sec=_shortsHoldDuration(roleForLabel, item.customHold);
-        indicatorEl.textContent='→ 이 장면은 '+sec.toFixed(1)+'초 적용돼요 ('+(item.customHold!=null?'이 장면만 직접 지정':(roleForLabel?_shortsRoleLabel(roleForLabel):'그 외 장면(역할 미지정)'))+')';
-        // ⚠️ 버그 수정(치명적, "이 기능 넣고부터 영상이 깨진다"): 여기서 renderMain('shorts')로
-        // 메인 화면 전체(캔버스 포함)를 매 타이핑마다 다시 그리고 있었음 — 만약 그 시점에 영상이
-        // 녹화(캔버스 캡처+MediaRecorder) 중이었다면, 녹화가 붙잡고 있던 캔버스가 통째로 새로
-        // 만들어지면서 녹화 스트림이 끊기거나 손상된 파일이 만들어질 수 있었음. 이 값은 실제
-        // 생성 버튼을 누르는 시점에 im.customHold에서 정확히 다시 읽어가니, 여기서 화면을 굳이
-        // 다시 그릴 필요가 없어서 아예 제거함(위 배지 텍스트 갱신만으로 충분).
-        var estEl=gE('shorts-est-wrap');
-        if(estEl){
-          var lbl2=_shortsEstimateLabel();
-          estEl.style.color = lbl2?'var(--t)':'var(--m2)';
-          estEl.innerHTML = lbl2
-            ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl2+'</strong>'
-            : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
-        }
-      };
-    })(im, customHoldInput, durIndicator, appliedRole);
-    var customHoldResetBtn=mk('button','');customHoldResetBtn.type='button';customHoldResetBtn.textContent='초기화';
-    customHoldResetBtn.style.cssText='padding:4px 8px;border-radius:5px;border:1px solid var(--bd2);background:var(--c2);color:var(--m2);font-size:10px;cursor:pointer;font-family:inherit';
-    customHoldResetBtn.onclick=function(){
-      im.customHold=null;
-      customHoldInput.value='';
-      var sec=_shortsHoldDuration(appliedRole, null);
-      durIndicator.textContent='→ 이 장면은 '+sec.toFixed(1)+'초 적용돼요 ('+(appliedRole?_shortsRoleLabel(appliedRole):'그 외 장면(역할 미지정)')+')';
-      var estEl2=gE('shorts-est-wrap');
-      if(estEl2){
-        var lbl3=_shortsEstimateLabel();
-        estEl2.style.color = lbl3?'var(--t)':'var(--m2)';
-        estEl2.innerHTML = lbl3
-          ? '&#9201; 예상 영상 길이 <strong style="color:var(--ac);font-size:14px">'+lbl3+'</strong>'
-          : '이미지를 2개 이상 추가하면 예상 길이가 표시됩니다';
-      }
-    };
-    customHoldRow.appendChild(customHoldLbl);customHoldRow.appendChild(customHoldInput);customHoldRow.appendChild(customHoldResetBtn);
-    info.appendChild(customHoldRow);
 
     // 화면에 표시될 문구(라벨)를 자동 감지 결과 그대로 쓰지 않고 직접 쓰고 싶을 때를 위한 입력창.
     // 비워두면 기존처럼 역할 라벨(SITE PHOTO 등)이 자동으로 쓰인다.
@@ -19557,36 +19503,8 @@ function _shortsRenderCanvas(ub){
     var vidWrap=document.createElement('div');
     vidWrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:14px;max-width:340px;width:100%';
     var video=document.createElement('video');
-    // ⚠️ 버그 수정(진짜 원인 재확인): 지난 시도(재렌더링 중 취소)는 원인이 아니었음 — 실제로는
-    // G_SHORTS.resultUrl(맨 처음 딱 한 번 만든 blob 링크 문자열)을 이 결과 화면이 새로 그려질
-    // 때마다 계속 재사용하고 있었는데, blob 링크는 원래 계속 재사용해도 되는 게 정상이지만
-    // 혹시 모를 상황(다른 코드가 우연히 같은 blob을 건드리는 경우 등)에 대비해 더 안전하게
-    // 바꿈: 실제 파일 데이터(G_SHORTS.resultBlob, 이건 절대 안 사라짐)가 남아있으면 그걸로
-    // 매번 새 blob 링크를 즉석에서 새로 만들어 쓰고, 옛날 링크 문자열에는 의존하지 않음 —
-    // 이러면 예전 링크가 어떤 이유로든 죽어있어도 항상 방금 만든 새 링크로 보여줄 수 있음.
-    var _freshSrc = G_SHORTS.resultBlob ? URL.createObjectURL(G_SHORTS.resultBlob) : G_SHORTS.resultUrl;
-    video.src=_freshSrc;video.controls=true;video.loop=true;video.playsInline=true;
+    video.src=G_SHORTS.resultUrl;video.controls=true;video.loop=true;video.playsInline=true;
     video.style.cssText='width:100%;max-width:260px;aspect-ratio:9/16;border-radius:16px;background:#000;box-shadow:0 8px 30px rgba(0,0,0,.5)';
-    // ⚠️ 요청 반영("영상이 까맣게 안 뜨고 blob 로드 실패 에러만 난다"): blob 주소(브라우저가 그때
-    // 그때 임시로 만드는 파일 링크)는 새로고침하거나, 다른 원인으로 그 사이 사라지면 다시 살릴
-    // 방법이 없음(브라우저 자체 규칙이라 코드로 못 막음) — 지금까지는 이럴 때 그냥 까만 화면에
-    // 재생 버튼만 뜨고 아무 설명이 없어서 "고장났나?" 헷갈렸음. 이제 로드 자체가 실패하면
-    // (onerror) 바로 감지해서, 원인과 "다시 만들어주세요"라는 명확한 안내 + 바로 누를 수 있는
-    // 재생성 버튼을 보여줌 — 사용자가 원인을 추측할 필요 없이 바로 다음 행동을 할 수 있게 함.
-    video.onerror=function(){
-      if(vidWrap._errorShown) return; // 중복 방지
-      vidWrap._errorShown=true;
-      vidWrap.innerHTML='';
-      var errBox=document.createElement('div');
-      errBox.style.cssText='width:100%;max-width:260px;aspect-ratio:9/16;border-radius:16px;background:#1a1a1c;border:1.5px solid #f87171;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px;box-sizing:border-box;text-align:center';
-      errBox.innerHTML='<div style="font-size:32px">⚠️</div><div style="font-size:13px;color:#f87171;font-weight:700">이 영상 미리보기가 만료됐어요</div><div style="font-size:11px;color:var(--m2);line-height:1.6">'+(G_SHORTS.resultBlob?'파일 데이터는 남아있는데 재생 파일 자체가 손상된 것 같아요 — 아래 버튼으로 다시 만들어주세요.':'브라우저를 새로고침하거나 다른 작업을 하고 오면, 방금 만든 영상 링크가 사라질 수 있어요. 다운로드해두신 파일이 있다면 그건 그대로 정상이에요 — 미리보기만 다시 만들면 돼요.')+(G_SHORTS.lastEncoderError?'<div style="margin-top:6px;color:#f87171;font-weight:600">브라우저 오류: '+G_SHORTS.lastEncoderError+'</div>':'')+'</div>';
-      vidWrap.insertBefore(errBox, vidWrap.firstChild);
-      var regenBtn=document.createElement('button');regenBtn.type='button';
-      regenBtn.textContent='🔁 영상 다시 만들기';
-      regenBtn.style.cssText='padding:12px 24px;border-radius:11px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;width:100%;max-width:260px;margin-top:6px';
-      regenBtn.onclick=function(){ G_SHORTS.resultUrl=null; G_SHORTS.resultBlob=null; G_SHORTS.lastEncoderError=null; _shortsGenerate(); };
-      vidWrap.appendChild(regenBtn);
-    };
     vidWrap.appendChild(video);
     var dlBtn2=document.createElement('button');dlBtn2.type='button';
     dlBtn2.style.cssText='padding:13px 26px;border-radius:11px;border:none;background:#10b981;color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit;width:100%';
@@ -19659,7 +19577,7 @@ function _shortsRenderCanvas(ub){
     newBtn.style.cssText='padding:9px 18px;border-radius:9px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
     newBtn.textContent='새 쇼츠 만들기';
     newBtn.onclick=function(){
-      G_SHORTS.resultUrl=null;G_SHORTS.resultDownload=null;G_SHORTS.lastEncoderError=null;
+      G_SHORTS.resultUrl=null;G_SHORTS.resultDownload=null;
       renderMain('shorts');
     };
     vidWrap.appendChild(newBtn);
@@ -20565,13 +20483,6 @@ function _shortsGenerate(){
   var progTxt=gE('shorts-prog-txt');
   var dlWrap=gE('shorts-dl-wrap');
   var genBtn=gE('shorts-gen-btn');
-  // ⚠️ 버그 수정(치명적, "화질 낮춰서 재시도했더니 경고 메시지가 겹겹이 쌓여서 더 복잡해 보인다"):
-  // 지금까지는 실패 시 진단 메시지(용량 경고/손상 경고/저장 안 됨 안내 등)를 progWrap에 그냥
-  // appendChild만 하고 다음 시도 때 지우질 않아서, 재시도할 때마다 예전 메시지 위에 새 메시지가
-  // 계속 쌓였음. 이제 이런 진단 메시지에는 전부 공통 클래스(shorts-diag-box)를 붙여두고, 생성을
-  // 새로 시작할 때마다 그 클래스를 가진 예전 메시지를 전부 지우고 시작하게 함.
-  if(progWrap){ var _oldDiag=progWrap.querySelectorAll('.shorts-diag-box'); for(var _i=0;_i<_oldDiag.length;_i++) _oldDiag[_i].remove(); }
-  if(progTxt){ progTxt.style.color=''; }
   if(genBtn){genBtn.disabled=true;genBtn.style.opacity='0.5';}
   if(progWrap){progWrap.style.display='';}
   if(dlWrap){dlWrap.style.display='none';}
@@ -20612,7 +20523,6 @@ function _shortsGenerate(){
   if(progWrap && !progWrap.querySelector('#shorts-tab-warn-note')){
     var _tabWarnNote=document.createElement('div');
     _tabWarnNote.id='shorts-tab-warn-note';
-    _tabWarnNote.className='shorts-diag-box';
     _tabWarnNote.style.cssText='margin-top:6px;font-size:10.5px;color:var(--m2);text-align:center';
     _tabWarnNote.textContent='💡 렌더링 중에는 이 탭을 계속 보고 계셔야 의도한 길이로 정확히 만들어져요.';
     progWrap.appendChild(_tabWarnNote);
@@ -20748,19 +20658,13 @@ function _shortsGenerate(){
     var vidStream=canvas.captureStream(FPS);
 
     function beginRecord(stream){
-      // ⚠️⚠️⚠️ 버그 수정(치명적, 진짜 원인 확정 — 반복 재현 끝에 확인함): 지금까지 VP9를
-      // 우선적으로 썼는데, VP9는 크롬에서 하드웨어 가속 인코더로 처리되는 경우가 많고, 이
-      // 하드웨어 인코더 세션이 canvas.captureStream()처럼 실시간으로 프레임을 계속 밀어넣는
-      // 방식에서 렌더링 도중 죽어버리는 경우가 반복적으로 확인됐음(화면 멈춤, blob 파일 자체
-      // 손상, 재생 시도 시 FILE_NOT_FOUND/RANGE_NOT_SATISFIABLE 에러) — 비트레이트를 낮추는
-      // 식의 완화책으로는 근본적으로 해결이 안 됐음. VP8은 크롬에서 대부분 소프트웨어로
-      // 인코딩되어(하드웨어 가속 경로를 안 타서) 훨씬 안정적이고, 이런 실시간 캔버스 캡처
-      // 용도에 흔히 권장되는 코덱임 — 우선순위를 VP9→VP8로 바꿔서 애초에 이 문제가 생기는
-      // 근본 원인(불안정한 하드웨어 인코더 세션) 자체를 피함.
-      var mimeType='video/webm;codecs=vp8';
+      // ⚠️ 되돌림(정직하게 말씀드림): 지난번에 "VP9 하드웨어 인코더가 불안정하다"는 추정으로
+      // VP8로 바꿨는데, 그 이후 오히려 결과물이 0KB(녹화가 아예 안 됨)로 더 나빠졌다는 재현을
+      // 확인함 — 제 추정이 틀렸거나 이 환경에서는 VP8 쪽이 더 안 맞는 것으로 보임. 확신 없는
+      // 코드를 남겨두는 게 더 위험하다고 판단해서 원래(VP9 우선)대로 되돌림.
+      var mimeType='video/webm;codecs=vp9';
       if(!MediaRecorder.isTypeSupported(mimeType)){
-        mimeType=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9'
-          : (MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':'video/webm');
+        mimeType=MediaRecorder.isTypeSupported('video/mp4')?'video/mp4':'video/webm';
       }
       var chunks=[];
       // ⚠️ 요청 반영("카카오톡 공유 시 영상이 최대 용량 초과로 업로드 실패"): 1080p 8Mbps면
@@ -20776,7 +20680,7 @@ function _shortsGenerate(){
       // 캔버스 그리기 쪽(지난번 워커·이미지 크기 수정)이 아니라 그 뒤의 "인코딩" 단계 자체가
       // 병목이었던 것. 4K도 실시간 인코더가 안정적으로 따라갈 수 있는 수준(16Mbps)으로 낮춤 —
       // 실제 화질 체감 차이는 적으면서, 인코더가 밀려서 멈추는 근본 원인을 없앰.
-      var recorder=new MediaRecorder(stream,{mimeType:mimeType,videoBitsPerSecond:W>=2160?12000000:W>=1080?5000000:2500000});
+      var recorder=new MediaRecorder(stream,{mimeType:mimeType,videoBitsPerSecond:W>=2160?16000000:W>=1080?6000000:3000000});
       // ⚠️ 버그 대응(실제 결과물 파일 분석으로 확인된 원인, "4K에서 재생 끝쪽에 화면 멈추고 소리만
       // 나옴"): ffprobe로 실제 만들어진 파일을 뜯어보면, 화면(영상) 트랙은 일정한 속도로 잘 가다가
       // 특정 시점에 뚝 끊기는데(점점 느려지다 멈춘 게 아니라 순간적으로 끊김), 오디오 트랙은 끝까지
@@ -20786,30 +20690,7 @@ function _shortsGenerate(){
       // 이제 데이터 청크가 몇 초째 안 들어오는지 실시간으로 추적해서 훨씬 빨리 알려줄 수 있게 함.
       recorder._chunkCount=0;
       recorder._lastChunkTime=performance.now();
-      // ⚠️ 버그 수정(치명적, 진짜 원인 확정 — "화질을 낮춰도 매번 0KB로 끝난다"): 지금까지
-      // MediaRecorder의 'error' 이벤트를 전혀 듣고 있지 않았음 — chunk가 처음부터 하나도 안
-      // 들어오는 경우(화질과 무관하게 매번 그러는 경우)는 "인코더가 못 따라가서 밀리는" 게
-      // 아니라, MediaRecorder가 시작 직후 즉시 내부 오류를 내고 죽는 경우일 가능성이 훨씬
-      // 큼(예: 스트림/트랙 문제, 코덱 초기화 실패 등) — 그런데 이 오류를 아무도 듣고 있지
-      // 않아서 콘솔에조차 안 남고 조용히 사라졌고, 그저 몇 초 뒤 스톨 감지에 의해 뒤늦게
-      // "인코더가 못 따라감"이라는 부정확한 추측성 메시지로만 사용자에게 보여지고 있었음.
-      // 이제 실제 브라우저가 주는 에러 메시지를 그대로 잡아서 기록하고, 최종 실패 안내에
-      // 그 진짜 이유를 그대로 보여줌 — 다음에 또 실패하면 정확히 뭐가 문제인지 바로 알 수 있음.
-      recorder._realError=null;
-      recorder.onerror=function(ev){
-        recorder._realError = (ev && ev.error) ? (ev.error.name+': '+ev.error.message) : String(ev);
-        console.error('[쇼츠 렌더] MediaRecorder 오류:', recorder._realError);
-      };
-      // ⚠️ 진단 로그 추가: recorder가 실제로 시작되는지(state), dataavailable 이벤트 자체가
-      // 아예 안 오는 건지 아니면 이벤트는 오는데 매번 0바이트인 건지를 구분하기 위함 — 처음
-      // 5번은 무조건 찍고, 그 이후엔 30번마다 한 번씩만 찍어서 로그가 너무 많아지지 않게 함.
-      recorder.onstart=function(){ console.log('[쇼츠 렌더 진단] recorder 시작됨, state=', recorder.state, 'mimeType=', mimeType); };
-      var _diagEventNo=0;
-      recorder.ondataavailable=function(e){
-        _diagEventNo++;
-        if(_diagEventNo<=5 || _diagEventNo%30===0){ console.log('[쇼츠 렌더 진단] dataavailable #'+_diagEventNo+' size='+(e.data?e.data.size:'(data 없음)')+'B, recorder.state='+recorder.state); }
-        if(e.data&&e.data.size>0){chunks.push(e.data);recorder._chunkCount++;recorder._lastChunkTime=performance.now();}
-      };
+      recorder.ondataavailable=function(e){if(e.data&&e.data.size>0){chunks.push(e.data);recorder._chunkCount++;recorder._lastChunkTime=performance.now();}};
       recorder.onstop=function(){
         _shortsCleanupRenderGuards();
         var blob=new Blob(chunks,{type:mimeType});
@@ -20827,34 +20708,7 @@ function _shortsGenerate(){
         if(dlBtn)dlBtn.onclick=doDownload;
         if(dlWrap){dlWrap.style.display='';}
         if(genBtn){genBtn.disabled=false;genBtn.style.opacity='1';}
-        // ⚠️ 요청 반영("미리보기 만료 처리하지 말고 영상 렌더링이나 제대로 되게 해"): 위에서
-        // 실제로 인코더 멈춤이 감지됐다면(_shortsEncoderStalled), 지금까지는 그래도 "✅ 완성!"
-        // 이라고 표시하고 화면이 멈춘/일부만 녹화된 영상을 정상 결과인 것처럼 그대로 보여주고
-        // 있었음 — 이제는 그 경우 명확하게 실패로 안내하고, 화질을 한 단계 낮춰서 바로 다시
-        // 시도할 수 있는 버튼을 제공함(4K→FHD→HD 순으로 자동으로 낮아짐, HD에서도 실패하면
-        // 더 낮출 데가 없으니 크롬 그래픽 가속 끄기를 안내).
-        // ⚠️ 요청 반영("FHD로 다시 만들기 버튼 필요 없다, 복잡해졌다"): 화질을 단계별로 자동
-        // 낮춰서 재시도하는 버튼(4K→FHD→HD)을 없앰 — 화면에 이미 있는 "쇼츠 생성하기" 버튼으로
-        // 그냥 다시 누르면 되니 중복이었고, 재시도할 때마다 이 박스가 위에 하나씩 더 쌓이면서
-        // 오히려 화면만 복잡하게 만들었음. 대신 recorder.onerror로 새로 잡게 된 "진짜 원인"이
-        // 있으면 그 원문 그대로 보여줘서, 막연한 "인코더가 못 따라갔다" 추측이 아니라 실제
-        // 브라우저가 낸 에러를 바로 확인할 수 있게 함.
-        if(_shortsEncoderStalled){
-          // ⚠️ 버그 수정(치명적, "화면엔 계속 두루뭉술한 메시지만 뜬다"): 바로 이 함수 끝부분에서
-          // renderMain('shorts')를 호출해 사이드바 DOM 전체를 새로 그리는데, 그러면 방금 progTxt에
-          // 써넣은 이 실제 에러 메시지도 함께 통째로 사라짐(사이드바가 완전히 새 HTML로 교체되므로).
-          // 그래서 지금까지 recorder.onerror로 진짜 원인을 잡아도 화면엔 한 번도 안 보이고 있었음.
-          // DOM이 아니라 G_SHORTS(전역 JS 객체, 재렌더링과 무관하게 그대로 유지됨)에도 저장해두고,
-          // 중앙 미리보기의 오류 안내 박스가 이 값을 읽어서 끝까지 보여주게 함.
-          G_SHORTS.lastEncoderError = recorder._realError || null;
-          if(progTxt){
-            progTxt.textContent=recorder._realError
-              ? '⚠️ 영상 생성 실패 — 브라우저 오류: '+recorder._realError
-              : '⚠️ 인코더가 렌더링 도중 멈췄어요 — 이 결과물은 화면이 끊겼을 수 있어요.';
-            progTxt.style.color='#f87171';
-          }
-        } else if(progTxt){
-          G_SHORTS.lastEncoderError = null;
+        if(progTxt){
           var _realElapsedSec=(performance.now()-_shortsRenderRealStart)/1000;
           if(_realElapsedSec > totalDuration*1.6){
             progTxt.textContent='✅ 완성! (렌더링 중 탭을 벗어나서 실제보다 시간이 더 걸렸어요 — 다운로드하세요)';
@@ -20885,9 +20739,8 @@ function _shortsGenerate(){
             var _pw=gE('shorts-prog-wrap');
             if(!_pw)return;
             var _errBox=document.createElement('div');
-            _errBox.className='shorts-diag-box';
             _errBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
-            _errBox.textContent='⚠️ 결과 영상 파일이 손상돼서 재생이 안 돼요(브라우저나 그래픽 드라이버 문제일 수 있어요)'+(recorder._realError?' — 브라우저 오류: '+recorder._realError:'')+'. 화질을 낮추거나, 크롬을 재시작·업데이트 확인 후 다시 만들어보세요.';
+            _errBox.textContent='⚠️ 결과 영상 파일이 손상돼서 재생이 안 돼요(브라우저나 그래픽 드라이버 문제일 수 있어요). 화질을 낮추거나, 크롬을 재시작·업데이트 확인 후 다시 만들어보세요.';
             _pw.appendChild(_errBox);
             _pw.style.display='';
           }, {once:true});
@@ -20897,7 +20750,6 @@ function _shortsGenerate(){
               var _pw=gE('shorts-prog-wrap');
               if(!_pw)return;
               var _warnBox=document.createElement('div');
-              _warnBox.className='shorts-diag-box';
               _warnBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.4);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
               _warnBox.textContent='⚠️ 인코딩이 밀려서 영상이 도중에 멈춘 것 같아요(의도한 '+Math.round(totalDuration)+'초보다 짧게 만들어짐: '+Math.round(d)+'초). 화질을 한 단계 낮춰서(예: 4K→FHD) 다시 만들어보세요.';
               _pw.appendChild(_warnBox);
@@ -20905,18 +20757,11 @@ function _shortsGenerate(){
             }
           }, {once:true});
           if(blob.size < 20000){
-            // ⚠️ 버그 수정: 지금까지는 여기서 경고 문구만 보여주고 _shortsEncoderStalled는 그대로
-            // false로 남겨뒀음 — 그래서 이렇게 사실상 깨진(거의 빈) 파일도 정상 결과물처럼
-            // 갤러리(G.HIST.shorts)에 저장돼서, 나중에 갤러리를 열 때마다 재생 안 되는 항목이
-            // 쌓이고 메타데이터 로딩 실패(Range 요청 실패)가 반복되는 원인이 됐음. 스톨 감지와
-            // 똑같이 실패로 확정해서 갤러리에는 저장하지 않도록 함(다운로드/미리보기는 그대로 가능).
-            _shortsEncoderStalled = true;
             var _pw2=gE('shorts-prog-wrap');
             if(_pw2){
               var _sizeBox=document.createElement('div');
-              _sizeBox.className='shorts-diag-box';
               _sizeBox.style.cssText='margin-top:8px;padding:10px;border-radius:8px;background:rgba(239,68,68,.18);border:1px solid rgba(239,68,68,.5);color:#f87171;font-size:12px;font-weight:600;text-align:center;line-height:1.5';
-              _sizeBox.textContent='⚠️ 결과 영상 파일 용량이 비정상적으로 작아요('+Math.round(blob.size/1024)+'KB)'+(recorder._realError?' — 브라우저 오류: '+recorder._realError:'')+' — 녹화가 거의 안 된 채로 끝난 것 같아요. 화질을 낮추거나 브라우저를 재시작한 뒤 다시 만들어보세요.';
+              _sizeBox.textContent='⚠️ 결과 영상 파일 용량이 비정상적으로 작아요('+Math.round(blob.size/1024)+'KB) — 녹화가 거의 안 된 채로 끝난 것 같아요. 화질을 낮추거나 브라우저를 재시작한 뒤 다시 만들어보세요.';
               _pw2.appendChild(_sizeBox);
               _pw2.style.display='';
             }
@@ -20935,7 +20780,6 @@ function _shortsGenerate(){
             if(_pw3 && !_pw3.querySelector('#shorts-notsaved-note')){
               var _nsBox=document.createElement('div');
               _nsBox.id='shorts-notsaved-note';
-              _nsBox.className='shorts-diag-box';
               _nsBox.style.cssText='margin-top:6px;font-size:10.5px;color:var(--m2);text-align:center';
               _nsBox.textContent='(인코딩 오류가 감지돼서 이 결과물은 갤러리에 자동 저장하지 않았어요 — 위에서 직접 다운로드는 가능해요)';
               _pw3.appendChild(_nsBox);
@@ -20962,31 +20806,6 @@ function _shortsGenerate(){
         if(G.wf==='shorts')renderMain('shorts');
       };
       recorder.start(100); // 100ms 단위로 chunk
-      // ⚠️⚠️⚠️ 버그 수정(치명적, 진짜 원인 확정): "_shortsEncoderStalled" 변수와 실시간 청크
-      // 시간 추적(recorder._lastChunkTime)까지 다 만들어져 있었는데, 정작 그 값을 주기적으로
-      // 확인해서 실제로 "멈췄다"고 판단하는 코드 자체가 어디에도 없었음 — 그래서 인코더가
-      // 렌더링 도중에 죽어도 이 플래그는 영원히 false로 남아있었고, onstop에서 "정상 완성"으로
-      // 처리돼서 화면 멈춘/손상된 영상이 그대로 "✅ 완성!"으로 갤러리에 저장되고 사용자에게
-      // 보여지고 있었음(재생 시도할 때만 blob 로드 실패로 뒤늦게 드러남). 이제 1초마다 실제로
-      // 확인해서, 녹화가 진행 중인데 2.5초 넘게 새 데이터가 안 들어오면(정상이면 100ms마다
-      // 들어와야 함) 인코더가 죽은 것으로 판단하고, 남은 시간 다 기다리지 않고 그 자리에서
-      // 바로 멈춰서 "실패로 확정"하고 갤러리 오염을 막음.
-      var _stallCheckIv=setInterval(function(){
-        if(recorder.state!=='recording') { clearInterval(_stallCheckIv); return; }
-        var _sinceLastChunk = performance.now() - recorder._lastChunkTime;
-        // ⚠️ 버그 수정(진짜 원인): 기존엔 "_chunkCount>0"일 때만 스톨로 판단해서, 인코더가
-        // 아예 처음부터(첫 청크도 못 만들고) 죽은 경우엔 이 조건이 영원히 참이 될 수 없었음 —
-        // 그래서 스톨 감지 없이 전체 길이만큼 흘러간 뒤에야 텅 빈 파일이 "완성!"으로 처리되고,
-        // 뒤늦게 재생 시도할 때 "미리보기 만료" 오류로 나타났음. _lastChunkTime은 start() 직후
-        // 한 번 초기화되므로, chunkCount 조건 없이 "마지막 데이터(또는 시작)로부터 지난 시간"만
-        // 으로 판단하면 첫 청크가 아예 안 오는 경우도 똑같이 몇 초 안에 잡아냄.
-        if(_sinceLastChunk > 2500){
-          _shortsEncoderStalled = true;
-          clearInterval(_stallCheckIv);
-          try{ recorder.stop(); }catch(e){}
-        }
-      }, 1000);
-      recorder.addEventListener('stop', function(){ clearInterval(_stallCheckIv); }, {once:true});
       return recorder;
     }
 
@@ -21009,14 +20828,6 @@ function _shortsGenerate(){
         // 장면 전환 스윽~ 효과음은 사용자 요청으로 제거함 (아래 함수 자체는 남겨두되 호출만 안 함)
         // _shortsScheduleSwooshes(audioCtx,dest,timeline,audioCtx.currentTime);
         var combined=new MediaStream([].concat(vidStream.getVideoTracks(),dest.stream.getAudioTracks()));
-        // ⚠️ 진단 로그 추가: "인코더가 못 따라간다"는 가정으로 여러 번 고쳐도 안 됐고, 이제
-        // MediaRecorder의 error 이벤트조차 안 뜨는 걸 확인함 — 즉 인코더가 죽는 게 아니라 아예
-        // 처음부터 스트림에 데이터가 없을 가능성이 큼. 스트림/트랙 자체가 비어있거나 죽은 상태로
-        // 시작하는지 바로 눈으로 확인할 수 있게 콘솔에 남김.
-        console.log('[쇼츠 렌더 진단] video 트랙:', combined.getVideoTracks().length,
-          combined.getVideoTracks().map(function(t){return t.readyState+'/enabled='+t.enabled+'/muted='+t.muted;}),
-          'audio 트랙:', combined.getAudioTracks().length,
-          combined.getAudioTracks().map(function(t){return t.readyState+'/enabled='+t.enabled+'/muted='+t.muted;}));
         var rec=beginRecord(combined);
         var _stallWarned=false;
         runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
@@ -33575,30 +33386,6 @@ document.addEventListener('DOMContentLoaded',function(){try{
   window.addEventListener('beforeunload', function(){
     saveHistToStorage();
   });
-
-  // ⚠️ 요청 반영("콘솔에 계속 똑같은 blob 링크가 죽어있다"): 콘솔을 다시 보니 여러 스크린샷에
-  // 걸쳐 완전히 똑같은 blob 주소(893e-7a2caf2dc661 등)가 계속 반복되고 있었음 — 이건 매번 새로
-  // 생성된 쇼츠 영상이 아니라, 예전 세션에 저장된 갤러리 항목 중 하나가 죽은 blob 링크를 그대로
-  // 물고 있는 것으로 보임(blob 링크는 그 링크를 만든 세션이 끝나면 영원히 죽어서, 문자열 자체가
-  // 어디엔가 저장돼있다면 새로고침해도 계속 똑같은 죽은 주소로 다시 시도하게 됨). 정확히 어느
-  // 저장 경로에서 이게 새는지 하나하나 다 찾기보다, 더 확실하게: 화면 어디서든 blob: 주소를 가진
-  // 이미지·영상이 로드 실패하면 그 즉시 전역적으로 감지해서 화면에서 치우고 관련 데이터에서도
-  // 지움 — 이러면 원인이 어디였든 상관없이 이 죽은 항목이 다시는 안 나타남. (error 이벤트는
-  // 버블링이 안 되는 이벤트라 캡처 단계에서 잡아야 함.)
-  document.addEventListener('error', function(e){
-    var el=e.target;
-    if(!el || (el.tagName!=='IMG' && el.tagName!=='VIDEO')) return;
-    var src=el.currentSrc || el.src || '';
-    if(src.indexOf('blob:')!==0) return; // blob: 주소가 아니면(일반 네트워크 오류 등) 건드리지 않음
-    console.warn('[자동 정리] 죽은 blob 링크 발견 → 정리함:', src.slice(0,60));
-    var card=el.closest('.h-item') || el.closest('[id^="hi-"]');
-    if(card) card.style.display='none';
-    try{
-      Object.keys(G.HIST||{}).forEach(function(wf){
-        G.HIST[wf]=(G.HIST[wf]||[]).filter(function(x){ return x.result!==src && x.orig!==src; });
-      });
-    }catch(err){}
-  }, true);
 
   // ── 30초마다 자동 저장 ────────────────────────────────────────
   setInterval(function(){
