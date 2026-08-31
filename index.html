@@ -20878,6 +20878,12 @@ function _shortsGenerate(){
             }
           }, {once:true});
           if(blob.size < 20000){
+            // ⚠️ 버그 수정: 지금까지는 여기서 경고 문구만 보여주고 _shortsEncoderStalled는 그대로
+            // false로 남겨뒀음 — 그래서 이렇게 사실상 깨진(거의 빈) 파일도 정상 결과물처럼
+            // 갤러리(G.HIST.shorts)에 저장돼서, 나중에 갤러리를 열 때마다 재생 안 되는 항목이
+            // 쌓이고 메타데이터 로딩 실패(Range 요청 실패)가 반복되는 원인이 됐음. 스톨 감지와
+            // 똑같이 실패로 확정해서 갤러리에는 저장하지 않도록 함(다운로드/미리보기는 그대로 가능).
+            _shortsEncoderStalled = true;
             var _pw2=gE('shorts-prog-wrap');
             if(_pw2){
               var _sizeBox=document.createElement('div');
@@ -20939,7 +20945,13 @@ function _shortsGenerate(){
       var _stallCheckIv=setInterval(function(){
         if(recorder.state!=='recording') { clearInterval(_stallCheckIv); return; }
         var _sinceLastChunk = performance.now() - recorder._lastChunkTime;
-        if(recorder._chunkCount>0 && _sinceLastChunk > 2500){
+        // ⚠️ 버그 수정(진짜 원인): 기존엔 "_chunkCount>0"일 때만 스톨로 판단해서, 인코더가
+        // 아예 처음부터(첫 청크도 못 만들고) 죽은 경우엔 이 조건이 영원히 참이 될 수 없었음 —
+        // 그래서 스톨 감지 없이 전체 길이만큼 흘러간 뒤에야 텅 빈 파일이 "완성!"으로 처리되고,
+        // 뒤늦게 재생 시도할 때 "미리보기 만료" 오류로 나타났음. _lastChunkTime은 start() 직후
+        // 한 번 초기화되므로, chunkCount 조건 없이 "마지막 데이터(또는 시작)로부터 지난 시간"만
+        // 으로 판단하면 첫 청크가 아예 안 오는 경우도 똑같이 몇 초 안에 잡아냄.
+        if(_sinceLastChunk > 2500){
           _shortsEncoderStalled = true;
           clearInterval(_stallCheckIv);
           try{ recorder.stop(); }catch(e){}
