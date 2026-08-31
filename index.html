@@ -20778,6 +20778,7 @@ function _shortsGenerate(){
 
   function startRender(forceMimeType, attemptIdx, skipAudio){
     attemptIdx = attemptIdx || 0;
+    _shortsRenderRealStart=performance.now(); // 재시도마다 "실제 걸린 시간" 기준을 새로 잡음(이전 시도의 대기 시간이 누적돼서 엉뚱하게 경고가 뜨는 걸 방지)
     // ⚠️⚠️⚠️⚠️⚠️⚠️ 버그 수정(여섯 번째 시도 — 방향을 바꿈): 지금까지 Worker/rAF 타이밍,
     // 수동/자동 캡처 모드, AudioContext resume까지 전부 시도했는데도 "tick은 실시간 그대로
     // 끝까지 진행되는데 MediaRecorder의 start/dataavailable/onstop이 rec.stop() 직전에만
@@ -20848,51 +20849,30 @@ function _shortsGenerate(){
       };
       recorder.onstop=function(){
         _sdbg('[쇼츠 녹화 진단] onstop 발생 — 최종 청크 개수:', chunks.length, '| 청크 총 용량(bytes):', chunks.reduce(function(s,c){return s+c.size;},0));
-        // ⚠️ 0바이트로 끝났으면(이 mimeType/인코더가 이 기기에서 안 먹힌 것) 사용자에게 실패
-        // 화면을 보여주는 대신, 조용히 다른 코덱으로 처음부터 자동 재시도함. vp9 → vp8 → webm
-        // 까지 다 실패하면, 마지막으로 해상도를 가장 낮은 HD로 낮춰서 한 번 더 시도함(고해상도
-        // 하드웨어 인코딩 자체가 이 기기에서 막혀있는 경우, 해상도를 낮추면 되는 경우가 실제로
-        // 있음). 그래도 안 되면 그때는 정말 이 기기/브라우저의 인코더 문제로 보고 실패 안내.
-        var _mimeFallbacks=['video/webm;codecs=vp8','video/webm'];
-        if(chunks.length===0 && attemptIdx < _mimeFallbacks.length){
-          var _nextMime=_mimeFallbacks[attemptIdx];
-          console.warn('[쇼츠 녹화 진단] 이번 시도(mimeType='+mimeType+')는 0바이트 — 다른 코덱으로 자동 재시도합니다:', _nextMime);
+        // ⚠️⚠️⚠️ 버그 수정("재렌더링을 몇 번을 하는거야, 원래는 한 번이면 됐는데" + "영상이
+        // 22초짜리인데 10초만에 끝난다"): 이전 버전은 실패할 때마다 코덱 3종 → 해상도 다운
+        // → 오디오 제거까지 최대 5번을 실시간(각 시도마다 영상 길이만큼, 즉 22초짜리면 시도당
+        // 22초)으로 전부 다시 그리며 재시도했음 — 시간이 몇 분씩 걸렸을 뿐 아니라, 시도마다
+        // W/H(해상도)를 바꾸는 등 상태를 계속 손대다 보니 오히려 최종 결과물의 길이가 꼬이는
+        // 새 버그까지 만들어냈음. 이제 자동 재시도는 "정말 필요한 한 번"으로 줄임 — 원래
+        // 방식이 0바이트로 실패하면, 가장 무난한 조합(코덱: 기본 webm, 오디오 없음)으로 딱
+        // 한 번만 더 시도하고, 그래도 안 되면 바로 사용자에게 실패를 알림. 해상도는 더 이상
+        // 자동으로 건드리지 않음(재시도마다 상태가 바뀌는 걸 원천 차단).
+        if(chunks.length===0 && attemptIdx===0){
+          console.warn('[쇼츠 녹화 진단] 이번 시도(mimeType='+mimeType+', 오디오 포함)는 0바이트 — 오디오 없이 기본 webm으로 한 번만 더 시도합니다');
           _shortsCleanupRenderGuards();
-          if(progTxt) progTxt.textContent='⚠️ 이 방식으로는 녹화가 안 돼서, 다른 방식으로 다시 시도할게요...';
+          if(progTxt) progTxt.textContent='⚠️ 이 방식으로는 녹화가 안 돼서, 한 번만 더 다른 방식으로 시도할게요...';
           if(progFill) progFill.style.width='0%';
-          setTimeout(function(){ startRender(_nextMime, attemptIdx+1); }, 300);
-          return;
-        }
-        if(chunks.length===0 && attemptIdx===_mimeFallbacks.length && (W>720)){
-          // 코덱을 3개 다 시도해도 안 되면, 마지막으로 가장 낮은 해상도(HD)로 한 번 더 시도.
-          console.warn('[쇼츠 녹화 진단] 코덱 3종 모두 0바이트 — 마지막으로 해상도를 HD로 낮춰서 재시도합니다');
-          _shortsCleanupRenderGuards();
-          if(progTxt) progTxt.textContent='⚠️ 마지막으로 화질을 낮춰서 다시 시도할게요...';
-          if(progFill) progFill.style.width='0%';
-          W=720; H=1280; // 가장 가벼운 해상도로 강제 조정
-          setTimeout(function(){ startRender('video/webm', attemptIdx+1); }, 300);
-          return;
-        }
-        if(chunks.length===0 && !skipAudio){
-          // ⚠️ 요청 반영("코덱·해상도 다 바꿔도 계속 안 된다"): 코덱과(가능하면) 해상도까지
-          // 전부 시도해도 0바이트면, 마지막으로 "오디오 트랙 없이 비디오만" 녹화를 시도함 —
-          // 오디오(Web Audio)와 비디오(캔버스) 트랙을 한 MediaStream으로 합쳐서 녹화하는
-          // 조합 자체가 이 기기/브라우저에서 막혀있는 경우가 실제로 있어서, 이걸 마지막으로
-          // 점검함. 이 시도로 성공하면 이번 결과물엔 배경음악/효과음 없이 화면만 담김.
-          console.warn('[쇼츠 녹화 진단] 코덱·해상도를 다 바꿔도 0바이트 — 마지막으로 오디오 없이(영상만) 재시도합니다');
-          _shortsCleanupRenderGuards();
-          if(progTxt) progTxt.textContent='⚠️ 마지막으로 소리 없이(영상만) 다시 시도할게요...';
-          if(progFill) progFill.style.width='0%';
-          setTimeout(function(){ startRender('video/webm', attemptIdx+1, true); }, 300);
+          setTimeout(function(){ startRender('video/webm', 1, true); }, 300);
           return;
         }
         if(chunks.length===0){
-          // 코덱·해상도·오디오 유무까지 다 바꿔봐도 전부 0바이트면, 이 기기/브라우저의 영상
-          // 인코더 자체가 문제일 가능성이 커서 더 재시도해도 소용없음 — 실패로 종료.
-          console.error('[쇼츠 녹화 진단] 코덱(vp9/vp8/webm)·해상도·오디오 유무를 전부 바꿔봐도 0바이트 — 이 기기/브라우저에서는 이 방식(canvas 녹화)의 동영상 생성 자체가 막혀있는 것으로 보임');
+          // 여기까지 왔으면 총 2번(원래 방식 1번 + 대체 방식 1번) 다 실패한 것 — 더 재시도해도
+          // 소용없을 가능성이 커서 바로 실패로 안내하고 사용자가 원할 때 직접 다시 누르게 함.
+          console.error('[쇼츠 녹화 진단] 두 방식 모두 0바이트 — 이 기기/브라우저에서는 지금 방식(canvas 녹화)의 동영상 생성 자체가 막혀있는 것으로 보임');
           _shortsCleanupRenderGuards();
           if(progTxt){
-            progTxt.innerHTML='❌ 여러 방식(코덱 3종·저해상도·무음)으로 전부 시도했지만 계속 실패했어요. 이 기기/브라우저에서는 지금 방식으로 영상 생성이 안 되는 것 같아요.<br><span style="font-size:11px">크롬 주소창에 chrome://gpu 를 입력해 "Video Encode" 항목이 꺼져있는지 확인해보시고, chrome://settings/system 에서 "하드웨어 가속 사용"을 꺼보거나 크롬을 최신 버전으로 업데이트해보세요. 다른 브라우저(엣지·파이어폭스)나 다른 기기에서도 시도해보시면 원인 파악에 도움돼요.</span>';
+            progTxt.innerHTML='❌ 녹화에 실패했어요. 이 브라우저/기기의 동영상 인코더 문제로 보여요.<br><span style="font-size:11px">크롬 주소창에 chrome://gpu 를 입력해 "Video Encode" 항목을 확인해보시고, chrome://settings/system 에서 "하드웨어 가속 사용"을 꺼보거나 크롬을 최신 버전으로 업데이트해보세요. 다른 브라우저(엣지·파이어폭스)나 다른 기기에서도 시도해보시면 원인 파악에 도움돼요.</span>';
             var _retryBtn=document.createElement('button');
             _retryBtn.type='button';
             _retryBtn.textContent='🔁 다시 렌더링';
