@@ -3341,13 +3341,17 @@ function translateToEnglish(text, cb){
     cb(tx(text));
   });
 }
-function goHome(){gE('home-s').style.display='flex';
+function goHome(){
+  // ⚠️ 버그 수정(위 openCommunityPanel과 같은 원인): #home-s, #canvas-upload-box, #hist-s가
+  // 데스크톱/모바일 레이아웃별로 화면에 2개씩 있는데 getElementById로 "첫 번째"만 다루고
+  // 있었음 — querySelectorAll로 전부 찾아서 같이 처리하도록 고침.
+  document.querySelectorAll('#home-s').forEach(function(el){ el.style.display='flex'; });
   try{ localStorage.removeItem('clover_last_wf'); }catch(e){}
   var sbtm=document.querySelector('.sb-btm');
   if(sbtm)sbtm.style.display='none';
   if(window.innerWidth<=768){window.scrollTo({top:0,behavior:'smooth'});}
-  document.getElementById('canvas-upload-box').classList.remove('active');
-  gE('hist-s').style.display='none';document.getElementById('canvas-upload-box').classList.remove('active');
+  document.querySelectorAll('#canvas-upload-box').forEach(function(el){ el.classList.remove('active'); });
+  document.querySelectorAll('.hist-s').forEach(function(el){ el.style.display='none'; });
   gE('rtags').innerHTML='';
   gE('stl').textContent='작업을 선택하세요';
   G.wf='';
@@ -32675,105 +32679,147 @@ function _communityPostForItem(item, btn){
 }
 
 function openCommunityPanel(){
-  var hs=gE('hist-s');
-  var home=gE('home-s');
-  var cub=document.getElementById('canvas-upload-box');
-  if(home)home.style.display='none';
-  if(cub)cub.classList.remove('active');
-  if(!hs)return;
-  hs.style.display='flex';
-  window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
-  hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">🌍 커뮤니티 갤러리 불러오는 중...</div>';
+  // ⚠️ 버그 수정("다른 탭 화면에 있다가 커뮤니티 누르면 반응이 없다"): 데스크톱/모바일용으로
+  // #home-s, #canvas-upload-box, .hist-s가 화면에 각각 2개씩(레이아웃별로) 존재하는데,
+  // 지금까지 getElementById로 "첫 번째" 하나만 다뤘음 — 그래서 지금 보고 있는 레이아웃이
+  // 하필 그 "첫 번째"가 아니면(예: 다른 워크플로우 탭에 있다가 눌렀을 때) 실제로 보이는
+  // 화면 쪽은 하나도 안 바뀌어서 "반응이 없다"고 느껴졌음. 이제 전부 querySelectorAll로
+  // 찾아서 존재하는 모든 인스턴스를 다 같이 처리함.
+  var hsAll=document.querySelectorAll('.hist-s');
+  var homeAll=document.querySelectorAll('#home-s');
+  var cubAll=document.querySelectorAll('#canvas-upload-box');
+  homeAll.forEach(function(home){ home.style.display='none'; });
+  cubAll.forEach(function(cub){ cub.classList.remove('active'); });
+  if(!hsAll.length)return;
+  hsAll.forEach(function(hs){
+    hs.style.display='flex';
+    window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
+    hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">🌍 커뮤니티 갤러리 불러오는 중...</div>';
+  });
   if(!_supa){
-    hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">커뮤니티 기능을 지금은 사용할 수 없어요.</div>';
+    hsAll.forEach(function(hs){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">커뮤니티 기능을 지금은 사용할 수 없어요.</div>'; });
     return;
   }
   _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname,caption').eq('is_public',true).order('created_at',{ascending:false}).limit(60)
     .then(function(res){
       if(res.error){
-        hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%;line-height:1.6">🌍 커뮤니티 갤러리를 아직 사용할 수 없어요.<br><span style="font-size:11px;opacity:.7">(관리자가 community_posts 테이블을 아직 설정하지 않았을 수 있어요)</span></div>';
+        hsAll.forEach(function(hs){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%;line-height:1.6">🌍 커뮤니티 갤러리를 아직 사용할 수 없어요.<br><span style="font-size:11px;opacity:.7">(관리자가 community_posts 테이블을 아직 설정하지 않았을 수 있어요)</span></div>'; });
         return;
       }
-      _renderCommunityGrid(res.data||[]);
+      hsAll.forEach(function(hs){ _renderCommunityGrid(res.data||[], hs); });
     }).catch(function(){
-      hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">커뮤니티 갤러리를 불러오지 못했어요.</div>';
+      hsAll.forEach(function(hs){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">커뮤니티 갤러리를 불러오지 못했어요.</div>'; });
     });
 }
 
-function _renderCommunityGrid(posts){
-  var hs=gE('hist-s');
+function _renderCommunityGrid(posts, targetHs){
+  var hs=targetHs||gE('hist-s');
   hs.innerHTML='';
+  // ⚠️ 요청 반영("커뮤니티가 너무 대학생 작품 같다, 미드저니처럼 세련되게 해달라"): 모든 카드를
+  // 억지로 4:3 박스에 잘라 넣던 걸 그만두고, 미드저니/핀터레스트처럼 사진 원래 비율 그대로
+  // 자연스럽게 흐르는 매스너리(계단식) 레이아웃으로 바꿈. 상단 배너·테두리 상자 느낌도 걷어내고
+  // 여백과 타이포그래피 중심으로 더 차분하고 고급스럽게 다시 짰음.
   var heroBar=document.createElement('div');
-  heroBar.style.cssText='width:100%;padding:20px 16px;text-align:center;flex-shrink:0;background:linear-gradient(180deg,rgba(0,229,204,.08),transparent)';
-  heroBar.innerHTML='<div style="font-size:22px;font-weight:800;color:var(--t);margin-bottom:4px">🌍 커뮤니티 갤러리</div>'+
-    '<div style="font-size:12.5px;color:var(--t2)">회원들이 직접 공개한 결과물 '+posts.length+'개</div>';
+  heroBar.style.cssText='width:100%;padding:28px 20px 18px;flex-shrink:0';
+  heroBar.innerHTML='<div style="font-size:26px;font-weight:800;color:var(--t);letter-spacing:-.02em;margin-bottom:5px">Community</div>'+
+    '<div style="font-size:13px;color:var(--m2)">회원들이 직접 공개한 작품 '+posts.length+'개</div>';
   hs.appendChild(heroBar);
   var bar=document.createElement('div');
-  bar.style.cssText='width:100%;display:flex;gap:8px;padding:0 10px 10px;flex-shrink:0;align-items:center;justify-content:flex-end';
+  bar.style.cssText='width:100%;display:flex;gap:10px;padding:0 20px 20px;flex-shrink:0;align-items:center;justify-content:flex-end;border-bottom:1px solid var(--bd);padding-bottom:18px';
   if(_supa && _supaUser){
     var myBtn=document.createElement('button');
-    myBtn.type='button';myBtn.textContent='🔧 내 공개 작품 관리';
-    myBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid rgba(0,229,204,.35);background:rgba(0,229,204,.1);color:var(--ac);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    myBtn.type='button';myBtn.textContent='내 공개 작품 관리';
+    myBtn.style.cssText='padding:8px 14px;border-radius:20px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s';
+    myBtn.onmouseenter=function(){ myBtn.style.borderColor='var(--ac)'; myBtn.style.color='var(--ac)'; };
+    myBtn.onmouseleave=function(){ myBtn.style.borderColor='var(--bd2)'; myBtn.style.color='var(--t2)'; };
     myBtn.onclick=function(){ openMyCommunityPostsPanel(); };
     bar.appendChild(myBtn);
   }
   var closeBtn=document.createElement('button');
-  closeBtn.type='button';closeBtn.textContent='✕ 닫기';
-  closeBtn.style.cssText='padding:7px 12px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit';
+  closeBtn.type='button';closeBtn.textContent='✕';
+  closeBtn.title='닫기';
+  closeBtn.style.cssText='width:32px;height:32px;border-radius:50%;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:13px;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;transition:all .15s';
+  closeBtn.onmouseenter=function(){ closeBtn.style.borderColor='var(--t)'; closeBtn.style.color='var(--t)'; };
+  closeBtn.onmouseleave=function(){ closeBtn.style.borderColor='var(--bd2)'; closeBtn.style.color='var(--t2)'; };
   closeBtn.onclick=function(){ if(G.wf){ renderMain(G.wf); } else { goHome(); } };
   bar.appendChild(closeBtn);
   hs.appendChild(bar);
   if(!posts.length){
     var empty=document.createElement('div');
-    empty.style.cssText='padding:40px;text-align:center;color:var(--t2);width:100%';
+    empty.style.cssText='padding:60px 20px;text-align:center;color:var(--m2);width:100%;font-size:13.5px';
     empty.textContent='아직 공개된 작품이 없어요. 갤러리에서 🌍 버튼을 눌러 첫 번째로 공개해보세요!';
     hs.appendChild(empty);
     return;
   }
+  if(!document.getElementById('comm-masonry-style')){
+    var mst=document.createElement('style');mst.id='comm-masonry-style';
+    mst.textContent='.comm-mgrid{column-gap:14px}'+
+      '@media(min-width:1400px){.comm-mgrid{columns:5}}'+
+      '@media(min-width:1100px) and (max-width:1399px){.comm-mgrid{columns:4}}'+
+      '@media(min-width:760px) and (max-width:1099px){.comm-mgrid{columns:3}}'+
+      '@media(min-width:480px) and (max-width:759px){.comm-mgrid{columns:2}}'+
+      '@media(max-width:479px){.comm-mgrid{columns:2;column-gap:8px}}'+
+      '.comm-card{break-inside:avoid;margin-bottom:14px;border-radius:14px;overflow:hidden;position:relative;cursor:pointer;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.3);transition:box-shadow .2s,transform .2s}'+
+      '.comm-card:hover{box-shadow:0 10px 28px rgba(0,0,0,.45);transform:translateY(-2px)}'+
+      '.comm-card img,.comm-card video{width:100%;height:auto;display:block}';
+    document.head.appendChild(mst);
+  }
   var grid=document.createElement('div');
-  grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;width:100%;padding:8px';
+  grid.className='comm-mgrid';
+  grid.style.cssText='width:100%;padding:0 20px 24px';
   posts.forEach(function(p){
     var card=document.createElement('div');
-    card.style.cssText='position:relative;border-radius:16px;overflow:hidden;background:var(--card);aspect-ratio:4/3;border:1px solid var(--bd);box-shadow:0 3px 14px rgba(0,0,0,.28);cursor:pointer';
+    card.className='comm-card';
     var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
     if(isVid){
       var v=document.createElement('video');
-      v.src=p.image_url;v.muted=true;v.loop=true;v.preload='none';v.style.cssText='width:100%;height:100%;object-fit:cover';
+      v.src=p.image_url;v.muted=true;v.loop=true;v.preload='none';
       v.onmouseenter=function(){ v.play().catch(function(){}); };
       v.onmouseleave=function(){ v.pause(); try{v.currentTime=0;}catch(e){} };
       card.appendChild(v);
     } else {
       var img=document.createElement('img');
-      img.src=p.image_url;img.loading='lazy';img.decoding='async';img.style.cssText='width:100%;height:100%;object-fit:cover';
+      img.src=p.image_url;img.loading='lazy';img.decoding='async';
       card.appendChild(img);
     }
     var grad=document.createElement('div');
-    grad.style.cssText='position:absolute;left:0;right:0;bottom:0;height:40%;background:linear-gradient(transparent,rgba(0,0,0,.6));pointer-events:none';
+    grad.style.cssText='position:absolute;left:0;right:0;bottom:0;height:46%;background:linear-gradient(transparent,rgba(0,0,0,.55));pointer-events:none';
     card.appendChild(grad);
     // ⚠️ 요청 반영("무슨 건물인지·무슨 인테리어인지 간단히 적을 수 있게 해달라"): 공개자가 남긴
     // 짧은 설명 문구가 있으면 카드 위쪽에 표시(2줄까지, 넘치면 ...).
     if(p.caption){
       var capGrad=document.createElement('div');
-      capGrad.style.cssText='position:absolute;left:0;right:0;top:0;height:46%;background:linear-gradient(rgba(0,0,0,.65),transparent);pointer-events:none';
+      capGrad.style.cssText='position:absolute;left:0;right:0;top:0;height:40%;background:linear-gradient(rgba(0,0,0,.5),transparent);pointer-events:none';
       card.appendChild(capGrad);
       var capTag=document.createElement('div');
-      capTag.style.cssText='position:absolute;top:8px;left:8px;right:8px;color:#fff;font-size:11px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,.6);z-index:5';
+      capTag.style.cssText='position:absolute;top:10px;left:10px;right:10px;color:#fff;font-size:11.5px;font-weight:500;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-shadow:0 1px 3px rgba(0,0,0,.5);z-index:5';
       capTag.textContent=p.caption;
       card.appendChild(capTag);
     }
     // 공개자가 직접 체크해서 닉네임을 공개한 경우에만 표시 — 기본은 아무 표시도 안 함(익명)
     if(p.show_nickname && p.nickname){
       var nickTag=document.createElement('div');
-      nickTag.style.cssText='position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,.55);color:#fff;font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:20px;z-index:5;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-      nickTag.textContent='👤 '+p.nickname;
+      nickTag.style.cssText='position:absolute;bottom:10px;left:10px;color:rgba(255,255,255,.9);font-size:11px;font-weight:500;z-index:5;max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.5)';
+      nickTag.textContent=p.nickname;
       card.appendChild(nickTag);
     }
-    var likeBtn=document.createElement('button');
-    likeBtn.type='button';
-    likeBtn.style.cssText='position:absolute;bottom:8px;right:8px;background:rgba(20,20,22,.75);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:5px 10px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px;color:#fff;z-index:5';
-    likeBtn.innerHTML='🤍 <span>'+(p.like_count||0)+'</span>';
-    likeBtn.onclick=function(e){ e.stopPropagation(); _communityToggleLike(p, likeBtn); };
-    card.appendChild(likeBtn);
+    if(p.like_count>0){
+      var likeBtn=document.createElement('button');
+      likeBtn.type='button';
+      likeBtn.style.cssText='position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.4);backdrop-filter:blur(6px);border:none;border-radius:14px;padding:4px 9px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px;color:#fff;z-index:5;font-weight:600';
+      likeBtn.innerHTML='♥ '+p.like_count;
+      likeBtn.onclick=function(e){ e.stopPropagation(); _communityToggleLike(p, likeBtn); };
+      card.appendChild(likeBtn);
+    } else {
+      var likeBtn2=document.createElement('button');
+      likeBtn2.type='button';
+      likeBtn2.style.cssText='position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.35);backdrop-filter:blur(6px);border:none;border-radius:50%;width:26px;height:26px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.85);z-index:5;opacity:0;transition:opacity .15s';
+      likeBtn2.textContent='♡';
+      card.onmouseenter=(function(btn){return function(){ btn.style.opacity='1'; };})(likeBtn2);
+      card.onmouseleave=(function(btn){return function(){ btn.style.opacity='0'; };})(likeBtn2);
+      likeBtn2.onclick=function(e){ e.stopPropagation(); _communityToggleLike(p, likeBtn2); };
+      card.appendChild(likeBtn2);
+    }
     // ⚠️ 요청 반영("커뮤니티 갤러리 이미지 클릭하면 큰 화면으로 보이게 해줘야지"): 좋아요
     // 버튼(위에서 stopPropagation 처리됨)이 아닌 카드 아무 곳이나 클릭하면 큰 화면으로 봄.
     card.onclick=function(){ _openCommunityLightbox(p, isVid); };
@@ -32854,24 +32900,26 @@ function _communityToggleLike(post, btn){
 // 고를 수 있는 전용 관리 화면. 커뮤니티 탭의 "🔧 내 공개 작품 관리" 버튼으로 들어옴.
 function openMyCommunityPostsPanel(){
   if(!_supa || !_supaUser){ alert('로그인 후 이용할 수 있어요.'); return; }
-  var hs=gE('hist-s');
-  var home=gE('home-s');
-  var cub=document.getElementById('canvas-upload-box');
-  if(home)home.style.display='none';
-  if(cub)cub.classList.remove('active');
-  if(!hs)return;
-  hs.style.display='flex';
-  window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
-  hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오는 중...</div>';
+  var hsAll=document.querySelectorAll('.hist-s');
+  var homeAll=document.querySelectorAll('#home-s');
+  var cubAll=document.querySelectorAll('#canvas-upload-box');
+  homeAll.forEach(function(home){ home.style.display='none'; });
+  cubAll.forEach(function(cub){ cub.classList.remove('active'); });
+  if(!hsAll.length)return;
+  hsAll.forEach(function(hs){
+    hs.style.display='flex';
+    window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
+    hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오는 중...</div>';
+  });
   _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname,caption').eq('user_id',_supaUser.id).order('created_at',{ascending:false}).limit(200)
     .then(function(res){
-      if(res.error){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오지 못했어요.</div>'; return; }
-      _renderMyCommunityGrid(res.data||[]);
-    }).catch(function(){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오지 못했어요.</div>'; });
+      if(res.error){ hsAll.forEach(function(hs){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오지 못했어요.</div>'; }); return; }
+      hsAll.forEach(function(hs){ _renderMyCommunityGrid(res.data||[], hs); });
+    }).catch(function(){ hsAll.forEach(function(hs){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">불러오지 못했어요.</div>'; }); });
 }
 
-function _renderMyCommunityGrid(posts){
-  var hs=gE('hist-s');
+function _renderMyCommunityGrid(posts, targetHs){
+  var hs=targetHs||gE('hist-s');
   hs.innerHTML='';
   window._myCommPostsCache = posts; // 벌크 액션 참조용
   if(!G._myCommSelected) G._myCommSelected=new Set(); else G._myCommSelected.clear();
