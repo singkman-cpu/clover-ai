@@ -11355,7 +11355,17 @@ function mkMultiRoomSpace(p){
     idbSaveDraft(_multiRoomDraftKey(), {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
     idbSaveDraft(_autoRoomDraftKey(), {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity, autoRoomSelected:spTab.autoRoomSelected}).catch(function(){});
     G._suppressHistOnce=true; // 이번 리셋 직후 화면엔 예전 결과물 대신 빈 업로드 화면을 보여줌(결과물 자체는 갤러리에 그대로 남음)
-    try{ localStorage.setItem('clover_suppress_hist_'+G.wf, String((G.HIST[G.wf]||[]).length)); }catch(e){} // 새로고침해도 계속 빈 화면 유지(새 결과물이 생기기 전까지)
+    // ⚠️ 버그 수정(방금 발견): "공간 컨셉 디자인"(spaceset)은 실제 화면에 보이는 개수가
+    // G.HIST['spaceset'] 전체 개수가 아니라 지금 보고 있는 모드(아파트/공간)에 맞는 것만 걸러낸
+    // 개수임 — 리셋 시 전체 개수를 저장해버리면, 필터링된(항상 더 적은) 개수가 그 값을 절대
+    //못 넘어서 새로 결과물을 만들어도 계속 빈 화면에 갇히는 문제가 있었음. renderMain과 똑같은
+    // 필터링을 적용한 "지금 이 모드에서 실제로 보이는" 개수를 저장해야 함.
+    var _resetSnapshot = G.HIST[G.wf]||[];
+    if(G.wf==='spaceset'){
+      var _curIsAptNow = !!getTab('spaceset').isAptSimpleMode;
+      _resetSnapshot = _resetSnapshot.filter(function(x){ return !!x.isApt === _curIsAptNow; });
+    }
+    try{ localStorage.setItem('clover_suppress_hist_'+G.wf, String(_resetSnapshot.length)); }catch(e){} // 새로고침해도 계속 빈 화면 유지(새 결과물이 생기기 전까지)
     renderSB();
     renderMain(G.wf); // ⚠️ 버그 수정(같은 클래스): 사이드바만 갱신하고 메인화면(오른쪽 미리보기)은 안 새로 그려서, 리셋했는데도 오른쪽엔 방금 지운 사진들이 그대로 남아있는 것처럼 보일 수 있었음
   };
@@ -30834,8 +30844,22 @@ function _admCommunityRender(c, posts){
 
   function persistOrder(){
     posts.forEach(function(p,i){ p.sort_order=(i+1)*10; });
+    // ⚠️ 버그 수정("관리자에서 바꾼 순서랑 실제 커뮤니티 화면 순서가 다르다"): 여기서 저장이
+    // 실패해도 지금까지는 console.warn만 찍고 화면엔 아무 표시도 안 했음 — 그래서 드래그로
+    // 순서를 바꾸면 화면(메모리)에는 바로 반영되니 저장된 것처럼 보였지만, 실제로는 RLS
+    // 정책(관리자 update 권한)이 막혀서 DB에는 하나도 안 저장되고 있었을 가능성이 큼. 이제
+    // Supabase 응답의 error 필드를 직접 확인해서, 하나라도 실패하면 관리자에게 명확히 알림.
     var updates=posts.map(function(p){ return _supa.from('community_posts').update({sort_order:p.sort_order}).eq('id',p.id); });
-    Promise.all(updates).catch(function(e){ console.warn('[커뮤니티 순서 저장 실패]', e); });
+    Promise.all(updates).then(function(results){
+      var failed=results.filter(function(r){ return r && r.error; });
+      if(failed.length){
+        console.error('[커뮤니티 순서 저장 실패]', failed.map(function(r){return r.error.message;}));
+        alert('순서 저장에 실패했어요('+failed.length+'개). 화면엔 바뀐 순서로 보이지만 실제로는 저장되지 않았을 수 있어요.\n\n원인: '+failed[0].error.message+'\n\nSupabase SQL 편집기에서 community_gallery_setup.sql의 관리자 권한 정책(community_posts_update_admin)이 실행됐는지 확인해주세요.');
+      }
+    }).catch(function(e){
+      console.warn('[커뮤니티 순서 저장 실패]', e);
+      alert('순서 저장 중 오류가 발생했어요: '+e.message);
+    });
   }
 
   function renderCard(p, idx){
@@ -30906,10 +30930,14 @@ function _admCommunityRender(c, posts){
     c.innerHTML='<div style="text-align:center;padding:30px;color:var(--m2);font-size:12.5px">아직 공개된 커뮤니티 게시물이 없어요.</div>';
   }
   // 초기 배정이 필요했다면(전부 null이었다면) 방금 매긴 값을 조용히 저장해둠 — 다음에 관리자가
-  // 다시 들어와도 순서가 유지되게.
+  // 다시 들어와도 순서가 유지되게. 여기서도 실패를 조용히 삼키지 않고 콘솔에 남김(화면까지
+  // 막지는 않되, 나중에 "순서가 왜 안 맞지" 문제를 진단할 때 단서가 되도록).
   if(needsInit){
-    var updates=posts.map(function(p){ return _supa.from('community_posts').update({sort_order:p.sort_order}).eq('id',p.id); });
-    Promise.all(updates).catch(function(){});
+    var initUpdates=posts.map(function(p){ return _supa.from('community_posts').update({sort_order:p.sort_order}).eq('id',p.id); });
+    Promise.all(initUpdates).then(function(results){
+      var failed=results.filter(function(r){ return r && r.error; });
+      if(failed.length) console.error('[커뮤니티 초기 순서 저장 실패]', failed.map(function(r){return r.error.message;}));
+    }).catch(function(e){ console.warn('[커뮤니티 초기 순서 저장 실패]', e); });
   }
 }
 
