@@ -30879,7 +30879,7 @@ function _admCommunityRender(c, posts){
     card.appendChild(info);
     var orderTag=document.createElement('div');
     orderTag.style.cssText='position:absolute;top:6px;left:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;font-weight:800;border-radius:5px;padding:1px 6px;pointer-events:none';
-    orderTag.textContent='#'+(idx+1);
+    orderTag.textContent='#'+(idx+1)+' (sort:'+(p.sort_order==null?'null':p.sort_order)+')'; // ⚠️ 진단용: 실제 저장된 sort_order 값을 직접 눈으로 확인할 수 있게 표시
     card.appendChild(orderTag);
     var delBtn=document.createElement('button');
     delBtn.type='button';delBtn.textContent='✕';
@@ -32977,11 +32977,9 @@ function _renderCommunityGrid(posts, targetHs){
     return;
   }
   _ensureCommMasonryStyle();
-  var grid=document.createElement('div');
-  grid.className='comm-mgrid';
-  grid.style.cssText='width:100%;padding:0 20px 24px';
-  posts.forEach(function(p){ grid.appendChild(_buildCommCard(p)); });
-  hs.appendChild(grid);
+  var gridWrap=_buildCommMasonryGrid(posts);
+  gridWrap.el.style.padding='0 20px 24px';
+  hs.appendChild(gridWrap.el);
 }
 
 // ⚠️ 요청 반영("메인화면에서도 커뮤니티 이미지를 미드저니 Explore처럼 크게 스크롤해서 볼 수
@@ -32991,16 +32989,49 @@ function _renderCommunityGrid(posts, targetHs){
 function _ensureCommMasonryStyle(){
   if(document.getElementById('comm-masonry-style')) return;
   var mst=document.createElement('style');mst.id='comm-masonry-style';
-  mst.textContent='.comm-mgrid{column-gap:14px}'+
-    '@media(min-width:1400px){.comm-mgrid{columns:5}}'+
-    '@media(min-width:1100px) and (max-width:1399px){.comm-mgrid{columns:4}}'+
-    '@media(min-width:760px) and (max-width:1099px){.comm-mgrid{columns:3}}'+
-    '@media(min-width:480px) and (max-width:759px){.comm-mgrid{columns:2}}'+
-    '@media(max-width:479px){.comm-mgrid{columns:2;column-gap:8px}}'+
+  // ⚠️ 버그 수정(진짜 원인, "관리자·커뮤니티·홈 화면 순서가 다 다르다"): CSS columns 속성으로
+  // 매스너리를 만들면, 데이터는 순서대로 정확히 들어가도 브라우저가 "1번째 칸을 위에서
+  // 아래로 가득 채운 다음 2번째 칸으로 넘어가는" 방식으로 배치함 — 그래서 화면을 왼쪽→오른쪽,
+  // 위→아래로 훑어보는 사람 눈에는 순서가 뒤섞인 것처럼 보였음(실제 데이터·정렬은 처음부터
+  // 계속 맞았음). 게다가 화면 폭에 따라 열 개수가 달라지면(반응형) 그 뒤섞이는 패턴도 화면마다
+  // 달라져서, 관리자 화면(일반 격자라 순서가 맞아 보임)·커뮤니티 탭·홈 화면이 전부 다르게
+  // 보였던 것. 이제 CSS columns 대신, 직접 열(column) DIV를 만들어 1번은 1열, 2번은 2열,
+  // 3번은 3열... 순서로 라운드로빈 배치해서, 화면을 왼쪽→오른쪽으로 훑을 때 등수 순서와
+  // 정확히 일치하도록 고침(핀터레스트류 매스너리가 실제로 쓰는 방식).
+  mst.textContent=
     '.comm-card{break-inside:avoid;margin-bottom:14px;border-radius:14px;overflow:hidden;position:relative;cursor:pointer;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.3);transition:box-shadow .2s,transform .2s}'+
     '.comm-card:hover{box-shadow:0 10px 28px rgba(0,0,0,.45);transform:translateY(-2px)}'+
     '.comm-card img,.comm-card video{width:100%;height:auto;display:block}';
   document.head.appendChild(mst);
+}
+// 화면 폭에 따라 열 개수를 정함 — 예전 CSS columns의 반응형 구간과 동일하게 맞춤.
+function _commColumnCount(){
+  var w=window.innerWidth;
+  if(w>=1400) return 5;
+  if(w>=1100) return 4;
+  if(w>=760) return 3;
+  return 2;
+}
+// posts 배열을 등수 순서 그대로 1열,2열,3열...에 라운드로빈으로 나눠 담는 매스너리 그리드를
+// 만듦 — 반환값은 {el: 그리드 DOM, appendMore: 이어서 더 추가할 때 쓰는 함수}.
+function _buildCommMasonryGrid(posts){
+  var n=_commColumnCount();
+  var grid=document.createElement('div');
+  grid.className='comm-mgrid-js';
+  grid.style.cssText='display:flex;gap:14px;width:100%;align-items:flex-start';
+  var cols=[];
+  for(var i=0;i<n;i++){
+    var col=document.createElement('div');
+    col.style.cssText='display:flex;flex-direction:column;gap:14px;flex:1;min-width:0';
+    grid.appendChild(col);
+    cols.push(col);
+  }
+  var count=0;
+  function appendMore(morePosts){
+    morePosts.forEach(function(p){ cols[count%n].appendChild(_buildCommCard(p)); count++; });
+  }
+  appendMore(posts);
+  return {el:grid, appendMore:appendMore};
 }
 function _buildCommCard(p){
   var card=document.createElement('div');
@@ -33353,13 +33384,11 @@ function _loadHomeCommunityShowcase(){
   var BATCH=30, CAP=90, loadedCount=0, totalCount=null;
   _ensureCommMasonryStyle();
 
-  var grid=document.createElement('div');
-  grid.className='comm-mgrid';
-  grid.style.cssText='width:100%';
+  var gridWrap=null; // _buildCommMasonryGrid 결과({el, appendMore}) — 첫 배치가 오면 만듦
   var moreWrap=document.createElement('div');
   moreWrap.style.cssText='text-align:center;margin-top:18px';
 
-  function renderShell(){
+  function renderShell(firstBatch){
     wrap.innerHTML='';
     var titleBar=document.createElement('div');
     titleBar.style.cssText='font-size:20px;font-weight:800;color:var(--t);margin-bottom:4px;text-align:center;letter-spacing:-.01em';
@@ -33369,7 +33398,8 @@ function _loadHomeCommunityShowcase(){
     subBar.style.cssText='font-size:12.5px;color:var(--m2);text-align:center;margin-bottom:20px';
     subBar.textContent='CLOVER AI 회원들이 직접 공개한 작품이에요';
     wrap.appendChild(subBar);
-    wrap.appendChild(grid);
+    gridWrap=_buildCommMasonryGrid(firstBatch);
+    wrap.appendChild(gridWrap.el);
     wrap.appendChild(moreWrap);
   }
 
@@ -33381,8 +33411,8 @@ function _loadHomeCommunityShowcase(){
       .then(function(res){
         if(res.error || !res.data){ if(loadedCount===0) wrap.style.display='none'; return; }
         if(loadedCount===0 && !res.data.length){ wrap.style.display='none'; return; } // 공개 작품이 하나도 없으면 섹션 자체를 숨김
-        if(loadedCount===0){ wrap.style.display='block'; renderShell(); }
-        res.data.forEach(function(p){ grid.appendChild(_buildCommCard(p)); });
+        if(loadedCount===0){ wrap.style.display='block'; renderShell(res.data); }
+        else { gridWrap.appendMore(res.data); }
         loadedCount += res.data.length;
         if(res.count!=null) totalCount=res.count;
         moreWrap.innerHTML='';
