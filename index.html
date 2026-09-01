@@ -508,6 +508,7 @@ select option{background:var(--c2)}
       <span style="color:var(--ac);font-size:12px">&#9733;</span>
       <div><div class="cr-n" id="cr-n">로그인</div><div class="cr-l" id="cr-l">Credits</div></div>
     </div>
+    <button class="nbtn" id="btn-guide" onclick="openMd('guide')">📖 사용 가이드</button>
     <button class="nbtn" id="btn-faq" onclick="openMd('faq')">FAQ</button>
     <button class="nbtn" id="btn-bugreport" onclick="openBugReportModal()" style="background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.4);color:#f59e0b;font-weight:700">🐛 버그 제보</button>
     <button class="nbtn" id="btn-bizinfo" onclick="openMd('bizinfo')">사업자정보</button>
@@ -667,6 +668,7 @@ select option{background:var(--c2)}
 <div id="zbg" style="position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.97);display:none;align-items:center;justify-content:center;cursor:zoom-out">
   <img id="zimg" src="" style="max-width:93%;max-height:93vh;object-fit:contain;border-radius:6px">
 </div>
+<div id="mguide" class="mbg"><div class="md" style="width:760px;max-width:94vw"><div class="mdh"><h2>📖 사용 가이드</h2><button class="mdc" id="guide-close">&#10005;</button></div><div class="mdb" id="guide-b"></div></div></div>
 <div id="mfaq" class="mbg"><div class="md" style="width:600px"><div class="mdh"><h2>FAQ · 자주 묻는 질문</h2><button class="mdc" id="faq-close">&#10005;</button></div><div class="mdb" id="faq-b"></div></div></div>
 <div id="mpricing" class="mbg"><div class="md" style="width:780px"><div class="mdh"><h2>요금제</h2><button class="mdc" id="pricing-close">&#10005;</button></div><div class="mdb" id="pr-b"></div></div></div>
 <div id="maccount" class="mbg"><div class="md" style="width:420px"><div class="mdh"><h2 id="account-title">계정</h2><button class="mdc" id="account-close">&#10005;</button></div><div class="mdb" id="ac-b"></div></div></div>
@@ -3784,7 +3786,12 @@ function renderMain(callWf, preserveScroll){
   hsAll.forEach(function(hs, hsIdx){
     var ub=ubAll[hsIdx]||ubAll[0];
     var _prevScrollTop = preserveScroll ? hs.scrollTop : 0; // 삭제·재실행 시엔 기존 스크롤 위치를 기억해뒀다가 그대로 복원
-    if(items.length>0){
+    // ⚠️ 요청 반영("전체 리셋 눌러도 메인 화면에 이전 이미지가 그대로 남아있다"): "전체 리셋"은
+    // 업로드해둔 참고 이미지(입력)만 지우는 버튼이라, 이미 만들어진 결과물(G.HIST)까지 지우면
+    // 그동안 만든 작업물이 통째로 사라져버려서 그러면 안 됨 — 대신 리셋 버튼을 누른 바로 이번
+    // 한 번의 화면 갱신에서만, 결과가 남아있어도 "결과 이력"이 아니라 빈 업로드 화면을 보여주게
+    // 하는 1회성 플래그를 둠(G._suppressHistOnce). 결과물 자체는 갤러리에 그대로 남아있음.
+    if(items.length>0 && !G._suppressHistOnce){
       ub.classList.remove('active');
       hs.style.display='flex';
       window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
@@ -3821,6 +3828,7 @@ function renderMain(callWf, preserveScroll){
       }
       hs.scrollTop = preserveScroll ? _prevScrollTop : 0;
     } else {
+      G._suppressHistOnce=false; // 1회성 플래그 소비 — 다음 렌더부터는 다시 정상적으로 결과 이력을 보여줌
       hs.style.display='none';
       window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
       hs.innerHTML='';
@@ -11335,6 +11343,7 @@ function mkMultiRoomSpace(p){
     if(_supa && _supaUser) _supa.from('user_workspace_state').delete().eq('user_id',_supaUser.id).eq('tab_key','spaceset_anchors').then(function(){}).catch(function(){});
     idbSaveDraft(_multiRoomDraftKey(), {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
     idbSaveDraft(_autoRoomDraftKey(), {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity, autoRoomSelected:spTab.autoRoomSelected}).catch(function(){});
+    G._suppressHistOnce=true; // 이번 리셋 직후 화면엔 예전 결과물 대신 빈 업로드 화면을 보여줌(결과물 자체는 갤러리에 그대로 남음)
     renderSB();
     renderMain(G.wf); // ⚠️ 버그 수정(같은 클래스): 사이드바만 갱신하고 메인화면(오른쪽 미리보기)은 안 새로 그려서, 리셋했는데도 오른쪽엔 방금 지운 사진들이 그대로 남아있는 것처럼 보일 수 있었음
   };
@@ -22350,6 +22359,7 @@ function mkMask(p){
       _mkMaskClearAll();
       maskResetTab.inputImg=null; maskResetTab.inputImgName=''; maskResetTab.resultImg=null; maskResetTab.prompt='';
       G.dm=null;
+      G._suppressHistOnce=true; // ⚠️ 같은 클래스 버그 수정: 리셋해도 메인화면에 예전 결과물이 그대로 남아있던 문제 — 갤러리 결과물 자체는 안 지우고, 이번 화면만 빈 업로드 화면으로 보여줌
       renderMain(G.wf); renderSB();
     };
     s.appendChild(maskResetBtn);
@@ -30275,6 +30285,7 @@ function showWelcomeModal(){
 }
 function openMd(id){
   if(id==='faq')buildFaq();
+  if(id==='guide')buildGuide();
   if(id==='pricing')buildPricing();
   if(id==='account')buildAccount();
   if(id==='credits')buildCredits();
@@ -30314,6 +30325,7 @@ function buildAdminDashboard(){
     {k:'credit',l:'💰 크레딧 지급'},
     {k:'coupon',l:'🎫 쿠폰 관리'},
     {k:'presetThumb',l:'🖼 프리셋 썸네일'},
+    {k:'community',l:'🌍 커뮤니티 이미지'},
     {k:'beforeAfter',l:'📷 비포/애프터'},
     {k:'logs',l:'📋 지급 이력'},
     {k:'bugReports',l:'🐛 버그 제보함'},
@@ -30344,6 +30356,7 @@ function admRenderTab(){
   else if(_adminTab==='credit') admCreditGive(c);
   else if(_adminTab==='coupon') admCoupon(c);
   else if(_adminTab==='presetThumb') admPresetThumb(c);
+  else if(_adminTab==='community') admCommunity(c);
   else if(_adminTab==='beforeAfter') admBeforeAfter(c);
   else if(_adminTab==='logs') admLogs(c);
   else if(_adminTab==='bugReports') admBugReports(c);
@@ -30749,6 +30762,103 @@ function admCoupon(c){
 // ── 프리셋 썸네일 관리 (관리자 전용) ────────────────────────────
 // 기본은 "처음 생성된 결과가 계속 대표 썸네일로 고정"이지만, 관리자는 마음에 안 드는
 // 썸네일을 다른 이미지 URL로 바꾸거나 아예 지워서(기본 아이콘으로 복원) 관리할 수 있다.
+// ⚠️ 요청 반영("관리자 모드로 커뮤니티 이미지 배치를 조정할 수 있게 해달라"): community_posts에
+// sort_order 컬럼을 두고, 관리자가 위/아래 버튼으로 순서를 직접 조정할 수 있게 함. 값이 작을수록
+// 커뮤니티 피드 앞쪽(먼저 보이는 자리)에 노출됨 — 아직 순서가 안 정해진(sort_order가 null인)
+// 게시물은 최신순으로 자동 정렬되다가, 관리자가 한 번 손대는 순간부터 그 순서가 고정됨.
+function admCommunity(c){
+  if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
+  c.innerHTML='<div style="text-align:center;padding:20px;color:var(--m2)">불러오는 중...</div>';
+  _supa.from('community_posts').select('id,image_url,like_count,created_at,is_public,sort_order,caption')
+    .order('sort_order',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}).limit(300)
+    .then(function(res){
+      if(res.error){
+        c.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">community_posts 조회에 실패했어요: <b>'+(res.error.message||'')+'</b><br>sort_order 컬럼이 없다면 Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
+          '<pre style="background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:12px;font-size:10.5px;color:var(--t2);overflow-x:auto;margin-top:10px;white-space:pre-wrap">alter table public.community_posts add column if not exists sort_order integer;</pre>';
+        return;
+      }
+      _admCommunityRender(c, res.data||[]);
+    }).catch(function(e){
+      c.innerHTML='<div style="color:#fca5a5">불러오지 못했어요: '+e.message+'</div>';
+    });
+}
+function _admCommunityRender(c, posts){
+  // sort_order가 하나도 안 정해진 상태(전부 null)면, 지금 보이는 순서(최신순) 그대로를
+  // 초기값으로 한 번만 배정해서 위/아래 버튼이 바로 동작할 수 있게 함.
+  var needsInit = posts.some(function(p){ return p.sort_order==null; });
+  if(needsInit){
+    posts.forEach(function(p,i){ if(p.sort_order==null) p.sort_order=(i+1)*10; });
+  }
+  var wrap=document.createElement('div');
+  var hint=document.createElement('div');
+  hint.style.cssText='font-size:11.5px;color:var(--m2);margin-bottom:12px;line-height:1.6';
+  hint.textContent='▲▼ 버튼으로 순서를 바꾸면 커뮤니티 피드에서 그 순서 그대로(위쪽일수록 먼저) 노출됩니다. 비공개(👁‍🗨 아이콘) 표시는 게시자가 공개를 취소한 게시물이에요.';
+  wrap.appendChild(hint);
+  var list=document.createElement('div');
+  list.style.cssText='display:flex;flex-direction:column;gap:8px';
+  function renderRow(p, idx){
+    var row=document.createElement('div');
+    row.style.cssText='display:flex;align-items:center;gap:10px;padding:8px;border-radius:10px;background:var(--c2);border:1px solid var(--bd2)';
+    var thumb=document.createElement('div');
+    thumb.style.cssText='width:52px;height:52px;border-radius:8px;overflow:hidden;flex-shrink:0;background:#000';
+    var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
+    thumb.innerHTML=isVid?'<video src="'+p.image_url+'" muted style="width:100%;height:100%;object-fit:cover"></video>':'<img src="'+p.image_url+'" style="width:100%;height:100%;object-fit:cover">';
+    row.appendChild(thumb);
+    var info=document.createElement('div');
+    info.style.cssText='flex:1;min-width:0';
+    info.innerHTML='<div style="font-size:11.5px;color:var(--t);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(p.caption||'<span style="color:var(--m2)">(문구 없음)</span>')+'</div>'+
+      '<div style="font-size:10px;color:var(--m2);margin-top:2px">❤️ '+(p.like_count||0)+(p.is_public?'':' · <span style="color:#f59e0b">비공개</span>')+'</div>';
+    row.appendChild(info);
+    var btns=document.createElement('div');
+    btns.style.cssText='display:flex;gap:4px;flex-shrink:0';
+    var upBtn=document.createElement('button');
+    upBtn.type='button';upBtn.textContent='▲';upBtn.disabled=(idx===0);
+    upBtn.style.cssText='width:26px;height:26px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:'+(idx===0?'var(--m2)':'var(--t)')+';cursor:'+(idx===0?'default':'pointer')+';font-size:11px';
+    upBtn.onclick=function(){ _admCommunitySwap(posts, idx, idx-1, c); };
+    var dnBtn=document.createElement('button');
+    dnBtn.type='button';dnBtn.textContent='▼';dnBtn.disabled=(idx===posts.length-1);
+    dnBtn.style.cssText='width:26px;height:26px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:'+(idx===posts.length-1?'var(--m2)':'var(--t)')+';cursor:'+(idx===posts.length-1?'default':'pointer')+';font-size:11px';
+    dnBtn.onclick=function(){ _admCommunitySwap(posts, idx, idx+1, c); };
+    var delBtn=document.createElement('button');
+    delBtn.type='button';delBtn.textContent='삭제';
+    delBtn.style.cssText='padding:0 8px;height:26px;border-radius:6px;border:1px solid rgba(255,80,80,.4);background:rgba(255,80,80,.12);color:#ff6b6b;cursor:pointer;font-size:10.5px;font-weight:700';
+    delBtn.onclick=function(){
+      if(!confirm('이 게시물을 커뮤니티에서 완전히 삭제할까요?')) return;
+      _supa.from('community_posts').delete().eq('id',p.id).then(function(res2){
+        if(res2.error){ alert('삭제 실패: '+res2.error.message); return; }
+        admCommunity(c);
+      });
+    };
+    btns.appendChild(upBtn);btns.appendChild(dnBtn);btns.appendChild(delBtn);
+    row.appendChild(btns);
+    return row;
+  }
+  posts.forEach(function(p,idx){ list.appendChild(renderRow(p,idx)); });
+  wrap.appendChild(list);
+  c.innerHTML='';
+  c.appendChild(wrap);
+  if(!posts.length){
+    c.innerHTML='<div style="text-align:center;padding:30px;color:var(--m2);font-size:12.5px">아직 공개된 커뮤니티 게시물이 없어요.</div>';
+  }
+  // 초기 배정이 필요했다면(전부 null이었다면) 방금 매긴 값을 조용히 저장해둠 — 다음에 관리자가
+  // 다시 들어와도 순서가 유지되게.
+  if(needsInit){
+    var updates=posts.map(function(p){ return _supa.from('community_posts').update({sort_order:p.sort_order}).eq('id',p.id); });
+    Promise.all(updates).catch(function(){});
+  }
+}
+function _admCommunitySwap(posts, i, j, c){
+  if(j<0||j>=posts.length) return;
+  var a=posts[i], b=posts[j];
+  var tmp=a.sort_order; a.sort_order=b.sort_order; b.sort_order=tmp;
+  posts[i]=b; posts[j]=a;
+  _admCommunityRender(c, posts); // 화면은 즉시 반영
+  Promise.all([
+    _supa.from('community_posts').update({sort_order:a.sort_order}).eq('id',a.id),
+    _supa.from('community_posts').update({sort_order:b.sort_order}).eq('id',b.id)
+  ]).catch(function(e){ console.warn('[커뮤니티 순서 저장 실패]', e); });
+}
+
 function admPresetThumb(c){
   var allPresets=(typeof PS_SPACE!=='undefined'?PS_SPACE:[]).map(function(q){return {k:q.k,l:q.l};});
   var optsHtml='<option value="">-- 프리셋 검색/선택 --</option>'+
@@ -32689,18 +32799,20 @@ function openCommunityPanel(){
   // 탭 전환 때(mobTab) 이미 이 오버레이들을 닫아주고 있었는데, 커뮤니티 버튼 쪽에는 그 처리가
   // 빠져있었음 — 동일하게 여기서도 열려있으면 먼저 닫아줌.
   var galPanel=gE('mob-gallery-panel');
-  if(galPanel && galPanel.style.display!=='none'){
-    galPanel.style.display='none';
-    ['mobt-gallery','mobt-favs'].forEach(function(id){
-      var el=gE(id);
-      if(el){el.style.color='';el.style.borderTop='';}
-    });
-  }
-  if(typeof _mobPanelOpen!=='undefined' && _mobPanelOpen && typeof closeMobPanel==='function') closeMobPanel();
-  // 모바일 탭바 강조 상태도 "커뮤니티"로 맞춰줌(다른 워크플로우 탭이 켜져있던 흔적 지움)
-  document.querySelectorAll('.mob-tab').forEach(function(t){t.classList.remove('on');});
-  var mobCommBtn=gE('mobt-community');
-  if(mobCommBtn) mobCommBtn.classList.add('on');
+  try{
+    if(galPanel && galPanel.style.display!=='none'){
+      galPanel.style.display='none';
+      ['mobt-gallery','mobt-favs'].forEach(function(id){
+        var el=gE(id);
+        if(el){el.style.color='';el.style.borderTop='';}
+      });
+    }
+    if(typeof _mobPanelOpen!=='undefined' && _mobPanelOpen && typeof closeMobPanel==='function') closeMobPanel();
+    // 모바일 탭바 강조 상태도 "커뮤니티"로 맞춰줌(다른 워크플로우 탭이 켜져있던 흔적 지움)
+    document.querySelectorAll('.mob-tab').forEach(function(t){t.classList.remove('on');});
+    var mobCommBtn=gE('mobt-community');
+    if(mobCommBtn) mobCommBtn.classList.add('on');
+  }catch(e){ console.warn('[커뮤니티] 모바일 오버레이 정리 중 오류(무시하고 계속):', e); }
 
   // ⚠️ 버그 수정("다른 탭 화면에 있다가 커뮤니티 누르면 반응이 없다"): 데스크톱/모바일용으로
   // #home-s, #canvas-upload-box, .hist-s가 화면에 각각 2개씩(레이아웃별로) 존재하는데,
@@ -32716,14 +32828,21 @@ function openCommunityPanel(){
   if(!hsAll.length)return;
   hsAll.forEach(function(hs){
     hs.style.display='flex';
-    window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
+    // ⚠️ 버그 수정("모바일에서 다른 탭에 있다가 커뮤니티 눌러도 여전히 반응 없다"): 이 정리
+    // 함수가 지금 있던 탭의 남은 상태에 따라 내부적으로 오류를 던지는 경우가 있었는데, try/catch가
+    // 없어서 그 오류가 나면 이 함수 전체가 그 자리에서 조용히 멈춰버렸음(콘솔에만 에러가 찍히고
+    // 사용자 화면은 그대로라 "반응 없음"으로 보였음) — 그래서 뒤에 있는 "로딩 중" 표시나 실제
+    // 커뮤니티 데이터를 불러오는 코드까지 아예 실행이 안 됐던 것. try/catch로 감싸서 여기서
+    // 문제가 생겨도 무시하고 반드시 아래로 계속 진행하게 함.
+    try{ window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs); }catch(e){ console.warn('[커뮤니티] _disposeW3DViewersIn 오류(무시하고 계속):', e); }
     hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">🌍 커뮤니티 갤러리 불러오는 중...</div>';
   });
   if(!_supa){
     hsAll.forEach(function(hs){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%">커뮤니티 기능을 지금은 사용할 수 없어요.</div>'; });
     return;
   }
-  _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname,caption').eq('is_public',true).order('created_at',{ascending:false}).limit(60)
+  _supa.from('community_posts').select('id,image_url,like_count,created_at,show_nickname,nickname,caption,sort_order').eq('is_public',true)
+    .order('sort_order',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}).limit(60)
     .then(function(res){
       if(res.error){
         hsAll.forEach(function(hs){ hs.innerHTML='<div style="padding:40px;text-align:center;color:var(--t2);width:100%;line-height:1.6">🌍 커뮤니티 갤러리를 아직 사용할 수 없어요.<br><span style="font-size:11px;opacity:.7">(관리자가 community_posts 테이블을 아직 설정하지 않았을 수 있어요)</span></div>'; });
@@ -33841,6 +33960,59 @@ window.addEventListener('load', function(){
   }
 })();
 });
+// ══════════════════════════════════════════════════════════════
+// 📖 사용 가이드 — "회원들이 플랫폼을 어떻게 쓰는지 모른다"는 요청으로 추가함. 11개 워크플로우
+// 탭 전부를 아코디언(펼치기/접기) 형식으로 한 페이지에 정리 — FAQ와 똑같은 패턴(G.faqO)을 써서
+// G.guideO로 열린 항목을 기억함. 로그인 여부와 무관하게 누구나 볼 수 있음(FAQ와 동일).
+// ══════════════════════════════════════════════════════════════
+var GUIDE_SECTIONS = [
+  {icon:'🏠',title:'현장사진 디자인',desc:'실제 현장(리모델링 전, 신축 골조 등) 사진을 올리면 원하는 스타일로 인테리어·외관을 바꿔줍니다. 가장 기본이 되는 첫 단계예요.',
+   steps:['사진을 한 장 올려요(휴대폰으로 찍은 현장 사진이면 충분해요).','원하는 스타일 프리셋을 고르거나, 직접 문구로 어떤 느낌을 원하는지 적어요.','"디자인 생성" 버튼을 누르면 30초~1분 정도 뒤에 결과가 나와요.','마음에 안 들면 문구를 수정해서 다시 생성하거나, 여러 장 동시에 만들어서 비교해볼 수 있어요.']},
+  {icon:'🏢',title:'아파트 컨셉 디자인',desc:'아파트처럼 정형화된 평형(브랜드·평형)을 고르면, 그 구조에 맞춰 여러 공간을 한 번에 통일된 컨셉으로 디자인해줘요.',
+   steps:['브랜드·평형을 고르거나, 우리 집 사진을 직접 올려요.','전체적으로 원하는 인테리어 스타일을 골라요.','거실·주방·방 등 여러 공간을 한 번에 생성하면, 전부 같은 톤으로 통일감 있게 나와요.']},
+  {icon:'🗺️',title:'공간 컨셉 디자인',desc:'건물 외관·여러 실내 공간(거실, 침실, 주방 등)을 한꺼번에 통일된 스타일로 만들 때 써요. 배치도를 참고 이미지로 넣으면 실제 공간 구조에 맞춰 더 정확하게 만들어줘요.',
+   steps:['건물 외관 사진(파사드뷰·투시뷰·조감뷰 등)과 실내 사진들을 각각 올려요.','필요하면 배치도(평면도) 이미지도 참고용으로 추가해요 — 방 형태·비율을 더 정확히 반영해줘요.','"AI가 만들어줄 뷰"에서 원하는 공간들을 체크하고, 레퍼런스 반영도(비슷하게/최대한 동일하게)를 골라요.','한 번에 여러 공간이 통일된 스타일로 생성돼요.']},
+  {icon:'💰',title:'AI 견적',desc:'디자인한 사진을 보고 AI가 항목별(바닥재, 도배, 조명 등)로 대략적인 견적을 뽑아줘요. 고객에게 빠르게 예산 감을 보여줄 때 유용해요.',
+   steps:['견적을 뽑고 싶은 디자인 사진을 선택해요.','평수·지역 등 기본 정보를 입력해요.','항목별로 나눠진 예상 견적표가 생성돼요 — 필요하면 항목을 직접 수정할 수 있어요.']},
+  {icon:'✨',title:'3D 렌더 실사화',desc:'3D 모델링 프로그램(스케치업 등)으로 뽑은 딱딱한 렌더링 이미지를 진짜 사진처럼 실사화해줘요.',
+   steps:['3D 렌더링 이미지를 업로드해요.','원하는 마감재·분위기를 지정해요(선택 사항).','실제 카메라로 찍은 것 같은 사실적인 결과물로 바뀌어요.']},
+  {icon:'🖊️',title:'AI 편집',desc:'이미 만든 디자인에서 가구·소재 등 일부분만 콕 집어서 수정하고 싶을 때 써요. 전체를 다시 만들지 않고 원하는 부분만 바꿀 수 있어요. "노후된 주택/빌라/상가" 같은 특수 프리셋도 여기 있어요.',
+   steps:['수정하고 싶은 이미지를 선택해요.','바꾸고 싶은 부분(가구, 바닥재, 벽 색상 등)을 프리셋으로 고르거나 직접 설명해요.','나머지 구조는 그대로 유지한 채 그 부분만 바뀐 결과가 나와요.']},
+  {icon:'▶️',title:'영상 제작',desc:'완성된 이미지들을 짧은 카메라 무빙 영상으로 만들어줘요(쇼츠와 달리, 한 장의 이미지를 살아있는 것처럼 움직이는 느낌).',
+   steps:['영상으로 만들 이미지를 선택해요.','카메라 움직임 스타일을 골라요.','몇 초짜리 영상이 자동 생성돼요.']},
+  {icon:'⬆️',title:'업스케일',desc:'이미지 화질이 낮거나 흐릴 때 2배·4배로 선명하게 키워줘요. 인쇄용이나 큰 화면에 띄울 때 유용해요.',
+   steps:['화질을 개선하고 싶은 이미지를 선택해요.','2배 또는 4배 업스케일을 골라요.','더 큰 해상도의 선명한 이미지가 나와요.']},
+  {icon:'🌐',title:'VR 투어',desc:'완성된 디자인을 실제로 걸어 다니는 것처럼 3D 공간으로 만들어줘요. 고객에게 직접 둘러보게 하고 싶을 때 강력해요.',
+   steps:['VR 투어로 만들 디자인 이미지(또는 여러 장)를 선택해요.','생성이 끝나면 링크가 나오고, 그 링크를 열면 마우스/터치로 공간을 둘러볼 수 있어요.','고객에게 링크만 공유하면 별도 앱 설치 없이 바로 체험할 수 있어요.']},
+  {icon:'🎬',title:'쇼츠 제작',desc:'여러 장의 이미지를 순서대로 이어붙여서 9:16 세로형 SNS 홍보 영상(유튜브 쇼츠·릴스·틱톡용)을 자동으로 만들어줘요.',
+   steps:['쇼츠에 넣을 이미지들을 순서대로 추가해요(드래그로 순서 변경 가능).','각 장면에 라벨(거실, 주방 등)을 붙이고, 필요하면 장면별로 노출 시간을 직접 지정해요.','장면 전환 효과(슬라이더/페이드/컷)와 배경음악을 골라요.','"쇼츠 생성하기"를 누르면 자동으로 영상이 만들어지고, 바로 다운로드하거나 커뮤니티에 공개할 수 있어요.']},
+  {icon:'📄',title:'제안서 제작',desc:'클라이언트에게 보여줄 PDF 제안서를 자동으로 만들어줘요. Before/After 이미지와 설명이 깔끔하게 정리된 문서로 나와요.',
+   steps:['제안서에 넣을 디자인 이미지들을 선택해요.','프로젝트 정보(고객명, 공간 정보 등)를 입력해요.','완성된 PDF를 바로 다운로드해서 고객에게 전달할 수 있어요.']}
+];
+function buildGuide(){
+  var b=gE('guide-b');if(!b)return;b.innerHTML='';
+  var intro=dv('');
+  intro.style.cssText='font-size:12.5px;color:var(--t2);line-height:1.6;padding:2px 4px 14px';
+  intro.textContent='CLOVER AI는 사진 한 장으로 시작해서 디자인 → 견적 → 영상 → 제안서 → VR 투어까지 이어지는 실무 흐름을 담고 있어요. 아래에서 각 기능을 눌러 사용법을 확인해보세요.';
+  b.appendChild(intro);
+  GUIDE_SECTIONS.forEach(function(sec,i){
+    var it=document.createElement('div');it.className='fqi';
+    var qe=document.createElement('div');qe.className='fqq';
+    qe.innerHTML='<span>'+sec.icon+' '+sec.title+'</span><span style="color:var(--ac)">'+(G.guideO===i?'\u2227':'\u2228')+'</span>';
+    qe.onclick=function(){G.guideO=G.guideO===i?-1:i;buildGuide();};
+    it.appendChild(qe);
+    if(G.guideO===i){
+      var ae=document.createElement('div');ae.className='fqa';
+      var html='<div style="margin-bottom:10px;color:var(--t2)">'+sec.desc+'</div><ol style="margin:0;padding-left:18px;line-height:1.8">';
+      sec.steps.forEach(function(s){ html+='<li>'+s+'</li>'; });
+      html+='</ol>';
+      ae.innerHTML=html;
+      it.appendChild(ae);
+    }
+    b.appendChild(it);
+  });
+}
+
 function buildFaq(){
   var b=gE('faq-b');if(!b)return;b.innerHTML='';
   var cats=[
@@ -34494,6 +34666,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
   };
   gE('btn-pricing').onclick=function(){openMd('pricing');};
   gE('faq-close').onclick=function(){closeMd('faq');};
+  gE('guide-close').onclick=function(){closeMd('guide');};
   gE('pricing-close').onclick=function(){closeMd('pricing');};
   gE('account-close').onclick=function(){closeMd('account');};
   gE('credits-close').onclick=function(){closeMd('credits');};
