@@ -426,7 +426,6 @@ select option{background:var(--c2)}
   .nav-r::-webkit-scrollbar{display:none!important}
   .nav-r>*{flex-shrink:0!important}
   #btn-pricing{order:-1!important} /* 가장 중요한 CTA라 스크롤 안 해도 바로 보이게 맨 앞으로 */
-  #btn-bizinfo{display:none!important}
   /* btn-account는 로그인 안 된 상태에서 로그인 창을 여는 버튼이라 숨기면 안 됨 —
      예전에 실수로 숨겨서 모바일에서 로그인 자체가 안 되는 버그가 있었음. 숨기는 대신 작게만. */
   #btn-account{padding:4px 7px!important;font-size:10.5px!important}
@@ -527,7 +526,6 @@ select option{background:var(--c2)}
     <button class="nbtn" id="btn-guide" onclick="openMd('guide')" style="background:rgba(0,229,204,.12);border-color:rgba(0,229,204,.35);color:var(--ac);font-weight:700"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;vertical-align:-3px;margin-right:4px"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>사용 가이드</button>
     <button class="nbtn" id="btn-faq" onclick="openMd('faq')">FAQ</button>
     <button class="nbtn" id="btn-bugreport" onclick="openBugReportModal()" style="background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.4);color:#f59e0b;font-weight:700"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;vertical-align:-2px;margin-right:3px"><rect x="7" y="8" width="10" height="11" rx="4"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/><path d="M12 12v4"/><path d="M4 12h3M17 12h3M5 8l2 2M19 8l-2 2M5 18l2-2M19 18l-2-2"/></svg>버그 제보</button>
-    <button class="nbtn" id="btn-bizinfo" onclick="openMd('bizinfo')">사업자정보</button>
     <a class="nbtn" id="btn-snap" href="https://www.snapdesign.co.kr" target="_blank" rel="noopener" title="최종 제출용 고퀄리티 3D 투시도·조감도가 필요하신가요?" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none" onclick="_trackEvent('snap_topnav_click')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0"><path d="M4 22V10l5-4 5 4v12"/><path d="M14 22V6l6-4v20"/><line x1="9" y1="13" x2="9" y2="13.01"/><line x1="9" y1="17" x2="9" y2="17.01"/></svg>SNAP</a>
     <button class="nbtn" id="btn-account" onclick="openMd('account')">계정</button>
     <button class="nbtn up" id="btn-pricing" onclick="openMd('pricing')">크레딧 충전</button>
@@ -21860,18 +21858,31 @@ function _measureLabelW(ctx, label){
 // 이전 장면(fromSlide) → 다음 장면(toSlide) 슬라이더 전환
 // progress 0: fromSlide 전체 그대로 → progress 1: toSlide 전체로 자연스럽게 넘어감
 // 우측에서 슬라이더 바가 나타나 좌측으로 이동하면서, 핸들 오른쪽 영역에 다음 장면이 드러난다.
+// ⚠️ 요청 반영("경계를 살짝 그라데이션(페더)으로 흐리게, 블러 없이도 더 정제된 느낌"):
+// 기존엔 다음 장면을 사각형으로 딱 잘라서(clip) 붙여넣어 경계선이 픽셀 단위로 딱딱하게
+// 끊겼음 — 이제 경계 폭만큼 투명도가 서서히 바뀌는 그라데이션 마스크를 써서, 두 장면이
+// 살짝 스며들 듯 자연스럽게 이어지도록 함. 오른쪽 핸들 아이콘(◀▶)은 그대로 유지.
 function _shortsDrawSlideWipe(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
-  var lineX=Math.round(W*(1-progress)); // progress 0: lineX=W(전체 이전 장면), 1: lineX=0(전체 다음 장면)
+  var lineX=W*(1-progress); // progress 0: lineX=W(전체 이전 장면), 1: lineX=0(전체 다음 장면)
+  var featherW=Math.max(2, Math.round(W*0.018)); // 경계 페더 폭(화면 폭의 약 1.8%)
 
   // 1. 이전 장면을 배경 전체에 먼저 그리기
   _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
 
-  // 2. 다음 장면을 핸들 오른쪽 영역에 클립해서 덮어 그리기
-  if(lineX<W){
-    ctx.save();
-    ctx.beginPath();ctx.rect(lineX,0,W-lineX,H);ctx.clip();
-    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
-    ctx.restore();
+  // 2. 다음 장면을 오프스크린에 그린 뒤, 왼쪽 경계만 그라데이션으로 부드럽게 마스킹해서 합성
+  if(lineX<W+featherW){
+    var off=document.createElement('canvas'); off.width=W; off.height=H;
+    var octx=off.getContext('2d');
+    _shortsDrawSlide(octx,W,H,toSlide,opts,imgCache);
+    octx.globalCompositeOperation='destination-in';
+    var fadeStart=Math.max(0,lineX-featherW), fadeEnd=Math.min(W,lineX+featherW);
+    var grad=octx.createLinearGradient(fadeStart,0,fadeEnd,0);
+    grad.addColorStop(0,'rgba(0,0,0,0)');
+    grad.addColorStop(1,'rgba(0,0,0,1)');
+    octx.fillStyle=grad;
+    octx.fillRect(fadeStart,0,Math.max(0,W-fadeStart),H);
+    if(fadeEnd<W){ octx.fillStyle='rgba(0,0,0,1)'; octx.fillRect(fadeEnd,0,W-fadeEnd,H); }
+    ctx.drawImage(off,0,0);
   }
 
   // 3. 구분선 + 핸들 (핸들 크기 절반으로 축소)
@@ -22263,11 +22274,29 @@ function _shortsDrawEnding(ctx, W, H){
 
 // 전환 효과
 // 모든 장면 전환은 항상 동일한 자연스러운 Cross Dissolve(크로스 디졸브) 페이드를 사용한다
+// ease-in-out(시작·끝은 느리고 중간은 빠른 곡선) — 페이드가 일정 속도로 겹쳐지던 것보다
+// 훨씬 고급스럽게 느껴짐. 새 전환 효과가 아니라 기존 페이드를 다듬는 것뿐이라 안전함.
+function _shortsEaseInOutCubic(t){ return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+// ⚠️ 요청 반영("페이드를 부드럽게(이징) 다듬기 + 크로스디졸브에 미세 확대(102%→100%) 얹기"):
+// 1) 진행률에 ease-in-out을 적용해서 겹쳐지는 속도 자체를 고급스럽게 만들고,
+// 2) 들어오는 장면이 102%로 살짝 확대된 채 시작해서 100%로 정착하며 나타나고, 나가는 장면도
+//    아주 살짝(100%→102%) 확대되며 사라지게 해서 "숨쉬는 듯한" 느낌을 더함(화려하지 않게 미세하게).
 function _shortsDrawTransition(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  var eased=_shortsEaseInOutCubic(progress);
+  // 나가는 장면: 100%→102%로 아주 살짝 확대되며 서서히 사라짐
+  var fromScale=1+eased*0.02;
+  ctx.save();
+  ctx.globalAlpha=1-eased;
+  ctx.translate(W/2,H/2);ctx.scale(fromScale,fromScale);ctx.translate(-W/2,-H/2);
   _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
-  ctx.save();ctx.globalAlpha=progress;
+  ctx.restore();
+  // 들어오는 장면: 102%에서 시작해 100%로 정착하며 서서히 나타남
+  var toScale=1.02-eased*0.02;
+  ctx.save();
+  ctx.globalAlpha=eased;
+  ctx.translate(W/2,H/2);ctx.scale(toScale,toScale);ctx.translate(-W/2,-H/2);
   _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
-  ctx.globalAlpha=1;ctx.restore();
+  ctx.restore();
 }
 
 // 줌스루 — 이전 장면이 화면 속으로 확대되며 빨려들어가듯 사라지고, 다음 장면이 크게 시작해서
