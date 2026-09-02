@@ -34173,6 +34173,12 @@ function chargeCr(amount){
   }).then(function(d){
     if(d.error){ msg('⚠️ '+d.error, true); return; }
     try{ sessionStorage.setItem('clover_pending_order', JSON.stringify(d)); }catch(e){}
+    // ⚠️ 진단 강화(2026-09-02, "정확히 뭐가 잘못됐는지 로그로 알아야지"): requestPayment
+    // 직전에 실제로 어떤 값들을 보내는지, 실패 시엔 e.message뿐 아니라 토스가 주는 e.code까지
+    // 콘솔에 그대로 찍음 — 화면 alert 문구만으론 원인 특정이 안 돼서 개발자도구 콘솔에서
+    // 바로 확인 가능하게 함.
+    console.log('[토스결제] requestPayment 호출 직전 — clientKey 앞8자:', TOSS_CLIENT_KEY.slice(0,8)+'...',
+      'customerKey:', _supaUser.id, 'amount:', d.amount, 'orderId:', d.orderId);
     var payment = TossPayments(TOSS_CLIENT_KEY).payment({ customerKey: _supaUser.id });
     payment.requestPayment({
       method:'CARD',
@@ -34183,7 +34189,8 @@ function chargeCr(amount){
       failUrl: location.origin+location.pathname+'?tossFail=1',
       customerEmail: _supaUser.email||undefined,
     }).catch(function(e){
-      msg('⚠️ 결제 취소 또는 실패: '+(e&&e.message||''), true);
+      console.error('[토스결제] requestPayment 실패 — code:', e&&e.code, '/ message:', e&&e.message, '/ 전체:', e);
+      msg('⚠️ 결제 취소 또는 실패 [code:'+(e&&e.code||'없음')+'] '+(e&&e.message||''), true);
     });
   }).catch(function(e){ console.error('[토스결제] create-order 네트워크 오류', e); msg('⚠️ 결제 준비 중 오류가 발생했어요: '+(e&&e.message||e), true); });
   }).catch(function(){ msg('⚠️ 로그인 세션 확인 중 오류가 발생했어요.', true); });
