@@ -3204,6 +3204,13 @@ function _openImageLightbox(url, urls, idx){
   var closeBtn=document.createElement('button');
   closeBtn.type='button'; closeBtn.innerHTML='&#10005;';
   closeBtn.style.cssText='position:absolute;top:18px;right:22px;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
+  // ⚠️ 요청 반영("색상 보정 기능 추가해줘, VizMaker의 Adjust Colors처럼"): 라이트박스에서 보고
+  // 있는 이미지를 바로 밝기·대비·채도·색온도 보정해서 다운로드할 수 있는 버튼. AI 재생성 없이
+  // 캔버스 필터로만 처리해서 크레딧이 전혀 들지 않음.
+  var adjustBtn=document.createElement('button');
+  adjustBtn.type='button'; adjustBtn.innerHTML='&#127912; 색상 보정';
+  adjustBtn.style.cssText='position:absolute;top:18px;left:22px;height:38px;padding:0 16px;border-radius:19px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;z-index:3;font-family:inherit';
+  adjustBtn.onclick=function(e){ e.stopPropagation(); _openColorAdjustPanel(img.src); };
   function close(){ ov.remove(); document.removeEventListener('keydown', onKey); }
   function showAt(newIdx){
     if(!hasNav) return;
@@ -3222,7 +3229,7 @@ function _openImageLightbox(url, urls, idx){
   closeBtn.onclick=close;
   ov.onclick=function(){ if(!zoomCtl.isZoomed()) close(); }; // 확대 중엔 바깥 클릭으로 안 닫히게(드래그 실수 방지)
   document.addEventListener('keydown', onKey);
-  ov.appendChild(mediaWrap); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn);
+  ov.appendChild(mediaWrap); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn); ov.appendChild(adjustBtn);
   if(hasNav){
     var prevBtn=document.createElement('button'); prevBtn.type='button'; prevBtn.innerHTML='&#10094;';
     prevBtn.style.cssText='position:absolute;left:14px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
@@ -3235,6 +3242,147 @@ function _openImageLightbox(url, urls, idx){
     counter.style.cssText='position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;z-index:3;pointer-events:none';
     ov.appendChild(prevBtn); ov.appendChild(nextBtn); ov.appendChild(counter);
   }
+  document.body.appendChild(ov);
+}
+
+// ⚠️ 요청 반영("VizMaker의 Adjust Colors처럼 색상 보정 기능"): 결과 이미지를 AI 재생성 없이
+// 캔버스 필터만으로 밝기·대비·채도·색온도를 조절해서 다운로드하는 패널. 크레딧 소모 0.
+function _openColorAdjustPanel(srcUrl){
+  var old=document.getElementById('color-adjust-ov'); if(old) old.remove();
+  var ov=document.createElement('div');
+  ov.id='color-adjust-ov';
+  ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;overflow:auto';
+  ov.onclick=function(e){ if(e.target===ov) close(); };
+
+  function close(){ ov.remove(); document.removeEventListener('keydown', onEsc); }
+  function onEsc(e){ if(e.key==='Escape') close(); }
+  document.addEventListener('keydown', onEsc);
+
+  var closeBtn=document.createElement('button');
+  closeBtn.type='button'; closeBtn.innerHTML='&#10005;';
+  closeBtn.style.cssText='position:absolute;top:18px;right:22px;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
+  closeBtn.onclick=close;
+
+  var title=document.createElement('div');
+  title.innerHTML='&#127912; 색상 보정 <span style="color:var(--m2,#888);font-weight:400;font-size:11.5px">— AI 재생성 없이, 크레딧 소모 없이 톤만 조절해요</span>';
+  title.style.cssText='color:#fff;font-size:14px;font-weight:700;margin-bottom:14px;text-align:center';
+
+  var canvasWrap=document.createElement('div');
+  canvasWrap.style.cssText='max-width:min(880px,92vw);max-height:56vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;border-radius:10px;overflow:hidden';
+  var canvas=document.createElement('canvas');
+  canvas.style.cssText='max-width:100%;max-height:56vh;display:block';
+  canvasWrap.appendChild(canvas);
+
+  var panel=document.createElement('div');
+  panel.style.cssText='width:min(440px,92vw);margin-top:16px;background:var(--card,#141414);border:1px solid var(--bd2,#2a2a2a);border-radius:12px;padding:16px;box-sizing:border-box';
+
+  var vals={brightness:0, contrast:0, saturation:0, warmth:0};
+  var pW=0, pH=0;
+  var srcImg=new Image();
+  var fullImg=new Image();
+
+  function drawPreview(){
+    if(!pW||!pH) return;
+    var ctx=canvas.getContext('2d');
+    canvas.width=pW; canvas.height=pH;
+    ctx.filter='brightness('+(100+vals.brightness)+'%) contrast('+(100+vals.contrast)+'%) saturate('+(100+vals.saturation)+'%)';
+    ctx.drawImage(srcImg,0,0,pW,pH);
+    ctx.filter='none';
+    if(vals.warmth!==0){
+      ctx.save();
+      ctx.globalCompositeOperation='overlay';
+      ctx.globalAlpha=Math.min(0.5, Math.abs(vals.warmth)/100*0.5);
+      ctx.fillStyle = vals.warmth>0 ? '#ff9d3c' : '#3ca0ff';
+      ctx.fillRect(0,0,pW,pH);
+      ctx.restore();
+    }
+  }
+  srcImg.onload=function(){
+    var maxW=800, maxH=480;
+    var scale=Math.min(1, maxW/srcImg.naturalWidth, maxH/srcImg.naturalHeight);
+    pW=Math.max(1,Math.round(srcImg.naturalWidth*scale));
+    pH=Math.max(1,Math.round(srcImg.naturalHeight*scale));
+    drawPreview();
+  };
+  srcImg.src=srcUrl;
+  fullImg.src=srcUrl;
+
+  function mkSlider(label, key, min, max){
+    var row=document.createElement('div');
+    row.style.cssText='margin-bottom:14px';
+    var lbl=document.createElement('div');
+    lbl.style.cssText='display:flex;justify-content:space-between;color:var(--t2,#ccc);font-size:12px;margin-bottom:6px';
+    var lblText=document.createElement('span'); lblText.textContent=label;
+    var lblVal=document.createElement('span'); lblVal.textContent='0'; lblVal.style.cssText='color:var(--ac,#00e5cc);font-weight:700;font-variant-numeric:tabular-nums';
+    lbl.appendChild(lblText); lbl.appendChild(lblVal);
+    var input=document.createElement('input');
+    input.type='range'; input.min=min; input.max=max; input.value=0; input.step=1;
+    input.style.cssText='width:100%;accent-color:var(--ac,#00e5cc)';
+    input.oninput=function(){
+      vals[key]=parseInt(input.value,10);
+      lblVal.textContent=vals[key];
+      drawPreview();
+    };
+    row.appendChild(lbl); row.appendChild(input);
+    return {row:row, input:input, lblVal:lblVal};
+  }
+
+  var sliders=[
+    mkSlider('밝기','brightness',-60,60),
+    mkSlider('대비','contrast',-60,60),
+    mkSlider('채도','saturation',-80,80),
+    mkSlider('색온도 (차갑게 ↔ 따뜻하게)','warmth',-60,60)
+  ];
+  sliders.forEach(function(s){ panel.appendChild(s.row); });
+
+  var btnRow=document.createElement('div');
+  btnRow.style.cssText='display:flex;gap:8px;margin-top:6px';
+  var resetBtn=document.createElement('button'); resetBtn.type='button'; resetBtn.textContent='초기화';
+  resetBtn.style.cssText='flex:1;padding:11px;border-radius:9px;border:1px solid var(--bd2,#2a2a2a);background:var(--c2,#1c1c1c);color:var(--t2,#ccc);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+  resetBtn.onclick=function(){
+    vals={brightness:0,contrast:0,saturation:0,warmth:0};
+    sliders.forEach(function(s){ s.input.value=0; s.lblVal.textContent='0'; });
+    drawPreview();
+  };
+  var errNote=document.createElement('div');
+  errNote.style.cssText='display:none;color:#f87171;font-size:11px;margin-top:8px;text-align:center';
+  errNote.textContent='보안 제한으로 이 이미지는 브라우저에서 직접 저장할 수 없어요. 화면 캡처로 저장해주세요.';
+  var dlBtn=document.createElement('button'); dlBtn.type='button'; dlBtn.innerHTML='&#11015; 보정본 다운로드';
+  dlBtn.style.cssText='flex:2;padding:11px;border-radius:9px;border:none;background:var(--ac,#00e5cc);color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+  dlBtn.onclick=function(){
+    if(!fullImg.complete || !fullImg.naturalWidth) return;
+    try{
+      var out=document.createElement('canvas');
+      out.width=fullImg.naturalWidth; out.height=fullImg.naturalHeight;
+      var octx=out.getContext('2d');
+      octx.filter='brightness('+(100+vals.brightness)+'%) contrast('+(100+vals.contrast)+'%) saturate('+(100+vals.saturation)+'%)';
+      octx.drawImage(fullImg,0,0);
+      octx.filter='none';
+      if(vals.warmth!==0){
+        octx.save();
+        octx.globalCompositeOperation='overlay';
+        octx.globalAlpha=Math.min(0.5, Math.abs(vals.warmth)/100*0.5);
+        octx.fillStyle = vals.warmth>0 ? '#ff9d3c' : '#3ca0ff';
+        octx.fillRect(0,0,out.width,out.height);
+        octx.restore();
+      }
+      var a=document.createElement('a');
+      a.href=out.toDataURL('image/jpeg', 0.95);
+      a.download='clover-ai-보정본.jpg';
+      document.body.appendChild(a); a.click(); a.remove();
+      errNote.style.display='none';
+    }catch(e){
+      errNote.style.display='block';
+    }
+  };
+  btnRow.appendChild(resetBtn); btnRow.appendChild(dlBtn);
+  panel.appendChild(btnRow);
+  panel.appendChild(errNote);
+
+  ov.appendChild(closeBtn);
+  ov.appendChild(title);
+  ov.appendChild(canvasWrap);
+  ov.appendChild(panel);
   document.body.appendChild(ov);
 }
 function dv(cl){return mk('div',cl);}
@@ -16974,7 +17122,14 @@ window.addEventListener('beforeunload', function(){
 
 // 쇼츠 타이밍 (초) — 고정값
 // ⚠️ 요청 반영("페이드가 느려서 잔상이 오래 남는 느낌") — 0.5초에서 0.3초로 단축.
-var SHORTS_TIMING = {holdFirst:2.0, transDur:0.3, wipeDur:1.8, holdAfter:3.0, endingHold:2.2};
+var SHORTS_TIMING = {holdFirst:2.0, transDur:0.3, wipeDur:1.8, holdAfter:3.0, endingHold:2.2, zoomDur:0.55, whipDur:0.38, flashDur:0.18};
+// 전환 모드별 소요 시간을 한 곳에서 관리(신규 모드 추가할 때 여기만 늘리면 됨)
+function _shortsTransDur(mode){
+  if(mode==='zoomthrough') return SHORTS_TIMING.zoomDur;
+  if(mode==='whippan') return SHORTS_TIMING.whipDur;
+  if(mode==='flash') return SHORTS_TIMING.flashDur;
+  return SHORTS_TIMING.transDur; // fade 및 기타 기본값
+}
 
 var G_PROPOSAL = {
   scenes: [], // {id, orig, result, label}
@@ -17182,7 +17337,7 @@ function _shortsBuildTimeline(slides){
         if(!nextIsHardCut){
           if(useCut){ /* 컷 모드는 겹치는 구간 자체가 없어서 보너스 불필요 */ }
           else if(useSlider && !nextSlide.noSlider) d0 += WIPE_DUR;
-          else d0 += FADE_DUR;
+          else d0 += _shortsTransDur(transMode);
         }
       }
       timeline.push({type:'hold',idx:0,start:t,end:t+d0});
@@ -17215,8 +17370,9 @@ function _shortsBuildTimeline(slides){
       timeline.push({type:'hold',idx:i,start:t,end:t+d});
       t+=d;
     } else {
-      timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+FADE_DUR});
-      t+=FADE_DUR;
+      var _tDur=_shortsTransDur(transMode);
+      timeline.push({type:'trans',from:i-1,to:i,mode:transMode,start:t,end:t+_tDur});
+      t+=_tDur;
       var d2=_slideDuration(slide);
       timeline.push({type:'hold',idx:i,start:t,end:t+d2});
       t+=d2;
@@ -18321,16 +18477,19 @@ function sbShorts(p){
   if(!opts.transitionMode) opts.transitionMode = (opts.beforeAfter!==false ? 'slider' : 'fade');
   var baWrap=dv('ss');
   baWrap.innerHTML='<div class="lbl">장면 전환 효과</div>';
-  var transRow=dv('');transRow.style.cssText='display:flex;gap:6px;margin-top:6px';
+  var transRow=dv('');transRow.style.cssText='display:flex;gap:6px;margin-top:6px;flex-wrap:wrap';
   var TRANS_MODES=[
     {k:'slider',l:'슬라이더',d:'우→좌로 화면을 밀며 전환'},
     {k:'fade',l:'페이드',d:'서서히 겹쳐지며 전환'},
-    {k:'cut',l:'컷(효과 없음)',d:'효과 없이 바로 다음 사진으로'}
+    {k:'cut',l:'컷(효과 없음)',d:'효과 없이 바로 다음 사진으로'},
+    {k:'zoomthrough',l:'줌스루',d:'화면 속으로 빨려들어가듯 확대되며 전환'},
+    {k:'whippan',l:'휩팬',d:'옆으로 휙 스치듯 블러 지나가며 전환'},
+    {k:'flash',l:'플래시컷',d:'화이트 플래시가 짧게 번쩍하며 전환'}
   ];
   TRANS_MODES.forEach(function(tm){
     var btn=mk('button','');btn.type='button';btn.textContent=tm.l;
     var isSel=opts.transitionMode===tm.k;
-    btn.style.cssText='flex:1;padding:8px 4px;border-radius:8px;border:1px solid '+(isSel?'var(--ac)':'var(--bd2)')+';background:'+(isSel?'var(--acg)':'var(--c2)')+';color:'+(isSel?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    btn.style.cssText='flex:1 1 30%;min-width:88px;padding:8px 4px;border-radius:8px;border:1px solid '+(isSel?'var(--ac)':'var(--bd2)')+';background:'+(isSel?'var(--acg)':'var(--c2)')+';color:'+(isSel?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
     btn.onclick=function(){
       opts.transitionMode=tm.k;
       opts.beforeAfter = (tm.k==='slider'); // 예전 필드도 같이 맞춰서 다른 곳에서 참조해도 어긋나지 않게 함
@@ -21496,10 +21655,14 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
     p1=Math.max(0,Math.min(1,p1));
     _shortsDrawSlideWipe(ctx,W,H,slides[entry.from],slides[entry.to],p1,opts,imgCache);
   } else if(entry.type==='trans'){
-    // Before/After 슬라이더를 껐을 때만 쓰는 페이드 인/아웃 전환
+    // 슬라이더(wipe) 외의 모든 전환 효과 — mode에 따라 실제 그리는 방식이 다름
     var p2=(t-entry.start)/(entry.end-entry.start);
     p2=Math.max(0,Math.min(1,p2));
-    _shortsDrawTransition(ctx,W,H,slides[entry.from],slides[entry.to],p2,opts,imgCache);
+    var _fromS=slides[entry.from], _toS=slides[entry.to];
+    if(entry.mode==='zoomthrough') _shortsDrawZoomThrough(ctx,W,H,_fromS,_toS,p2,opts,imgCache);
+    else if(entry.mode==='whippan') _shortsDrawWhipPan(ctx,W,H,_fromS,_toS,p2,opts,imgCache);
+    else if(entry.mode==='flash') _shortsDrawFlashCut(ctx,W,H,_fromS,_toS,p2,opts,imgCache);
+    else _shortsDrawTransition(ctx,W,H,_fromS,_toS,p2,opts,imgCache); // 페이드(기본값)
   }
   if(opts.watermark)_shortsDrawWatermark(ctx,W,H);
 }
@@ -22105,6 +22268,62 @@ function _shortsDrawTransition(ctx, W, H, fromSlide, toSlide, progress, opts, im
   ctx.save();ctx.globalAlpha=progress;
   _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
   ctx.globalAlpha=1;ctx.restore();
+}
+
+// 줌스루 — 이전 장면이 화면 속으로 확대되며 빨려들어가듯 사라지고, 다음 장면이 크게 시작해서
+// 원래 크기로 줄어들며 나타남. 두 장면 다 화면 중앙 기준으로 확대/축소해서, "카메라가 뚫고
+// 지나가는" 느낌을 줌. 정지 이미지에 확실한 움직임을 더하고 싶을 때 컷/페이드보다 임팩트가 큼.
+function _shortsDrawZoomThrough(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  // 이전 장면: 100%→135%로 확대하면서, 후반부(55%~100%)에 걸쳐 서서히 사라짐
+  var fromScale=1+progress*0.35;
+  var fromAlpha=1-Math.max(0,(progress-0.55)/0.45);
+  ctx.save();
+  ctx.globalAlpha=Math.max(0,Math.min(1,fromAlpha));
+  ctx.translate(W/2,H/2);ctx.scale(fromScale,fromScale);ctx.translate(-W/2,-H/2);
+  _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
+  ctx.restore();
+  // 다음 장면: 130%에서 시작해 100%로 줄어들면서, 전반부(35%~100%)에 걸쳐 서서히 나타남
+  var toScale=1.3-progress*0.3;
+  var toAlpha=Math.max(0,(progress-0.35)/0.65);
+  ctx.save();
+  ctx.globalAlpha=Math.min(1,toAlpha);
+  ctx.translate(W/2,H/2);ctx.scale(toScale,toScale);ctx.translate(-W/2,-H/2);
+  _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
+  ctx.restore();
+}
+
+// 휩팬 — 화면이 옆으로 빠르게 스치듯 블러 처리되며 지나가는 전환. 전반부엔 이전 장면이
+// 블러와 함께 화면 밖(왼쪽)으로 빠져나가고, 후반부엔 다음 장면이 블러와 함께 화면 밖(오른쪽)에서
+// 들어와 자리를 잡음. 릴스·틱톡 빠른 편집에서 흔히 쓰는 "휙" 넘어가는 느낌.
+function _shortsDrawWhipPan(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  var maxBlurPx=Math.round(W*0.03); // 화면 크기에 비례한 블러 강도
+  if(progress<0.5){
+    var p=progress/0.5;
+    ctx.save();
+    try{ ctx.filter='blur('+Math.round(p*maxBlurPx)+'px)'; }catch(e){}
+    ctx.translate(-p*W*0.9,0);
+    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
+    ctx.restore();
+  } else {
+    var p2=(progress-0.5)/0.5;
+    ctx.save();
+    try{ ctx.filter='blur('+Math.round((1-p2)*maxBlurPx)+'px)'; }catch(e){}
+    ctx.translate((1-p2)*W*0.9,0);
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
+    ctx.restore();
+  }
+}
+
+// 플래시컷 — 컷 중간 지점에서 화이트 플래시가 아주 짧게 번쩍하며 넘어감. 구현이 제일 간단하면서도
+// (움직임 계산 없이 밝기만 오버레이) 템포감·에너지를 확실하게 살려주는 전환.
+function _shortsDrawFlashCut(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  _shortsDrawSlide(ctx,W,H, progress>=0.5?toSlide:fromSlide, opts, imgCache);
+  var flashAlpha=1-Math.abs(progress-0.5)*2; // 중간(50%)에서 최대(1)로 번쩍, 양 끝에서 0
+  ctx.save();
+  ctx.globalAlpha=Math.max(0,Math.min(1,flashAlpha));
+  ctx.fillStyle='#fff';
+  ctx.fillRect(0,0,W,H);
+  ctx.restore();
 }
 
 // 워터마크
