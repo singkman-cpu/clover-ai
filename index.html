@@ -36068,10 +36068,44 @@ document.addEventListener('click',function(e){
     setTimeout(function(){ mobTab(_mobInitWf); }, 300);
   }
 </script>
+<script>
+  // ⚠️ 진단용 인터셉터(2026-09-02, "추측하지 말고 로그로 정확히 파악해야지"): tosspayments.com으로
+  // 나가는 모든 fetch/XHR 요청의 실제 응답(status + body)을 그대로 콘솔에 찍음. 토스 SDK 내부에서
+  // 쏘는 px-payment-parameters 같은 호출은 우리 코드가 직접 못 잡는 내부 호출이라, 지금까지는
+  // 개발자도구에서 사람이 일일이 클릭해서 봐야 했음 — 이제 콘솔에 자동으로 다 찍히게 함.
+  (function(){
+    var origFetch = window.fetch;
+    window.fetch = function(){
+      var url = arguments[0] && (arguments[0].url || arguments[0]);
+      var p = origFetch.apply(this, arguments);
+      if(typeof url==='string' && url.indexOf('tosspayments.com')>-1){
+        p.then(function(r){
+          r.clone().text().then(function(t){
+            console.log('[토스 네트워크 진단] fetch', r.status, url, '\n응답 본문:', t);
+          });
+        }).catch(function(e){ console.log('[토스 네트워크 진단] fetch 실패', url, e); });
+      }
+      return p;
+    };
+    var origOpen = XMLHttpRequest.prototype.open;
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(method, url){ this.__toss_url = url; return origOpen.apply(this, arguments); };
+    XMLHttpRequest.prototype.send = function(){
+      var xhr = this;
+      if(typeof xhr.__toss_url==='string' && xhr.__toss_url.indexOf('tosspayments.com')>-1){
+        xhr.addEventListener('loadend', function(){
+          console.log('[토스 네트워크 진단] xhr', xhr.status, xhr.__toss_url, '\n응답 본문:', xhr.responseText);
+        });
+      }
+      return origSend.apply(this, arguments);
+    };
+  })();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://js.tosspayments.com/v2/standard"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
+
 // ── Supabase 설정 ─────────────────────────────────────────────────
 // 아래 두 줄에 직접 입력하거나, 계정 관리자 설정에서 입력하세요
 // 관리자 이메일 목록 (DB 조회 실패 시 폴백용)
