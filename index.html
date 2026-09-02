@@ -16974,7 +16974,14 @@ window.addEventListener('beforeunload', function(){
 
 // 쇼츠 타이밍 (초) — 고정값
 // ⚠️ 요청 반영("페이드가 느려서 잔상이 오래 남는 느낌") — 0.5초에서 0.3초로 단축.
-var SHORTS_TIMING = {holdFirst:2.0, transDur:0.3, wipeDur:1.8, holdAfter:3.0, endingHold:2.2};
+var SHORTS_TIMING = {holdFirst:2.0, transDur:0.3, wipeDur:1.8, holdAfter:3.0, endingHold:2.2, zoomDur:0.55, whipDur:0.38, flashDur:0.18};
+// 전환 모드별 소요 시간을 한 곳에서 관리(신규 모드 추가할 때 여기만 늘리면 됨)
+function _shortsTransDur(mode){
+  if(mode==='zoomthrough') return SHORTS_TIMING.zoomDur;
+  if(mode==='whippan') return SHORTS_TIMING.whipDur;
+  if(mode==='flash') return SHORTS_TIMING.flashDur;
+  return SHORTS_TIMING.transDur; // fade 및 기타 기본값
+}
 
 var G_PROPOSAL = {
   scenes: [], // {id, orig, result, label}
@@ -17118,29 +17125,6 @@ function _shortsBuildSlides(){
       skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
       noSlider:!!im.noSlider, customDuration:(!im.isVideo && im.customDuration>0)?im.customDuration:null});
   });
-  // ⚠️ 요청 반영("컷별 길이 강약 조절 — 첫 컷·마지막 컷은 자동으로 1.5~2초, 중간 컷들은
-  // 1~1.3초로, 전체 길이가 20~25초 안에 들어오도록 자동 계산"): opts.autoWeightedDuration이
-  // 켜져 있으면, 직접 초를 지정하지 않은 장면들(customDuration이 없는 일반 사진 장면)에 한해
-  // 이 자동 강약 값을 채워넣음 — 사용자가 특정 장면에 직접 초를 지정해뒀다면 그건 항상 이
-  // 자동 계산보다 우선함(여기서 절대 안 건드림). 전환 효과(슬라이더/페이드/컷)에 따라 실제
-  // 총 길이는 조금씩 달라질 수 있어 "정확히" 20~25초를 보장하진 않지만, 목표 범위 안에 들어
-  // 오도록 최대한 맞춤.
-  if(opts.autoWeightedDuration){
-    var _awSlides = slides.filter(function(s){ return s.type==='slide' && !s.isVideo && s.customDuration==null; });
-    var _awN = _awSlides.length;
-    if(_awN>0){
-      var _awFirstLast = 1.75; // 1.5~2초 범위의 중간값
-      var _awTargetHoldTotal = 20; // 전체 목표(20~25초)에서 전환·엔딩 여유분을 뺀, 순수 "장면 노출 시간" 합계 목표
-      if(_awN<=2){
-        _awSlides.forEach(function(s){ s.customDuration=_awFirstLast; });
-      } else {
-        var _awMidBudget = Math.max(1, Math.min(1.3, (_awTargetHoldTotal - _awFirstLast*2) / (_awN-2)));
-        _awSlides.forEach(function(s,i){
-          s.customDuration = (i===0 || i===_awN-1) ? _awFirstLast : _awMidBudget;
-        });
-      }
-    }
-  }
   if(opts.ending){
     slides.push({type:'ending',label:'',img:SHORTS_ENDING_IMG});
   }
@@ -17205,7 +17189,7 @@ function _shortsBuildTimeline(slides){
         if(!nextIsHardCut){
           if(useCut){ /* 컷 모드는 겹치는 구간 자체가 없어서 보너스 불필요 */ }
           else if(useSlider && !nextSlide.noSlider) d0 += WIPE_DUR;
-          else d0 += FADE_DUR;
+          else d0 += _shortsTransDur(transMode);
         }
       }
       timeline.push({type:'hold',idx:0,start:t,end:t+d0});
@@ -17238,8 +17222,9 @@ function _shortsBuildTimeline(slides){
       timeline.push({type:'hold',idx:i,start:t,end:t+d});
       t+=d;
     } else {
-      timeline.push({type:'trans',from:i-1,to:i,start:t,end:t+FADE_DUR});
-      t+=FADE_DUR;
+      var _tDur=_shortsTransDur(transMode);
+      timeline.push({type:'trans',from:i-1,to:i,mode:transMode,start:t,end:t+_tDur});
+      t+=_tDur;
       var d2=_slideDuration(slide);
       timeline.push({type:'hold',idx:i,start:t,end:t+d2});
       t+=d2;
@@ -17319,9 +17304,10 @@ function _shortsEstimateBreakdown(){
 }
 function _shortsEstBreakdownText(){
   var bd=_shortsEstimateBreakdown();
+  var _transLabels={fade:'페이드 전환',zoomthrough:'줌스루 전환',whippan:'휩팬 전환',flash:'플래시컷 전환'};
   var parts=['노출 '+bd.hold+'초'];
   if(bd.trans>0){
-    parts.push((bd.transMode==='fade'?'페이드 전환':'전환')+' '+bd.trans+'초');
+    parts.push((_transLabels[bd.transMode]||'전환')+' '+bd.trans+'초');
   }
   if(bd.ending>0) parts.push('엔딩 '+bd.ending+'초');
   var txt=parts.join(' + ');
@@ -18344,16 +18330,19 @@ function sbShorts(p){
   if(!opts.transitionMode) opts.transitionMode = (opts.beforeAfter!==false ? 'slider' : 'fade');
   var baWrap=dv('ss');
   baWrap.innerHTML='<div class="lbl">장면 전환 효과</div>';
-  var transRow=dv('');transRow.style.cssText='display:flex;gap:6px;margin-top:6px';
+  var transRow=dv('');transRow.style.cssText='display:flex;gap:6px;margin-top:6px;flex-wrap:wrap';
   var TRANS_MODES=[
     {k:'slider',l:'슬라이더',d:'우→좌로 화면을 밀며 전환'},
     {k:'fade',l:'페이드',d:'서서히 겹쳐지며 전환'},
-    {k:'cut',l:'컷(효과 없음)',d:'효과 없이 바로 다음 사진으로'}
+    {k:'cut',l:'컷(효과 없음)',d:'효과 없이 바로 다음 사진으로'},
+    {k:'zoomthrough',l:'줌스루',d:'화면 속으로 빨려들어가듯 확대되며 전환'},
+    {k:'whippan',l:'휩팬',d:'옆으로 휙 스치듯 블러 지나가며 전환'},
+    {k:'flash',l:'플래시컷',d:'화이트 플래시가 짧게 번쩍하며 전환'}
   ];
   TRANS_MODES.forEach(function(tm){
     var btn=mk('button','');btn.type='button';btn.textContent=tm.l;
     var isSel=opts.transitionMode===tm.k;
-    btn.style.cssText='flex:1;padding:8px 4px;border-radius:8px;border:1px solid '+(isSel?'var(--ac)':'var(--bd2)')+';background:'+(isSel?'var(--acg)':'var(--c2)')+';color:'+(isSel?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    btn.style.cssText='flex:1 1 30%;min-width:88px;padding:8px 4px;border-radius:8px;border:1px solid '+(isSel?'var(--ac)':'var(--bd2)')+';background:'+(isSel?'var(--acg)':'var(--c2)')+';color:'+(isSel?'var(--ac)':'var(--t2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
     btn.onclick=function(){
       opts.transitionMode=tm.k;
       opts.beforeAfter = (tm.k==='slider'); // 예전 필드도 같이 맞춰서 다른 곳에서 참조해도 어긋나지 않게 함
@@ -18708,33 +18697,6 @@ function sbShorts(p){
     optRow.appendChild(label);
   });
   p.appendChild(optRow);
-
-  // ⚠️ 요청 반영("오토 켄번즈 효과 + 컷별 길이 강약 조절 자동화 추가해줘"):
-  // 1) 켄번즈 — 각 장면이 떠 있는 동안 100%→110%로 서서히 확대(짝수 컷)/축소(홀수 컷)해서
-  //    정지 이미지에도 움직임이 있는 느낌을 줌(실제 확대 애니메이션은 _shortsDrawSlide에서 처리).
-  // 3) 자동 길이 강약 — 켜면 역할별 슬라이더 대신, 첫 장면·마지막 장면(배치도 등)은 자동으로
-  //    길게(1.5~2초), 중간 장면들은 짧게(1~1.3초) 잡아서 전체 길이가 20~25초 안에 들어오도록
-  //    자동 계산함(_shortsAutoWeightedDuration 참고). 직접 지정(customDuration)한 장면은
-  //    이 자동 계산보다 항상 우선함(수동 설정이 자동보다 위에 있음).
-  var kbRow=dv('ss');
-  kbRow.style.cssText='display:flex;flex-direction:column;gap:8px';
-  var kbLabel=document.createElement('label');
-  kbLabel.style.cssText='display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t2);cursor:pointer;font-weight:600';
-  var kbCk=document.createElement('input');kbCk.type='checkbox';kbCk.checked=!!opts.kenBurns;
-  kbCk.style.cssText='width:13px;height:13px;accent-color:var(--ac)';
-  kbCk.onchange=function(){opts.kenBurns=kbCk.checked;renderSB();renderMain('shorts');};
-  kbLabel.appendChild(kbCk);
-  kbLabel.appendChild(document.createTextNode('🎥 오토 켄번즈 효과(장면마다 서서히 확대/축소)'));
-  kbRow.appendChild(kbLabel);
-  var awLabel=document.createElement('label');
-  awLabel.style.cssText='display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t2);cursor:pointer;font-weight:600';
-  var awCk=document.createElement('input');awCk.type='checkbox';awCk.checked=!!opts.autoWeightedDuration;
-  awCk.style.cssText='width:13px;height:13px;accent-color:var(--ac)';
-  awCk.onchange=function(){opts.autoWeightedDuration=awCk.checked;renderSB();renderMain('shorts');};
-  awLabel.appendChild(awCk);
-  awLabel.appendChild(document.createTextNode('⏱ 자동 길이 강약(첫·마지막 장면 길게, 전체 20~25초로 자동 맞춤)'));
-  kbRow.appendChild(awLabel);
-  p.appendChild(kbRow);
 
   // 예상 길이 — 이미지/역할/템플릿이 바뀔 때마다 실시간으로 갱신된다
   var estLabel=_shortsEstimateLabel();
@@ -21546,10 +21508,14 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
     p1=Math.max(0,Math.min(1,p1));
     _shortsDrawSlideWipe(ctx,W,H,slides[entry.from],slides[entry.to],p1,opts,imgCache);
   } else if(entry.type==='trans'){
-    // Before/After 슬라이더를 껐을 때만 쓰는 페이드 인/아웃 전환
+    // 슬라이더(wipe) 외의 모든 전환 효과 — mode에 따라 실제 그리는 방식이 다름
     var p2=(t-entry.start)/(entry.end-entry.start);
     p2=Math.max(0,Math.min(1,p2));
-    _shortsDrawTransition(ctx,W,H,slides[entry.from],slides[entry.to],p2,opts,imgCache);
+    var _fromS=slides[entry.from], _toS=slides[entry.to];
+    if(entry.mode==='zoomthrough') _shortsDrawZoomThrough(ctx,W,H,_fromS,_toS,p2,opts,imgCache);
+    else if(entry.mode==='whippan') _shortsDrawWhipPan(ctx,W,H,_fromS,_toS,p2,opts,imgCache);
+    else if(entry.mode==='flash') _shortsDrawFlashCut(ctx,W,H,_fromS,_toS,p2,opts,imgCache);
+    else _shortsDrawTransition(ctx,W,H,_fromS,_toS,p2,opts,imgCache); // 페이드(기본값)
   }
   if(opts.watermark)_shortsDrawWatermark(ctx,W,H);
 }
@@ -21603,21 +21569,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
   var _bothTextOff = !!slide.skipTopText && !!slide.skipBottomText;
   var _effFitMode = ((opts&&(opts.fitMode||'cover'))==='contain' && _bothTextOff) ? 'cover' : (opts&&(opts.fitMode||'cover'));
   if(img){
-    // ⚠️ 요청 반영("오토 켄번즈 효과 — 각 컷마다 100%→108~112% 자동 확대, 짝수 컷은 줌인·
-    // 홀수 컷은 줌아웃으로 번갈아 리듬감"): opts.kenBurns가 켜져 있으면, 이 장면이 화면에 떠
-    // 있는 시간(elapsed) 동안 진행률(0→1)에 따라 확대 배율을 서서히 바꿈 — 사용자가 직접
-    // 설정해둔 수동 확대/이동(slide.zoom/offX/offY)은 그대로 살리고, 그 위에 곱해서 자연스럽게
-    // 얹음(수동 설정과 절대 충돌하지 않도록). 짝수 인덱스(0,2,4...)는 100%→110%로 줌인,
-    // 홀수 인덱스는 110%→100%로 줌아웃 — 매 장면마다 반대로 번갈아서 리듬감을 줌.
-    var _kbZoom = 1;
-    if(opts && opts.kenBurns && slideIdx!=null && elapsed!=null){
-      var _kbDur = _slideDuration(slide) || 1.3;
-      var _kbProg = Math.min(1, Math.max(0, elapsed/_kbDur));
-      var _kbRange = 0.10; // 100% → 110% (요청하신 108~112% 범위의 중간값)
-      var _kbZoomIn = (slideIdx%2===0);
-      _kbZoom = _kbZoomIn ? (1+_kbRange*_kbProg) : ((1+_kbRange)-_kbRange*_kbProg);
-    }
-    _shortsDrawImage(ctx,W,H,img,_effFitMode,(slide.zoom||1)*_kbZoom,slide.offX,slide.offY);
+    _shortsDrawImage(ctx,W,H,img,_effFitMode,(slide.zoom||1),slide.offX,slide.offY);
   } else {
     // ⚠️ 이미지 로드 실패(위 loadEndVideo에서 이미 경고했지만, 사용자가 무시하고 진행한 경우 대비):
     // 그냥 검은 화면으로 남겨두면 "왜 멈췄지?" 알 수가 없으니, 최소한 원인을 알 수 있는 문구를
@@ -22169,6 +22121,62 @@ function _shortsDrawTransition(ctx, W, H, fromSlide, toSlide, progress, opts, im
   ctx.save();ctx.globalAlpha=progress;
   _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
   ctx.globalAlpha=1;ctx.restore();
+}
+
+// 줌스루 — 이전 장면이 화면 속으로 확대되며 빨려들어가듯 사라지고, 다음 장면이 크게 시작해서
+// 원래 크기로 줄어들며 나타남. 두 장면 다 화면 중앙 기준으로 확대/축소해서, "카메라가 뚫고
+// 지나가는" 느낌을 줌. 정지 이미지에 확실한 움직임을 더하고 싶을 때 컷/페이드보다 임팩트가 큼.
+function _shortsDrawZoomThrough(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  // 이전 장면: 100%→135%로 확대하면서, 후반부(55%~100%)에 걸쳐 서서히 사라짐
+  var fromScale=1+progress*0.35;
+  var fromAlpha=1-Math.max(0,(progress-0.55)/0.45);
+  ctx.save();
+  ctx.globalAlpha=Math.max(0,Math.min(1,fromAlpha));
+  ctx.translate(W/2,H/2);ctx.scale(fromScale,fromScale);ctx.translate(-W/2,-H/2);
+  _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
+  ctx.restore();
+  // 다음 장면: 130%에서 시작해 100%로 줄어들면서, 전반부(35%~100%)에 걸쳐 서서히 나타남
+  var toScale=1.3-progress*0.3;
+  var toAlpha=Math.max(0,(progress-0.35)/0.65);
+  ctx.save();
+  ctx.globalAlpha=Math.min(1,toAlpha);
+  ctx.translate(W/2,H/2);ctx.scale(toScale,toScale);ctx.translate(-W/2,-H/2);
+  _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
+  ctx.restore();
+}
+
+// 휩팬 — 화면이 옆으로 빠르게 스치듯 블러 처리되며 지나가는 전환. 전반부엔 이전 장면이
+// 블러와 함께 화면 밖(왼쪽)으로 빠져나가고, 후반부엔 다음 장면이 블러와 함께 화면 밖(오른쪽)에서
+// 들어와 자리를 잡음. 릴스·틱톡 빠른 편집에서 흔히 쓰는 "휙" 넘어가는 느낌.
+function _shortsDrawWhipPan(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  var maxBlurPx=Math.round(W*0.03); // 화면 크기에 비례한 블러 강도
+  if(progress<0.5){
+    var p=progress/0.5;
+    ctx.save();
+    try{ ctx.filter='blur('+Math.round(p*maxBlurPx)+'px)'; }catch(e){}
+    ctx.translate(-p*W*0.9,0);
+    _shortsDrawSlide(ctx,W,H,fromSlide,opts,imgCache);
+    ctx.restore();
+  } else {
+    var p2=(progress-0.5)/0.5;
+    ctx.save();
+    try{ ctx.filter='blur('+Math.round((1-p2)*maxBlurPx)+'px)'; }catch(e){}
+    ctx.translate((1-p2)*W*0.9,0);
+    _shortsDrawSlide(ctx,W,H,toSlide,opts,imgCache);
+    ctx.restore();
+  }
+}
+
+// 플래시컷 — 컷 중간 지점에서 화이트 플래시가 아주 짧게 번쩍하며 넘어감. 구현이 제일 간단하면서도
+// (움직임 계산 없이 밝기만 오버레이) 템포감·에너지를 확실하게 살려주는 전환.
+function _shortsDrawFlashCut(ctx, W, H, fromSlide, toSlide, progress, opts, imgCache){
+  _shortsDrawSlide(ctx,W,H, progress>=0.5?toSlide:fromSlide, opts, imgCache);
+  var flashAlpha=1-Math.abs(progress-0.5)*2; // 중간(50%)에서 최대(1)로 번쩍, 양 끝에서 0
+  ctx.save();
+  ctx.globalAlpha=Math.max(0,Math.min(1,flashAlpha));
+  ctx.fillStyle='#fff';
+  ctx.fillRect(0,0,W,H);
+  ctx.restore();
 }
 
 // 워터마크
