@@ -34317,9 +34317,26 @@ function buildCredits(){
 // 수십 명이라 위험하다"는 판단. 열려있는 동안 카드번호만 대충 입력해도 크레딧이 지급되는
 // 문제가 실사용자 규모 때문에 현실적 위험으로 커짐. 토스 심사팀에게는 화면 캡처/녹화로
 // 대체 제출하거나, 심사팀과 사전에 협의한 특정 시간대에만 짧게 여는 방식으로 재조율할 것 —
-// 불특정 다수에게 노출된 상태로 무기한 열어두지 말 것.
-var TOSS_CLIENT_KEY = ''; // ⚠️ 토스페이먼츠 승인 완료 후, 개발자센터에서 발급받은
-                          // "API 개별 연동 키 > 클라이언트 키"(라이브)로 여기 넣으세요
+// ⚠️⚠️⚠️ 요청 반영(2026-09-03, "회원들이 공짜로 할 수 있으니 담당자만 결제 가능하게"): 키를
+// 다시 켜되, 이번엔 아무나 못 쓰게 "비밀 링크로 들어온 사람한테만" 실제 결제가 열리도록 게이트를
+// 추가함. 일반 회원은 URL에 아래 파라미터가 없으니 여전히 "정식 오픈 후 충전 가능해요" 안내만
+// 보이고(크레딧이 지급되지 않음), 토스 담당자에게 드린 비밀 링크(?reviewkey=...)로 들어온
+// 사람만 세션 동안 실제 결제창이 열림. 심사 끝나면 아래 TOSS_CLIENT_KEY를 다시 ''로 되돌릴 것
+// (이 게이트는 추가 안전장치일 뿐, 심사 끝나면 키 자체를 끄는 게 원칙).
+var TOSS_REVIEW_TOKEN = 'cloverai-toss-review-0903-k7f2m9';
+function _tossReviewAllowed(){
+  try{
+    if(sessionStorage.getItem('_tossReviewOK')==='1') return true;
+    var qs = new URLSearchParams(location.search);
+    if(qs.get('reviewkey')===TOSS_REVIEW_TOKEN){
+      sessionStorage.setItem('_tossReviewOK','1');
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+var TOSS_CLIENT_KEY = 'test_ck_DLJOpm5QrlBR45P4QL2o3PNdxbWn'; // ⚠️ 심사 끝나면 즉시 ''로 되돌릴 것! 라이브 키는
+                          // 토스페이먼츠 승인 완료 후 "API 개별 연동 키 > 클라이언트 키"(live_ck_...)로 교체
 function chargeCr(amount){
   var res=gE('cr-charge-res');
   // ⚠️ 버그 수정("요금제 모달에서 충전하면 아무 반응 없이 그냥 메인화면만 보임"): 상태 메시지를
@@ -34333,7 +34350,7 @@ function chargeCr(amount){
     // else if(isError)에 안 걸려서 여전히 조용히 묻히고 있었음 — 에러 여부와 상관없이 항상 뜨게 함.
   }
   if(!amount||amount<100){msg('100cr 이상 입력해 주세요.', true);return;}
-  if(!TOSS_CLIENT_KEY){
+  if(!TOSS_CLIENT_KEY || !_tossReviewAllowed()){
     // 결제 연동 전(키 미설정): 기존처럼 선택 표시만
     // ⚠️ 요청 반영("충전하기 누르면 그냥 메인화면만 보이고 아무 설명 없다, 정식 오픈하면 가능하다는
     // 안내 메세지가 있어야지"): 문구를 "정식 오픈 후 충전이 가능합니다"로 명확히 바꿔서, 지금은
