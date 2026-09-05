@@ -17272,7 +17272,8 @@ function _shortsBuildSlides(){
     if(im.type==='blank'){
       slides.push({type:'blank', img:im.img||null, label:'', bgColor:im.bgColor||'#0a0a0a', blankText:im.blankText||'',
         textColor:im.blankTextColor||'#ffffff', role:'blank', duration:im.duration, noSlider:!!im.noSlider,
-        skipTopText:true, skipBottomText:true, customDuration:(im.customDuration>0?im.customDuration:null)});
+        skipTopText:true, skipBottomText:true, customDuration:(im.customDuration>0?im.customDuration:null),
+        transitionOverride:im.transitionOverride||null});
       return;
     }
     var r=_shortsResolvedRole(im);
@@ -17287,7 +17288,8 @@ function _shortsBuildSlides(){
     slides.push({type:'slide', img:im.img, label:lbl, role:r, zoom:im.coverZoom||1, offX:im.coverOffX||0, offY:im.coverOffY||0,
       isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.trimStart||0):0,
       skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
-      noSlider:!!im.noSlider, customDuration:(!im.isVideo && im.customDuration>0)?im.customDuration:null});
+      noSlider:!!im.noSlider, customDuration:(!im.isVideo && im.customDuration>0)?im.customDuration:null,
+      transitionOverride:im.transitionOverride||null});
   });
   if(opts.ending){
     slides.push({type:'ending',label:'',img:SHORTS_ENDING_IMG});
@@ -17339,6 +17341,14 @@ function _shortsBuildTimeline(slides){
     if(slide.customDuration!=null) return slide.customDuration;
     return _shortsHoldDuration(slide.role);
   }
+  // ⚠️ 요청 반영("비포→애프터 넘어갈 때만 화려하게, 나머지는 차분하게 — 컷마다 전환효과
+  // 따로 고르고 싶다"): 이 슬라이드로 "들어오는" 전환은 기본적으로 opts.transitionMode(전체
+  // 설정)를 쓰지만, 이 슬라이드에 transitionOverride가 지정돼 있으면 그 컷만 그 효과를 씀.
+  // 전체 설정을 바꾸는 게 아니라 그 컷 하나만 예외로 다르게 그리는 것뿐이라, 나머지 컷들의
+  // 타이밍·효과에는 전혀 영향 없음.
+  function _cutTransMode(slide){
+    return slide.transitionOverride || transMode;
+  }
   slides.forEach(function(slide,i){
     if(i===0){
       var d0 = _slideDuration(slide);
@@ -17351,9 +17361,10 @@ function _shortsBuildTimeline(slides){
         var nextSlide=slides[1];
         var nextIsHardCut = nextSlide.type==='ending' || nextSlide.isVideo;
         if(!nextIsHardCut){
-          if(useCut){ /* 컷 모드는 겹치는 구간 자체가 없어서 보너스 불필요 */ }
-          else if(useSlider && !nextSlide.noSlider) d0 += WIPE_DUR;
-          else d0 += _shortsTransDur(transMode);
+          var _cm0 = _cutTransMode(nextSlide);
+          if(_cm0==='cut'){ /* 컷 모드는 겹치는 구간 자체가 없어서 보너스 불필요 */ }
+          else if(_cm0==='slider' && !nextSlide.noSlider) d0 += WIPE_DUR;
+          else d0 += _shortsTransDur(_cm0);
         }
       }
       timeline.push({type:'hold',idx:0,start:t,end:t+d0});
@@ -17361,13 +17372,16 @@ function _shortsBuildTimeline(slides){
       return;
     }
     var isEnding = slide.type==='ending' || slide.isVideo;
+    var cutMode = _cutTransMode(slide);
+    var cutUseSlider = cutMode==='slider';
+    var cutUseCut = cutMode==='cut';
     if(isEnding){
       // 엔딩/영상 클립은 항상 하드 컷으로 들어간다 (슬라이더/페이드 없음 — 영상이 재생 중인데
       // 슬라이더가 그 위를 지나가면 부자연스러움)
       var dHard=_slideDuration(slide);
       timeline.push({type:'hold',idx:i,start:t,end:t+dHard});
       t+=dHard;
-    } else if(useCut){
+    } else if(cutUseCut){
       // 컷: 전환 구간 자체가 없음 — 바로 다음 장면 hold로 이어짐(효과 없이 바로 넘어감)
       // ⚠️ 버그 수정(치명적, "장면별 초수를 직접 지정해도 예상 길이·실제 영상에 반영이 안 된다"):
       // 여기 세 분기(컷/슬라이더/페이드) 전부 customDuration을 검사하는 _slideDuration()을 안
@@ -17379,15 +17393,15 @@ function _shortsBuildTimeline(slides){
       var dCut=_slideDuration(slide);
       timeline.push({type:'hold',idx:i,start:t,end:t+dCut});
       t+=dCut;
-    } else if(useSlider && !slide.noSlider){
+    } else if(cutUseSlider && !slide.noSlider){
       timeline.push({type:'wipe',from:i-1,to:i,start:t,end:t+WIPE_DUR});
       t+=WIPE_DUR;
       var d=_slideDuration(slide);
       timeline.push({type:'hold',idx:i,start:t,end:t+d});
       t+=d;
     } else {
-      var _tDur=_shortsTransDur(transMode);
-      timeline.push({type:'trans',from:i-1,to:i,mode:transMode,start:t,end:t+_tDur});
+      var _tDur=_shortsTransDur(cutMode);
+      timeline.push({type:'trans',from:i-1,to:i,mode:cutMode,start:t,end:t+_tDur});
       t+=_tDur;
       var d2=_slideDuration(slide);
       timeline.push({type:'hold',idx:i,start:t,end:t+d2});
@@ -17925,6 +17939,36 @@ function sbShorts(p){
       return trow;
     }
 
+    // ⚠️ 요청 반영("비포→애프터 넘어갈 때만 화려하게, 나머지는 차분하게 — 컷마다 전환효과
+    // 따로 고르고 싶다"): 이 장면으로 "들어오는" 전환만 전체 설정과 다르게 지정할 수 있는
+    // 드롭다운. "자동"으로 두면 기존처럼 위쪽 "장면 전환 효과"에서 고른 전체 설정을 그대로
+    // 따름 — 아무도 이 드롭다운을 안 건드리면 동작이 전혀 바뀌지 않음. 맨 첫 장면은 "들어오는
+    // 전환" 자체가 없어서(이전 장면이 없음) 이 컨트롤을 안 보여줌(idx>0일 때만 호출됨).
+    function _makeTransOverrideRow(item){
+      var trow2=dv('');trow2.style.cssText='display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap';
+      var lbl2=dv('');lbl2.style.cssText='font-size:10px;color:var(--m2)';lbl2.textContent='이 컷만 전환효과 직접 지정:';
+      var TRANS_OVERRIDE_OPTS=[
+        {k:'',l:'자동(전체 설정 따름)'},
+        {k:'slider',l:'슬라이더'},
+        {k:'fade',l:'페이드'},
+        {k:'cut',l:'컷(효과 없음)'},
+        {k:'zoomthrough',l:'줌스루'},
+        {k:'flash',l:'플래시컷'}
+      ];
+      var sel2=document.createElement('select');
+      sel2.style.cssText='padding:4px 6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:11px;font-family:inherit;cursor:pointer';
+      TRANS_OVERRIDE_OPTS.forEach(function(o){
+        var op=document.createElement('option');op.value=o.k;op.textContent=o.l;sel2.appendChild(op);
+      });
+      sel2.value=item.transitionOverride||'';
+      sel2.onchange=function(){
+        item.transitionOverride=sel2.value||null;
+        renderSB();renderMain('shorts');
+      };
+      trow2.appendChild(lbl2);trow2.appendChild(sel2);
+      return trow2;
+    }
+
     if(im.type==='blank'){
       // ── 빈 페이지: 배경색 + 문구(자막) + 글자색만 입력하면 되는 전용 UI ──
       var blankTag=dv('');blankTag.style.cssText='font-size:10.5px;color:var(--ac);font-weight:700';
@@ -18013,6 +18057,7 @@ function sbShorts(p){
       var durOverrideUnitBlank=dv('');durOverrideUnitBlank.style.cssText='font-size:10px;color:var(--m2)';durOverrideUnitBlank.textContent='초 (비우면 역할별 자동 시간 사용)';
       durOverrideRowBlank.appendChild(durOverrideUnitBlank);
       info.appendChild(durOverrideRowBlank);
+      if(idx>0) info.appendChild(_makeTransOverrideRow(im));
       row.appendChild(info);
     } else {
     var sel=document.createElement('select');
@@ -18090,6 +18135,7 @@ function sbShorts(p){
       var durOverrideUnit=dv('');durOverrideUnit.style.cssText='font-size:10px;color:var(--m2)';durOverrideUnit.textContent='초 (비우면 역할별 자동 시간 사용)';
       durOverrideRow.appendChild(durOverrideUnit);
       info.appendChild(durOverrideRow);
+      if(idx>0) info.appendChild(_makeTransOverrideRow(im));
     }
 
     // 화면에 표시될 문구(라벨)를 자동 감지 결과 그대로 쓰지 않고 직접 쓰고 싶을 때를 위한 입력창.
