@@ -7919,7 +7919,11 @@ function getCost(){
   var _spaceUrbanProOn = G.wf==='space' && !!(getTab('spaceset').autoRoomUrbanMode);
   if((G.wf==='space'||G.wf==='render'||G.wf==='edit') && (G.eng==='nano_pro'||_spaceUrbanProOn) && !_isEditPeoplePreset){
     var proRes=getResObj().k;
-    base = proRes==='2K' ? 45 : 30;
+    // ⚠️ 버그 수정("4K 전체 파이프라인 확인해줘"로 점검하다 발견): 위 주석에 Nano Banana Pro도
+    // nano-banana-2 계열이라 4K를 지원한다고 되어있는데, 여기 요금 분기엔 4K 구간이 아예 없어서
+    // 4K를 고르면 1K 요금(30cr)만 청구되고 있었음(실제 생성은 4K로 정상 요청됨 — 요금만 누락).
+    // nano2와 같은 배율(1K→4K 2.0배)로 60cr 적용.
+    base = proRes==='4K' ? 60 : proRes==='2K' ? 45 : 30;
   }
   // ⚠️ 요청 반영: Seedream 5.0 Pro 신규 추가 — fal.ai 원가 1536px 이하 $0.0675/장, 2048px까지
   // $0.135/장으로 나노바나나Pro(약 $0.08~0.15)보다 조금 더 비쌈 — 그에 맞게 나노바나나Pro보다
@@ -27479,8 +27483,11 @@ function uploadImgToFal(dataUrl, onDone, onErr) {
 function resizeForUpload(dataUrl, cb, resolution){
   var img = new Image();
   img.onload = function(){
-    // 1K: 최대 1024px / 2K: 최대 2048px — API 처리 속도 최적화
-    var MAX = resolution==='2K' ? 2048 : 1024;
+    // 1K: 최대 1024px / 2K: 최대 2048px / 4K: 최대 4096px — API 처리 속도 최적화
+    // ⚠️ 버그 수정("4K 전체 파이프라인 확인해줘"로 점검하다 발견): '4K' 구간이 없어서 4K를
+    // 선택해도 AI에 보내는 입력 사진 자체는 계속 1024px로 축소되고 있었음 — 출력을 4K로
+    // 요청해도 AI가 참고하는 원본 디테일이 1K 수준이라 실제 결과 품질이 손해를 보고 있었음.
+    var MAX = resolution==='4K' ? 4096 : resolution==='2K' ? 2048 : 1024;
     var w=img.width, h=img.height;
     if(w<=MAX && h<=MAX){ cb(dataUrl); return; }
     var ratio = Math.min(MAX/w, MAX/h);
@@ -28881,7 +28888,12 @@ function _makeSeamlessTile(dataUrl, cb){
 }
 function _resizeToOriginalScale(origImg, ri, resolution, cb){
   if(!origImg || !ri){ cb(ri); return; }
-  var mult = (resolution==='2K') ? 2 : 1;
+  // ⚠️ 버그 수정(치명적, "4K로 렌더링했는데 1K로 나온다"): 이 줄이 '2K'만 확인하고 있어서
+  // resolution이 '4K'로 들어와도 else 분기(mult=1, 즉 원본과 동일한 = 1K급 크기)로 빠졌음.
+  // AI 모델 자체는 4K로 정상 생성해서 넘어왔는데, 바로 이 후처리 단계가 그 4K 결과물을
+  // "원본 사진과 같은 크기(1x)"로 도로 축소해버리고 있었던 것 — 화면엔 "1K로 렌더링된다"로
+  // 보였지만 실제로는 4K 생성 → 강제 축소였음. 1K=원본과 동일(1x), 2K=2x, 4K=4x로 정확히 맞춤.
+  var mult = (resolution==='4K') ? 4 : (resolution==='2K') ? 2 : 1;
   var probe=new Image();
   probe.onload=function(){
     var origW=Math.round(probe.naturalWidth*mult), origH=Math.round(probe.naturalHeight*mult);
