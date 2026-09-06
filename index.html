@@ -21981,15 +21981,28 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
   }
   if(slide.isVideo){
     var vEl=videoCache&&videoCache[slide.videoUrl];
+    var _vSrc=null;
     if(vEl){
       if(vEl.paused){ try{ vEl.currentTime = slide.trimStart||0; }catch(e){} vEl.play().catch(function(){}); } // 이 장면 구간에 처음 들어온 순간 트림 시작지점부터 재생 시작(실시간 렌더 루프라 그대로 싱크가 맞음)
-      _shortsDrawCoverImage(ctx,W,H,vEl);
+      _vSrc=vEl;
     } else {
       // 아직 준비 안 됐거나(프리로드 중) 영상을 못 살렸을 때(새로고침 후 등) — 포스터 썸네일로 대체
-      var poster=imgCache[slide.img];
-      if(poster)_shortsDrawCoverImage(ctx,W,H,poster);
+      _vSrc=imgCache[slide.img];
     }
-    if(slide.label && opts && opts.showSlideLabels!==false) _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,null,'cover');
+    // ⚠️ 2026-09-06 수정: 예전엔 영상 슬라이드는 무조건 꽉채우기(cover)로만 그리고 여기서 바로
+    // return 해버려서, 레터박스(전체보이기) 모드에서 넣은 상단/하단 문구가 영상 장면에서는
+    // 통째로 사라졌음(사진 슬라이드에서만 보임). 이제 사진과 똑같이 전체 설정(fitMode)을 따라서
+    // 레터박스면 검은 여백 안에 문구를 그대로 그려줌.
+    var _effFitModeV = ((opts&&(opts.fitMode||'cover'))==='contain' && !!slide.skipTopText && !!slide.skipBottomText) ? 'cover' : (opts&&(opts.fitMode||'cover'));
+    if(_vSrc) _shortsDrawImage(ctx,W,H,_vSrc,_effFitModeV,1,0,0);
+    var _effTopV = slide.skipTopText ? '' : (opts&&opts.topText);
+    var _effBottomV = slide.skipBottomText ? '' : (opts&&opts.bottomText);
+    if(_effFitModeV==='contain' && (_effTopV||_effBottomV)){
+      _shortsDrawLetterboxText(ctx,W,H,_vSrc,_effTopV,_effBottomV,opts&&opts.fontFamily,opts.topTextColor,opts.bottomTextColor,opts.topCharColors,opts.bottomCharColors,opts.topTextScale,opts.bottomTextScale,revealCount);
+      if(slide.label && opts.showSlideLabels!==false) _shortsDrawSlideLabelBadge(ctx,W,H,_vSrc,slide.label,opts&&opts.fontFamily,opts&&opts.textPos,!!_effTopV,!!_effBottomV,opts&&opts.labelStyle);
+    } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
+      _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,_vSrc,_effFitModeV);
+    }
     return;
   }
   if(slide.type==='ending'){
@@ -22227,7 +22240,7 @@ function _shortsDrawCoverImage(ctx, W, H, img, extraZoom, offX, offY){
 // 인테리어·건축 사진은 크롭하면 중요한 디자인 디테일이 잘려나갈 수 있어서, 이 모드가 더 안전할 때가 많음.
 function _shortsDrawContainImage(ctx, W, H, img, barColor){
   if(!img)return;
-  var iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+  var iw=img.naturalWidth||img.videoWidth||img.width, ih=img.naturalHeight||img.videoHeight||img.height;
   if(!iw||!ih)return;
   ctx.fillStyle=barColor||'#000';
   ctx.fillRect(0,0,W,H);
