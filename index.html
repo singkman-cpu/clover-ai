@@ -4256,9 +4256,51 @@ function _openGalleryPickerForUpload(key, boxEl, refIdx){
   head.appendChild(closeX);
   modal.appendChild(head);
 
+  // ⚠️ 요청 반영("오래전에 작업한 게 안 보인다, 너무 멀리 있으니 탭별로 보기나 즐겨찾기 탭을
+  // 만들어달라"): 예전엔 최신 200개까지만 잘라서 보여줘서(allItems.slice(0,200)) 그 뒤로 있는
+  // 오래된 항목은 아예 목록에 들어오지도 못했음 — 이제 전부 보여주되(성능은 이미지 lazy 로딩으로
+  // 커버), 상단에 "⭐ 즐겨찾기"·기능별 탭을 둬서 스크롤 없이 원하는 것만 바로 골라볼 수 있게 함.
+  var filterBar=document.createElement('div');
+  filterBar.style.cssText='display:flex;gap:6px;padding:10px 18px;border-bottom:1px solid var(--bd2);overflow-x:auto;flex-shrink:0';
+  var _wfPresent=[]; allItems.forEach(function(it){ if(it.wf && _wfPresent.indexOf(it.wf)===-1) _wfPresent.push(it.wf); });
+  var FILTER_TABS=[{k:'all',l:'전체 ('+allItems.length+')'},{k:'fav',l:'⭐ 즐겨찾기 ('+allItems.filter(function(it){return it.fav;}).length+')'}]
+    .concat(_wfPresent.map(function(wf){ return {k:'wf:'+wf, l:(_wfLabelsForPicker[wf]||wf)+' ('+allItems.filter(function(it){return it.wf===wf;}).length+')'}; }));
+  var _curFilter='all';
+  var filterBtns=[];
+  function _applyFilter(){
+    grid.innerHTML='';
+    var shown = allItems.filter(function(it){
+      if(_curFilter==='all') return true;
+      if(_curFilter==='fav') return !!it.fav;
+      return it.wf===_curFilter.slice(3);
+    });
+    if(!shown.length){
+      var emptyMsg=document.createElement('div');
+      emptyMsg.style.cssText='width:100%;text-align:center;padding:30px;color:var(--m2);font-size:12.5px';
+      emptyMsg.textContent='이 탭엔 아직 항목이 없어요.';
+      grid.appendChild(emptyMsg);
+      return;
+    }
+    shown.forEach(_renderCell);
+  }
+  FILTER_TABS.forEach(function(ft){
+    var fb=document.createElement('button');fb.type='button';fb.textContent=ft.l;
+    fb.style.cssText='flex-shrink:0;padding:7px 13px;border-radius:16px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap';
+    fb.onclick=function(){
+      _curFilter=ft.k;
+      filterBtns.forEach(function(b2){ b2.style.background='var(--c2)'; b2.style.color='var(--t2)'; b2.style.borderColor='var(--bd2)'; });
+      fb.style.background='var(--acg)'; fb.style.color='var(--ac)'; fb.style.borderColor='var(--ac)';
+      _applyFilter();
+    };
+    filterBtns.push(fb);
+    filterBar.appendChild(fb);
+  });
+  filterBtns[0].style.background='var(--acg)'; filterBtns[0].style.color='var(--ac)'; filterBtns[0].style.borderColor='var(--ac)';
+  modal.appendChild(filterBar);
+
   var grid=document.createElement('div');
   grid.style.cssText='padding:16px 18px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:10px;align-content:flex-start';
-  allItems.slice(0,200).forEach(function(it){
+  function _renderCell(it){
     var src=it.result||it.orig;
     if(!src) return;
     var cell=document.createElement('div');
@@ -4304,7 +4346,8 @@ function _openGalleryPickerForUpload(key, boxEl, refIdx){
       ov.remove();
     };
     grid.appendChild(cell);
-  });
+  }
+  _applyFilter();
   modal.appendChild(grid);
   ov.appendChild(modal);
   document.body.appendChild(ov);
@@ -18888,6 +18931,32 @@ function sbShorts(p){
   animWrap.appendChild(animToggleRow);animWrap.appendChild(animSpeedRow);
   p.appendChild(animWrap);
 
+  // ── 켄번즈 효과(자동 확대/축소) — 요청 반영("여백 안 생기게, 1.25초처럼 짧은 장면도 티나게").
+  // 항상 100% 이상만 쓰고(100% 밑으로 안 내려가서 여백 생길 일이 없음), 장면이 화면에 머무는
+  // 시간에 비례해서 확대량을 정함(최대 12%) — 그래서 아무리 짧은 컷(예: 1.25초)이어도 그 컷
+  // 길이 나름대로 처음부터 끝까지 자연스럽게 다 움직이고, 긴 컷은 더 크게 움직임.
+  var kbWrap=dv('ss');
+  kbWrap.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:11px 14px;margin-bottom:8px';
+  var kbToggleRow=dv('');kbToggleRow.style.cssText='display:flex;align-items:center;justify-content:space-between';
+  var kbTxt=dv('');
+  kbTxt.innerHTML='<div style="font-size:12.5px;font-weight:700;color:var(--t)">🎥 켄번즈 효과 (자동 확대/축소)</div><div style="font-size:10.5px;color:var(--m2);margin-top:2px">정지된 사진이 살짝 확대·축소되며 움직이는 느낌을 줘요 (100% 밑으로는 안 줄어들어서 여백은 안 생겨요)</div>';
+  var kbToggleBtn=mk('button','');kbToggleBtn.type='button';
+  var _kbOn=!!opts.kenBurns;
+  function _styleKbToggle(){
+    kbToggleBtn.style.cssText='flex-shrink:0;margin-left:10px;width:46px;height:26px;border-radius:13px;border:none;cursor:pointer;position:relative;background:'+(_kbOn?'var(--ac)':'var(--bd2)')+';transition:background .15s';
+    kbToggleBtn.innerHTML='<span style="position:absolute;top:3px;left:'+(_kbOn?'23px':'3px')+';width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s"></span>';
+  }
+  _styleKbToggle();
+  kbToggleBtn.onclick=function(){
+    _kbOn=!_kbOn;
+    opts.kenBurns=_kbOn;
+    _styleKbToggle();
+    renderMain('shorts');
+  };
+  kbToggleRow.appendChild(kbTxt);kbToggleRow.appendChild(kbToggleBtn);
+  kbWrap.appendChild(kbToggleRow);
+  p.appendChild(kbWrap);
+
   // 역할별 머무는 시간 조절 — 예: 현장사진은 짧게 훅 지나가고, AI디자인 결과는 좀 더 오래 보여주고 싶을 때
   var holdWrap=dv('ss');
   holdWrap.innerHTML='<div class="lbl">장면별 머무는 시간 <span class="lbl-en">역할마다 다르게</span></div>';
@@ -21762,7 +21831,7 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
     return;
   }
   if(entry.type==='hold'){
-    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,videoCache, t-entry.start, entry.idx);
+    _shortsDrawSlide(ctx,W,H,slides[entry.idx],opts,imgCache,videoCache, t-entry.start, entry.idx, entry.end-entry.start);
   } else if(entry.type==='wipe'){
     // 이전 장면 → 다음 장면으로: 우측에서 슬라이더 바가 생성되어 좌측으로 이동하며
     // 그 자리에 다음 장면(오른쪽 영역)이 자연스럽게 드러난다.
@@ -21784,7 +21853,7 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
 // 슬라이드 그리기
 // elapsed: 이 슬라이드가 화면에 나온 뒤 지난 시간(초) — 타이핑 애니메이션용. 없으면(undefined)
 // 전체 문구를 그대로 다 보여줌(썸네일·전환 중 프레임 등 애니메이션이 필요 없는 경우).
-function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed, slideIdx){
+function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed, slideIdx, holdDuration){
   if(!slide)return;
   var revealCount=null;
   if(elapsed!=null && opts && opts.textAnim==='typewriter'){
@@ -21820,17 +21889,21 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
     return;
   }
   var img=imgCache[slide.img];
-  // ⚠️ 요청 반영("문구는 다 껐는데 레터박스 검은 띠는 왜 남아있냐"): 기존엔 레터박스(꽉 안 채우고
-  // 위아래 검은 여백을 두는 방식)가 "이 장면에 문구가 있냐 없냐"와 무관하게 opts.fitMode 설정
-  // 하나로만 정해져서, 문구를 완전히 꺼도(상단·하단 둘 다) 사진 자체의 원래 비율 때문에 생기는
-  // 검은 여백은 그대로 남아있었음 — 그런데 애초에 이 검은 여백은 "문구 넣을 자리"로 필요했던
-  // 거라, 문구가 아예 없는 장면이라면 그 자리도 필요 없음. 이제 이 장면의 상단·하단 문구가 둘 다
-  // 꺼져 있으면, 이 장면만 레터박스 대신 꽉채우기(cover, 여백 없이 프레임 전체를 사진으로 채움)로
-  // 자동 전환함 — 문구가 하나라도 켜져 있는 장면은 기존처럼 레터박스 그대로 유지됨.
-  var _bothTextOff = !!slide.skipTopText && !!slide.skipBottomText;
-  var _effFitMode = ((opts&&(opts.fitMode||'cover'))==='contain' && _bothTextOff) ? 'cover' : (opts&&(opts.fitMode||'cover'));
+  // ⚠️ 요청 반영("켄번즈 효과 다시 넣어달라, 근데 1.25초처럼 짧은 장면도 티나게, 여백은 안 생기게"):
+  // 100% 밑으로는 절대 안 내려가도록(항상 100% 이상만 사용) 줌인/줌아웃 둘 다 구성해서, 화면보다
+  // 사진이 작아져서 여백(레터박스)이 생기는 일이 없게 함. 확대량은 이 장면이 화면에 머무는 시간에
+  // 비례(초당 3%, 최대 12%)해서, 아무리 짧은 컷(1.25초)이어도 그 컷 길이 나름대로 처음부터
+  // 끝까지 자연스럽게 다 움직이도록 계산함 — 짧은 컷은 살짝만, 긴 컷은 좀 더 크게 움직임.
+  var _kbZoom=1;
+  if(opts && opts.kenBurns && slide.type!=='blank' && slide.type!=='ending' && !slide.isVideo && elapsed!=null && holdDuration>0){
+    var _kbDelta=Math.min(0.12, 0.03*holdDuration); // 이 장면의 최대 확대폭(항상 100%~112% 사이)
+    var _kbProg=Math.max(0,Math.min(1, elapsed/holdDuration));
+    var _kbZoomIn=(slideIdx%2===0); // 장면마다 줌인/줌아웃 번갈아서 다양성
+    _kbZoom = _kbZoomIn ? (1+_kbDelta*_kbProg) : (1+_kbDelta*(1-_kbProg));
+  }
+  var _effFitMode = ((opts&&(opts.fitMode||'cover'))==='contain' && !!slide.skipTopText && !!slide.skipBottomText) ? 'cover' : (opts&&(opts.fitMode||'cover'));
   if(img){
-    _shortsDrawImage(ctx,W,H,img,_effFitMode,(slide.zoom||1),slide.offX,slide.offY);
+    _shortsDrawImage(ctx,W,H,img,_effFitMode,(slide.zoom||1)*_kbZoom,slide.offX,slide.offY);
   } else {
     // ⚠️ 이미지 로드 실패(위 loadEndVideo에서 이미 경고했지만, 사용자가 무시하고 진행한 경우 대비):
     // 그냥 검은 화면으로 남겨두면 "왜 멈췄지?" 알 수가 없으니, 최소한 원인을 알 수 있는 문구를
@@ -24989,7 +25062,15 @@ function addHistEl(item, scroll, targetHs, atBottom){
       if(scroll && hs.scrollTop<=40) hs.scrollTop=0; // 이미 아래로 스크롤해서 예전 결과를 보고 있으면 그 자리 유지
       return;
     }
-    var isVideo = item.wf==='video' || item.wf==='shorts' || item.result.includes('.mp4') || item.result.includes('.webm');
+    // ⚠️ 버그 수정(치명적, "영상 제작에서 이미지 업로드하고 좌측 이미지 클릭하면 재생버튼·다운로드
+    // 같은 비디오 플레이어가 뜬다"): 예전엔 item.wf==='video'이기만 하면 item.result가 실제로
+    // 뭐든(이미지 URL이어도) 무조건 비디오로 취급했음 — Start/End Frame 썸네일을 클릭해서
+    // 미리보기하면(_previewImageInMain) item.wf가 'video'로 찍힌 채 result 자리에 "이미지 URL"이
+    // 들어가는데, 이걸 비디오 플레이어로 그리려니 재생이 안 되고 껍데기(0:00, 다운로드, 새 탭
+    // 재생 버튼)만 뜬 것. 미리보기 항목(preview:true, 실제 생성 결과가 아니라 방금 올린/클릭한
+    // 이미지를 그대로 보여주는 용도)은 wf와 무관하게 항상 실제 파일 내용(확장자)만으로 판단하도록
+    // 수정 — 진짜 영상 생성 결과(preview가 아닌 경우)는 기존처럼 wf 기준 판단 그대로 유지.
+    var isVideo = (!item.preview && (item.wf==='video' || item.wf==='shorts')) || item.result.includes('.mp4') || item.result.includes('.webm');
     var IMG_STYLE='display:block;width:100%;height:auto;min-height:300px;max-height:calc(100vh - 180px);object-fit:contain;background:#1a1a22';
     // ⚠️ 버그 수정(핵심): "16:9로 바꿨는데 비율이 이상하게 나온다" — 실제 생성 결과 파일 자체는
     // 정확히 16:9로 나왔는데, Before/After 비교 슬라이더의 박스 크기가 첫 번째로 배치되는
