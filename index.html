@@ -8026,7 +8026,13 @@ function getCost(){
       // Start/End(첫/끝 프레임) 방식은 4·6·8초 중에서만 고를 수 있음(연속값이 아니고, 5초·7초는
       // 애초에 없는 값) — 예전엔 6/7/8초로 반올림해서 정작 제일 저렴한 4초 옵션 자체가 없었음.
       var vDurBilled = dur<=5?4:dur<=7?6:8;
-      base = 220 + (vDurBilled-6)*37;
+      base = 220 + (vDurBilled-6)*37; // 720p 기준
+      // ⚠️ 버그 수정(치명적, "해상도 골라도 요금이 안 바뀐다"): 이 엔진만 해상도별 배율이 아예
+      // 없어서 720p/1080p/4K 아무거나 골라도 항상 똑같이 청구되고 있었음(Seedance 2.0은 이미
+      // 해상도 배율이 있었는데 Veo만 빠져있었음) — 실제 Veo 3.1 Fast 요금표(720p $0.10/s,
+      // 1080p $0.12/s, 4K $0.30/s, 2026년 4월 기준) 비율 그대로 반영.
+      if(G.vres==='1080p') base = Math.round(base*1.2);
+      else if(G.vres==='4K') base = Math.round(base*3.0);
     } else if(eng==='seedance2'){
       // ⚠️ 버그 수정(kling과 같은 클래스): dur<5일 때 Math.max가 0이 돼서 4초짜리도 5초(360cr)와
       // 똑같이 청구되고 있었음 — 완전히 선형으로 통일(360=5*72와 정확히 같음).
@@ -28333,7 +28339,14 @@ function runVeo31(imgDataUrl, prompt, duration, onDone, onErr, endImgDataUrl){
   // 옵션 자체가 없었고, 청구 금액(getCost)과도 어긋나 있었음 — 두 곳을 똑같은 기준으로 맞춤.
   var vDur = duration <= 5 ? '4s' : duration <= 7 ? '6s' : '8s';
   var vRes = G.vres||'720p';
-  if(['720p','1080p','4k'].indexOf(vRes)<0) vRes='720p';
+  // ⚠️ 버그 수정(치명적, "4K 골라도 실제로는 720p로 나온다"): G.vres는 다른 모든 곳에서 대문자
+  // '4K'로 저장·비교되는데(예: getCost()의 G.vres==='4K'), 여기만 소문자 '4k'로 체크하고 있어서
+  // 대소문자가 안 맞아 매번 이 목록에서 못 찾고 무조건 '720p'로 되돌아가고 있었음 — 4K를
+  // 선택해도(그리고 4K 요금을 냈어도) 실제 fal.ai 요청은 항상 720p로 나가고 있었던 것.
+  if(['720p','1080p','4K'].indexOf(vRes)<0) vRes='720p';
+  // fal.ai API 자체는 소문자 '4k' 표기 관례를 쓸 가능성이 높아서, 내부 표기('4K')와 별도로
+  // 실제 API 전송용 값만 소문자로 정규화 — 내부 비교·표시는 계속 '4K'로 통일해서 씀.
+  var vResApi = vRes==='4K' ? '4k' : vRes;
   if(endImgDataUrl){
     _doUpload(imgDataUrl, function(firstUrl){
       _doUpload(endImgDataUrl, function(lastUrl){
@@ -28342,7 +28355,7 @@ function runVeo31(imgDataUrl, prompt, duration, onDone, onErr, endImgDataUrl){
           last_frame_url: lastUrl,
           prompt: finalPrompt,
           duration: vDur,
-          resolution: vRes
+          resolution: vResApi
         }, function(d){
           var url=falExtractVideoUrl(d)||falExtractImageUrl(d);
           if(url){onDone(url);}else{onErr('Veo 3.1(Start/End): 결과 URL 없음');}
@@ -28359,7 +28372,7 @@ function runVeo31(imgDataUrl, prompt, duration, onDone, onErr, endImgDataUrl){
       image_url: imgUrl,
       prompt: finalPrompt,
       duration: vDur,
-      resolution: vRes
+      resolution: vResApi
     }, function(d){
       var url=falExtractVideoUrl(d)||falExtractImageUrl(d);
       if(url){onDone(url);}else{onErr('Veo 3.1: 결과 URL 없음');}
