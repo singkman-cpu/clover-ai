@@ -15724,15 +15724,24 @@ function sbVideo(p){
     var resOpts=engData.res||['720p'];
     // 현재 선택된 해상도가 지원 안 되면 첫 번째로
     if(resOpts.indexOf(G.vres)<0) G.vres=resOpts[resOpts.length-1>0?resOpts.length-1:0];
-    mkChips(p,'해상도',resOpts,'vres');
-    // ⚠️ 요청 반영("720이랑 1080 금액이 똑같네??"): fal.ai 공식 문서 확인 결과, Kling 3.0 Pro API는
-    // 애초에 해상도를 지정하는 파라미터 자체가 없음(출력 해상도는 입력 이미지 비율/화질을 따라감,
-    // 그래서 720p/1080p를 눌러도 실제로 보내는 요청이 똑같아서 가격도 동일함) — 버그가 아니라
-    // 이 모델 자체의 한계라, 사용자가 헷갈리지 않도록 안내 문구를 추가함.
+    // ⚠️ 요청 반영("Kling은 항상 1080p인데 720p/1080p 버튼이 왜 있냐, 헷갈리니까 알아서 수정해"):
+    // Kling 3.0 Pro는 fal.ai API 자체에 해상도 지정 파라미터가 없어서 버튼을 눌러도 실제로는
+    // 항상 1080p로 고정 출력됨 — 그동안은 버튼은 그대로 두고 안내 문구만 덧붙였는데, 그래도
+    // "버튼이 있으니 뭔가 바뀌겠지"라고 오해하기 쉬워서 아예 버튼 자체를 없애고 "1080p 고정"
+    // 배지만 보여주는 걸로 바꿈 — G.vres도 항상 '1080p'로 고정해서 내부 상태도 일치시킴.
     if(engKey==='kling3'){
-      var resNote=dv('');resNote.style.cssText='font-size:10.5px;color:var(--m2);margin:-2px 0 8px;line-height:1.5';
-      resNote.textContent='ℹ️ Kling 3.0 Pro는 API 자체에 해상도 지정 옵션이 없어요(입력 이미지 화질을 따라감) — 그래서 720p/1080p를 선택해도 결과·가격이 동일해요. 정말 해상도를 지정하고 싶으면 Veo나 Seedance를 사용해주세요.';
+      G.vres='1080p';
+      var resFixedWrap=dv('ss');resFixedWrap.innerHTML='<div class="lbl">해상도</div>';
+      var resFixedBadge=dv('');
+      resFixedBadge.style.cssText='display:inline-block;padding:6px 12px;border-radius:8px;background:var(--acg);border:1px solid var(--acb);color:var(--ac);font-size:12px;font-weight:700';
+      resFixedBadge.textContent='1080p 고정';
+      resFixedWrap.appendChild(resFixedBadge);
+      p.appendChild(resFixedWrap);
+      var resNote=dv('');resNote.style.cssText='font-size:10.5px;color:var(--m2);margin:4px 0 8px;line-height:1.5';
+      resNote.textContent='ℹ️ Kling 3.0 Pro는 API 자체에 해상도 지정 옵션이 없어요(입력 이미지 화질을 따라 항상 1080p로 나와요). 다른 해상도가 필요하면 Veo나 Seedance를 사용해주세요.';
       p.appendChild(resNote);
+    } else {
+      mkChips(p,'해상도',resOpts,'vres');
     }
   })();
   var dw=dv('sl-w'),dr=dv('sl-row');
@@ -25642,8 +25651,16 @@ function addHistEl(item, scroll, targetHs, atBottom){
     if(item.wf==='video' && !item.preview){
       var vidEngKey = item.vidEng || 'wan22';
       var evFound = (EV||[]).find(function(e){return e.k===vidEngKey;})||{n:vidEngKey,res:['720p']};
-      var resLabel=(evFound.res&&evFound.res.length>1&&G.vres==='1080p')?'1080p':'720p';
-      var fhdLabel=resLabel==='1080p'?'FHD':'HD';
+      // ⚠️ 버그 수정(치명적, "해상도별로 결과 배지가 제대로 나오는지 확인해줘"로 점검하다 발견):
+      // 이 배지가 그 영상을 만들 당시의 해상도(item.vidRes 스냅샷)가 아니라, 지금 이 순간 화면에
+      // 떠있는 G.vres(전역, 계속 바뀜)를 읽고 있었음 — 1080p로 만든 영상도 나중에 다른 영상
+      // 만들려고 720p로 바꿔두면 예전 결과 배지까지 같이 잘못 바뀌어 보였음. 또한 720p/1080p
+      // 둘 중 하나로만 판단해서 480p·4K는 항상 720p로 잘못 표시되고 있었음 — 이제 실제 저장된
+      // 값을 그대로 쓰고, 4개 해상도(480p/720p/1080p/4K) 전부 정확히 매핑함.
+      var resLabel = item.vidRes || '720p';
+      if(['480p','720p','1080p','4K'].indexOf(resLabel)===-1) resLabel='720p'; // 안전망
+      var fhdLabelMap={'480p':'SD','720p':'HD','1080p':'FHD','4K':'UHD'};
+      var fhdLabel = fhdLabelMap[resLabel]||'HD';
       // 엔진 태그
       var vidEngTag=mk('span','ptag');
       var vidColors={wan22:'#22d3ee',kling3:'#a78bfa',veo31:'#4ade80',seedance2:'#f59e0b',seedance2mini:'#fb923c',omniflash:'#60a5fa'};
@@ -28586,6 +28603,13 @@ function _runToolWithPromptActual(translatedPrompt){
     // 계산과 실제 사용 엔진이 다른 문제를 일으켜서, 검증된 나노바나나2로 되돌림.
     eng:       (G.wf==='edit' && G.editMode==='mask') ? 'nano2' : G.eng,
     vidEng:    G.vidEng,
+    // ⚠️ 버그 수정(치명적, "영상 렌더링 결과 배지에 해상도가 제대로 나오는지 확인해줘"로 점검하다
+    // 발견): 이 필드가 아예 없어서, 결과 카드의 해상도 배지가 "이 영상을 만들 때 실제로 쓴
+    // 해상도"가 아니라 "지금 이 순간 화면에 떠있는 G.vres(전역, 계속 바뀜)"를 그대로 읽고
+    // 있었음 — 그래서 1080p로 만든 영상도, 나중에 다른 영상 만들려고 720p로 바꿔두면 예전
+    // 결과의 배지까지 같이 "720p"로 잘못 바뀌어 보이는 문제가 있었음. 생성 시점의 값을
+    // 스냅샷으로 저장해서 그 영상 고유의 해상도가 항상 정확히 표시되게 함.
+    vidRes:    G.vres||null,
     upscaleEng:G_UPSCALE_ENG||'clarity',
     scale:     tab.scale||G.tabs.upscale.scale||'2x',
     resolution:tab.resolution||'1K',
@@ -28798,23 +28822,42 @@ function executeSingleRender(task){
         var ps=allPS.find(function(p){return p.k===task.selK;});
         if(ps)tags.push('preset:'+ps.l);
       }
-      // 크레딧: 영상은 EV.cost 기준
+      // 크레딧: 영상은 실제 청구(getCost())와 동일한 공식으로 계산
       var cost;
       if(task.wf==='video'){
         var vidDur=task.vdur||5;
-        // 실제 원가 기반 (1cr=₩10, $1=₩1,450 기준, 마진 50% 적용)
-        // Kling:    오디오ON $0.168/초 → ₩244/초 → 약 25cr/초
-        // Veo:      $0.90/6초=$0.15/초 → ₩218/초 → 약 22cr/초
-        // Seedance: $1.52/5초=$0.304/초 → ₩441/초 → 약 45cr/초
-        var crPerSec={kling3:40, veo31:37, seedance2:72, seedance2mini:36, omniflash:32};
-        var cps=crPerSec[task.vidEng]||25;
-        cost=Math.round(cps*vidDur);
+        var vEng=task.vidEng||'kling3';
+        var vRes2=task.vidRes||'720p';
+        // ⚠️ 버그 수정(치명적, "결과 카드 배지가 실제 청구 금액이랑 다르다"): 이 블록이
+        // getCost()랑 완전히 다른 별도의 간이 공식(엔진별 고정 초당 단가만 곱함)을 쓰고 있어서,
+        // 특히 해상도 배율(Veo 1080p/4K, Seedance 480p/1080p)과 Veo의 4/6/8초 구간 요금이
+        // 전혀 반영 안 되고 있었음 — 그 결과 실제로 청구된 금액과 카드에 찍히는 "OOOcr" 표시가
+        // 서로 어긋났음. getCost()에서 검증된 것과 완전히 동일한 공식으로 다시 계산함.
+        if(vEng==='kling3'){
+          cost = vidDur*40;
+        } else if(vEng==='veo31'){
+          var vDurBilled2 = vidDur<=5?4:vidDur<=7?6:8;
+          cost = 220 + (vDurBilled2-6)*37;
+          if(vRes2==='1080p') cost = Math.round(cost*1.2);
+          else if(vRes2==='4K') cost = Math.round(cost*3.0);
+        } else if(vEng==='seedance2'){
+          cost = vidDur*72;
+          if(vRes2==='1080p') cost = Math.round(cost*2.2);
+          else if(vRes2==='480p') cost = Math.round(cost*0.5);
+        } else if(vEng==='seedance2mini'){
+          cost = vidDur*35;
+          if(vRes2==='480p') cost = Math.round(cost*0.5);
+        } else if(vEng==='omniflash'){
+          cost = Math.min(10,vidDur)*32;
+        } else {
+          cost = vidDur*40;
+        }
       } else {
         cost=Math.round(getBaseCost(task.wf,task.scale,task.resolution));
       }
       tags.push(cost+'cr');
       if(!G.HIST[task.wf])G.HIST[task.wf]=[];
-      var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null,isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined};
+      var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,vidRes:task.vidRes||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null,isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined};
 
       function _finishItem(){
         // ── 1. 결과 저장 (DB 오류와 무관하게 무조건 실행) ──────────
