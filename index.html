@@ -21459,9 +21459,34 @@ function _shortsGenerate(){
         doneCount++;
         if(doneCount>=readyList.length) startRender();
       }
-      vEl.addEventListener('loadeddata', ready, {once:true});
+      // ⚠️ 버그 수정("트림 구간을 1~4초로 바꾸든 2~4초로 바꾸든 위치와 무관하게 항상 똑같이 끊김"):
+      // 예전엔 'loadeddata'(맨 앞 프레임 정도만 준비된 상태)만 확인하고 바로 렌더링 시작 준비완료로
+      // 쳤음 — 실제 트림 시작지점(currentTime)으로 옮기는 탐색(seek)과 디코더 예열은 실시간 녹화가
+      // 이미 시작된 뒤, 이 장면에 처음 들어오는 그 순간(_shortsDrawSlide)에야 비로소 일어났음.
+      // 탐색은 비동기라 완료되기까지 프레임이 멈추거나 엉뚱한 프레임이 캡처되는데, 이게 트림 위치와
+      // 무관하게 "장면 시작 시점"마다 매번 재현되는 끊김의 정체였음. 이제 녹화가 시작되기 전(준비
+      // 단계)에 미리 트림 시작지점까지 탐색해두고, 짧게 재생→일시정지까지 해서 디코더를 예열해둔
+      // 뒤에야 준비완료로 표시함 — 실제 장면 진입 시점엔 이미 정확한 프레임에 멈춰있는 상태라
+      // play()만 호출하면 곧바로 매끄럽게 이어짐.
+      function seekThenPrime(){
+        var target=vSlide.trimStart||0;
+        function afterSeek(){
+          vEl.removeEventListener('seeked', afterSeek);
+          // 디코더 예열: 짧게 재생시켰다가 곧바로 멈춰서, 실제 장면 진입 시 play()가 지연 없이 바로 먹히게 함
+          var playPromise=vEl.play();
+          if(playPromise && playPromise.catch) playPromise.catch(function(){});
+          setTimeout(function(){
+            try{ vEl.pause(); vEl.currentTime=target; }catch(e){}
+            ready();
+          }, 120);
+        }
+        if(Math.abs((vEl.currentTime||0)-target)<0.05){ afterSeek(); return; }
+        vEl.addEventListener('seeked', afterSeek, {once:true});
+        try{ vEl.currentTime=target; }catch(e){ afterSeek(); }
+      }
+      vEl.addEventListener('loadeddata', seekThenPrime, {once:true});
       vEl.addEventListener('error', ready, {once:true}); // 실패해도 렌더는 계속 진행(그 구간만 포스터로 대체)
-      setTimeout(ready, 4000); // 혹시 이벤트가 안 오는 환경 대비 안전장치
+      setTimeout(ready, 5500); // 혹시 이벤트가 안 오는 환경 대비 안전장치(탐색·예열 시간 포함해 여유 있게)
     });
   }
   loadNext();
@@ -21983,7 +22008,13 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
     var vEl=videoCache&&videoCache[slide.videoUrl];
     var _vSrc=null;
     if(vEl){
-      if(vEl.paused){ try{ vEl.currentTime = slide.trimStart||0; }catch(e){} vEl.play().catch(function(){}); } // 이 장면 구간에 처음 들어온 순간 트림 시작지점부터 재생 시작(실시간 렌더 루프라 그대로 싱크가 맞음)
+      if(vEl.paused){
+        // 준비 단계(seekThenPrime)에서 이미 트림 시작지점까지 탐색해뒀으므로, 위치가 어긋나 있을
+        // 때(예: 안전장치 타임아웃으로 예열을 못 마치고 진입한 경우)만 다시 탐색함 — 정상적인
+        // 경우엔 재탐색 없이 곧바로 재생만 시작해서 끊김 없이 이어짐.
+        if(Math.abs((vEl.currentTime||0)-(slide.trimStart||0))>0.1){ try{ vEl.currentTime = slide.trimStart||0; }catch(e){} }
+        vEl.play().catch(function(){});
+      } // 이 장면 구간에 처음 들어온 순간 재생 시작(실시간 렌더 루프라 그대로 싱크가 맞음)
       _vSrc=vEl;
     } else {
       // 아직 준비 안 됐거나(프리로드 중) 영상을 못 살렸을 때(새로고침 후 등) — 포스터 썸네일로 대체
