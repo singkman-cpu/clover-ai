@@ -72,6 +72,12 @@
 <meta name="apple-mobile-web-app-title" content="Clover AI">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+/* ⚠️ 요청 반영("렌더링이 예상보다 너무 오래 걸리면 취소 버튼을 눈에 띄게 알려줘야지"):
+   예상 시간의 2배를 넘게 기다리면 취소 버튼에 이 애니메이션을 걸어서 시선을 끌게 함. */
+@keyframes ldPulseAttn{
+  0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55);}
+  50%{box-shadow:0 0 0 8px rgba(239,68,68,0);}
+}
 /* 숫자 입력창의 위/아래 스핀 버튼(화살표)을 전부 숨김 — 클릭이나 스크롤로 실수로 값이
    바뀌는 걸 막고 키보드로 직접 타이핑만 하도록 함 (특히 예산 계획기 항목별 금액 입력창) */
 input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
@@ -690,7 +696,10 @@ select option{background:var(--c2)}
         </div>
         <div id="ldsteps" style="display:flex;flex-direction:column;gap:2px;align-items:center;margin-top:8px"></div>
         <button onclick="gE('ldov').style.display='none'" style="position:absolute;top:14px;right:14px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:#fff;border-radius:50%;width:28px;height:28px;font-size:14px;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center">✕</button>
-      <button id="ld-cancel" onclick="cancelRun()" style="margin-top:14px;padding:6px 18px;border-radius:6px;border:1px solid var(--bd2);background:none;color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit">취소</button>
+      <!-- ⚠️ 요청 반영("취소 버튼이 왜 없냐" — 있긴 했는데 회색 테두리만 있는 작은 버튼이라 급할 때
+      눈에 안 띄어서 못 찾았던 것으로 보임): 눈에 확실히 띄도록 빨간 배경의 큰 버튼으로 키우고,
+      "이 작업 취소"라고 더 명확한 문구로 바꿈. 기능(cancelRun) 자체는 그대로. -->
+      <button id="ld-cancel" onclick="cancelRun()" style="margin-top:14px;padding:9px 22px;border-radius:8px;border:1px solid rgba(239,68,68,.5);background:rgba(239,68,68,.15);color:#f87171;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit">✕ 이 작업 취소</button>
       </div>
     </div>
     </div><!-- /cnv-row -->
@@ -28751,10 +28760,19 @@ function executeSingleRender(task){
         if(elapsed<_eta){
           hintEl.textContent='예상 남은 시간: 약 '+remain+'초'
             +(_slowCombo?' (구도 변환 + 2K는 시간이 더 걸려요)':'');
-        } else {
+          var cancelBtn0=gE('ld-cancel'); if(cancelBtn0) cancelBtn0.style.animation='';
+        } else if(elapsed < _eta*2){
           hintEl.textContent=_slowCombo
             ? '복잡한 구도 변환 처리 중입니다. 조금만 더 기다려주세요 (최대 8~10분 소요될 수 있어요)'
             : '거의 완료됩니다...';
+        } else {
+          // ⚠️ 요청 반영("영상 렌더링 걸었는데 너무 오래 반응이 없으면 취소하기 누르게 해줘야지"):
+          // 예상 시간의 2배를 넘게 기다리고 있으면, 조용히 기다리게만 두지 말고 취소 옵션이
+          // 있다는 걸 능동적으로 알려줌 — 그리고 취소 버튼 자체도 눈에 띄게 깜빡이게 해서, 급하게
+          // 화면 보다가 놓치지 않게 함(예전엔 "취소 버튼이 어디 있냐"는 피드백이 있었음).
+          hintEl.innerHTML='예상 시간(약 '+_eta+'초)보다 많이 늦어지고 있어요. 서버가 혼잡할 수 있어요 — 계속 기다리셔도 되고, 급하시면 아래 <strong style="color:#f87171">취소</strong> 후 다시 시도해보세요.';
+          var cancelBtn=gE('ld-cancel');
+          if(cancelBtn) cancelBtn.style.animation='ldPulseAttn 1.2s ease-in-out infinite';
         }
       }
       // 프로그레스 바
@@ -28769,6 +28787,7 @@ function executeSingleRender(task){
     var timerEl=gE('ld-timer');
     var hintEl=gE('ld-timer-hint');
     var barEl=gE('ldbar');
+    var cancelBtnDone=gE('ld-cancel'); if(cancelBtnDone) cancelBtnDone.style.animation='';
     var elapsed=Math.round((Date.now()-_renderStart)/1000);
     if(timerEl)timerEl.textContent=elapsed+'s ✓';
     if(hintEl)hintEl.textContent='완료 ('+elapsed+'초 소요)';
