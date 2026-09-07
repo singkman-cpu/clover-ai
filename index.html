@@ -17577,9 +17577,17 @@ function _shortsBuildSlides(){
     // 계속 보이니까 "화면엔 있는데 영상엔 없다"는 혼란을 줬을 것. 이제 역할이 없어도 절대
     // 빼지 않고, 라벨만 "기타 장면"으로 넣어서 영상에 포함시킴.
     var lbl = custom ? im.customLabel.trim() : (r ? _shortsRoleLabel(r) : '기타 장면');
-    var vidDuration = im.isVideo ? ((im.trimEnd!=null && im.trimStart!=null) ? Math.max(0.2, im.trimEnd-im.trimStart) : im.duration) : im.duration;
+    // ⚠️ 요청 반영("캡컷처럼 5초 영상을 3초 속도로 압축해서 쓸 수 있나?"): 기존 트림(구간 잘라내기)
+    // 과는 별개로, "전체 구간을 다 쓰되 배속으로 압축"하는 speedMode를 추가함. speedMode일 땐
+    // 트림 구간(trimStart~trimEnd)이 아니라 전체 길이를 그대로 쓰고, 원하는 최종 시간(speedTargetDur)
+    // 에 맞춰 playbackRate를 계산해서 슬라이드에 실어보냄 — 실제 배속 재생은 videoCache 예열/재생
+    // 코드(_autoRoomPromptFor 근처가 아니라 렌더 tick 쪽)에서 vEl.playbackRate로 적용함.
+    var _vFullDur = im.isVideo ? (im._fullDuration || im.duration || 0) : 0;
+    var _speedRate = (im.isVideo && im.speedMode && im.speedTargetDur>0) ? (_vFullDur / im.speedTargetDur) : 1;
+    var vidDuration = im.isVideo ? (im.speedMode ? Math.max(0.2, im.speedTargetDur||_vFullDur) : ((im.trimEnd!=null && im.trimStart!=null) ? Math.max(0.2, im.trimEnd-im.trimStart) : im.duration)) : im.duration;
     slides.push({type:'slide', img:im.img, label:lbl, role:r, zoom:im.coverZoom||1, offX:im.coverOffX||0, offY:im.coverOffY||0,
-      isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.trimStart||0):0,
+      isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.speedMode?0:(im.trimStart||0)):0,
+      playbackRate:_speedRate,
       skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
       noSlider:!!im.noSlider, customDuration:(!im.isVideo && im.customDuration>0)?im.customDuration:null,
       transitionOverride:im.transitionOverride||null});
@@ -18551,6 +18559,56 @@ function sbShorts(p){
       })(im);
       trimWrap.appendChild(trimResetBtn);
       _refreshTrimLabel();
+
+      // ── 배속 모드(요청: "캡컷처럼 5초 영상을 3초로 압축해서 쓸 수 있나?") ──────────────
+      // ⚠️ 구간 자르기(트림)와는 다른 기능: 트림은 일부만 잘라 쓰는 거고, 이건 "영상 전체를
+      // 그대로 다 쓰되 원하는 시간에 맞춰 빠르게 재생"하는 방식. 둘은 동시에 안 쓰이게(배속
+      // 켜면 트림 무시하고 전체 구간을 씀) speedMode 플래그로 구분함.
+      if(im.speedMode==null) im.speedMode=false;
+      if(im.speedTargetDur==null) im.speedTargetDur = fullDur;
+      var spdWrap = dv(''); spdWrap.style.cssText='margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd2)';
+      var spdToggleRow = dv(''); spdToggleRow.style.cssText='display:flex;align-items:center;gap:6px;cursor:pointer';
+      var spdCk = document.createElement('input'); spdCk.type='checkbox'; spdCk.checked=!!im.speedMode;
+      var spdLbl = dv(''); spdLbl.style.cssText='font-size:11px;color:var(--t)'; spdLbl.textContent='⏩ 구간 자르기 대신, 전체 구간을 배속으로 압축해서 쓰기';
+      spdToggleRow.appendChild(spdCk); spdToggleRow.appendChild(spdLbl);
+      spdWrap.appendChild(spdToggleRow);
+      var spdBody = dv(''); spdBody.style.cssText='margin-top:6px';
+      var spdInfoLbl = dv(''); spdInfoLbl.style.cssText='font-size:10.5px;color:var(--ac);font-weight:700;margin-bottom:4px';
+      var spdRow = dv(''); spdRow.style.cssText='display:flex;align-items:center;gap:8px';
+      var spdRowLbl = dv(''); spdRowLbl.style.cssText='font-size:10px;color:var(--m2);flex-shrink:0'; spdRowLbl.textContent='목표 길이';
+      var spdInput = document.createElement('input'); spdInput.type='range'; spdInput.min='0.5'; spdInput.max=String(fullDur); spdInput.step='0.1'; spdInput.value=String(im.speedTargetDur);
+      spdInput.style.cssText='flex:1';
+      spdRow.appendChild(spdRowLbl); spdRow.appendChild(spdInput);
+      spdBody.appendChild(spdInfoLbl); spdBody.appendChild(spdRow);
+      spdWrap.appendChild(spdBody);
+      function _refreshSpdLabel(){
+        var rate = fullDur / Math.max(0.1, im.speedTargetDur);
+        spdInfoLbl.textContent = _fmtT(fullDur)+' 전체를 → '+_fmtT(im.speedTargetDur)+'로 압축 ('+rate.toFixed(2)+'배속)';
+      }
+      function _refreshSpeedModeUI(){
+        var on = !!im.speedMode;
+        spdBody.style.display = on ? '' : 'none';
+        // 배속 켜면 트림 UI는 의미가 없어지므로(항상 전체 구간을 쓰니까) 흐리게 비활성화 표시
+        trimRow.style.opacity = on ? '0.35' : '1';
+        trimRow2.style.opacity = on ? '0.35' : '1';
+        startInput.disabled = on; endInput.disabled = on; trimResetBtn.disabled = on;
+        _refreshSpdLabel();
+      }
+      (function(item){
+        spdCk.onchange=function(){
+          item.speedMode = spdCk.checked;
+          _refreshSpeedModeUI();
+          renderMain('shorts');
+        };
+        spdInput.oninput=function(){
+          item.speedTargetDur = parseFloat(spdInput.value);
+          _refreshSpdLabel();
+          renderMain('shorts');
+        };
+      })(im);
+      _refreshSpeedModeUI();
+      trimWrap.appendChild(spdWrap);
+
       info.appendChild(trimWrap);
     }
     if(im.source==='clover'){
@@ -20560,7 +20618,7 @@ function _shortsRenderCanvas(ub){
     im._tileDomId = _tileImgId; // 썸네일 생성이 끝나면 이 id로 찾아서 바로 교체해줌
     _shortsEnsureThumb(im); // 아직 썸네일이 없으면 백그라운드에서 생성 시작(없어도 원본으로 우선 표시됨)
     tile.innerHTML='<img id="'+_tileImgId+'" src="'+_tileImgSrc+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none" onerror="this.style.display=\'none\';this.nextElementSibling.nextElementSibling.nextElementSibling.style.display=\'flex\'">'+
-      (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+((im.trimEnd!=null&&im.trimStart!=null)?(im.trimEnd-im.trimStart):(im.duration||0)).toFixed(1)+'s</div>':'')+
+      (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+(im.speedMode?(im.speedTargetDur||im.duration||0):((im.trimEnd!=null&&im.trimStart!=null)?(im.trimEnd-im.trimStart):(im.duration||0))).toFixed(1)+(im.speedMode?'s⏩':'s')+'</div>':'')+
       '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+(usable?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">'+(idx+1)+'</div>'+
       '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(usable?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px;pointer-events:none">'+badgeTxt+'</div>'+
       '<div style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:#2a1a0a;color:#f59e0b;font-size:11px;font-weight:700;text-align:center;padding:8px;pointer-events:none">⚠️ 이미지 깨짐<span style="font-size:9px;color:#ccc;font-weight:500">다시 업로드해주세요</span></div>'+
@@ -21552,6 +21610,7 @@ function _shortsGenerate(){
       // play()만 호출하면 곧바로 매끄럽게 이어짐.
       function seekThenPrime(){
         var target=vSlide.trimStart||0;
+        try{ vEl.playbackRate = vSlide.playbackRate||1; }catch(e){} // ⚠️ 배속(요청: "5초 영상을 3초로 압축") 예열 단계부터 적용
         function afterSeek(){
           vEl.removeEventListener('seeked', afterSeek);
           // 디코더 예열: 짧게 재생시켰다가 곧바로 멈춰서, 실제 장면 진입 시 play()가 지연 없이 바로 먹히게 함
@@ -22095,6 +22154,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
         // 때(예: 안전장치 타임아웃으로 예열을 못 마치고 진입한 경우)만 다시 탐색함 — 정상적인
         // 경우엔 재탐색 없이 곧바로 재생만 시작해서 끊김 없이 이어짐.
         if(Math.abs((vEl.currentTime||0)-(slide.trimStart||0))>0.1){ try{ vEl.currentTime = slide.trimStart||0; }catch(e){} }
+        try{ if(vEl.playbackRate !== (slide.playbackRate||1)) vEl.playbackRate = slide.playbackRate||1; }catch(e){} // ⚠️ 배속(캡컷처럼 5초 영상을 3초로 압축) 반영
         vEl.play().catch(function(){});
       } // 이 장면 구간에 처음 들어온 순간 재생 시작(실시간 렌더 루프라 그대로 싱크가 맞음)
       _vSrc=vEl;
