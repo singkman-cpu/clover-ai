@@ -28560,7 +28560,52 @@ function runClarityUpscale(imgDataUrl, scaleFactor, onDone, onErr) {
     }catch(e){onErr('base64 오류: '+e.message);}
   }
 
-  uploadOrig(function(imgUrl){
+// ⚠️⚠️⚠️ 버그 수정("업스케일 안 된다" — 콘솔에 "Image dimensions are too large. Maximum area
+// is 16777216 pixels². Found 36054016 pixels²"): Creative/Clarity Upscaler는 입력 이미지
+// 면적이 16,777,216px²(대략 4096×4096)를 넘으면 거부함. 근데 '3D 렌더 실사화'에서 4K로 뽑은
+// 이미지는 8224×4384(36,054,016px²)처럼 이미 이 한도를 훌쩍 넘는 경우가 많아서, 업스케일에
+// 그대로 넣으면 두 엔진 다 422 에러로 실패했음 — 그 다음 이어지는 로컬 캔버스 폴백도 CORS
+// 정책(tainted canvas) 때문에 조용히 실패해서, 사용자 눈엔 그냥 "업스케일이 안 됨"으로만
+// 보였음. 업스케일 API에 보내기 전에 이 한도에 맞춰 미리 축소해두는 사전 점검 단계를 추가함.
+// ⚠️ 추가 확인: Topaz(fal-ai/topaz/upscale/image)는 출력 기준 최대 512MP까지 공식 지원하는
+// 전문가용 업스케일러라 Creative/Clarity처럼 낮은 입력 제한이 없음 — 그래서 Topaz/VizMaker
+// Pro(같은 Topaz 엔진)에는 이 좁은 한도를 적용하지 않고, Creative/Clarity에만 적용함.
+var UPSCALE_MAX_AREA = 16000000; // Creative/Clarity 전용 — 16,777,216보다 살짝 여유 있게
+var UPSCALE_MAX_AREA_TOPAZ = 200000000; // Topaz 계열은 사실상 거의 안 걸리는 넉넉한 한도만
+function _checkAndResizeForUpscaler(url, ldst, eng, onDone, onErr){
+  var maxArea = (eng==='topaz' || eng==='vizpro') ? UPSCALE_MAX_AREA_TOPAZ : UPSCALE_MAX_AREA;
+  var img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=function(){
+    var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+    var area=w*h;
+    if(!area || area<=maxArea){ onDone(url); return; } // 한도 이내면 그대로 사용
+    var scale=Math.sqrt(maxArea/area);
+    var nw=Math.max(1,Math.floor(w*scale)), nh=Math.max(1,Math.floor(h*scale));
+    console.warn('[업스케일 입력 크기 보정] '+w+'x'+h+'('+area+'px²) → '+nw+'x'+nh+'로 축소 (업스케일러 입력 한도 초과, 엔진: '+eng+')');
+    if(ldst)ldst.textContent='이미지가 커서 먼저 축소하는 중...';
+    try{
+      var cv=document.createElement('canvas');
+      cv.width=nw;cv.height=nh;
+      var ctx=cv.getContext('2d');
+      ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+      ctx.drawImage(img,0,0,nw,nh);
+      var out=cv.toDataURL('image/jpeg',0.92);
+      _doUpload(out, onDone, onErr);
+    }catch(e){
+      console.warn('[업스케일 입력 크기 보정] 캔버스 처리 실패:', e.message);
+      onErr('이미지 해상도가 너무 커서('+w+'×'+h+') 업스케일 전에 자동으로 줄이지 못했습니다. 이미지를 한 번 다운로드했다가 다시 업로드해서 시도해주세요.');
+    }
+  };
+  img.onerror=function(){
+    console.warn('[업스케일 입력 크기 보정] 이미지 로드 실패, 원본 URL 그대로 사용');
+    onDone(url);
+  };
+  img.src=url;
+}
+
+  uploadOrig(function(imgUrl0){
+    _checkAndResizeForUpscaler(imgUrl0, ldst, eng, function(imgUrl){
     if(eng==='topaz'){
       // ── Topaz Upscaler (fal.ai) ───────────────────────────────────
       if(ldst)ldst.textContent='Topaz 업스케일 중 (20~60초)...';
@@ -28618,6 +28663,7 @@ function runClarityUpscale(imgDataUrl, scaleFactor, onDone, onErr) {
       // Clarity Upscaler (기본)
       runClarity(imgUrl, scaleFactor, onDone, onErr);
     }
+    }, onErr);
   });
 }
 
@@ -28687,6 +28733,13 @@ function runFaceRestore(imgUrl, onDone){
 
 function localUpscale(dataUrl, scaleFactor, onDone){
   var img2=new Image();
+  // ⚠️ 버그 수정("업스케일 안 된다" — 콘솔에 "Uncaught SecurityError: Failed to execute
+  // 'toDataURL' ... Tainted canvases may not be exported"): 여기 들어오는 dataUrl은 실제로는
+  // 로컬 데이터가 아니라 fal 호스팅 원격 이미지 URL인 경우가 많은데, crossOrigin 설정 없이
+  // 로드하면 캔버스가 "오염"되어(tainted) toDataURL() 호출이 브라우저 보안 정책으로 막힘 —
+  // Creative/Clarity 업스케일이 둘 다 실패했을 때의 최종 폴백인 이 함수가 매번 조용히
+  // 죽고 있었음. crossOrigin='anonymous'를 지정해서 CORS로 로드하면 해결됨.
+  img2.crossOrigin='anonymous';
   img2.onload=function(){
     var sc=Math.min(scaleFactor||2, 4);
     var cv2=document.createElement('canvas');
@@ -28694,7 +28747,14 @@ function localUpscale(dataUrl, scaleFactor, onDone){
     var ctx=cv2.getContext('2d');
     ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
     ctx.drawImage(img2,0,0,cv2.width,cv2.height);
-    onDone(cv2.toDataURL('image/jpeg',0.95));
+    try{
+      onDone(cv2.toDataURL('image/jpeg',0.95));
+    }catch(e){
+      // crossOrigin을 지정해도 서버가 CORS 헤더를 안 주는 극히 드문 경우 대비 — 이땐 캔버스에서
+      // 못 뽑아내니 어쩔 수 없이 원본 URL이라도 그대로 반환(업스케일 안 된 채로라도 결과는 나오게).
+      console.warn('[localUpscale] CORS로도 캔버스 추출 실패, 원본 반환:', e.message);
+      onDone(dataUrl);
+    }
   };
   img2.onerror=function(){onDone(dataUrl);};
   img2.src=dataUrl;
