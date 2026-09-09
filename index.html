@@ -3511,6 +3511,12 @@ function canRun(){
   if(G.wf==='proposal') return false; // 제안서도 자체 버튼 사용
   if(G.wf==='video'&&tab.vidMode==='prompt')return (tab.prompt||'').length>2;
   if(!tab.inputImg)return false;
+  // ⚠️ 요청 반영("3D 렌더 실사화는 프리셋 선택 안 하면 렌더 버튼 활성화 안 되게 해줘 — 계속
+  // 프리셋 안 누르고 렌더만 누르네"): 이 탭은 프리셋(실사화/고급 실사화/캐드→아이소 등)에 따라
+  // 결과 성격이 완전히 달라지는데, 프리셋 없이도 기본 프롬프트로 그냥 실행이 돼버려서 사용자가
+  // 매번 프리셋 선택을 깜빡하고 그냥 눌러버리는 경우가 많았음 — 프리셋을 반드시 먼저 고르도록
+  // 이미지가 있어도 프리셋(selK) 없으면 버튼 자체를 막음.
+  if(G.wf==='render' && !tab.selK) return false;
   // 관리자는 크레딧 무제한 (이미지만 있으면 실행 가능)
   if(G.supaRole==='admin'||G.plan==='admin'||localStorage.getItem('clover_plan')==='admin') return true;
   // 크레딧 부족 체크
@@ -3544,6 +3550,7 @@ function updBtn(){
     if(!G.wf){ al.textContent='작업을 선택하세요'; return; }
     var tab=getTab(G.wf);
     if(!tab||!tab.inputImg){ al.textContent=WFL[G.wf]||'실행'; }
+    else if(G.wf==='render' && !tab.selK){ al.textContent='프리셋을 선택하세요'; }
     else if(G.supaRole!=='admin' && G.plan!=='admin' && localStorage.getItem('clover_plan')!=='admin' && G.cr<cost){ al.textContent='크레딧 부족 ('+G.cr+'cr)'; }
     else { al.textContent=WFL[G.wf]||'실행'; }
   });
@@ -15818,6 +15825,15 @@ function _autoRoomRetryOne(idx){
 function sbRender(p){
   mkNote(p,'<strong style="color:#a78bfa">3D 렌더/도면 &#8594; 실사 이미지</strong><br>3D 렌더링·스케치·도면을 실사 사진 수준으로.');
   mkEng(p,false);mkUB(p,'렌더/도면 업로드','main');mkRef(p,6,'실사 참고 이미지');
+  // ⚠️ 요청 반영("3D 렌더탭에 브이월드/스마트서울맵 연결해서 투시도·조감도 배경 퀄리티 있게
+  // 만드는 프로세스 할 수 있어?"): 실제 대지의 진짜 주변 건물·지형을 참고 이미지로 바로 캡처해서
+  // 첨부할 수 있게, 브이월드(VWorld) 3D 지도를 여는 버튼을 추가함. 자세한 내용은 _openVworldModal
+  // 참고.
+  var vwBtn=mk('button','');vwBtn.type='button';
+  vwBtn.style.cssText='width:100%;margin:4px 0 10px;padding:9px;border-radius:8px;border:1px solid rgba(96,165,250,.4);background:rgba(96,165,250,.1);color:#93c5fd;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px';
+  vwBtn.innerHTML='🗺️ 실제 대지 배경 참고 (브이월드 3D)';
+  vwBtn.onclick=function(){ _openVworldModal(); };
+  p.appendChild(vwBtn);
   // ⚠️ 요청 반영("렌더링 완성본 고품질화 눌렀는데 화질이 더 안 좋아지고 팔걸이 마감재가 바뀐다"):
   // ① 참고 이미지는 이 3개 프리셋(실사화/고급 실사화/렌더링 완성본 고품질화)엔 이제 아예 반영이
   // 안 되도록 코드를 고쳤으니 그 사실을 알려줌 — 켜져 있어도 무시된다는 걸 몰라서 "왜 반영이
@@ -15838,6 +15854,134 @@ function sbRender(p){
   mkPre(p,PS_RENDER);
   mkSl(p,'Creativity','c0',-10,10);mkSl(p,'HDR','h0',-10,10);mkSl(p,'Resemblance','r0',-10,10);mkSl(p,'Fractality','f0',-10,10);
 }
+// ══ 브이월드(VWorld) 3D 배경 참고 도구 ═══════════════════════════════════
+// ⚠️ 요청 반영("3D 렌더탭에 브이월드 연결해서 투시도·조감도 배경 만드는 프로세스"): 실제
+// 대지의 진짜 주변 건물·지형을 확인하고, 원하는 카메라 각도로 맞춘 화면을 캡처해서 "3D 렌더
+// 실사화"의 참고 이미지로 바로 첨부할 수 있게 함. 주의: 브이월드 API 키는 등록된 도메인에서만
+// 작동하므로, vworld.kr 인증키 관리 페이지에서 실제 서비스 도메인을 등록해둬야 함. 또한 브이월드
+// 3D 건물 모델은 서울 등 일부 지역에만 상세히 구축돼 있고, 그 외 지역은 지형만 나올 수 있음.
+// 화면 캡처는 WebGL 캔버스에서 이미지를 뽑아내는 방식이라, 타일 서버가 CORS를 허용 안 하면
+// 실패할 수 있음(이땐 브라우저 자체 스크린샷 기능으로 직접 캡처해서 올리도록 안내).
+var VWORLD_API_KEY = 'CCA2A6BE-4D04-47E6-9D6A-1F5C6764281D';
+var _vwScriptLoaded = false;
+var _vwMapInstance = null;
+function _loadVworldScript(cb){
+  if(_vwScriptLoaded && window.vw){ cb(); return; }
+  var s=document.createElement('script');
+  s.src='https://map.vworld.kr/js/webglMapInit.js.do?version=2.0&apiKey='+VWORLD_API_KEY+'&domain='+encodeURIComponent(location.hostname);
+  s.onload=function(){ _vwScriptLoaded=true; setTimeout(cb, 300); }; // vw 전역객체 초기화 시간 약간 대기
+  s.onerror=function(){ cb('브이월드 스크립트 로드 실패 — API 키 또는 도메인 등록을 확인해주세요.'); };
+  document.head.appendChild(s);
+}
+function _vworldGeocode(address, cb){
+  var url='https://api.vworld.kr/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&address='+encodeURIComponent(address)+'&format=json&type=road&key='+VWORLD_API_KEY;
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    try{
+      var pt=d.response.result.point;
+      cb(parseFloat(pt.x), parseFloat(pt.y));
+    }catch(e){ cb(null,null,'주소를 찾지 못했어요. 지번/도로명 주소를 정확히 입력해보세요.'); }
+  }).catch(function(){ cb(null,null,'주소 검색 중 오류가 발생했어요.'); });
+}
+function _openVworldModal(){
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px';
+  var panel=document.createElement('div');
+  panel.style.cssText='background:var(--c1,#151519);border-radius:14px;width:100%;max-width:920px;max-height:92vh;overflow:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5)';
+  panel.innerHTML=
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
+      '<div style="font-size:15px;font-weight:800;color:var(--t)">🗺️ 실제 대지 배경 참고 (브이월드 3D)</div>'+
+      '<button id="vw-close" style="border:none;background:transparent;color:var(--m2);font-size:20px;cursor:pointer;line-height:1">✕</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;margin-bottom:8px">'+
+      '<input id="vw-addr" type="text" placeholder="주소 입력 (예: 서울 강남구 테헤란로 123)" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit">'+
+      '<button id="vw-search" style="padding:9px 14px;border-radius:8px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">검색</button>'+
+    '</div>'+
+    '<div id="vw-err" style="font-size:11px;color:#f87171;margin-bottom:6px;display:none"></div>'+
+    '<div id="vmap" style="width:100%;height:480px;border-radius:10px;overflow:hidden;background:#111"></div>'+
+    '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'+
+      '<button id="vw-persp" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">👁️ 투시도(눈높이)</button>'+
+      '<button id="vw-aerial" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🚁 조감도(항공뷰)</button>'+
+      '<button id="vw-capture" style="flex:2;min-width:180px;padding:8px;border-radius:7px;border:none;background:var(--acg,rgba(0,229,204,.15));color:var(--ac,#00e5cc);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">📸 이 화면 캡처해서 참고 이미지로 추가</button>'+
+    '</div>'+
+    '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5">드래그로 회전, 스크롤로 확대/축소, 화면 캡처가 잘 안 되면(오류 메시지 뜨면) 직접 스크린샷 찍어서 "실사 참고 이미지"에 수동으로 올려주세요.<br>참고: 브이월드 3D 건물 모델은 서울 등 일부 지역에만 상세히 구축돼 있어요.</div>';
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  var errEl=panel.querySelector('#vw-err');
+  function showErr(msg){ errEl.textContent=msg; errEl.style.display='block'; }
+
+  panel.querySelector('#vw-close').onclick=function(){ ov.remove(); };
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+
+  var mapDiv=panel.querySelector('#vmap');
+  mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--m2);font-size:12px">브이월드 3D 지도 불러오는 중...</div>';
+
+  _loadVworldScript(function(err){
+    if(err){ mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:12px;padding:20px;text-align:center">'+err+'</div>'; return; }
+    if(!window.vw){ mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:12px;padding:20px;text-align:center">브이월드 지도 객체를 초기화하지 못했어요 — API 키의 등록 도메인을 확인해주세요.</div>'; return; }
+    mapDiv.innerHTML='';
+    var defaultLon=126.9783, defaultLat=37.5665; // 서울시청 기본값
+    try{
+      var options={
+        mapId:'vmap',
+        initPosition:new vw.CameraPosition(new vw.CoordZ(defaultLon, defaultLat, 1200), new vw.Direction(0,-60,0)),
+        logo:false,
+        navigation:true
+      };
+      _vwMapInstance=new vw.Map();
+      _vwMapInstance.setOption(options);
+      _vwMapInstance.setMapId('vmap');
+    }catch(e){
+      mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:12px;padding:20px;text-align:center">지도 초기화 중 오류: '+e.message+'</div>';
+      return;
+    }
+
+    function flyTo(lon, lat, height, pitch){
+      try{
+        _vwMapInstance.setInitPosition(new vw.CameraPosition(new vw.CoordZ(lon, lat, height), new vw.Direction(0, pitch, 0)));
+      }catch(e){ console.warn('[VWorld] flyTo 실패', e); }
+    }
+
+    panel.querySelector('#vw-search').onclick=function(){
+      var addr=panel.querySelector('#vw-addr').value.trim();
+      if(!addr){ showErr('주소를 입력해주세요.'); return; }
+      errEl.style.display='none';
+      _vworldGeocode(addr, function(lon,lat,err2){
+        if(err2){ showErr(err2); return; }
+        flyTo(lon, lat, 500, -50);
+      });
+    };
+    panel.querySelector('#vw-addr').onkeydown=function(e){ if(e.key==='Enter') panel.querySelector('#vw-search').click(); };
+
+    panel.querySelector('#vw-persp').onclick=function(){
+      // 현재 위치는 유지하고 카메라만 눈높이(투시도)로 낮춤 — 정확한 현재 좌표 추적이 어려워
+      // 마지막 검색 좌표가 없으면 기본 위치 기준으로 동작함
+      flyTo(defaultLon, defaultLat, 150, -15);
+    };
+    panel.querySelector('#vw-aerial').onclick=function(){
+      flyTo(defaultLon, defaultLat, 800, -70);
+    };
+
+    panel.querySelector('#vw-capture').onclick=function(){
+      var cv=mapDiv.querySelector('canvas');
+      if(!cv){ showErr('캡처할 화면을 찾지 못했어요.'); return; }
+      try{
+        var dataUrl=cv.toDataURL('image/png');
+        var rTab=getTab('render');
+        if(!rTab.refs) rTab.refs=Array(6).fill(null);
+        var emptyIdx=rTab.refs.findIndex(function(r){return !r;});
+        if(emptyIdx===-1){ showErr('실사 참고 이미지 슬롯이 이미 6개 다 찼어요 — 하나 비우고 다시 시도해주세요.'); return; }
+        rTab.refs[emptyIdx]=dataUrl;
+        ov.remove();
+        renderSB();
+      }catch(e){
+        showErr('화면 캡처에 실패했어요(브라우저 보안 정책). 대신 브라우저 스크린샷 기능으로 직접 캡처해서 "실사 참고 이미지"에 올려주세요.');
+        console.warn('[VWorld 캡처 실패]', e);
+      }
+    };
+  });
+}
+
 function sbEdit(p){
   // ⚠️ 요청 반영("예전에 골라둔 뷰 프리셋이 여전히 45cr Pro로 뜬다"): 화면이 그려질 때마다 항상
   // 현재 선택된 프리셋에 맞는 올바른 엔진으로 재검증·보정함 — 언제 선택했든(새로고침·재방문
@@ -29927,6 +30071,27 @@ function procImgWithTask(task, onDone, onErr){
       : 'Improve materials, lighting and quality of this interior. Keep all other areas exactly unchanged. Photorealistic architectural photography. Camera and composition must remain exactly as in the original photo. CRITICAL COLOR ACCURACY RULE (자주 놓치던 부분 — 붉은/따뜻한 색조가 전체적으로 씌워지는 문제 방지): every wall, surface, and object must keep its EXACT original hue, saturation and overall color temperature from the source image — do NOT apply a warm, orange, golden-hour, or reddish color cast over the whole image while "improving" the lighting. Any lighting/exposure improvement must be strictly neutral in color temperature (matching the original photo\'s actual white balance), never shifting the image warmer or cooler as a side effect. If a wall or object looked a certain color/brightness in the original, it must be that identical color/brightness in the result — only sharpness, reflections and photographic realism should improve, not the color grading.'
   } else {
     ap='Interior architecture photography. '+(prompt||'photorealistic high quality')+'. Sharp details.';
+  }
+
+  // ⚠️⚠️⚠️ 치명적 발견 및 수정("이 슬라이더 작동 잘 되고 있는거 맞아?"): Creativity/HDR/
+  // Resemblance/Fractality 슬라이더(3D 렌더 실사화·현장사진 디자인 탭)가 지금까지 실제 AI
+  // 생성 경로 어디에서도 읽히지 않고 있었음 — 전체 코드 검색 결과, 이 값(G.c0/h0/r0/f0)은
+  // 지금 안 쓰이는 레거시 로컬 캔버스 필터 함수(procImgCanvas, "FAL_KEY 없을 때"만 도는 완전
+  // 별개의 폴백 경로)에서만 참조되고 있었고, 실제로 매번 쓰이는 이 함수(procImgWithTask)의
+  // 진짜 프롬프트에는 전혀 반영되지 않고 있었음 — 즉 슬라이더를 움직여도 결과물에 아무 영향이
+  // 없는 완전히 죽어있는 UI였음. 여기서 슬라이더 값을 실제 프롬프트 문구로 번역해서 진짜로
+  // 작동하게 만듦(0이면 아무 문구도 안 넣어서 기본 동작 그대로 유지).
+  if(wf==='space' || wf==='render'){
+    var _sldTxt='';
+    if(G.c0>0) _sldTxt+=' Feel free to creatively reinterpret and add extra realistic detail beyond strict accuracy (creativity level '+G.c0+'/10).';
+    else if(G.c0<0) _sldTxt+=' Stay extremely literal and conservative — add nothing beyond the minimum needed for realism, no creative reinterpretation at all (conservatism level '+(-G.c0)+'/10).';
+    if(G.h0>0) _sldTxt+=' Increase the dynamic range and contrast — brighter highlights, deeper shadows, more vivid tonal range than a flat/neutral photo (HDR intensity '+G.h0+'/10).';
+    else if(G.h0<0) _sldTxt+=' Keep the dynamic range flat, soft and even — avoid strong contrast or punchy highlights/shadows (flatness level '+(-G.h0)+'/10).';
+    if(G.r0>0) _sldTxt+=' Stay very closely, strictly faithful to the original photo\'s exact structure, materials and details — minimize any deviation (fidelity level '+G.r0+'/10).';
+    else if(G.r0<0) _sldTxt+=' You may deviate a bit more freely from the original\'s exact details while keeping the overall scene recognizable (looser fidelity, level '+(-G.r0)+'/10).';
+    if(G.f0>0) _sldTxt+=' Add more fine surface micro-texture and detail — visible material grain, subtle imperfections, crisper fine detail (detail intensity '+G.f0+'/10).';
+    else if(G.f0<0) _sldTxt+=' Keep surfaces smoother and cleaner with less fine micro-texture (smoothness level '+(-G.f0)+'/10).';
+    if(_sldTxt) ap += ' ⚠️ Additional fine-tuning requested by the user (apply these on top of everything above, without breaking any of the CRITICAL rules above):' + _sldTxt;
   }
 
   // ══ EDIT 탭 — 원본 해상도 유지 ═══════════════════════════════════
