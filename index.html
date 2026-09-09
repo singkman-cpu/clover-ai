@@ -4257,6 +4257,23 @@ function rUB(b,key){
     im.onload=function(){
       var w=this.naturalWidth,h=this.naturalHeight;
       pxBadge.textContent=w+'×'+h+' px';
+      // ⚠️ 요청 반영("3D 렌더 실사화 탭에서만이라도, 원본 픽셀 크기를 인지해서 화질 손실 없는
+      // 최소 해상도를 자동으로 골라달라"): Nano Banana Pro는 1K/2K/4K 중에서만 고를 수 있는
+      // 구조적 한계가 있어서(fal.ai 공식 smart-resize 도구도 내부적으로 "요청 크기를 커버하는
+      // 가장 작은 등급"을 자동으로 고르는 방식) — 여기서도 원본의 긴 변 픽셀 수를 기준으로,
+      // 그걸 깎아먹지 않는 가장 저렴한 등급을 자동 선택함. 같은 이미지에 이미 한 번 자동
+      // 적용했으면(사용자가 그 뒤 직접 바꿨을 수 있으니) 다시 덮어쓰지 않음.
+      if(key==='main' && G.wf==='render'){
+        var _rTab2=getTab('render');
+        if(_rTab2._autoResAppliedForImg !== v){
+          var _longSide=Math.max(w,h);
+          var _autoTier = _longSide<=1024 ? '1K' : (_longSide<=2048 ? '2K' : '4K');
+          _rTab2.resolution = _autoTier;
+          _rTab2._autoResAppliedForImg = v;
+          console.log('[3D 렌더 실사화] 원본 '+w+'×'+h+'px → 자동 해상도 선택: '+_autoTier);
+          renderSB();
+        }
+      }
     };
     th.appendChild(im);th.appendChild(db);th.appendChild(pxBadge);b.innerHTML='';b.appendChild(th);
     // 클릭하면 메인화면(가운데 큰 화면)에 이 업로드 이미지가 보이고, 더블클릭하면 크게 확대됨.
@@ -15794,6 +15811,19 @@ function _autoRoomRetryOne(idx){
 function sbRender(p){
   mkNote(p,'<strong style="color:#a78bfa">3D 렌더/도면 &#8594; 실사 이미지</strong><br>3D 렌더링·스케치·도면을 실사 사진 수준으로.');
   mkEng(p,false);mkUB(p,'렌더/도면 업로드','main');mkRef(p,6,'실사 참고 이미지');
+  // ⚠️ 요청 반영("렌더링 완성본 고품질화 눌렀는데 화질이 더 안 좋아지고 팔걸이 마감재가 바뀐다"):
+  // ① 참고 이미지는 이 3개 프리셋(실사화/고급 실사화/렌더링 완성본 고품질화)엔 이제 아예 반영이
+  // 안 되도록 코드를 고쳤으니 그 사실을 알려줌 — 켜져 있어도 무시된다는 걸 몰라서 "왜 반영이
+  // 안 되지"로 헷갈리지 않게. ② 해상도를 원본 이미지보다 낮게(예: 1K) 선택하면, 생성 자체가
+  // 낮은 해상도로 되고 그걸 다시 원본 크기로 늘리는 과정에서 화질이 떨어질 수밖에 없음 —
+  // 원본이 이미 고해상도면 해상도를 4K로 맞추라고 안내.
+  var _rTab=getTab('render');
+  if(_rTab && (_rTab.selK==='hq_real' || _rTab.selK==='hq_real_pro' || _rTab.selK==='render_quality_boost')){
+    var _realismNote=dv('note');
+    _realismNote.style.cssText='margin:8px 0;padding:10px 12px;border-radius:9px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);font-size:11px;line-height:1.6;color:#fbbf24';
+    _realismNote.innerHTML='⚠️ 이 프리셋은 "아무것도 안 바꾸고 사실감만 올리는" 용도라 <b>위 실사 참고 이미지는 반영되지 않아요</b>(의도적으로 무시함). <br>또한 원본 이미지가 이미 고해상도라면, 아래 해상도를 원본보다 낮게(1K 등) 고르면 오히려 화질이 떨어질 수 있어요 — <b>원본 해상도에 맞춰 4K를 선택</b>하는 걸 추천드려요.';
+    p.appendChild(_realismNote);
+  }
   mkResolution(p);
   mkCandidateCount(p);
   mkAspectRatio(p);
@@ -22983,6 +23013,52 @@ function buildUpscaleSliders(eng,container){
     var note=dv('note');
     note.innerHTML='<strong style="color:var(--ac)">Topaz Upscaler</strong><span style="background:rgba(0,229,204,.15);color:var(--ac);font-size:9px;padding:1px 6px;border-radius:3px;margin-left:6px">High Fidelity V2</span><br>전문가용 정밀 업스케일. 재질 복원, 에지 선명도, 원본 구조 완벽 보존. 건축·인테리어 렌더에 최적화.';
     container.appendChild(note);
+  } else if(eng==='clarity'){
+    // ⚠️ 요청 반영("매그니픽처럼 원본은 그대로 두고 재질만 더 사실적으로 디테일하게"): 매그니픽이
+    // 쓰는 것과 같은 계열의 오픈소스 모델(philz1337x/clarity-upscaler, "무료 매그니픽 대안"으로
+    // 알려진 모델)이라 똑같은 조절 파라미터(Creativity·Dynamic=HDR·Resemblance·Fractality)를
+    // 지원하는데, 지금까지 이 값들을 UI로 노출을 안 하고 코드에 고정값만 박아뒀었음(게다가 HDR은
+    // 아예 전달도 안 하고 있었음). 사용자가 보여준 매그니픽 캡처의 레시피(Creativity 0, HDR 2,
+    // Resemblance 낮게, Fractality 0)에 최대한 가깝게 기본값을 맞추고, 직접 미세조정할 수 있게
+    // 슬라이더로 노출함.
+    if(!G.tabs.upscale) G.tabs.upscale={};
+    var ut=G.tabs.upscale;
+    if(ut.clCreativity==null) ut.clCreativity=0;      // 0~1: 새 디테일을 얼마나 "창작"할지(0=원본 형태 그대로, 재질 질감만 다듬음)
+    if(ut.clDynamic==null) ut.clDynamic=3;            // 1~50 (HDR/명암 대비) — 매그니픽 HDR:2와 가장 가까운, 문서 권장 안전 구간(3~9)의 아래쪽
+    if(ut.clResemblance==null) ut.clResemblance=0.6;  // 0~3: 원본에 얼마나 딱 붙어있을지(모델 기본값)
+    if(ut.clFractality==null) ut.clFractality=0;      // 0~10 UI 표시용 — 내부적으로 타일 크기(fractality)로 환산
+
+    var note2=dv('note');
+    note2.innerHTML='<strong style="color:var(--ac)">Clarity Upscaler</strong><span style="background:rgba(0,229,204,.15);color:var(--ac);font-size:9px;padding:1px 6px;border-radius:3px;margin-left:6px">Magnific 오픈소스 대안 모델</span><br>매그니픽과 같은 계열 모델이라 같은 조절값을 제공해요. 기본값은 "원본은 그대로 두고 재질 질감만 살짝 더 사실적으로" 하는 쪽으로 맞춰뒀어요 — 매그니픽에서 익숙하신 대로 직접 조절하셔도 됩니다.';
+    container.appendChild(note2);
+
+    function _mkClaritySlider(label, key, min, max, step, desc){
+      var wrap=dv('ss');
+      var valSpan=document.createElement('span');
+      valSpan.style.cssText='float:right;color:var(--ac);font-weight:700';
+      valSpan.textContent=ut[key];
+      var lbl=dv('lbl');lbl.textContent=label;lbl.appendChild(valSpan);
+      wrap.appendChild(lbl);
+      if(desc){ var d=dv('');d.style.cssText='font-size:10px;color:var(--m2);margin-bottom:4px';d.textContent=desc;wrap.appendChild(d); }
+      var rng=document.createElement('input');rng.type='range';rng.min=min;rng.max=max;rng.step=step;rng.value=ut[key];
+      rng.style.cssText='width:100%';
+      rng.oninput=function(){ ut[key]=parseFloat(rng.value); valSpan.textContent=ut[key]; };
+      wrap.appendChild(rng);
+      container.appendChild(wrap);
+    }
+    _mkClaritySlider('Creativity', 'clCreativity', 0, 1, 0.05, '높을수록 재질을 더 적극적으로 새로 "창작"함(형태가 살짝 바뀔 수 있음) — 원본 그대로 유지하려면 0에 가깝게');
+    _mkClaritySlider('HDR (Dynamic)', 'clDynamic', 1, 15, 1, '명암 대비·입체감 — 매그니픽 HDR 값과 비슷한 느낌');
+    _mkClaritySlider('Resemblance', 'clResemblance', 0, 2, 0.1, '원본 구도·형태에 얼마나 딱 붙어있을지');
+    _mkClaritySlider('Fractality', 'clFractality', 0, 10, 1, '높을수록 더 잘게 쪼개서 미세 디테일을 추가함(타일 경계가 보일 수 있어 과하면 부자연스러움)');
+
+    var resetBtn=mk('button','');resetBtn.type='button';resetBtn.textContent='↺ 매그니픽 레시피로 되돌리기(Creativity 0 · HDR 3 · Resemblance 0.6 · Fractality 0)';
+    resetBtn.style.cssText='width:100%;margin-top:4px;padding:7px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
+    resetBtn.onclick=function(){
+      ut.clCreativity=0; ut.clDynamic=3; ut.clResemblance=0.6; ut.clFractality=0;
+      var sl=document.getElementById('upscale-sl-area');
+      if(sl){sl.innerHTML='';buildUpscaleSliders('clarity',sl);}
+    };
+    container.appendChild(resetBtn);
   }
 }
 // ── 대화형 수정 — 채팅하듯 "벽 화이트로" → 완료 → "소파 오른쪽으로" → 완료 식으로
@@ -28258,7 +28334,13 @@ function runNanoBanana(prompt, imgDataUrl, modelSlug, onDone, onErr, resKey) {
   var slug = modelSlug || 'fal-ai/nano-banana-2/edit';
   // space/render 탭의 레퍼런스 이미지(무드보드)를 가져와서 메인 이미지와 함께 전달
   // (이게 빠져있으면 레퍼런스를 업로드해도 AI에게 전혀 전달되지 않음)
-  var refImgs = (getTab(G.wf) && getTab(G.wf).refs || []).filter(Boolean).slice(0, getMaxRefs());
+  var _curTabForRef = getTab(G.wf);
+  // ⚠️⚠️⚠️ 치명적 버그 수정("렌더링 완성본 고품질화 눌렀는데 의자 팔걸이 마감재가 바뀐다"): 프롬프트로
+  // "참고 이미지 무시하라"고 아무리 강하게 써도 완전히 신뢰할 수 없다는 게 이번에 확인돼서, 실사화
+  // 계열 3개 프리셋일 때는 아예 참고 이미지를 API 호출 자체에 물리적으로 첨부하지 않음(원본 이미지만
+  // 전달) — 이 세 프리셋은 원래 "아무것도 안 바꾸고 사실감만 올리는" 용도라 참고 이미지가 필요 없음.
+  var _isRealismOnlyForRefBlock = _curTabForRef && (_curTabForRef.selK==='hq_real' || _curTabForRef.selK==='hq_real_pro' || _curTabForRef.selK==='render_quality_boost');
+  var refImgs = _isRealismOnlyForRefBlock ? [] : (getTab(G.wf) && getTab(G.wf).refs || []).filter(Boolean).slice(0, getMaxRefs());
   gE('ldst').textContent = '이미지 업로드 중 (' + slug.split('/').pop() + ')...';
   var apiRes = resKey || (getResObj() ? getResObj().apiRes : '1K');
 
@@ -28542,11 +28624,26 @@ function runClarityUpscale(imgDataUrl, scaleFactor, onDone, onErr) {
 function runClarity(imgUrl, scaleFactor, onDone, onErr){
   var ldst=gE('ldst');
   if(ldst)ldst.textContent='Clarity Upscaler 처리 중 (10~40초)...';
+  // ⚠️ 요청 반영("매그니픽처럼 미세조정하고 싶다" — 그동안 UI로 노출 안 된 값들을 슬라이더로
+  // 조절 가능하게 만들었으니, 여기서 하드코딩 대신 그 값을 실제로 읽어서 API에 전달함. tiling_*
+  // (fractality)는 값이 작을수록 디테일이 잘게 쪼개져서 더 많이 생기는 구조라, UI의 "Fractality"
+  // (0~10, 클수록 디테일 많음)를 거꾸로 타일 크기로 환산함 — 정확한 매그니픽 내부 매핑값이
+  // 공개돼있진 않아서 문서 기본값(112×144)을 기준으로 한 근사치임.
+  var ut=(G.tabs.upscale)||{};
+  var _creativity = (ut.clCreativity!=null) ? ut.clCreativity : 0;
+  var _dynamic = (ut.clDynamic!=null) ? ut.clDynamic : 3;
+  var _resemblance = (ut.clResemblance!=null) ? ut.clResemblance : 0.6;
+  var _fractality = (ut.clFractality!=null) ? ut.clFractality : 0;
+  var _tileW = Math.max(32, Math.round(112 - _fractality*8));
+  var _tileH = Math.max(40, Math.round(144 - _fractality*10));
   falRun('fal-ai/clarity-upscaler',{
     image_url: imgUrl,
     upscale_factor: Math.min(4, scaleFactor||2),
-    creativity: 0,
-    resemblance: 1,
+    creativity: _creativity,
+    dynamic: _dynamic,
+    resemblance: _resemblance,
+    tiling_width: _tileW,
+    tiling_height: _tileH,
     num_inference_steps: 18,
     output_format: 'jpeg',
     prompt: 'masterpiece, best quality, highres'
@@ -29701,7 +29798,21 @@ function procImgWithTask(task, onDone, onErr){
   if(wf==='render'){
     // 프리셋 프롬프트가 있으면 우선 사용, 없으면 기본 실사화 프롬프트
     if(prompt){
-      ap=prompt+' If reference images are provided, blend their color, material and style naturally into this specific request. IMPORTANT — REFERENCE IMAGES MUST NEVER OVERRIDE DOOR/WINDOW PRESERVATION: even when copying a reference image\'s furniture, cabinetry, or shelving layout, you must still keep every original door and window completely unblocked and walkable-through. Do NOT extend a reference image\'s continuous cabinet run, shelving wall, or furniture arrangement across a wall segment that contains a door in the original photo — adapt the reference layout (shorten it, break it, or leave a gap) so the door stays exactly where it was and remains fully open and usable. This rule overrides literal copying of the reference composition. Do not generate, render or display any text, letters, signs, labels or typography in the image.'; // 프리셋 프롬프트 기준 + 레퍼런스 자연스럽게 결합
+      // ⚠️⚠️⚠️ 치명적 버그 수정("렌더링 완성본 고품질화 눌렀는데 의자 팔걸이 마감재가 바뀐다"):
+      // 프리셋을 골랐어도 무조건 이 아래에서 "참고 이미지의 색감·재질·스타일을 자연스럽게
+      // 블렌드하라"는 문구가 프롬프트 맨 끝(가장 강하게 반영되는 자리)에 덧붙고 있었음. 근데
+      // 실사화/고급실사화/렌더링완성본고품질화는 "아무것도 바꾸지 말고 사실감만 올려라"가
+      // 핵심인 프리셋들인데, 이 탭엔 "실사 참고 이미지" 슬롯이 기본 UI로 항상 있어서 사용자가
+      // 습관적으로 여러 장 채워두고 있었음 — 그 참고 이미지의 재질이 실제로 가구·마감재에
+      // 섞여 들어가면서 팔걸이 마감재가 바뀌는 등 프리셋 자체의 "절대 안 바뀐다" 규칙과
+      // 정면으로 충돌하고 있었음. 이 3개 프리셋일 때는 참고 이미지를 재질/스타일에 절대
+      // 반영하지 않도록 명시적으로 차단함(그 외 프리셋은 기존처럼 자연스럽게 블렌드).
+      var _isRealismOnlyPreset = (task.selK==='hq_real' || task.selK==='hq_real_pro' || task.selK==='render_quality_boost');
+      if(_isRealismOnlyPreset){
+        ap=prompt+' ⚠️⚠️⚠️⚠️ 마지막으로 다시 한번, 가장 중요(참고 이미지 사용 금지): 실사 참고 이미지가 몇 장 첨부되어 있더라도, 그 참고 이미지의 재질·색상·스타일·가구·마감재를 이 결과물에 절대 반영하지 마세요 — 참고 이미지는 이 작업에서 완전히 무시하세요. 이 원본 이미지에 실제로 보이는 재질·색상·가구만 그대로 유지한 채 사실감(조명·반사·질감)만 개선하는 것이 유일한 목표입니다. 참고 이미지 때문에 원본에 없던 재질이나 다른 디자인의 가구가 섞여 들어가면 명백한 실패입니다.';
+      } else {
+        ap=prompt+' If reference images are provided, blend their color, material and style naturally into this specific request. IMPORTANT — REFERENCE IMAGES MUST NEVER OVERRIDE DOOR/WINDOW PRESERVATION: even when copying a reference image\'s furniture, cabinetry, or shelving layout, you must still keep every original door and window completely unblocked and walkable-through. Do NOT extend a reference image\'s continuous cabinet run, shelving wall, or furniture arrangement across a wall segment that contains a door in the original photo — adapt the reference layout (shorten it, break it, or leave a gap) so the door stays exactly where it was and remains fully open and usable. This rule overrides literal copying of the reference composition. Do not generate, render or display any text, letters, signs, labels or typography in the image.'; // 프리셋 프롬프트 기준 + 레퍼런스 자연스럽게 결합
+      }
     } else {
       // ⚠️ 버그 수정("실사화 눌렀는데 TV가 다른 기기로 바뀐다" — 프리셋 미선택 시 기본값도 동일 원인
       // 있었음): 기존엔 "참고 이미지 있으면 벽/바닥 재질을 새 디자인에 맞게 바꾸고, 낡은 가전은
@@ -30048,7 +30159,9 @@ function procImgWithTask(task, onDone, onErr){
     return;
   }
   // 기본: NB2
-  var _refs3=(getTab(wf).refs||[]).filter(Boolean).slice(0,getMaxRefs());
+  var _curTabForRef3 = getTab(wf);
+  var _isRealismOnlyForRef3 = _curTabForRef3 && (_curTabForRef3.selK==='hq_real' || _curTabForRef3.selK==='hq_real_pro' || _curTabForRef3.selK==='render_quality_boost');
+  var _refs3 = _isRealismOnlyForRef3 ? [] : (getTab(wf).refs||[]).filter(Boolean).slice(0,getMaxRefs());
   uploadImgToFal(img, function(imgUrl){
     if(!_refs3.length){
       _withExplicitAspect(img, function(_asp){
