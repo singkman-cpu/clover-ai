@@ -4456,6 +4456,7 @@ function _openGalleryPickerForUpload(key, boxEl, refIdx){
         // 특정 슬롯(refIdx)에 바로 넣어줌.
         if(!tab.refs) tab.refs=[];
         tab.refs[refIdx]=src;
+        _saveMainTabImagesDraft(); // ⚠️ 버그 수정("레퍼런스 이미지가 없어진다"): 갤러리에서 선택해서 넣는 이 경로도 자동저장 함수를 안 부르고 있었음
         document.querySelectorAll('#rs-'+refIdx).forEach(function(sl){ rSlot(sl,refIdx); });
       } else if(key==='spaceset-refdesign'){
         // 공간 컨셉 디자인의 "참고 디자인 이미지"(전체 공통 스타일 기준)도 갤러리에서 바로 가져올 수 있게 함.
@@ -4566,7 +4567,7 @@ function rSlot(sl,i){
       if(e.target.closest('.rs-del')) return;
       _openImageLightbox(_refs[i]); // 더블클릭: 크게 보기 (앱 전체 공통 규칙)
     };
-    sl.querySelector('.rs-del').onclick=function(e){e.stopPropagation();var _r2=getTab(G.wf).refs||[];_r2[i]=null;rSlot(sl,i);};
+    sl.querySelector('.rs-del').onclick=function(e){e.stopPropagation();var _r2=getTab(G.wf).refs||[];_r2[i]=null;rSlot(sl,i);_saveMainTabImagesDraft();};
   } else {
     // ⚠️ 요청 반영: 레퍼런스 슬롯도 파일 업로드만 되고 갤러리에서 가져오는 방법이 없었음 —
     // 슬롯을 클릭하면 파일선택창이 뜨는 건 그대로 두고(가장 흔한 동작), 작은 갤러리 아이콘을
@@ -15852,6 +15853,20 @@ function sbRender(p){
   var vwHint=dv('');vwHint.style.cssText='font-size:10px;color:var(--m2);margin:-4px 0 10px;line-height:1.5';
   vwHint.innerHTML='캡처한 배경을 참고 이미지로 넣은 뒤, 아래 프리셋에서 눈높이 컷이면 <b style="color:var(--t2)">"실제 대지 배경 합성 - 투시도(눈높이)"</b>, 항공뷰 컷이면 <b style="color:var(--t2)">"실제 대지 배경 합성 - 조감도(항공뷰)"</b>를 선택하세요 — 업로드한 설계안 건물은 그대로 두고 배경만 실제 대지 환경으로 바꿔줘요.';
   p.appendChild(vwHint);
+  // ⚠️ 요청 반영("카카오맵/네이버맵 좌표로 위치 잡아서 주변 건물 인식할 수 없나"): 로드뷰 화면
+  // 자체를 캡처해서 저장·재사용하는 건 약관상 애매해서 안 만들었지만, 주소 검색으로 좌표를 잡고
+  // 위성/하이브리드 지도로 "주변에 어떤 건물이 어디 있는지" 눈으로 확인하는 건 지도 API의 정상
+  // 사용 범위라 문제없음 — 로드뷰 캡처하러 가기 전에 먼저 여기서 방향·배치를 파악하는 용도.
+  // 이 모달엔 일부러 "캡처해서 참고 이미지로 추가" 버튼을 안 넣음(지도 자체를 참고 이미지로
+  // 쓰는 건 브이월드처럼 안전하다고 확신할 수 없어서) — 순수 "위치 확인용" 도구로만 씀.
+  var kmBtn=mk('button','');kmBtn.type='button';
+  kmBtn.style.cssText='width:100%;margin:4px 0 10px;padding:9px;border-radius:8px;border:1px solid rgba(250,204,21,.4);background:rgba(250,204,21,.1);color:#fde047;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px';
+  kmBtn.innerHTML='📍 위치 확인 (카카오맵 - 주변 건물 배치)';
+  kmBtn.onclick=function(){ _openKakaoMapModal(); };
+  p.appendChild(kmBtn);
+  var kmHint=dv('');kmHint.style.cssText='font-size:10px;color:var(--m2);margin:-4px 0 10px;line-height:1.5';
+  kmHint.innerHTML='주소 검색 → 위성/하이브리드 지도로 주변 건물 배치를 먼저 확인하고, 어느 방향에서 로드뷰를 찍어야 할지 가늠하는 용도예요(이 지도 자체는 참고 이미지로 저장되지 않아요).';
+  p.appendChild(kmHint);
   // ⚠️ 요청 반영("렌더링 완성본 고품질화 눌렀는데 화질이 더 안 좋아지고 팔걸이 마감재가 바뀐다"):
   // ① 참고 이미지는 이 3개 프리셋(실사화/고급 실사화/렌더링 완성본 고품질화)엔 이제 아예 반영이
   // 안 되도록 코드를 고쳤으니 그 사실을 알려줌 — 켜져 있어도 무시된다는 걸 몰라서 "왜 반영이
@@ -15990,6 +16005,7 @@ function _openVworldModal(){
         var emptyIdx=rTab.refs.findIndex(function(r){return !r;});
         if(emptyIdx===-1){ showErr('실사 참고 이미지 슬롯이 이미 6개 다 찼어요 — 하나 비우고 다시 시도해주세요.'); return; }
         rTab.refs[emptyIdx]=dataUrl;
+        _saveMainTabImagesDraft(); // ⚠️ 버그 수정("레퍼런스 이미지가 없어진다"): 이 캡처 경로가 자동저장 함수를 안 부르고 있어서, 화면엔 보여도 실제로는 저장이 안 되고 있었음
         ov.remove();
         renderSB();
       }catch(e){
@@ -15997,6 +16013,107 @@ function _openVworldModal(){
         console.warn('[VWorld 캡처 실패]', e);
       }
     };
+  });
+}
+
+// ══ 카카오맵 위치 확인 도구 ═══════════════════════════════════════════
+// ⚠️ 요청 반영("카카오맵/네이버맵 좌표로 위치 잡아서 주변 건물 인식할 수 없나"): 로드뷰 화면을
+// 캡처해서 저장·재사용하는 건 지난번에 확인했듯 카카오 약관상("로컬 API 응답 결과 데이터는
+// 별도 저장하여 사용할 수 없음") 애매한 부분이 있어서 이 모달엔 일부러 안 넣음 — 순수하게
+// "주소로 좌표 찾고, 위성/하이브리드 지도로 주변에 어떤 건물이 있는지 눈으로 확인"하는
+// 용도로만 씀(지도 API의 정상적인 사용 범위). 로드뷰는 여기서 방향만 가늠한 뒤, 실제로는
+// 사용자가 카카오맵/네이버맵 사이트에서 직접 캡처해서 올리는 기존 방식 그대로 감.
+var KAKAO_MAP_API_KEY = '4d8d7f29f40a3469972ba73528712ed4';
+var _kakaoScriptLoaded = false;
+var _kakaoMapInstance = null;
+function _loadKakaoMapScript(cb){
+  if(_kakaoScriptLoaded && window.kakao && window.kakao.maps){ cb(); return; }
+  if(!KAKAO_MAP_API_KEY){ cb('카카오맵 API 키가 아직 설정되지 않았어요 — dapi.kakao.com에서 JavaScript 키를 발급받아 코드에 넣어야 해요.'); return; }
+  var s=document.createElement('script');
+  s.src='https://dapi.kakao.com/v2/maps/sdk.js?appkey='+KAKAO_MAP_API_KEY+'&autoload=false&libraries=services';
+  s.onload=function(){
+    window.kakao.maps.load(function(){ _kakaoScriptLoaded=true; cb(); });
+  };
+  s.onerror=function(){ cb('카카오맵 스크립트 로드에 실패했어요 — API 키 또는 등록된 도메인을 확인해주세요.'); };
+  document.head.appendChild(s);
+}
+function _openKakaoMapModal(){
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px';
+  var panel=document.createElement('div');
+  panel.style.cssText='background:var(--c1,#151519);border-radius:14px;width:100%;max-width:920px;max-height:92vh;overflow:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5)';
+  panel.innerHTML=
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
+      '<div style="font-size:15px;font-weight:800;color:var(--t)">📍 위치 확인 (카카오맵)</div>'+
+      '<button id="km-close" style="border:none;background:transparent;color:var(--m2);font-size:20px;cursor:pointer;line-height:1">✕</button>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;margin-bottom:8px">'+
+      '<input id="km-addr" type="text" placeholder="주소 입력 (예: 서울 마포구 합정역)" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit">'+
+      '<button id="km-search" style="padding:9px 14px;border-radius:8px;border:none;background:#fde047;color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">검색</button>'+
+    '</div>'+
+    '<div id="km-err" style="font-size:11px;color:#f87171;margin-bottom:6px;display:none"></div>'+
+    '<div id="kmap" style="width:100%;height:480px;border-radius:10px;overflow:hidden;background:#111"></div>'+
+    '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'+
+      '<button id="km-normal" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🗺️ 일반 지도</button>'+
+      '<button id="km-sat" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🛰️ 위성</button>'+
+      '<button id="km-hybrid" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🏙️ 하이브리드(위성+라벨)</button>'+
+    '</div>'+
+    '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5">이 지도는 "주변에 어떤 건물이 어디 있는지" 확인하는 용도예요 — 캡처/저장 기능은 없어요. 방향을 파악하신 뒤, 실제 로드뷰 캡처는 카카오맵/네이버맵 사이트에서 직접 캡처해서 "실사 참고 이미지"에 올려주세요.</div>';
+  ov.appendChild(panel);
+  document.body.appendChild(ov);
+
+  var errEl=panel.querySelector('#km-err');
+  function showErr(msg){ errEl.textContent=msg; errEl.style.display='block'; }
+
+  panel.querySelector('#km-close').onclick=function(){ ov.remove(); };
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+
+  var mapDiv=panel.querySelector('#kmap');
+  mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--m2);font-size:12px">카카오맵 불러오는 중...</div>';
+
+  _loadKakaoMapScript(function(err){
+    if(err){ mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:12px;padding:20px;text-align:center">'+err+'</div>'; return; }
+    mapDiv.innerHTML='';
+    var kakao=window.kakao;
+    var defaultPos=new kakao.maps.LatLng(37.5665, 126.9780); // 서울시청 기본값
+    var map=new kakao.maps.Map(mapDiv, {center:defaultPos, level:3});
+    _kakaoMapInstance=map;
+    var marker=new kakao.maps.Marker({position:defaultPos, map:map});
+    var geocoder=new kakao.maps.services.Geocoder();
+    var places=new kakao.maps.services.Places();
+
+    function moveTo(lat, lng){
+      var pos=new kakao.maps.LatLng(lat, lng);
+      map.setCenter(pos);
+      map.setLevel(3);
+      marker.setPosition(pos);
+    }
+
+    panel.querySelector('#km-search').onclick=function(){
+      var addr=panel.querySelector('#km-addr').value.trim();
+      if(!addr){ showErr('주소를 입력해주세요.'); return; }
+      errEl.style.display='none';
+      // 주소 검색(지번/도로명) 먼저 시도, 실패하면 키워드(장소명) 검색으로 재시도 — "합정역" 같은
+      // 지번·도로명이 아닌 장소명 검색도 되게 하기 위함.
+      geocoder.addressSearch(addr, function(result, status){
+        if(status===kakao.maps.services.Status.OK && result[0]){
+          moveTo(result[0].y, result[0].x);
+        } else {
+          places.keywordSearch(addr, function(data, status2){
+            if(status2===kakao.maps.services.Status.OK && data[0]){
+              moveTo(data[0].y, data[0].x);
+            } else {
+              showErr('주소/장소를 찾지 못했어요. 다른 표현으로 다시 검색해보세요.');
+            }
+          });
+        }
+      });
+    };
+    panel.querySelector('#km-addr').onkeydown=function(e){ if(e.key==='Enter') panel.querySelector('#km-search').click(); };
+
+    panel.querySelector('#km-normal').onclick=function(){ map.setMapTypeId(kakao.maps.MapTypeId.ROADMAP); };
+    panel.querySelector('#km-sat').onclick=function(){ map.setMapTypeId(kakao.maps.MapTypeId.SKYVIEW); };
+    panel.querySelector('#km-hybrid').onclick=function(){ map.setMapTypeId(kakao.maps.MapTypeId.HYBRID); };
   });
 }
 
