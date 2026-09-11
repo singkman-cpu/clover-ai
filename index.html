@@ -11656,11 +11656,16 @@ function _tryRestoreSpacesetAnchors(spTab){
 function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
+    // ⚠️ executeSingleRender 쪽과 같은 이유로 여기도 영상 URL이면 .jpg/image-jpeg로 잘못
+    // 저장되지 않도록 방어 (지금은 wf:'video'로 호출되는 곳이 없지만, 나중에 호출될 경우를 대비).
+    var _isVidResult2 = (wf==='video') || /\.(mp4|webm|mov)(\?|#|$)/i.test(resultUrl||'');
+    var _resExt2 = _isVidResult2 ? 'mp4' : 'jpg';
+    var _resCT2 = _isVidResult2 ? 'video/mp4' : 'image/jpeg';
     var galleryId=id+'';
-    var filePath=_supaUser.id+'/'+wf+'/'+galleryId+'.jpg';
+    var filePath=_supaUser.id+'/'+wf+'/'+galleryId+'.'+_resExt2;
     var origPath=_supaUser.id+'/'+wf+'/'+galleryId+'_orig.jpg';
     fetch(resultUrl).then(function(r){return r.blob();}).then(function(blob){
-      _supa.storage.from('gallery').upload(filePath, blob, {contentType:'image/jpeg', upsert:true}).then(function(uploadRes){
+      _supa.storage.from('gallery').upload(filePath, blob, {contentType:_resCT2, upsert:true}).then(function(uploadRes){
         if(uploadRes.error){ console.warn('[Gallery] 업로드 실패:', uploadRes.error.message); return; }
         var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
         function saveRow(origUrlFinal){
@@ -21778,7 +21783,11 @@ function _shortsAddImageFlow(){
     wrap.dataset.cardId=item.id;
     wrap.dataset.cardFav=item.fav?'1':'0';
     wrap.style.cssText='border-radius:10px;overflow:hidden;cursor:pointer;border:3px solid transparent;transition:border-color .15s;aspect-ratio:1;background:#111;position:relative';
-    var isVidItem = item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1);
+    // ⚠️ 확장자(.mp4/.webm)만으로 영상 판별하면, 예전에 클라우드 저장 시 확장자가 잘못
+    // .jpg로 저장됐던 영상 항목(아래 executeSingleRender 버그 수정 이전 데이터)은 여전히
+    // 이미지로 오인됨 — 다른 곳(cloverShare/다운로드 로직 등)처럼 item.wf==='video'도 같이
+    // 검사해서 최소한 영상 뱃지/아이콘이라도 정확히 뜨도록 보강.
+    var isVidItem = item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1 || item.wf==='video');
     if(isVidItem){
       var vid2=document.createElement('video');
       vid2.crossOrigin='anonymous'; // ⚠️ 일부 브라우저는 CORS 헤더 없는 원격 영상은 프레임 자체를 안 그림
@@ -21900,8 +21909,9 @@ function _shortsAddImageFlow(){
   var confirmBtn=document.createElement('button');confirmBtn.type='button';
   confirmBtn.style.cssText='width:100%;padding:13px;border-radius:10px;border:none;background:#12E6E6;color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit';
   confirmBtn.onclick=function(){
-    var imgItems = selectedGalItems.filter(function(item){ return !(item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1)); });
-    var vidItems = selectedGalItems.filter(function(item){ return item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1); });
+    var _isVidSel = function(item){ return !!(item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1 || item.wf==='video')); };
+    var imgItems = selectedGalItems.filter(function(item){ return !_isVidSel(item); });
+    var vidItems = selectedGalItems.filter(_isVidSel);
     imgItems.forEach(function(item){
       var autoRole=_shortsAutoDetectRole(item);
       var _detectedRoom=_shortsDetectRoomLabel(item);
@@ -29847,12 +29857,25 @@ function executeSingleRender(task){
         // ── Supabase Storage + gallery 테이블 저장 (클라우드 갤러리) ──
         if(_supa&&_supaUser&&ri){
           try{
+            // ⚠️ 버그 수정("쇼츠 제작에서 영상을 불러오면 검은 화면이고, 불러들여도 깨져있다"):
+            // 여기가 wf에 상관없이 무조건 .jpg 경로 + contentType:'image/jpeg'로 클라우드에
+            // 저장하고 있었음 — 영상 탭(task.wf==='video') 결과물도 예외 없이 이 코드를 타서,
+            // 실제로는 mp4/webm 바이트가 그대로 올라가는데 파일명은 "....jpg"로, Storage에 저장된
+            // Content-Type도 "image/jpeg"로 잘못 박혀버렸음. 그 결과 클라우드에서 다시 불러온
+            // public_url은 ".jpg"로 끝나서, 쇼츠 쪽 영상 판별 로직(.mp4/.webm 확장자 검사)이
+            // 전부 실패해 이미지로 오인 → <img>로 그리려다 보니 검은 화면/깨진 아이콘으로 보이고,
+            // 실제로 영상으로 불러들여도 브라우저가 "image/jpeg"라고 믿고 있어서 재생이 깨짐.
+            // 결과 URL이 영상(wf==='video' 이거나 URL이 .mp4/.webm/.mov로 끝남)이면 확장자와
+            // Content-Type을 영상 것으로 정확히 맞춰서 저장하도록 수정.
+            var _isVidResult = (task.wf==='video') || /\.(mp4|webm|mov)(\?|#|$)/i.test(ri||'');
+            var _resExt = _isVidResult ? 'mp4' : 'jpg';
+            var _resCT = _isVidResult ? 'video/mp4' : 'image/jpeg';
             var galleryId=item.id+'';
-            var filePath=_supaUser.id+'/'+task.wf+'/'+galleryId+'.jpg';
+            var filePath=_supaUser.id+'/'+task.wf+'/'+galleryId+'.'+_resExt;
             var origPath=_supaUser.id+'/'+task.wf+'/'+galleryId+'_orig.jpg';
             fetch(ri).then(function(r){return r.blob();}).then(function(blob){
               _supa.storage.from('gallery').upload(filePath, blob, {
-                contentType:'image/jpeg', upsert:true
+                contentType:_resCT, upsert:true
               }).then(function(uploadRes){
                 if(uploadRes.error){console.warn('[Gallery] 업로드 실패:',uploadRes.error.message);return;}
                 var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
