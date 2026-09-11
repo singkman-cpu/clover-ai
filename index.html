@@ -21767,7 +21767,12 @@ function _shortsAddImageFlow(){
   grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px';
   var selectedGalItems=[]; // 예전엔 한 장 클릭하면 바로 창이 닫혀서 여러 장을 고를 수가 없었음 —
   // 이제 클릭하면 체크 표시만 되고, 아래 "선택한 N장 추가하기" 버튼을 눌러야 한꺼번에 추가되고 닫힘.
-  allItems.slice(0,150).forEach(function(item){
+  // ⚠️ 버그 수정("쇼츠 제작에서 이미지 불러올 때 더 예전 작업한 것들은 화면에 안 보인다"): 여기가
+  // 최근 150개까지만 그려주고 그 뒤(더 오래된 항목)는 아예 렌더링을 안 하고 있었음 — 지금
+  // 갤러리가 393개인데 150개 넘는 나머지는 원천적으로 안 보였던 것. 이미지는 이미
+  // loading='lazy'라 실제 화면에 스크롤해서 보이는 것만 불러오므로, 개수 제한을 없애도 성능
+  // 부담이 크지 않음 — 전부 다 그려주도록 제한 제거함.
+  allItems.forEach(function(item){
     var wrap=document.createElement('div');
     wrap.dataset.cardWf=item.wf||'';
     wrap.dataset.cardId=item.id;
@@ -21776,15 +21781,36 @@ function _shortsAddImageFlow(){
     var isVidItem = item.result && (item.result.indexOf('.mp4')>-1 || item.result.indexOf('.webm')>-1);
     if(isVidItem){
       var vid2=document.createElement('video');
-      vid2.src=item.result; vid2.muted=true; vid2.playsInline=true; vid2.preload='auto';
+      vid2.crossOrigin='anonymous'; // ⚠️ 일부 브라우저는 CORS 헤더 없는 원격 영상은 프레임 자체를 안 그림
+      vid2.muted=true; vid2.playsInline=true; vid2.preload='auto';
       vid2.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
-      // ⚠️ 버그 수정("이미지 추가 팝업에서 영상 썸네일이 검은 화면으로만 나온다, 갤러리 탭은 잘
-      // 보이는데"): preload='metadata'만 쓰면 브라우저가 길이·크기 정보만 가져오고 실제로 그릴
-      // 프레임은 안 불러와서 화면이 계속 검게 나오고 있었음 — 로드되면 살짝(0.1초) 시간을
-      // 이동시켜서 그 지점의 프레임을 강제로 그리게 함.
+      // ⚠️⚠️ 버그 재수정("이미지 추가 팝업에서 영상 썸네일이 아직도 검은 화면으로 나온다"): 지난번
+      // 수정(seek만으로 프레임 강제 표시)이 브라우저에 따라 여전히 안 먹혔음 — 특히 일부 브라우저는
+      // seek만으로는 실제로 화면을 다시 그리지(repaint) 않고, "아주 짧게 재생했다가 바로 정지"해야
+      // 확실히 프레임이 그려짐. 두 방법을 같이 써서 어느 브라우저에서도 최대한 뜨도록 함. 그래도
+      // 완전히 실패하면(영상 자체 로드 에러 등) 최소한 검은 화면 대신 영상 아이콘이라도 보이게
+      // 폴백 처리함.
+      var _vidThumbOk=false;
+      function _vidThumbTryPlayPause(){
+        if(_vidThumbOk) return;
+        var p=vid2.play();
+        if(p && p.then){ p.then(function(){ vid2.pause(); }).catch(function(){}); }
+        else { try{ vid2.pause(); }catch(e){} }
+      }
       vid2.addEventListener('loadedmetadata', function(){
         try{ vid2.currentTime = Math.min(0.1, (vid2.duration||1)/2); }catch(e){}
+        _vidThumbTryPlayPause();
       });
+      vid2.addEventListener('seeked', function(){ _vidThumbOk=true; });
+      vid2.addEventListener('error', function(){
+        vid2.style.display='none';
+        var fallbackIcon=document.createElement('div');
+        fallbackIcon.style.cssText='width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:32px;background:#1a1a22';
+        fallbackIcon.textContent='🎬';
+        wrap.insertBefore(fallbackIcon, wrap.firstChild);
+      });
+      vid2.src=item.result;
+      vid2.load();
       wrap.appendChild(vid2);
       var vidBadge=document.createElement('div');
       vidBadge.style.cssText='position:absolute;bottom:6px;right:6px;background:rgba(139,92,246,.9);color:#fff;font-size:9.5px;font-weight:800;padding:2px 6px;border-radius:5px';
