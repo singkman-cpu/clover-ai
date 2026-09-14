@@ -904,8 +904,25 @@ function cloverDownload(src, fname){
     for(var i=0;i<bstr.length;i++) u8[i]=bstr.charCodeAt(i);
     saveBlobWithFreeWatermark(new Blob([u8],{type:mime}));
   } else if(src.startsWith('http')){
-    fetch(src).then(function(r){return r.blob();}).then(saveBlobWithFreeWatermark)
-      .catch(function(){ window.open(src,'_blank','noopener'); });
+    // ⚠️ 버그 수정("갤러리탭에서 쇼츠영상 다운로드 눌러도 반응이 없다"): fetch(src)가
+    // CORS 등의 이유로 실패하면 원래 .catch()에서 window.open(src)로 새 탭을 열어 최소한
+    // 영상이라도 보여주려 했는데, 이 window.open 호출이 fetch가 끝난 "비동기" 시점에
+    // 일어나다 보니 — 브라우저 팝업 차단기가 "방금 클릭이랑 직접 연결된 게 아니다"라고
+    // 판단해서 에러도 안 띄우고 조용히 막아버리는 경우가 있었음(그래서 버튼을 눌러도 정말
+    // 아무 일도 안 일어난 것처럼 보였던 것). 클릭한 바로 그 순간(동기적으로) 빈 탭을 미리
+    // 열어두고, fetch가 끝난 뒤 그 탭의 주소만 바꿔주는 방식으로 팝업 차단을 우회함 —
+    // 이미 열려있는 탭의 location을 바꾸는 건 사용자 제스처 판정과 무관하게 항상 허용됨.
+    var _preOpenedTab = null;
+    try{ _preOpenedTab = window.open('', '_blank'); }catch(e){}
+    fetch(src).then(function(r){return r.blob();}).then(function(blob){
+      if(_preOpenedTab && !_preOpenedTab.closed){ try{ _preOpenedTab.close(); }catch(e){} }
+      saveBlobWithFreeWatermark(blob);
+    }).catch(function(){
+      if(_preOpenedTab && !_preOpenedTab.closed){
+        try{ _preOpenedTab.location.href = src; return; }catch(e){}
+      }
+      window.open(src,'_blank','noopener');
+    });
   }
 }
 
@@ -22450,11 +22467,90 @@ function _shortsGenerate(){
         G_SHORTS.resultUrl=url;
         _draftClear(_shortsDraftKey()); // 완성됐으니 임시저장은 이제 필요 없음
         var ext=mimeType.includes('mp4')?'mp4':'webm';
+        // ⚠️ 버그 수정("영상을 폰으로 가져가면 1초 영상이라고 뜨고, 인스타에 올리면 1초만 보인다"):
+        // 크롬 MediaRecorder로 녹화한 mp4는 파일 컨테이너(moov/mvhd 등)에 실제 재생시간이 제대로
+        // 안 적혀있는 경우가 있음(0이나 매우 짧은 값) — 크롬 자체 <video> 재생기는 이 잘못된 값을
+        // 만나면 알아서 끝까지 다시 훑어서 실제 길이를 스스로 보정해 재생하기 때문에(그 순간
+        // "움찔"하는 게 바로 이 보정 과정) 문제없이 보이지만, 인스타그램이나 폰 갤러리 앱처럼
+        // 컨테이너에 적힌 값을 그대로 믿는 프로그램들은 그 짧은(보통 1초) 값만큼만 가져가 버림.
+        // 아래 함수는 mp4 파일의 moov 박스 안 mvhd/tkhd/mdhd에 적힌 재생시간 값을, 우리가 이미
+        // 알고 있는 실제 의도된 길이(totalDuration)로 직접 덮어써서 고침 — 실제 영상/오디오
+        // 데이터는 전혀 건드리지 않고 헤더의 숫자 몇 개만 고치는 거라 화질 손실이나 재인코딩 없음.
+        function _mp4FixDuration(buf, durationSec){
+          var dv, len, movieTimescale=null, moovStart=-1, moovEnd=-1;
+          function forEachBox(start, end, fn){
+            var p = start;
+            while(p + 8 <= end){
+              var size = dv.getUint32(p);
+              var type = String.fromCharCode(dv.getUint8(p+4),dv.getUint8(p+5),dv.getUint8(p+6),dv.getUint8(p+7));
+              var hdr = 8, boxEnd;
+              if(size === 1){
+                var hi = dv.getUint32(p+8), lo = dv.getUint32(p+12);
+                boxEnd = p + hi*4294967296 + lo; hdr = 16;
+              } else if(size === 0){ boxEnd = end; }
+              else { boxEnd = p + size; }
+              if(boxEnd <= p || boxEnd > end) break;
+              fn(type, p+hdr, boxEnd);
+              p = boxEnd;
+            }
+          }
+          try{
+            dv = new DataView(buf); len = buf.byteLength;
+            forEachBox(0, len, function(type, cs, be){ if(type==='moov'){ moovStart=cs; moovEnd=be; } });
+            if(moovStart<0) return false;
+            forEachBox(moovStart, moovEnd, function(type, cs){
+              if(type==='mvhd'){
+                var v=dv.getUint8(cs);
+                if(v===1){ movieTimescale=dv.getUint32(cs+20); dv.setUint32(cs+24,0); dv.setUint32(cs+28, Math.round(durationSec*movieTimescale)); }
+                else { movieTimescale=dv.getUint32(cs+12); dv.setUint32(cs+16, Math.round(durationSec*movieTimescale)); }
+              }
+            });
+            if(!movieTimescale) return false;
+            forEachBox(moovStart, moovEnd, function(type, cs, be){
+              if(type==='trak'){
+                forEachBox(cs, be, function(t2, cs2, be2){
+                  if(t2==='tkhd'){
+                    var v=dv.getUint8(cs2);
+                    if(v===1){ dv.setUint32(cs2+28,0); dv.setUint32(cs2+32, Math.round(durationSec*movieTimescale)); }
+                    else { dv.setUint32(cs2+20, Math.round(durationSec*movieTimescale)); }
+                  } else if(t2==='mdia'){
+                    forEachBox(cs2, be2, function(t3, cs3){
+                      if(t3==='mdhd'){
+                        var v3=dv.getUint8(cs3), ts3;
+                        if(v3===1){ ts3=dv.getUint32(cs3+20); dv.setUint32(cs3+24,0); dv.setUint32(cs3+28, Math.round(durationSec*ts3)); }
+                        else { ts3=dv.getUint32(cs3+12); dv.setUint32(cs3+16, Math.round(durationSec*ts3)); }
+                      }
+                    });
+                  }
+                });
+              }
+            });
+            return true;
+          }catch(e){ console.warn('[쇼츠 mp4 재생시간 메타데이터 수정 실패]', e); return false; }
+        }
         function doDownload(){
-          var a=document.createElement('a');
-          a.href=url;
-          a.download='cloverai_shorts_'+Date.now()+'.'+ext;
-          document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},500);
+          function _triggerDownload(dlUrl){
+            var a=document.createElement('a');
+            a.href=dlUrl;
+            a.download='cloverai_shorts_'+Date.now()+'.'+ext;
+            document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);},500);
+          }
+          if(ext==='mp4'){
+            blob.arrayBuffer().then(function(buf){
+              var patched=false;
+              try{ patched=_mp4FixDuration(buf, totalDuration); }catch(e){ console.warn('[쇼츠 mp4 재생시간 수정 실패, 원본으로 다운로드]', e); }
+              if(patched){
+                var dlBlob=new Blob([buf], {type: mimeType});
+                var dlUrl=URL.createObjectURL(dlBlob);
+                _triggerDownload(dlUrl);
+                setTimeout(function(){ URL.revokeObjectURL(dlUrl); }, 60000);
+              } else {
+                _triggerDownload(url);
+              }
+            }).catch(function(){ _triggerDownload(url); });
+          } else {
+            _triggerDownload(url);
+          }
         }
         var dlBtn=gE('shorts-dl-btn');
         if(dlBtn){ dlBtn.onclick=doDownload; dlBtn.innerHTML='&#11015; 쇼츠 다운로드 ('+ext.toUpperCase()+')'; }
