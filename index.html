@@ -838,6 +838,26 @@ function _falProxyCall(action, body, cb, errCb){
 // ── 다운로드 함수 (페이지 이동 없음) ──────────────────────────
 function cloverDownload(src, fname){
   fname = fname || ('clover-ai-'+Date.now()+'.jpg');
+  // ⚠️ 버그 수정("갤러리 영상 다운로드 버튼 눌러도 완전히 무반응"): fetch()로 영상을 받아온 뒤
+  // blob으로 저장하는 방식은 CORS 헤더가 없는 영상 URL에서 조용히 실패했고, 그 대안으로 쓴
+  // window.open()도 브라우저/환경에 따라 팝업 자체가 막혀서 아예 아무 반응이 없는 경우가
+  // 있었음 — 영상은 어차피 워터마크를 입히지 않아서(아래 saveBlobWithFreeWatermark의
+  // isImageFile 체크에서 항상 제외됨) blob으로 받아올 필요 자체가 없었음. 그래서 영상은
+  // fetch/CORS/팝업과 전혀 무관하게 항상 동작하는 가장 단순한 방식(a 태그의 download 속성)으로
+  // 바로 처리하도록 분리함 — 브라우저가 직접 그 주소에서 내려받거나(성공 시) 혹은 그 자리에서
+  // 재생 화면으로 넘어가거나(브라우저가 다운로드를 지원 안 하는 교차 출처 상황) 둘 중 하나는
+  // 반드시 일어나서, 최소한 "완전히 무반응"인 상황만큼은 없앰.
+  if(/\.(mp4|webm|mov)(\?|#|$)/i.test(fname) || /\.(mp4|webm|mov)(\?|#|$)/i.test(src||'')){
+    try{
+      var vA=document.createElement('a');
+      vA.href=src; vA.download=fname; vA.rel='noopener'; vA.target='_blank';
+      vA.style.cssText='position:fixed;top:-9999px;left:-9999px';
+      document.body.appendChild(vA);
+      vA.click();
+      setTimeout(function(){ try{document.body.removeChild(vA);}catch(e){} }, 500);
+    }catch(e){ console.warn('[영상 다운로드 실패]', e); }
+    return;
+  }
   function saveBlobDirect(blob){
     // showSaveFilePicker 지원 시 (Chrome 86+, 로컬파일서버에서 안전)
     if(window.showSaveFilePicker){
