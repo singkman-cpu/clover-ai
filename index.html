@@ -3352,10 +3352,10 @@ function _openImageLightbox(url, urls, idx){
   ov.appendChild(mediaWrap); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn); ov.appendChild(adjustBtn);
   if(hasNav){
     var prevBtn=document.createElement('button'); prevBtn.type='button'; prevBtn.innerHTML='&#10094;';
-    prevBtn.style.cssText='position:absolute;left:14px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
+    prevBtn.style.cssText='position:absolute;left:14px;top:50%;transform:translateY(-50%);width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
     prevBtn.onclick=function(e){ e.stopPropagation(); showAt(curIdx-1); };
     var nextBtn=document.createElement('button'); nextBtn.type='button'; nextBtn.innerHTML='&#10095;';
-    nextBtn.style.cssText='position:absolute;right:14px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
+    nextBtn.style.cssText='position:absolute;right:14px;top:50%;transform:translateY(-50%);width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
     nextBtn.onclick=function(e){ e.stopPropagation(); showAt(curIdx+1); };
     var counter=document.createElement('div');
     counter.textContent=(curIdx+1)+' / '+urls.length;
@@ -12013,7 +12013,9 @@ function mkMultiRoomSpace(p){
   // 한 번에 지우고, IndexedDB에 저장된 것도 같이 지움. 두 모드가 같은 화면 상단에 있으니 버튼도
   // 공용으로 하나만 둠.
   var resetAllBtn=mk('button','');resetAllBtn.type='button';resetAllBtn.textContent='🗑️ 전체 리셋 (업로드한 사진 모두 삭제)';
-  resetAllBtn.style.cssText='width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#f87171;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit';
+  // ⚠️ 요청 반영("전체 리셋버튼 크고 잘 보이게 만들어달라"): 글자 크기·패딩·테두리를 키워서 훨씬
+  // 눈에 띄게 만듦.
+  resetAllBtn.style.cssText='width:100%;margin-top:10px;padding:13px;border-radius:10px;border:1.5px solid rgba(239,68,68,.5);background:rgba(239,68,68,.12);color:#f87171;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit';
   resetAllBtn.onclick=function(){
     if(!confirm('현장사진세트·컨셉확장에 올려둔 사진과 입력한 문구(전체 공통 스타일 등)가 모두 삭제됩니다. 계속할까요?')) return;
     spTab.multiRoomImages=[];
@@ -13881,7 +13883,22 @@ function _autoRoomTryResumeInterrupted(spTab, isApt){
   if(spTab[stateKey] && spTab[stateKey].running) return; // 이미 진행 중이면(같은 탭 안이면) 손댈 필요 없음
   idbLoadDraft(_autoRoomProgressDraftKey(isApt), 6*60*60*1000).then(function(draft){ // 6시간 넘은 건 너무 오래돼서 무시
     if(!draft || !draft.selected || !draft.selected.length) return;
-    if(!draft.results || draft.step==null || draft.step>=draft.selected.length) return; // 이미 다 끝난 진행상황이면 재개 불필요
+    if(!draft.results || draft.step==null) return;
+    // ⚠️ 버그 수정("강제 새로고침하면 좌측에 렌더링 걸었던 게 지워져서 다시 부분 재생성을 못한다"):
+    // 예전엔 draft.step>=draft.selected.length(=이미 렌더링이 전부 끝난 상태)면 "재개할 필요
+    // 없다"는 이유로 그냥 여기서 리턴하고 끝냈는데, 그러면서 정작 spTab[stateKey]에 결과를
+    // 다시 채워넣는 걸 깜빡해서, 새로고침하면 결과 데이터는 IndexedDB에 안전하게 남아있는데도
+    // 화면(좌측 결과 목록)에는 하나도 안 보이는 상태가 됐었음 — "이 뷰만 다시 생성" 버튼도
+    // 당연히 같이 사라짐. 이미 다 끝난 경우엔 다시 생성을 재개할 필요는 없는 게 맞지만,
+    // 화면에 결과를 다시 채워넣는 것까지는 해야 함 — running:false로 채워서 재개는 안 하고
+    // 목록 표시만 복원함.
+    if(draft.step>=draft.selected.length){
+      console.log('[자동 이어서 생성] 완료된 렌더링 결과 복원 — '+draft.selected.length+'개');
+      if(isApt) spTab.aptRoomSelected = draft.selected; else spTab.autoRoomSelected = draft.selected;
+      spTab[stateKey] = {running:false, step:draft.step, results:draft.results, error:null, isApt:isApt};
+      if(G.wf==='spaceset') renderSB();
+      return;
+    }
     console.log('[자동 이어서 생성] 중단된 렌더링 발견 — '+draft.step+'/'+draft.selected.length+'부터 이어서 진행');
     if(isApt) spTab.aptRoomSelected = draft.selected; else spTab.autoRoomSelected = draft.selected;
     spTab[stateKey] = {running:true, step:draft.step, results:draft.results, error:null, isApt:isApt};
@@ -14271,9 +14288,15 @@ function mkAutoRoomCamera(p){
   mkAnchorSlotList(upsWrap, spTab.autoRoomExtAnchors, EXT_ANCHOR_TYPE_OPTIONS, 6, 'autoRoomGenExtUrls');
   p.appendChild(upsWrap);
 
-  // ── 실내 사진: 방 이름표를 붙여서 최대 10장까지 ──────────────────────────
-  var intWrap=dv('ss');intWrap.innerHTML='<div class="lbl">🏠 실내 사진 <span class="lbl-en">방 이름표를 붙여서 최대 10장까지</span></div>';
-  mkAnchorSlotList(intWrap, spTab.autoRoomIntAnchors, currentIntTypes, 10, 'autoRoomGenIntUrls');
+  // ── 실내 사진: 방 이름표를 붙여서 최대 N장까지 ──────────────────────────
+  // ⚠️ 요청 반영("실내공간이 33개나 있는데 10개는 너무 적다, 늘려줘"): 예전엔 10으로
+  // 고정해뒀는데, 지금 카테고리의 실제 방 종류 개수(currentIntTypes.length)에 맞춰
+  // 동적으로 늘림 — 나중에 방 종류가 더 늘어나도 자동으로 같이 늘어남. 참고로 이건
+  // "디자인 레퍼런스"(공용 스타일 참고, 요금제별 차등)와 달리, 방 하나 만들 때 그 방에
+  // 해당하는 앵커 1~2장만 골라서 쓰는 구조라 개수를 늘려도 매 생성마다 API로 보내는
+  // 이미지 수가 늘어나지 않음 — 그래서 넉넉하게 늘려도 괜찮음.
+  var intWrap=dv('ss');intWrap.innerHTML='<div class="lbl">🏠 실내 사진 <span class="lbl-en">방 이름표를 붙여서 최대 '+currentIntTypes.length+'장까지</span></div>';
+  mkAnchorSlotList(intWrap, spTab.autoRoomIntAnchors, currentIntTypes, currentIntTypes.length, 'autoRoomGenIntUrls');
   p.appendChild(intWrap);
 
   // ⚠️ 요청 반영("도시뷰(간판 많음)는 나노바나나2 한글이 이상해서, 도시뷰면 자동으로 프로로
@@ -14613,6 +14636,35 @@ function mkAutoRoomCamera(p){
         estBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.08);color:#fbbf24;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
         estBtn.onclick=function(resUrl,lbl,cat){ return function(){ _sendToBudgetEstimate(resUrl, lbl, cat); }; }(result.url, typeName, _categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory));
         rRow.appendChild(estBtn);
+        // ⚠️ 요청 수정("이건 내가 말한 게 아니다, 디자인 레퍼런스 말고 실내사진/건축외관사진
+        // 이름표 붙은 참고 칸에 넣는 거였다"): 처음엔 일반 "디자인 레퍼런스"(스타일 참고용, 위쪽
+        // 공용 칸)에 넣었었는데, 사용자가 원한 건 컨셉확장 화면의 "실내 사진"/"건축 외관 사진"
+        // 이름표 붙은 전용 앵커 칸(예: "거실" 이름표가 붙은 칸)이었음 — 그래서 그쪽으로 정확히
+        // 넣도록 다시 고침. 같은 이름표(typeName)의 빈 칸이 있으면 거기에, 이미 사진이 채워진
+        // 같은 이름표 칸이 있으면 최신 결과로 덮어쓰고, 둘 다 없으면 새 칸을 추가함(최대치까지).
+        var useAsRefBtn=mk('button','');useAsRefBtn.type='button';useAsRefBtn.textContent='📌 참고 이미지로 쓰기';
+        useAsRefBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(139,92,246,.4);background:rgba(139,92,246,.08);color:#a78bfa;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+        useAsRefBtn.onclick=function(resUrl,lbl){ return function(){
+          var _t=getTab('spaceset');
+          var isExt = _isExteriorViewType(lbl);
+          var arrName = isExt ? 'autoRoomExtAnchors' : 'autoRoomIntAnchors';
+          var maxCount = isExt ? 6 : SPACE_CATEGORIES[_t.autoRoomCategory].types.length;
+          if(!_t[arrName]) _t[arrName]=[];
+          var arr = _t[arrName];
+          var emptySlot=null, filledSlot=null;
+          for(var _i=0;_i<arr.length;_i++){
+            if(arr[_i].label===lbl){
+              if(!arr[_i].img && !emptySlot) emptySlot=arr[_i];
+              else if(!filledSlot) filledSlot=arr[_i];
+            }
+          }
+          if(emptySlot){ emptySlot.img=resUrl; }
+          else if(filledSlot){ filledSlot.img=resUrl; }
+          else if(arr.length<maxCount){ arr.push({img:resUrl, label:lbl}); }
+          else { alert('"'+lbl+'" 항목을 넣을 칸이 없어요 — '+(isExt?'건축 외관 사진':'실내 사진')+'이 이미 최대('+maxCount+'장)까지 차있어요. 위쪽에서 하나를 비우고 다시 눌러주세요.'); return; }
+          renderSB();
+        }; }(result.url, typeName);
+        rRow.appendChild(useAsRefBtn);
       } else if(result && result.error){
         var rErr=dv('');rErr.style.cssText='font-size:10.5px;color:#f87171';rErr.textContent='⚠️ 실패: '+result.error;
         rRow.appendChild(rErr);
@@ -34239,10 +34291,10 @@ function _simpleImageZoomShow(urlList, idx){
   ov.appendChild(mediaWrap);
   if(urlList.length>1){
     var prevBtn=document.createElement('button');prevBtn.type='button';prevBtn.textContent='‹';
-    prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
+    prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
     prevBtn.onclick=function(e){ e.stopPropagation(); _simpleImageZoomShow(urlList, idx-1<0?urlList.length-1:idx-1); };
     var nextBtn=document.createElement('button');nextBtn.type='button';nextBtn.textContent='›';
-    nextBtn.style.cssText='position:absolute;top:50%;right:12px;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
+    nextBtn.style.cssText='position:absolute;top:50%;right:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
     nextBtn.onclick=function(e){ e.stopPropagation(); _simpleImageZoomShow(urlList, (idx+1)%urlList.length); };
     var counter=document.createElement('div');
     counter.textContent=(idx+1)+' / '+urlList.length;
@@ -34312,10 +34364,10 @@ function _galleryZoomShow(list, idx){
   }
   // 이전/다음 이동 버튼
   var prevBtn=document.createElement('button');prevBtn.type='button';prevBtn.textContent='‹';
-  prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
+  prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
   prevBtn.onclick=function(e){ e.stopPropagation(); _galleryZoomShow(list, idx-1<0?list.length-1:idx-1); };
   var nextBtn=document.createElement('button');nextBtn.type='button';nextBtn.textContent='›';
-  nextBtn.style.cssText='position:absolute;top:50%;right:12px;transform:translateY(-50%);width:48px;height:48px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
+  nextBtn.style.cssText='position:absolute;top:50%;right:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
   nextBtn.onclick=function(e){ e.stopPropagation(); _galleryZoomShow(list, (idx+1)%list.length); };
   var counter=document.createElement('div');
   counter.textContent=(idx+1)+' / '+list.length;
