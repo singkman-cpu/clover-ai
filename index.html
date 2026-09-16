@@ -11973,6 +11973,7 @@ function mkMultiRoomSpace(p){
         // 유지해줘"): 출력 비율(forcedAspect)이 지금까지 임시저장 대상에 빠져있어서, 새로고침
         // 하거나 다시 들어오면 매번 기본값('auto')으로 되돌아가고 있었음 — 저장/복원 둘 다에 추가.
         if(data.forcedAspect) spTab.forcedAspect = data.forcedAspect;
+        if(data.autoRoomWeather && !spTab.autoRoomWeather) spTab.autoRoomWeather = data.autoRoomWeather;
         if(G.wf==='spaceset') renderSB();
       }).catch(function(){});
     }
@@ -11990,7 +11991,8 @@ function mkMultiRoomSpace(p){
       multiRoomPrompt: spTab.multiRoomPrompt,
       multiRoomCategory: spTab.multiRoomCategory,
       multiRoomResolution: spTab.multiRoomResolution,
-      forcedAspect: spTab.forcedAspect
+      forcedAspect: spTab.forcedAspect,
+      autoRoomWeather: spTab.autoRoomWeather
     }).catch(function(){});
   }, 600);
 
@@ -12407,6 +12409,7 @@ function mkMultiRoomSpace(p){
   chipRow1.appendChild(_quickToggleBtn('가구·소품 다양하게', ' 가구와 소품 디자인은 공간마다 전부 다르게 해줘.'));
   chipRow1.appendChild(_quickToggleBtn('건물 반복 금지', ' 건물 형태를 매번 너무 똑같이 만들지 말고 다양하게 변형해줘.'));
   chipRow1.appendChild(_quickToggleBtn('실내공간 반복 금지', ' 이 집의 여러 실내 공간(거실·주방·침실 등)이 마치 같은 방을 재활용한 것처럼 서로 비슷하게 나오지 않게 해줘 — 가구 배치·디자인, 카메라가 바라보는 방향·거리, 창문 형태와 창밖으로 보이는 풍경까지 방마다 확실히 다르게 만들어줘. 특히 큰 창을 정면으로 마주보는 구도만 여러 방에서 반복하지 말고, 방마다 문간에서 비스듬히, 모서리에서 대각선으로, 가구에 가까이 등 다른 각도를 섞어서 만들어줘.'));
+  chipRow1.appendChild(_quickToggleBtn('투시뷰 건물 많이 보이게', ' 투시뷰(스트리트뷰)는 카메라를 너무 가까이 붙이지 말고 뒤로 물러나서, 이 건물이 최대한 많이(전체 파사드가 거의 다) 프레임 안에 들어오는 구도로 만들어줘 — 건물의 일부만 크게 확대해서 보여주지 말고, 건물 전체 형태가 한눈에 들어오게 해줘.'));
   // ⚠️ 요청 반영("렌더링 이미지 1장에 공간이 2~3개씩 붙어서 나온다, 1장당 한 공간만 나오게 해달라"):
   // 여러 장을 한 번에 요청하면 모델이 한 이미지 안에 여러 공간을 콜라주/그리드로 붙여서 만드는
   // 경우가 있어 이를 명시적으로 금지하는 문구.
@@ -12438,6 +12441,39 @@ function mkMultiRoomSpace(p){
     ['단독주택 단지',' 건물 주변 배경은 단독주택들이 늘어선 저층 주택단지로 해줘 — 건축 외관 뷰뿐 아니라, 실내 공간 사진에서도 창문 밖으로 보이는 풍경은 전부 이 저층 단독주택 단지 배경과 일치해야 해(고층 아파트나 도심 풍경이 창밖에 보이면 안 돼).'],
     ['서울 도심',' 건물 주변 배경은 고층건물이 보이는 서울 도심 풍경으로 해줘 — 건축 외관 뷰뿐 아니라, 실내 공간 사진에서도 창문 밖으로 보이는 풍경은 전부 이 서울 도심·고층건물 배경과 일치해야 해.']
   ]));
+  // ⚠️ 요청 반영("이런 내용들이 공간컨셉에만 들어가는게아니고 현장사진세트에도 적용이 되어야할것들은
+  // 되고있지?"): 날씨·계절 연출이 컨셉확장(autoRoom)에만 있고 현장사진세트(multiRoom)엔 아예 UI가
+  // 없었음 — 똑같이 추가함. spTab.autoRoomWeather 상태를 그대로 같이 씀(두 모드가 같은 spTab 객체를
+  // 공유하므로, 한쪽에서 골라두면 다른 쪽 들어가도 유지됨) — 실제 문구 반영은 아래
+  // _multiRoomBuildPrompt/_multiRoomBuildExteriorPrompt 안에서 처리함.
+  (function(){
+    var gWrap=dv('');gWrap.style.cssText='margin-bottom:8px';
+    var gLbl=dv('');gLbl.style.cssText='font-size:11px;color:var(--t2);font-weight:600;margin-bottom:5px';gLbl.textContent='날씨·계절 연출 (건축 외관 전체 + 실내 뷰의 창밖 풍경에 반영)';
+    gWrap.appendChild(gLbl);
+    var chipRow=dv('');chipRow.style.cssText='display:flex;flex-wrap:wrap';
+    var btns=[];
+    [['봄(벚꽃)','spring'],['여름(햇살)','summer'],['가을(단풍)','autumn'],['겨울(눈 펑펑)','winter'],['비 오는 날','rain'],['노을(골든아워)','golden_hour']].forEach(function(opt){
+      var name=opt[0], key=opt[1];
+      var b=mk('button','');b.type='button';
+      b.style.cssText='padding:7px 10px;border-radius:7px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit;margin:0 6px 6px 0';
+      function sync(){
+        var on=(spTab.autoRoomWeather||'')===key;
+        b.textContent=(on?'✓ ':'')+name;
+        b.style.border='1px solid '+(on?'var(--acb)':'var(--bd2)');
+        b.style.background=on?'var(--acg)':'var(--c2)';
+        b.style.color=on?'var(--ac)':'var(--t2)';
+      }
+      b.onclick=function(){
+        spTab.autoRoomWeather = (spTab.autoRoomWeather===key) ? '' : key; // 다시 누르면 해제
+        btns.forEach(function(fn){fn();});
+      };
+      btns.push(sync);
+      sync();
+      chipRow.appendChild(b);
+    });
+    gWrap.appendChild(chipRow);
+    quickWrap.appendChild(gWrap);
+  })();
   pw.appendChild(quickWrap);
   // ⚠️ 요청 반영: "공간 컨셉 디자인에도 사람 추가할 수 있게 버튼 해줘" — 다른 탭(AI편집 등)에
   // 이미 있는 "🧑‍🤝‍🧑 사람 추가" 토글과 동일한 방식으로, 공통 스타일 문구 끝에 사람 배치
@@ -12652,6 +12688,11 @@ function _multiRoomBuildExteriorPrompt(userStyle, viewLabel, hasRoomRef){
   prompt += ' \u26a0\u26a0\u26a0 만약 참고 이미지가 건물 외관이 아니라 실내 공간으로 보인다면(외벽·창호·지붕 같은 외관 요소가 보이지 않고 바닥재·벽 마감재·가구 같은 실내 요소가 보인다면): 그 실내 사진을 그대로 외관에 옮기려 하지 말고, 그 실내에서 느껴지는 스타일의 핵심 단서(재질의 따뜻함/차가움, 색상 팔레트, 미니멀한지 장식적인지, 톤의 밝기)를 건축 외관 디자인 언어로 번역해서 적용하세요 — 예를 들어 노출콘크리트·우드톤의 미니멀한 실내라면 노출콘크리트와 목재 루버가 어우러진 미니멀한 모던 외관으로, 화이트·베이지 톤의 따뜻한 실내라면 화이트 스타코 마감의 부드러운 외관으로, 짙은 색감의 고급스러운 실내라면 짙은 톤의 석재나 금속 패널이 들어간 외관으로 번역하는 식입니다. 외장재·창호 프레임의 정확한 형태를 억지로 그 실내 사진에서 뽑아내려 하지 말고, 이렇게 유추한 스타일 방향 안에서 이 대지·건물 규모에 자연스럽게 어울리는 외장재·색상·조경을 새로 디자인하세요.';
   prompt += ' 참고 이미지에 사람이나 차량, 반려동물이 나온다고 해도 그대로 복사해서 넣지 마세요 — 참고 이미지는 오직 마감재·색감·조경 스타일만 참고하는 용도입니다.';
   var cat = _categoryForRoomLabel(viewLabel, getTab('spaceset').multiRoomCategory);
+  // ⚠️ 요청 반영("날씨·계절 연출이 현장사진세트에도 적용돼야지"): 외관 쪽도 동일하게 적용.
+  var _mrWeatherExt = getTab('spaceset').autoRoomWeather;
+  if(_mrWeatherExt && SPACE_WEATHER_TEXT[_mrWeatherExt]){
+    prompt += ' ' + SPACE_WEATHER_TEXT[_mrWeatherExt];
+  }
   prompt += ' ' + KOREA_LAYOUT_GUIDE[cat] + EXTERIOR_CONSISTENCY_RULE + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE + AC_CONSISTENCY_RULE + MAIN_LIGHT_CONSISTENCY_RULE + (prompt.indexOf('사람')===-1 && prompt.indexOf('한국인')===-1?NO_PEOPLE_ANIMALS_RULE:'');
   return prompt;
 }
@@ -12760,6 +12801,13 @@ function _multiRoomBuildPrompt(userStyle, roomLabel, hasRoomRef){
   // 스타일(색감·소재·톤)은 참고 이미지가 정하고, 공간의 형태·비례·구조 관습은 한국 시장 기준을
   // 따르게 함 — 방 라벨(예: '거실','사무실','카운터')로 카테고리를 찾아서 그에 맞는 가이드를 붙임.
   var cat = _categoryForRoomLabel(roomLabel, getTab('spaceset').multiRoomCategory);
+  // ⚠️ 요청 반영("날씨·계절 연출이 현장사진세트에도 적용돼야지"): 위에서 UI만 추가하고 실제
+  // 반영 로직이 없으면 소용없으므로, 컨셉확장과 동일하게 여기서도 SPACE_WEATHER_TEXT_INTERIOR를
+  // 적용함(실내는 "방 자체는 그대로, 창밖 풍경·채광만" 계절에 맞추는 순한 버전).
+  var _mrWeather = getTab('spaceset').autoRoomWeather;
+  if(_mrWeather && SPACE_WEATHER_TEXT_INTERIOR[_mrWeather]){
+    prompt += SPACE_WEATHER_TEXT_INTERIOR[_mrWeather];
+  }
   var _prependRules2 = '⚠️⚠️ 가장 먼저 지켜야 할 절대 규칙들(다른 무엇보다 우선): ' + SINGLE_IMAGE_OUTPUT_RULE + AC_CONSISTENCY_RULE + (prompt.indexOf('사람')===-1 && prompt.indexOf('한국인')===-1 ? NO_PEOPLE_ANIMALS_RULE : '') + ' --- 이제 아래 지시를 반영하세요: ';
   prompt = _prependRules2 + prompt + ' ' + KOREA_LAYOUT_GUIDE[cat] + INTERIOR_CONSISTENCY_RULE + (ROOM_TYPE_DISAMBIGUATION[roomLabel]||'') + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + KOREA_BACKGROUND_RULE + MAIN_LIGHT_CONSISTENCY_RULE;
   return prompt;
@@ -14480,6 +14528,7 @@ function mkAutoRoomCamera(p){
   chipRow1AR.appendChild(_quickToggleBtnAR('가구·소품 다양하게', ' 가구와 소품 디자인은 공간마다 전부 다르게 해줘.'));
   chipRow1AR.appendChild(_quickToggleBtnAR('건물 반복 금지', ' 건물 형태를 매번 너무 똑같이 만들지 말고 다양하게 변형해줘.'));
   chipRow1AR.appendChild(_quickToggleBtnAR('실내공간 반복 금지', ' 이 집의 여러 실내 공간(거실·주방·침실 등)이 마치 같은 방을 재활용한 것처럼 서로 비슷하게 나오지 않게 해줘 — 가구 배치·디자인, 카메라가 바라보는 방향·거리, 창문 형태와 창밖으로 보이는 풍경까지 방마다 확실히 다르게 만들어줘. 특히 큰 창을 정면으로 마주보는 구도만 여러 방에서 반복하지 말고, 방마다 문간에서 비스듬히, 모서리에서 대각선으로, 가구에 가까이 등 다른 각도를 섞어서 만들어줘.'));
+  chipRow1AR.appendChild(_quickToggleBtnAR('투시뷰 건물 많이 보이게', ' 투시뷰(스트리트뷰)는 카메라를 너무 가까이 붙이지 말고 뒤로 물러나서, 이 건물이 최대한 많이(전체 파사드가 거의 다) 프레임 안에 들어오는 구도로 만들어줘 — 건물의 일부만 크게 확대해서 보여주지 말고, 건물 전체 형태가 한눈에 들어오게 해줘.'));
   chipRow1AR.appendChild(_quickToggleBtnAR('한 장에 한 공간만', ' 결과 이미지 한 장에는 반드시 하나의 공간만 담아줘. 한 이미지 안에 여러 공간을 나눠 붙이거나 콜라주·그리드처럼 합쳐서 보여주지 마.'));
   // ⚠️ 요청 반영("CG나 AI처럼 안 나오게 자연스러운 실사느낌 나게 하는 문구를 자주 쓰는 문구에
   // 추가해줘") — 위 multiRoom 쪽(chipRow1)에는 이미 있던 칩인데 여기(컨셉 확장/AI 카메라
