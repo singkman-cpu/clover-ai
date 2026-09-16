@@ -3563,6 +3563,7 @@ function canRun(){
   if(!G.wf) return false; // 탭 미선택
   if(G.wf==='shorts') return false; // 쇼츠는 자체 버튼 사용
   if(G.wf==='proposal') return false; // 제안서도 자체 버튼 사용
+  if(G._uploadBusy) return false; // 이미지 업로드(파일 읽기+리사이즈) 처리 중 — 경합 방지
   if(G.wf==='video'&&tab.vidMode==='prompt')return (tab.prompt||'').length>2;
   if(!tab.inputImg)return false;
   // ⚠️ 요청 반영("3D 렌더 실사화는 프리셋 선택 안 하면 렌더 버튼 활성화 안 되게 해줘 — 계속
@@ -3577,7 +3578,13 @@ function canRun(){
   // 정상적인 사용법이라(순수 텍스트 지시), '3D 렌더 실사화'처럼 프리셋을 무조건 강제하진 않고
   // "프리셋 또는 직접 입력한 프롬프트 둘 중 하나는 있어야 한다"로 막음 — 아무것도 없이 그냥
   // 누르기만 하는 경우만 차단.
-  if((G.wf==='space' || G.wf==='edit' || (G.wf==='video' && tab.vidMode!=='prompt')) && !tab.selK && !(tab.prompt||'').trim()) return false;
+  // ⚠️ 요청 반영("레퍼런스 이미지만 넣고 렌더링 돌리고 싶은데 프리셋을 선택하라고 나온다 —
+  // 레퍼런스 이미지만 클릭해도 그 이미지에 맞는 공간으로 자동 디자인되게 해달라"): 프리셋도
+  // 없고 직접 입력한 프롬프트도 없어도, "디자인 레퍼런스" 참고 이미지가 1장이라도 첨부돼 있으면
+  // 그것만으로도 실행 가능하도록 조건 추가 — 아래 실제 프롬프트 생성 쪽에도 "레퍼런스 이미지만
+  // 있을 때" 쓸 기본 지시문을 같이 추가해뒀음(_finalPrompt 조립 부분 참고).
+  var _hasAnyRef = tab.refs && tab.refs.some(function(r){return !!r;});
+  if((G.wf==='space' || G.wf==='edit' || (G.wf==='video' && tab.vidMode!=='prompt')) && !tab.selK && !(tab.prompt||'').trim() && !_hasAnyRef) return false;
   // 관리자는 크레딧 무제한 (이미지만 있으면 실행 가능)
   if(G.supaRole==='admin'||G.plan==='admin'||localStorage.getItem('clover_plan')==='admin') return true;
   // 크레딧 부족 체크
@@ -3609,10 +3616,11 @@ function updBtn(){
   var cost=(!G.wf)?null:getCost();
   document.querySelectorAll('.aclbl').forEach(function(al){
     if(!G.wf){ al.textContent='작업을 선택하세요'; return; }
+    if(G._uploadBusy){ al.textContent='이미지 업로드 중...'; return; }
     var tab=getTab(G.wf);
     if(!tab||!tab.inputImg){ al.textContent=WFL[G.wf]||'실행'; }
     else if(G.wf==='render' && !tab.selK){ al.textContent='프리셋을 선택하세요'; }
-    else if((G.wf==='space' || G.wf==='edit' || (G.wf==='video' && tab.vidMode!=='prompt')) && !tab.selK && !(tab.prompt||'').trim()){ al.textContent='프리셋을 선택하거나 프롬프트를 입력하세요'; }
+    else if((G.wf==='space' || G.wf==='edit' || (G.wf==='video' && tab.vidMode!=='prompt')) && !tab.selK && !(tab.prompt||'').trim() && !(tab.refs && tab.refs.some(function(r){return !!r;}))){ al.textContent='프리셋을 선택하거나 프롬프트를 입력하세요'; }
     else if(G.supaRole!=='admin' && G.plan!=='admin' && localStorage.getItem('clover_plan')!=='admin' && G.cr<cost){ al.textContent='크레딧 부족 ('+G.cr+'cr)'; }
     else { al.textContent=WFL[G.wf]||'실행'; }
   });
@@ -4859,7 +4867,6 @@ var PS_SPACE_CATS=[
   {name:'스타일/기반',keys:['site_based','modern_minimal','scandi','luxury','cafe','office','midcentury','muji','naturalwood','showroom','exhibition','hanok','japanese_trad','industrial','bauhaus','artdeco','brutalism','japandi','cream_contemporary','coastal','french_modern','modern_classic','modern_luxury','hotel_style_home']},
   {name:'🌎 해외 도시 컬렉션',keys:['city_tokyo_minimal','city_kyoto_wabi_sabi','city_milan_luxury','city_paris_boutique','city_soho_new_york','city_copenhagen_nordic','city_london_industrial','city_bali_tropical','city_santorini_white','city_tulum_resort','city_mediterranean_coastal']},
   {name:'🔥 2026-27 트렌드 키워드',keys:['trend_quiet_luxury','warm_minimalism_2026','trend_organic_modern','japandi_2026','trend_neo_vintage','trend_biophilic_design','trend_boutique_hotel','trend_dark_luxury','trend_gallery_space','trend_future_minimal','organic_luxe_2026','trend_sculptural_interior','trend_textured_minimalism','trend_natural_stone_luxury','trend_contemporary_resort']},
-  {name:'🚀 미래·퓨처리즘',keys:['futuristic_smart_home','futuristic_cyberpunk_interior','futuristic_space_station','futuristic_holographic','futuristic_minimal_white','futuristic_ai_office','futuristic_biophilic_interior','futuristic_neo_architecture','futuristic_sustainable_building','futuristic_glass_pavilion','futuristic_vertical_forest_city','futuristic_megacity']},
   {name:'🆕 2026 트렌드',keys:['trend_warm_minimalism','trend_collected_interior','trend_neo_deco','trend_color_drenching','trend_high_gloss','trend_sculptural_furniture','trend_craft_revival','trend_biophilic2','trend_afrohemian','trend_playful_interior','warm_modern_farmhouse_2026','textured_brick_facade_2026','warm_minimalism_2026','organic_luxe_2026','color_drenched_2026','modern_heritage_2026','scanditalia_2026','freehand_artistry_2026','thoughtful_maximalism_2026','classic_pattern_revival_2026','tin_tarnished_metal_2026','circular_sustainable_2026','sensorial_smart_2026','functional_drama_2026','moody_carved_wood_2026','freestanding_shower_kr_2026','earthy_palette_kr_2026','seamless_plaster_kr_2026','arch_door_kr_2026','oak_wood_flooring_kr_2026','tube_furniture_retro_kr_2026','layered_maximalism_kr_2026','personal_journey_kr_2026','preview_2027_jewel_color','contrast_wood_kr_2026','passive_house_2026','weather_adaptive_facade_2026','color_storytelling_facade_2026','low_carbon_circular_architecture_2026','zero_energy_house_kr_2026','terrace_house_kr_2026']},
   {name:'🆕 2027 오피스 디자인 트렌드',keys:['acoustic_office_2027','hospitality_office_2027','neuro_inclusive_office_2027','ai_smart_office_2027','biophilic_office_evolved_2027','modular_reconfig_office_2027','wellness_office_2027','purposeful_color_office_2027','circular_office_furniture_2027','outdoor_connected_office_2027']},
   {name:'🆕 2027 호텔·숙박 트렌드',keys:['residential_lobby_2027','artisan_hospitality_2027','quiet_luxury_hotel_2027','spa_bathroom_hotel_2027','wellness_hub_hotel_2027','hyperlocal_hospitality_2027','playful_social_corner_2027','invisible_tech_hospitality_2027','sustainable_luxury_hotel_2027','irregular_organic_form_2027']},
@@ -25933,6 +25940,14 @@ window._redrawPolyAreas=_redrawPolyAreas;
 // ── File loading ──────────────────────────────────────────────
 function loadF(f,key){
   if(!f||!f.type.startsWith('image/'))return;
+  // ⚠️ 버그 수정("현장업로드+레퍼런스 넣고 렌더링했다가, 빨리 다른 공간으로 바꾸려고 레퍼런스를
+  // 지우고 새로 넣은 뒤 바로 렌더링 눌렀더니 이전 레퍼런스가 반영된 것 같다"): 이미지 업로드는
+  // 파일 읽기+리사이즈까지 포함된 비동기 처리라(특히 고화질 사진은 시간이 좀 걸림), 그 처리가
+  // 끝나기 전에 렌더링 버튼을 누르면 아직 tab.refs에 새 이미지가 채워지기 전(또는 지우자마자라
+  // 비어있는) 상태로 요청이 나갈 수 있었음 — 업로드 처리 중에는 렌더링 버튼을 잠시 비활성화해서
+  // 이 경합(race condition)을 막음.
+  G._uploadBusy = true;
+  if(typeof updBtn==='function') updBtn();
   // ⚠️ 버그 수정: "이미지 올리면 몇 박자 늦게 반영된다"는 지적 — 실제로는 FileReader로 파일을
   // 읽고(특히 견적용으로 올리는 고화질 사진은 용량이 커서 이 과정이 꽤 걸림) 다시 캔버스로
   // 리사이즈하는 과정이 전부 끝나야 화면이 바뀌는데, 그동안 화면엔 아무 반응이 없어서 "멈춘
@@ -26094,6 +26109,7 @@ function _loadFApply(v, f, key){
       document.querySelectorAll('#rs-'+G.refIdx).forEach(function(sl){ rSlot(sl,G.refIdx); });
     }
     var ub=gE('ub-'+key);if(ub&&key!=='ref')rUB(ub,key);
+    G._uploadBusy = false; // 업로드 처리 완료 — 이제 렌더링 버튼 다시 활성화 가능
     updBtn();
     // 모바일: 이미지 업로드 후 패널 자동 열기 제거 (탭 버튼 직접 클릭 방식으로)
     // 대신 탭바의 현재 탭 아이콘을 깜빡여서 안내
@@ -37040,6 +37056,17 @@ document.addEventListener('DOMContentLoaded',function(){try{
         if(_fallbackPreset){
           _finalPrompt = _fallbackPreset.pt || _fallbackPreset.l || '';
           console.warn('[버그 방어] tab.prompt가 비어있어서 프리셋("'+tab.selK+'") 원문을 실행 직전에 다시 채워넣음');
+        }
+      }
+      // ⚠️ 요청 반영("레퍼런스 이미지만 넣어도 그 이미지에 맞는 공간으로 자동 디자인되게 해달라"):
+      // 프리셋도 없고 사용자가 직접 적은 텍스트도 없지만, "디자인 레퍼런스" 참고 이미지는 있는
+      // 경우 — canRun()에서는 이제 이 상태로도 실행을 허용하는데, 정작 여기서 프롬프트가 완전히
+      // 빈 채로 API에 넘어가면 안 되므로, 참고 이미지의 스타일을 보고 알아서 어울리게 디자인하라는
+      // 기본 지시문을 넣어줌.
+      if(!_finalPrompt && !tab.selK && G.wf==='space'){
+        var _autoRefs = (tab.refs||[]).filter(function(r){return !!r;});
+        if(_autoRefs.length){
+          _finalPrompt = '별도로 지정한 프리셋이나 문구는 없지만, 첨부된 "디자인 레퍼런스" 참고 이미지가 있습니다. 이 참고 이미지의 스타일·재질·색감·가구 분위기를 보고, 지금 이 사진 속 공간(용도·크기·구조)에 자연스럽게 어울리도록 AI가 알아서 적절한 디자인을 판단해서 적용해주세요 — 참고 이미지를 억지로 그대로 베끼기보다는, 그 이미지가 보여주는 디자인 방향을 이 공간에 맞게 자연스럽게 번역해서 반영하세요.';
         }
       }
       // ⚠️ 프롬프트가 13,000자 넘게 길어서 맨 끝에만 지시를 붙이면 모델이 놓칠 수 있음 — 짧고 강한
