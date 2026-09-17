@@ -924,24 +924,27 @@ function cloverDownload(src, fname){
     for(var i=0;i<bstr.length;i++) u8[i]=bstr.charCodeAt(i);
     saveBlobWithFreeWatermark(new Blob([u8],{type:mime}));
   } else if(src.startsWith('http')){
-    // ⚠️ 버그 수정("갤러리탭에서 쇼츠영상 다운로드 눌러도 반응이 없다"): fetch(src)가
-    // CORS 등의 이유로 실패하면 원래 .catch()에서 window.open(src)로 새 탭을 열어 최소한
-    // 영상이라도 보여주려 했는데, 이 window.open 호출이 fetch가 끝난 "비동기" 시점에
-    // 일어나다 보니 — 브라우저 팝업 차단기가 "방금 클릭이랑 직접 연결된 게 아니다"라고
-    // 판단해서 에러도 안 띄우고 조용히 막아버리는 경우가 있었음(그래서 버튼을 눌러도 정말
-    // 아무 일도 안 일어난 것처럼 보였던 것). 클릭한 바로 그 순간(동기적으로) 빈 탭을 미리
-    // 열어두고, fetch가 끝난 뒤 그 탭의 주소만 바꿔주는 방식으로 팝업 차단을 우회함 —
-    // 이미 열려있는 탭의 location을 바꾸는 건 사용자 제스처 판정과 무관하게 항상 허용됨.
-    var _preOpenedTab = null;
-    try{ _preOpenedTab = window.open('', '_blank'); }catch(e){}
+    // ⚠️ 버그 수정("다운로드 누르면 전체화면이 빤짝거린다"): 예전엔 fetch 성공/실패와 무관하게
+    // 클릭할 때마다 매번 빈 탭을 미리 열어뒀다가, fetch가 성공하면(대부분의 경우) 그 탭을 바로
+    // 닫는 방식이었음 — 이 "열렸다 닫히는" 과정이 매번 화면이 깜빡이는 것처럼 보이는 부작용을
+    // 만들었음. 정상적으로 성공하는 경우가 훨씬 많으므로, 이제 빈 탭은 미리 열지 않고 그냥
+    // fetch만 시도함 — 성공하면(대부분) 화면 깜빡임 없이 바로 다운로드됨. 실패하는 드문
+    // 경우에만, 그 시점에 a태그의 download 속성으로 직접 다운로드를 한 번 더 시도하고
+    // (fetch 없이 브라우저가 직접 처리하므로 CORS와 무관하게 동작하는 경우가 많음), 그마저도
+    // 안 되면 최후의 수단으로 새 탭을 염(이 경우는 실패 후 딱 한 번뿐이라 깜빡임이 문제되지 않음).
     fetch(src).then(function(r){return r.blob();}).then(function(blob){
-      if(_preOpenedTab && !_preOpenedTab.closed){ try{ _preOpenedTab.close(); }catch(e){} }
       saveBlobWithFreeWatermark(blob);
     }).catch(function(){
-      if(_preOpenedTab && !_preOpenedTab.closed){
-        try{ _preOpenedTab.location.href = src; return; }catch(e){}
+      try{
+        var vA=document.createElement('a');
+        vA.href=src; vA.download=fname; vA.rel='noopener';
+        vA.style.cssText='position:fixed;top:-9999px;left:-9999px';
+        document.body.appendChild(vA);
+        vA.click();
+        setTimeout(function(){ try{document.body.removeChild(vA);}catch(e){} }, 500);
+      }catch(e){
+        window.open(src,'_blank','noopener');
       }
-      window.open(src,'_blank','noopener');
     });
   }
 }
