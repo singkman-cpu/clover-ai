@@ -137,8 +137,9 @@ input[type="checkbox"]{accent-color:var(--ac)}
 .wft-en{font-size:10px;color:var(--m2)}
 .sdiv{height:1px;background:var(--bd);margin:7px 10px}
 .sb-scroll{flex:1;min-height:0;overflow-y:auto;padding:4px 10px 8px}
-.sb-scroll::-webkit-scrollbar{width:3px}
-.sb-scroll::-webkit-scrollbar-thumb{background:var(--bd2)}
+.sb-scroll::-webkit-scrollbar{width:10px}
+.sb-scroll::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:10px;border:2px solid var(--c1,transparent)}
+.sb-scroll::-webkit-scrollbar-thumb:hover{background:var(--m2)}
 .sb-btm{flex-shrink:0;padding:8px 10px;border-top:1px solid var(--bd)}
 .ss{margin-bottom:12px;break-inside:avoid;-webkit-column-break-inside:avoid}
 /* 사이드바를 넓히면 위아래로 계속 스크롤해야 하는 게 불편하다는 피드백 반영 — 섹션들
@@ -12443,6 +12444,7 @@ function mkMultiRoomSpace(p){
   chipRow1.appendChild(_quickToggleBtn('실내공간 반복 금지', ' 이 집의 여러 실내 공간(거실·주방·침실 등)이 마치 같은 방을 재활용한 것처럼 서로 비슷하게 나오지 않게 해줘 — 가구 배치·디자인, 카메라가 바라보는 방향·거리, 창문 형태와 창밖으로 보이는 풍경까지 방마다 확실히 다르게 만들어줘. 특히 큰 창을 정면으로 마주보는 구도만 여러 방에서 반복하지 말고, 방마다 문간에서 비스듬히, 모서리에서 대각선으로, 가구에 가까이 등 다른 각도를 섞어서 만들어줘.'));
   chipRow1.appendChild(_quickToggleBtn('투시뷰 건물 많이 보이게', ' 투시뷰(스트리트뷰)는 카메라를 너무 가까이 붙이지 말고 뒤로 물러나서, 이 건물이 최대한 많이(전체 파사드가 거의 다) 프레임 안에 들어오는 구도로 만들어줘 — 건물의 일부만 크게 확대해서 보여주지 말고, 건물 전체 형태가 한눈에 들어오게 해줘.'));
   chipRow1.appendChild(_quickToggleBtn('거실 복층(위에 방 없음)', ' 거실은 복층 구조(보이드, 위아래로 뚫린 이중 높이 천장)야 — 거실 바로 위 공간에는 바닥이나 다른 방이 얹혀있으면 안 돼. 거실 위층 부분은 뚫려서 아래층 거실이 그대로 올려다보이는 상태로 그려줘. 거실 바로 위에 침실이나 다른 방이 천장처럼 덮고 있는 모습으로 그리면 안 돼.'));
+  chipRow1.appendChild(_quickToggleBtn('창밖 저층(3~5층)', ' 실내 공간에서 창문 너머로 보이는 주변 건물은 전부 저층(3~5층 정도 높이)으로 해줘 — 대략 주변 나무들 머리(우듬지) 높이랑 비슷하거나 그보다 살짝 낮은 정도의 높이야. 고층 아파트나 초고층 건물이 창밖에 보이면 안 돼.'));
   // ⚠️ 요청 반영("렌더링 이미지 1장에 공간이 2~3개씩 붙어서 나온다, 1장당 한 공간만 나오게 해달라"):
   // 여러 장을 한 번에 요청하면 모델이 한 이미지 안에 여러 공간을 콜라주/그리드로 붙여서 만드는
   // 경우가 있어 이를 명시적으로 금지하는 문구.
@@ -12994,6 +12996,29 @@ function _autoRoomTypesForCategory(catKey){
 // 카메라 앵글 지시·건물 일관성 규칙(EXTERIOR_CONSISTENCY_RULE)이 하나도 안 걸려서 그냥 평범한
 // "실내 같은" 결과가 나왔던 것. "외관"이라는 이름 자체를 명시적으로 외관으로 인식하게 함.
 function _isExteriorViewType(t){ return t==='외관' || SPACE_CATEGORIES.exterior.types.indexOf(t)!==-1; }
+// ⚠️ 요청 반영("한 번에 전체 다 참고이미지로 사용할 수 있게도 해줘, 상단에"): 개별 "📌 참고
+// 이미지로 쓰기" 버튼 로직을 공용 함수로 분리 — 개별 버튼과 상단의 "전체 참고 이미지로 추가"
+// 버튼이 이 함수를 같이 씀. 성공하면 true, 칸이 다 차서 못 넣으면 false를 반환함(호출하는
+// 쪽에서 개별 알림을 띄울지, 여러 건을 모아서 요약 알림 한 번만 띄울지 결정).
+function _pushResultAsRef(resUrl, lbl){
+  var _t=getTab('spaceset');
+  var isExt = _isExteriorViewType(lbl);
+  var arrName = isExt ? 'autoRoomExtAnchors' : 'autoRoomIntAnchors';
+  var maxCount = isExt ? 6 : SPACE_CATEGORIES[_t.autoRoomCategory].types.length;
+  if(!_t[arrName]) _t[arrName]=[];
+  var arr = _t[arrName];
+  var emptySlot=null, filledSlot=null;
+  for(var _i=0;_i<arr.length;_i++){
+    if(arr[_i].label===lbl){
+      if(!arr[_i].img && !emptySlot) emptySlot=arr[_i];
+      else if(!filledSlot) filledSlot=arr[_i];
+    }
+  }
+  if(emptySlot){ emptySlot.img=resUrl; return true; }
+  if(filledSlot){ filledSlot.img=resUrl; return true; }
+  if(arr.length<maxCount){ arr.push({img:resUrl, label:lbl}); return true; }
+  return false;
+}
 // ⚠️ 요청 반영: "발코니처럼 외기에 면한(반외부) 공간에는 에어컨을 설치하면 안 된다" — 발코니는
 // 세탁실·창고 등으로 쓰이는 반외부 공간이라 실내 냉방기구(시스템에어컨)가 어색함. 테라스·파티오
 // 등 다른 야외 성격 공간도 마찬가지로 취급함.
@@ -14563,6 +14588,7 @@ function mkAutoRoomCamera(p){
   chipRow1AR.appendChild(_quickToggleBtnAR('실내공간 반복 금지', ' 이 집의 여러 실내 공간(거실·주방·침실 등)이 마치 같은 방을 재활용한 것처럼 서로 비슷하게 나오지 않게 해줘 — 가구 배치·디자인, 카메라가 바라보는 방향·거리, 창문 형태와 창밖으로 보이는 풍경까지 방마다 확실히 다르게 만들어줘. 특히 큰 창을 정면으로 마주보는 구도만 여러 방에서 반복하지 말고, 방마다 문간에서 비스듬히, 모서리에서 대각선으로, 가구에 가까이 등 다른 각도를 섞어서 만들어줘.'));
   chipRow1AR.appendChild(_quickToggleBtnAR('투시뷰 건물 많이 보이게', ' 투시뷰(스트리트뷰)는 카메라를 너무 가까이 붙이지 말고 뒤로 물러나서, 이 건물이 최대한 많이(전체 파사드가 거의 다) 프레임 안에 들어오는 구도로 만들어줘 — 건물의 일부만 크게 확대해서 보여주지 말고, 건물 전체 형태가 한눈에 들어오게 해줘.'));
   chipRow1AR.appendChild(_quickToggleBtnAR('거실 복층(위에 방 없음)', ' 거실은 복층 구조(보이드, 위아래로 뚫린 이중 높이 천장)야 — 거실 바로 위 공간에는 바닥이나 다른 방이 얹혀있으면 안 돼. 거실 위층 부분은 뚫려서 아래층 거실이 그대로 올려다보이는 상태로 그려줘. 거실 바로 위에 침실이나 다른 방이 천장처럼 덮고 있는 모습으로 그리면 안 돼.'));
+  chipRow1AR.appendChild(_quickToggleBtnAR('창밖 저층(3~5층)', ' 실내 공간에서 창문 너머로 보이는 주변 건물은 전부 저층(3~5층 정도 높이)으로 해줘 — 대략 주변 나무들 머리(우듬지) 높이랑 비슷하거나 그보다 살짝 낮은 정도의 높이야. 고층 아파트나 초고층 건물이 창밖에 보이면 안 돼.'));
   chipRow1AR.appendChild(_quickToggleBtnAR('한 장에 한 공간만', ' 결과 이미지 한 장에는 반드시 하나의 공간만 담아줘. 한 이미지 안에 여러 공간을 나눠 붙이거나 콜라주·그리드처럼 합쳐서 보여주지 마.'));
   // ⚠️ 요청 반영("CG나 AI처럼 안 나오게 자연스러운 실사느낌 나게 하는 문구를 자주 쓰는 문구에
   // 추가해줘") — 위 multiRoom 쪽(chipRow1)에는 이미 있던 칩인데 여기(컨셉 확장/AI 카메라
@@ -14695,6 +14721,27 @@ function mkAutoRoomCamera(p){
 
   if(st && !st.isApt && (st.results.length || st.running)){
     var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">결과</div>';
+    // ⚠️ 요청 반영("개별로 참고이미지 쓸 수 있는 거, 한 번에 전체 다 참고이미지로 쓸 수 있게도
+    // 해줘, 상단에"): 완료된 결과 전부를 한 번에 각자 알맞은 이름표 칸(실내/외관)에 등록하는
+    // 버튼을 결과 목록 맨 위에 추가함.
+    var addAllRefBtn=mk('button','');addAllRefBtn.type='button';addAllRefBtn.textContent='📌 전체 결과를 참고 이미지로 추가';
+    addAllRefBtn.style.cssText='width:100%;margin-bottom:8px;padding:8px;border-radius:8px;border:1px solid rgba(139,92,246,.4);background:rgba(139,92,246,.08);color:#a78bfa;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    addAllRefBtn.onclick=function(){
+      var okCount=0, failCount=0;
+      var allTypesForAdd=spTab.autoRoomSelected.slice();
+      allTypesForAdd.forEach(function(typeName,i){
+        var r=st.results[i];
+        if(r && r.url){
+          if(_pushResultAsRef(r.url, typeName)) okCount++; else failCount++;
+        }
+      });
+      if(okCount===0 && failCount===0){ alert('아직 완료된 결과가 없어요.'); return; }
+      renderSB();
+      var msg = okCount+'개를 참고 이미지로 추가했어요.';
+      if(failCount>0) msg += ' ('+failCount+'개는 칸이 다 차서 못 넣었어요 — 위쪽에서 비우고 다시 눌러주세요.)';
+      alert(msg);
+    };
+    resWrap.appendChild(addAllRefBtn);
     var resGrid=dv('');resGrid.style.cssText='display:flex;flex-direction:column;gap:10px';
     var allTypes=spTab.autoRoomSelected.slice();
     allTypes.forEach(function(typeName,i){
@@ -14728,23 +14775,8 @@ function mkAutoRoomCamera(p){
         var useAsRefBtn=mk('button','');useAsRefBtn.type='button';useAsRefBtn.textContent='📌 참고 이미지로 쓰기';
         useAsRefBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(139,92,246,.4);background:rgba(139,92,246,.08);color:#a78bfa;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
         useAsRefBtn.onclick=function(resUrl,lbl){ return function(){
-          var _t=getTab('spaceset');
-          var isExt = _isExteriorViewType(lbl);
-          var arrName = isExt ? 'autoRoomExtAnchors' : 'autoRoomIntAnchors';
-          var maxCount = isExt ? 6 : SPACE_CATEGORIES[_t.autoRoomCategory].types.length;
-          if(!_t[arrName]) _t[arrName]=[];
-          var arr = _t[arrName];
-          var emptySlot=null, filledSlot=null;
-          for(var _i=0;_i<arr.length;_i++){
-            if(arr[_i].label===lbl){
-              if(!arr[_i].img && !emptySlot) emptySlot=arr[_i];
-              else if(!filledSlot) filledSlot=arr[_i];
-            }
-          }
-          if(emptySlot){ emptySlot.img=resUrl; }
-          else if(filledSlot){ filledSlot.img=resUrl; }
-          else if(arr.length<maxCount){ arr.push({img:resUrl, label:lbl}); }
-          else { alert('"'+lbl+'" 항목을 넣을 칸이 없어요 — '+(isExt?'건축 외관 사진':'실내 사진')+'이 이미 최대('+maxCount+'장)까지 차있어요. 위쪽에서 하나를 비우고 다시 눌러주세요.'); return; }
+          var ok = _pushResultAsRef(resUrl, lbl);
+          if(!ok){ var isExt=_isExteriorViewType(lbl); alert('"'+lbl+'" 항목을 넣을 칸이 없어요 — '+(isExt?'건축 외관 사진':'실내 사진')+'이 이미 최대까지 차있어요. 위쪽에서 하나를 비우고 다시 눌러주세요.'); return; }
           renderSB();
         }; }(result.url, typeName);
         rRow.appendChild(useAsRefBtn);
