@@ -11762,6 +11762,16 @@ function _uploadDataUrlIfNeeded(url, pathHint, cb){
 var _spacesetAnchorSyncTimer=null;
 function _scheduleSpacesetAnchorSync(spTab){
   if(_spacesetAnchorSyncTimer) clearTimeout(_spacesetAnchorSyncTimer);
+  // ⚠️ 버그 수정("컨셉확장 카페·상업공간에서 작업하다 새로고침하면 건물외관 참고이미지만 남고
+  // 나머지는 사라진 채 예전 주거공간 걸로 채워져있다"): 이 사진들은 두 곳에 따로 저장됨 —
+  // ① 이 기기의 IndexedDB(빠르지만 이 기기 전용), ② 클라우드(다른 기기 동기화용, 느림). 새로고침
+  // 하면 둘 다 비동기로 복원을 시도하는데, 어느 쪽이 먼저 끝날지 보장이 없어서 "나중에 도착하는
+  // 쪽이 먼저 도착한 더 최신 데이터를 무조건 덮어써버리는" 경쟁 상태가 있었음 — 예를 들어 방금
+  // 카페 사진을 올린 직후라 클라우드 저장이 아직 안 끝났는데, 그보다 오래된(예전 주거공간 시절)
+  // 클라우드 스냅샷이 뒤늦게 도착해서 방금 복원된 최신 로컬 데이터를 덮어써버리는 식. 이제 저장할
+  // 때마다 타임스탬프(ts)를 같이 남기고, 복원할 때 "이미 적용된 데이터보다 더 오래된 것"이면
+  // 절대 덮어쓰지 않도록 함(아래 idbLoadDraft·_tryRestoreSpacesetAnchors 쪽도 동일하게 수정).
+  var _tsAtSchedule = Date.now();
   _spacesetAnchorSyncTimer=setTimeout(function(){
     var extList=spTab.autoRoomExtAnchors||[], intList=spTab.autoRoomIntAnchors||[];
     var pending=0, done=function(){ pending--; if(pending<=0) finalize(); };
@@ -11775,7 +11785,7 @@ function _scheduleSpacesetAnchorSync(spTab){
       _uploadDataUrlIfNeeded(a.img, 'anchor'+i, function(finalUrl){ a.img=finalUrl; done(); });
     });
     function finalize(){
-      _saveWorkspaceState('spaceset_anchors', {ext:extOut, int:intOut, category:spTab.autoRoomCategory||'residential'});
+      _saveWorkspaceState('spaceset_anchors', {ext:extOut, int:intOut, category:spTab.autoRoomCategory||'residential', ts:_tsAtSchedule});
     }
   }, 1200);
 }
@@ -11857,6 +11867,14 @@ function _tryRestoreSpacesetAnchors(spTab){
     if(hasAnyLocalNow) return;
     var hasCloud = (data.ext||[]).some(function(a){return a.img;}) || (data.int||[]).some(function(a){return a.img;});
     if(!hasCloud) return;
+    // ⚠️ 버그 수정(2차, 위 race condition 수정의 반대 방향): 여기서 클라우드 데이터를 적용해도,
+    // 이 콜백이 끝난 뒤에 또 다른 복원 경로(mkAutoRoomCamera의 idbLoadDraft, 이 기기 전용 예전
+    // 초안)가 나중에 도착해서 지금 막 적용한 이 클라우드 데이터를 무조건 덮어쓸 수 있음 — 두
+    // 복원 경로 모두 "누가 먼저 적용됐는지" 기록해서, 더 오래된 데이터가 이미 적용된 더 최신
+    // 데이터를 덮어쓰지 못하게 막음(_acAppliedTs 비교, idbLoadDraft 쪽도 동일하게 적용).
+    var _cloudTs = data.ts || 1;
+    if((spTab._acAppliedTs||0) > _cloudTs) return;
+    spTab._acAppliedTs = _cloudTs;
     if(data.ext && data.ext.length) spTab.autoRoomExtAnchors=data.ext;
     if(data.int && data.int.length) spTab.autoRoomIntAnchors=data.int;
     if(data.category) spTab.autoRoomCategory=data.category;
@@ -14108,6 +14126,14 @@ function mkAutoRoomCamera(p){
     spTab.autoRoomIntAnchors=[{img:null,label:currentIntTypes[0]}];
     idbLoadDraft(_autoRoomDraftKey(), 7*24*60*60*1000).then(function(data){
       if(!data) return;
+      // ⚠️ 버그 수정("컨셉확장 카페·상업공간에서 작업하다 새로고침하면 예전 주거공간 걸로
+      // 채워져있다"): 이 기기 전용 초안(IndexedDB)이 클라우드 복원(_tryRestoreSpacesetAnchors)보다
+      // 늦게 도착하면, 그쪽에서 이미 적용해둔 더 최신 데이터를 여기서 무조건 덮어쓰고 있었음 —
+      // 저장 시점 타임스탬프(ts)를 비교해서, 이미 적용된 데이터보다 이 초안이 더 오래됐으면
+      // 덮어쓰지 않음(위 _scheduleSpacesetAnchorSync·_tryRestoreSpacesetAnchors 쪽도 동일 적용).
+      var _draftTs = data.ts || 1;
+      if((spTab._acAppliedTs||0) > _draftTs) return;
+      spTab._acAppliedTs = _draftTs;
       spTab.autoRoomExtAnchors = (data.autoRoomExtAnchors && data.autoRoomExtAnchors.length) ? data.autoRoomExtAnchors : spTab.autoRoomExtAnchors;
       spTab.autoRoomIntAnchors = (data.autoRoomIntAnchors && data.autoRoomIntAnchors.length) ? data.autoRoomIntAnchors : spTab.autoRoomIntAnchors;
       spTab.autoRoomPrompt = data.autoRoomPrompt || spTab.autoRoomPrompt || '';
@@ -14162,7 +14188,8 @@ function mkAutoRoomCamera(p){
       autoRoomFidelity: spTab.autoRoomFidelity,
       autoRoomWeather: spTab.autoRoomWeather,
       autoRoomSelected: spTab.autoRoomSelected,
-      forcedAspect: spTab.forcedAspect
+      forcedAspect: spTab.forcedAspect,
+      ts: Date.now()
     }).catch(function(){});
   }, 600);
 
