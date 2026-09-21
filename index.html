@@ -18394,10 +18394,28 @@ function _shortsCloudLoadDraft(cb){
 }
 function _shortsSaveDraftAsync(){
   if(!G_SHORTS.images.length) return;
+  // ⚠️ 버그 수정("소리도 안 나고 화면도 마지막 장면만 계속 나온다"): 렌더링(녹화) 진행 중에는
+  // 이 무거운 동기 저장 작업이 메인 스레드를 막아서 canvas.captureStream 자동 프레임 캡처를
+  // 방해할 수 있음 — 렌더링 중에는 임시저장을 완전히 건너뜀(끝나면 다시 정상 동작).
+  if(G_SHORTS._isRendering) return;
   // 이미 3번 이상 변환에 실패한(죽은) blob은 더 이상 재시도하지 않음 — 무한 재시도로 콘솔에
   // net::ERR_FILE_NOT_FOUND가 계속 쌓이던 문제 방지. 대신 화면에서 "깨짐" 표시로 보여줌.
   var blobImgs=G_SHORTS.images.filter(function(im){return im.img && im.img.indexOf('blob:')===0 && !im._blobDead;});
-  if(!blobImgs.length){ _shortsSaveSnapshot(G_SHORTS); return; } // 변환할 게 없으면 바로 저장(dirty-check 포함)
+  if(!blobImgs.length){
+    // ⚠️ 버그 수정("IndexedDB 백업 실패: DataCloneError ... could not be cloned"): 완성된 쇼츠가
+    // 있을 때 G_SHORTS에는 resultDownload(함수)처럼 구조적 복제가 안 되는 값이 들어있는데, 이
+    // "빠른 경로"는 그 G_SHORTS를 정제 없이 그대로 idbSaveDraft(IndexedDB)에 넘겨서 매번
+    // DataCloneError를 던지고 있었음 — 아래처럼 저장에 불필요한 함수/대용량 필드를 뺀 사본만
+    // 만들어서 저장하도록 고침(임시저장 목적상 어차피 필요 없는 값들임).
+    var fastSnap=JSON.parse(JSON.stringify(G_SHORTS, function(k,v){
+      if(k==='bgmFile'||k==='file'||k==='resultDownload'||k==='resultBlob') return undefined;
+      if(k==='videoUrl' && typeof v==='string' && v.indexOf('blob:')===0) return undefined;
+      if(k==='_thumb'||k==='_thumbLoading'||k==='_thumbFailed'||k==='_cachedDataUrl'||k==='_cachedDataUrlSrc'||k==='_blobFailCount') return undefined;
+      return v;
+    }));
+    _shortsSaveSnapshot(fastSnap);
+    return;
+  } // 변환할 게 없으면 바로 저장(dirty-check 포함)
   // ⚠️ 성능 개선(위와 짝을 이룸): blob 하나당 6초마다 매번 다시 base64로 변환하고 있었는데,
   // 같은 blob URL이면 지난번에 변환해둔 결과(im._cachedDataUrl)를 그대로 재사용하도록 해서,
   // 실제로 새로 추가되거나 바뀐 blob만 변환 작업을 하게 함.
@@ -22598,6 +22616,22 @@ function _shortsGenerate(){
   if(progWrap){progWrap.style.display='';}
   if(dlWrap){dlWrap.style.display='none';}
 
+  // ⚠️ 버그 수정("소리도 안 나고 화면도 마지막 장면만 계속 나온다"): 6초마다 도는 임시저장
+  // setInterval(_shortsSaveDraftAsync)이 렌더링 중에도 멈추지 않고 계속 돌고 있었음 — 완성된
+  // 쇼츠가 있을 때는 변환할 blob이 없어서 G_SHORTS 전체를 그대로 JSON.stringify+localStorage
+  // 저장(동기 작업)하는 "빠른 경로"를 타는데, 이 무거운 동기 작업이 실제 녹화(canvas.captureStream
+  // 자동 모드) 도중 메인 스레드를 막아버리면, 이 파일 다른 곳에 자세히 기록된 것처럼 브라우저가
+  // 자동 프레임 캡처를 스케줄링하지 못해 인코더가 새 프레임을 거의 못 받고(그래서 화면이 멈춘
+  // 것처럼 보이고) 오디오 트랙도 같이 끊기는 원인이 될 수 있음. 렌더링이 진행되는 동안은 이
+  // 임시저장을 아예 건너뛰도록 플래그를 세움(렌더 끝나면 _shortsCleanupRenderGuards에서 해제).
+  G_SHORTS._isRendering = true;
+
+  // ⚠️ 버그 수정(위와 같은 제보): 완성된 쇼츠가 있을 때(G_SHORTS.resultDownload=함수,
+  // G_SHORTS.resultBlob=Blob) 타는 "빠른 경로"가 이 함수/Blob이 섞인 G_SHORTS 객체를 그대로
+  // IndexedDB에 넘겨서, put()이 함수는 구조적 복제가 안 된다며 DataCloneError를 계속 던지고
+  // 있었음(콘솔에 반복적으로 쌓임) — 이건 렌더링 자체를 막지는 않지만, 6초마다 불필요한 예외를
+  // 계속 만들어내는 낭비였음(아래 _shortsSaveDraftAsync 쪽에서 별도로 정리함).
+
   // ⚠️ 버그 수정(치명적, "28초로 만들었는데 실제로는 1분 넘게 나온다"): 원인을 찾아보니, 이
   // 영상은 캔버스를 실시간으로 녹화하는 방식(canvas.captureStream + MediaRecorder)이라, 렌더링
   // 도중에 이 탭이 백그라운드로 밀려나면(다른 탭으로 전환하거나 화면이 꺼지면) 브라우저가 타이머
@@ -22630,6 +22664,7 @@ function _shortsGenerate(){
     document.removeEventListener('visibilitychange', _shortsOnVisChange);
     if(_shortsVisWarnEl){ _shortsVisWarnEl.remove(); _shortsVisWarnEl=null; }
     if(_shortsWakeLock){ try{_shortsWakeLock.release();}catch(e){} _shortsWakeLock=null; }
+    G_SHORTS._isRendering = false; // 렌더링 끝났으니 6초 임시저장 다시 허용
   }
   if(progWrap && !progWrap.querySelector('#shorts-tab-warn-note')){
     var _tabWarnNote=document.createElement('div');
