@@ -37408,6 +37408,22 @@ document.addEventListener('DOMContentLoaded',function(){try{
           _finalPrompt = _finalPrompt.split(_neighborClauseOrig).join(_neighborClauseReplacement);
         }
       }
+      // ⚠️ 버그 수정(치명적, "미완성 3단계에서 가을 날씨로 해달라고 했는데 반영이 안 된다"):
+      // 공사단계별(0~3단계) 프리셋들은 본문 어디에도 "날씨/계절"을 언급하지 않는데도, 실제로는
+      // 입력 사진(예: 눈 쌓인 겨울 완공 사진)에 보이는 눈·앙상한 나무 같은 시각적 조건을 이미지
+      // 생성 모델이 "따로 지시가 없으면 원본 그대로 유지"하려는 강한 경향 때문에 그대로 베껴서,
+      // 뒤에 붙는 사용자의 "가을로 해줘" 요청이 텍스트끼리 충돌하는 게 아니라 원본 사진의 시각적
+      // 관성에 밀려 무시되고 있었음(투시도→조감도의 "문구 충돌" 버그와는 다른 원인). 이런 경우
+      // "우선순위" 문구만으로는 안 먹혀서, 사용자가 추가 요청사항에 계절 키워드를 적으면 이
+      // 공사단계별 프리셋들에 한해 "원본 사진의 눈/날씨는 무시하고 이 계절로 바꿔라"는 명시적
+      // 지시를 강하게 추가함.
+      var _seasonKoToEn = {'봄':'spring (fresh bright green new leaves on all trees, mild pleasant weather, absolutely no snow anywhere)','여름':'summer (lush, deep green, full foliage on all trees, warm weather, clear or partly cloudy sky, absolutely no snow anywhere)','가을':'autumn/fall (trees showing warm orange, red and yellow autumn foliage, some fallen leaves scattered on the ground, crisp cool weather, absolutely no snow anywhere)','겨울':'winter (bare branches or light snow dusting is acceptable, cold weather)'};
+      var _wantsSeasonKo = null;
+      if(_extra){ Object.keys(_seasonKoToEn).forEach(function(k){ if(_extra.indexOf(k)!==-1) _wantsSeasonKo=k; }); }
+      var _stageKeysForSeasonFix=['unfinished_stage0','unfinished_stage1','unfinished_stage2','unfinished_stage3'];
+      if(_wantsSeasonKo && _stageKeysForSeasonFix.indexOf(tab.selK)!==-1){
+        _finalPrompt += ' ⚠⚠⚠⚠ CRITICAL — OVERRIDE THE WEATHER/SEASON VISIBLE IN THE ORIGINAL REFERENCE PHOTO (매우 중요, 사용자가 명시적으로 요청함 — 원본 사진을 그대로 베끼면 명백한 실패): the original reference photo may show snow on the ground/roof/trees, bare winter branches, or some other season\'s weather — you must NOT copy that weather/ground/foliage condition into this result just because it appears in the reference photo. Completely remove any snow, ice, or seasonal condition shown in the reference photo from the ground, roof, scaffolding, construction materials, and every tree/plant, and instead render the weather, sky, ground condition, and all trees/foliage as clearly '+_seasonKoToEn[_wantsSeasonKo]+'. This season change applies only to weather/sky/ground-cover/foliage — the construction-stage condition of the building itself (structure, materials installed so far, work-in-progress state) described earlier in this prompt must still be followed exactly regardless of season.';
+      }
       // ⚠️ 요청 반영("노후된 빨간벽돌 건물, 레퍼런스 없이 돌리면 매번 비슷하게 나오네"): 프리셋
       // 본문에 "매번 무작위로 다르게 골라서 조합하라"고 문구로만 시켜뒀었는데, 실제로는 AI가
       // "무작위로 고르라"는 말을 들어도 결국 자기가 학습한 가장 그럴듯한(확률 높은) 조합 하나로
