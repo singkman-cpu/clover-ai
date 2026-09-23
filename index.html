@@ -3369,7 +3369,7 @@ function _openImageLightbox(url, urls, idx){
   var adjustBtn=document.createElement('button');
   adjustBtn.type='button'; adjustBtn.innerHTML='&#127912; 색상 보정';
   adjustBtn.style.cssText='position:absolute;top:18px;left:22px;height:38px;padding:0 16px;border-radius:19px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;z-index:3;font-family:inherit';
-  adjustBtn.onclick=function(e){ e.stopPropagation(); _openColorAdjustPanel(img.src); };
+  adjustBtn.onclick=function(e){ e.stopPropagation(); _openColorAdjustPanel(img.src, G.wf); };
   function close(){ ov.remove(); document.removeEventListener('keydown', onKey); }
   function showAt(newIdx){
     if(!hasNav) return;
@@ -3406,7 +3406,7 @@ function _openImageLightbox(url, urls, idx){
 
 // ⚠️ 요청 반영("VizMaker의 Adjust Colors처럼 색상 보정 기능"): 결과 이미지를 AI 재생성 없이
 // 캔버스 필터만으로 밝기·대비·채도·색온도를 조절해서 다운로드하는 패널. 크레딧 소모 0.
-function _openColorAdjustPanel(srcUrl){
+function _openColorAdjustPanel(srcUrl, wfForSave){
   var old=document.getElementById('color-adjust-ov'); if(old) old.remove();
   var ov=document.createElement('div');
   ov.id='color-adjust-ov';
@@ -3439,6 +3439,12 @@ function _openColorAdjustPanel(srcUrl){
   var pW=0, pH=0;
   var srcImg=new Image();
   var fullImg=new Image();
+  // ⚠️ 버그 수정("보안 제한으로 다운로드가 안 된다"): 원격 CDN(fal.media/Supabase Storage) 이미지를
+  // crossOrigin 설정 없이 캔버스에 그리면 캔버스가 "오염(tainted)"되어서 toDataURL() 호출이 항상
+  // SecurityError로 막힘 — 이 코드베이스 다른 곳(_mkBuildMarkedReferenceImage 등)에서도 이미 같은
+  // 원인으로 겪었던 문제. crossOrigin='anonymous'를 설정해서 해결(두 CDN 모두 CORS 허용 헤더를 줌).
+  srcImg.crossOrigin='anonymous';
+  fullImg.crossOrigin='anonymous';
 
   function drawPreview(){
     if(!pW||!pH) return;
@@ -3506,27 +3512,37 @@ function _openColorAdjustPanel(srcUrl){
   var errNote=document.createElement('div');
   errNote.style.cssText='display:none;color:#f87171;font-size:11px;margin-top:8px;text-align:center';
   errNote.textContent='보안 제한으로 이 이미지는 브라우저에서 직접 저장할 수 없어요. 화면 캡처로 저장해주세요.';
-  var dlBtn=document.createElement('button'); dlBtn.type='button'; dlBtn.innerHTML='&#11015; 보정본 다운로드';
-  dlBtn.style.cssText='flex:2;padding:11px;border-radius:9px;border:none;background:var(--ac,#00e5cc);color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+
+  // ⚠️ 요청 반영("다운로드만 되지 말고 보정한 걸로 갤러리에 저장도 되게 해줘"): 다운로드 버튼과
+  // "갤러리에 저장" 버튼이 똑같은 보정 캔버스를 만들어야 해서, 그 캔버스 생성 로직을 공용
+  // 함수로 뽑아 재사용함.
+  function _buildCorrectedDataUrl(){
+    if(!fullImg.complete || !fullImg.naturalWidth) return null;
+    var out=document.createElement('canvas');
+    out.width=fullImg.naturalWidth; out.height=fullImg.naturalHeight;
+    var octx=out.getContext('2d');
+    octx.filter='brightness('+(100+vals.brightness)+'%) contrast('+(100+vals.contrast)+'%) saturate('+(100+vals.saturation)+'%)';
+    octx.drawImage(fullImg,0,0);
+    octx.filter='none';
+    if(vals.warmth!==0){
+      octx.save();
+      octx.globalCompositeOperation='overlay';
+      octx.globalAlpha=Math.min(0.5, Math.abs(vals.warmth)/100*0.5);
+      octx.fillStyle = vals.warmth>0 ? '#ff9d3c' : '#3ca0ff';
+      octx.fillRect(0,0,out.width,out.height);
+      octx.restore();
+    }
+    return out.toDataURL('image/jpeg', 0.95);
+  }
+
+  var dlBtn=document.createElement('button'); dlBtn.type='button'; dlBtn.innerHTML='&#11015; 다운로드';
+  dlBtn.style.cssText='flex:1;padding:11px;border-radius:9px;border:1px solid var(--bd2,#2a2a2a);background:var(--c2,#1c1c1c);color:var(--t2,#ccc);font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
   dlBtn.onclick=function(){
-    if(!fullImg.complete || !fullImg.naturalWidth) return;
     try{
-      var out=document.createElement('canvas');
-      out.width=fullImg.naturalWidth; out.height=fullImg.naturalHeight;
-      var octx=out.getContext('2d');
-      octx.filter='brightness('+(100+vals.brightness)+'%) contrast('+(100+vals.contrast)+'%) saturate('+(100+vals.saturation)+'%)';
-      octx.drawImage(fullImg,0,0);
-      octx.filter='none';
-      if(vals.warmth!==0){
-        octx.save();
-        octx.globalCompositeOperation='overlay';
-        octx.globalAlpha=Math.min(0.5, Math.abs(vals.warmth)/100*0.5);
-        octx.fillStyle = vals.warmth>0 ? '#ff9d3c' : '#3ca0ff';
-        octx.fillRect(0,0,out.width,out.height);
-        octx.restore();
-      }
+      var dataUrl=_buildCorrectedDataUrl();
+      if(!dataUrl){ errNote.style.display='block'; return; }
       var a=document.createElement('a');
-      a.href=out.toDataURL('image/jpeg', 0.95);
+      a.href=dataUrl;
       a.download='clover-ai-보정본.jpg';
       document.body.appendChild(a); a.click(); a.remove();
       errNote.style.display='none';
@@ -3534,7 +3550,33 @@ function _openColorAdjustPanel(srcUrl){
       errNote.style.display='block';
     }
   };
-  btnRow.appendChild(resetBtn); btnRow.appendChild(dlBtn);
+
+  // ⚠️ 요청 반영("보정본을 갤러리에 저장도 되게 해줘"): 로컬 다운로드만이 아니라, 다른 결과물처럼
+  // 히스토리(G.HIST)에 새 카드로 추가하고 로그인 상태면 클라우드 갤러리(Supabase)에도 올려서
+  // 새로고침·다른 기기에서도 남아있게 함. 어느 탭(wf)에 저장할지는 이 패널을 연 화면 기준(없으면
+  // 현재 보고 있는 탭)으로 정함.
+  var galBtn=document.createElement('button'); galBtn.type='button'; galBtn.innerHTML='&#128190; 갤러리에 저장';
+  galBtn.style.cssText='flex:2;padding:11px;border-radius:9px;border:none;background:var(--ac,#00e5cc);color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
+  galBtn.onclick=function(){
+    try{
+      var dataUrl=_buildCorrectedDataUrl();
+      if(!dataUrl){ errNote.style.display='block'; return; }
+      errNote.style.display='none';
+      var saveWf = wfForSave || G.wf;
+      if(!G.HIST[saveWf]) G.HIST[saveWf]=[];
+      var newId=Date.now()+Math.random();
+      G.HIST[saveWf].unshift({id:newId, orig:srcUrl, origThumb:null, result:dataUrl, tags:['색상보정'], ai:'', cx:50, fav:false, wf:saveWf, preview:false});
+      if(G.wf===saveWf && typeof renderMain==='function') renderMain(saveWf);
+      if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery(saveWf, newId, dataUrl, srcUrl, '색상 보정', '', null, '');
+      var origLabel=galBtn.innerHTML;
+      galBtn.innerHTML='&#10003; 저장됨';
+      setTimeout(function(){ galBtn.innerHTML=origLabel; }, 1600);
+    }catch(e){
+      errNote.style.display='block';
+    }
+  };
+
+  btnRow.appendChild(resetBtn); btnRow.appendChild(dlBtn); btnRow.appendChild(galBtn);
   panel.appendChild(btnRow);
   panel.appendChild(errNote);
 
@@ -35062,7 +35104,7 @@ function _galleryZoomShow(list, idx){
     var adjB=document.createElement('button');
     adjB.innerHTML='&#127912; 색상보정';
     adjB.style.cssText='padding:10px 20px;background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.4);color:var(--ac);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-    adjB.onclick=function(e){ e.stopPropagation(); _openColorAdjustPanel(src); };
+    adjB.onclick=function(e){ e.stopPropagation(); _openColorAdjustPanel(src, it.wf); };
     btns.appendChild(adjB);
 
     var upB=document.createElement('button');
@@ -38745,7 +38787,7 @@ function _mobGalleryShowSingle(item, idx){
     var adjB=document.createElement('button');
     adjB.innerHTML='&#127912; 색상보정';
     adjB.style.cssText='padding:10px 20px;background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.4);color:var(--ac);border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-    adjB.onclick=function(){ _openColorAdjustPanel(url); };
+    adjB.onclick=function(){ _openColorAdjustPanel(url, item.wf); };
     btns.appendChild(adjB);
 
     var upB=document.createElement('button');
