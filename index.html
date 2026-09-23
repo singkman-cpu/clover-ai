@@ -3232,6 +3232,55 @@ function _imgLoadWithRetry(imgEl, src, maxRetries){
   tryLoad();
 }
 // 이미지를 화면 전체 크게 보여주는 라이트박스 — 레퍼런스 썸네일 등 어디서든 재사용
+// ⚠️ 요청 반영("확대축소 비포에프터가 아니더라도 이미지생성된거에서 바로 확대축소도 휠마우스로
+// 되게해줘"): 메인 결과 피드의 결과 카드(mediaBox, Before/After 비교 카드 포함)는 라이트박스와
+// 별개로 그 자리에서 바로(키 없이) 휠로 확대/축소할 수 있어야 해서 만든 전용 함수 — Before/After
+// 비교 슬라이더(clip-path 드래그) 로직과 완전히 분리되어 있어(이 함수는 이미지 자체에 CSS
+// transform:scale만 적용) 두 기능이 동시에 정상 동작함. mediaBox 안의 <img> 전체(BEFORE+AFTER
+// 또는 단일 이미지)를 같은 배율로 함께 확대해서 비교 정렬이 흐트러지지 않게 함.
+// 실제 휠줌 로직 코어 — container 위에서 휠을 돌리면 targetEls(배경/이미지 등, 여러 개면 항상
+// 같은 배율로 함께 확대)을 커서 위치 기준으로 확대/축소함. Before/After 비교(클립패스나 드래그
+// 방식과 무관하게 대상 엘리먼트에 transform만 적용)와 완전히 분리돼 있어 두 기능이 동시에 됨.
+function _wireWheelZoomCore(container, getTargets, opts){
+  opts=opts||{};
+  var excludeSel=opts.excludeDblClick; // 더블클릭 리셋을 무시할 셀렉터(예: 슬라이더 손잡이)
+  var zScale=1;
+  container.addEventListener('wheel',function(e){
+    var targets=getTargets();
+    if(!targets||!targets.length) return;
+    e.preventDefault();
+    var rect=container.getBoundingClientRect();
+    if(!rect.width||!rect.height) return;
+    var ox=(((e.clientX-rect.left)/rect.width)*100).toFixed(1);
+    var oy=(((e.clientY-rect.top)/rect.height)*100).toFixed(1);
+    var delta=e.deltaY>0?-0.15:0.15;
+    var newScale=Math.max(1,Math.min(4,zScale+delta));
+    if(newScale===zScale) return;
+    zScale=newScale;
+    for(var i=0;i<targets.length;i++){
+      targets[i].style.transformOrigin=ox+'% '+oy+'%';
+      targets[i].style.transform= zScale>1 ? ('scale('+zScale+')') : '';
+    }
+    container.style.cursor = zScale>1 ? 'zoom-out' : (opts.defaultCursor||'');
+  },{passive:false});
+  container.addEventListener('dblclick',function(e){
+    if(excludeSel && e.target && e.target.closest && e.target.closest(excludeSel)) return;
+    if(zScale===1) return;
+    zScale=1;
+    var targets=getTargets();
+    for(var i=0;i<targets.length;i++){ targets[i].style.transform=''; targets[i].style.transformOrigin=''; }
+    container.style.cursor = opts.defaultCursor||'';
+  });
+  return { reset:function(){ zScale=1; var targets=getTargets(); for(var i=0;i<targets.length;i++){ targets[i].style.transform=''; targets[i].style.transformOrigin=''; } } };
+}
+function _wireMediaBoxWheelZoom(mediaBox){
+  try{
+    var imgs=mediaBox.querySelectorAll('img');
+    if(!imgs.length) return;
+    _wireWheelZoomCore(mediaBox, function(){ return mediaBox.querySelectorAll('img'); }, {excludeDblClick:'.cmp-ln'});
+  }catch(e){}
+}
+
 // ⚠️ 요청 반영: "렌더링·업로드·갤러리·즐겨찾기 이미지 전체에 확대/축소를 쉽게 넣어달라" —
 // 라이트박스(_openImageLightbox)랑 갤러리 확대보기(_galleryZoomShow)가 서로 다른 함수라
 // 각자 따로 구현하면 두 배로 손이 가고 나중에 또 하나만 고쳐지는 실수가 나기 쉬움 — 확대/
@@ -3426,14 +3475,16 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
   title.innerHTML='&#127912; 색상 보정 <span style="color:var(--m2,#888);font-weight:400;font-size:11.5px">— AI 재생성 없이, 크레딧 소모 없이 톤만 조절해요</span>';
   title.style.cssText='color:#fff;font-size:14px;font-weight:700;margin-bottom:14px;text-align:center';
 
+  // ⚠️ 요청 반영("이미지도 크게해줘 잘안보이자나"): 미리보기가 너무 작아서 보정 결과를 확인하기
+  // 어려웠음 — 창 크기 대비 최대한 크게 보이도록 폭/높이 상한을 크게 늘림.
   var canvasWrap=document.createElement('div');
-  canvasWrap.style.cssText='max-width:min(880px,92vw);max-height:56vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;border-radius:10px;overflow:hidden';
+  canvasWrap.style.cssText='max-width:min(1400px,94vw);max-height:72vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;border-radius:10px;overflow:hidden';
   var canvas=document.createElement('canvas');
-  canvas.style.cssText='max-width:100%;max-height:56vh;display:block';
+  canvas.style.cssText='max-width:100%;max-height:72vh;display:block';
   canvasWrap.appendChild(canvas);
 
   var panel=document.createElement('div');
-  panel.style.cssText='width:min(440px,92vw);margin-top:16px;background:var(--card,#141414);border:1px solid var(--bd2,#2a2a2a);border-radius:12px;padding:16px;box-sizing:border-box';
+  panel.style.cssText='width:min(460px,92vw);margin-top:16px;background:var(--card,#141414);border:1px solid var(--bd2,#2a2a2a);border-radius:12px;padding:16px;box-sizing:border-box;max-height:32vh;overflow-y:auto';
 
   var vals={brightness:0, contrast:0, saturation:0, warmth:0};
   var pW=0, pH=0;
@@ -3446,6 +3497,41 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
   srcImg.crossOrigin='anonymous';
   fullImg.crossOrigin='anonymous';
 
+  // ⚠️ 요청 반영("색상조정에 커브도 넣어줄수있음 넣어줘"): 밝기/대비/채도/색온도는 전체 톤을
+  // 한 방향으로만 밀지만, 커브는 어두운 곳/중간톤/밝은 곳을 각각 따로 올리고 내릴 수 있어서
+  // 더 세밀한 보정이 가능함(예: 그림자만 밝히고 하이라이트는 그대로 두기). 항상 (0,0)과
+  // (255,255) 두 끝점은 고정하고, 그 사이에 점을 추가/이동/삭제하면서 Catmull-Rom 스플라인으로
+  // 부드러운 곡선을 만들고, 그 곡선을 256단계 룩업테이블(LUT)로 미리 계산해서 모든 픽셀의
+  // R/G/B에 동일하게 적용함(포토샵의 "RGB 통합 채널" 커브와 같은 방식).
+  var curvePoints=[{x:0,y:0},{x:255,y:255}];
+  var curveLUT=null;
+  function rebuildCurveLUT(){
+    var pts=curvePoints.slice().sort(function(a,b){return a.x-b.x;});
+    if(pts.length<2){ curveLUT=null; return; }
+    var isIdentity = pts.length===2 && pts[0].x===0&&pts[0].y===0&&pts[1].x===255&&pts[1].y===255;
+    if(isIdentity){ curveLUT=null; return; }
+    var lut=new Uint8ClampedArray(256);
+    for(var x=0;x<256;x++){
+      var i=0;
+      while(i<pts.length-2 && pts[i+1].x<x) i++;
+      var p0=pts[Math.max(0,i-1)], p1=pts[i], p2=pts[Math.min(pts.length-1,i+1)], p3=pts[Math.min(pts.length-1,i+2)];
+      var span=(p2.x-p1.x)||1;
+      var t=Math.max(0,Math.min(1,(x-p1.x)/span));
+      var t2=t*t, t3=t2*t;
+      var y=0.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3);
+      lut[x]=Math.max(0,Math.min(255,Math.round(y)));
+    }
+    curveLUT=lut;
+  }
+  function applyCurveLUT(ctx,w,h){
+    if(!curveLUT) return;
+    var imgData=ctx.getImageData(0,0,w,h);
+    var d=imgData.data;
+    for(var i=0;i<d.length;i+=4){
+      d[i]=curveLUT[d[i]]; d[i+1]=curveLUT[d[i+1]]; d[i+2]=curveLUT[d[i+2]];
+    }
+    ctx.putImageData(imgData,0,0);
+  }
   function drawPreview(){
     if(!pW||!pH) return;
     var ctx=canvas.getContext('2d');
@@ -3453,6 +3539,7 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
     ctx.filter='brightness('+(100+vals.brightness)+'%) contrast('+(100+vals.contrast)+'%) saturate('+(100+vals.saturation)+'%)';
     ctx.drawImage(srcImg,0,0,pW,pH);
     ctx.filter='none';
+    applyCurveLUT(ctx,pW,pH);
     if(vals.warmth!==0){
       ctx.save();
       ctx.globalCompositeOperation='overlay';
@@ -3463,7 +3550,7 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
     }
   }
   srcImg.onload=function(){
-    var maxW=800, maxH=480;
+    var maxW=1600, maxH=900;
     var scale=Math.min(1, maxW/srcImg.naturalWidth, maxH/srcImg.naturalHeight);
     pW=Math.max(1,Math.round(srcImg.naturalWidth*scale));
     pH=Math.max(1,Math.round(srcImg.naturalHeight*scale));
@@ -3492,6 +3579,108 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
     return {row:row, input:input, lblVal:lblVal};
   }
 
+  // ── 커브 에디터 UI ──────────────────────────────────────────────
+  var curveWrap=document.createElement('div');
+  curveWrap.style.cssText='margin-bottom:16px';
+  var curveLbl=document.createElement('div');
+  curveLbl.style.cssText='display:flex;justify-content:space-between;align-items:center;color:var(--t2,#ccc);font-size:12px;margin-bottom:6px';
+  curveLbl.innerHTML='<span>커브 <span style="color:var(--m2,#888);font-weight:400;font-size:10.5px">(점을 클릭해서 추가, 드래그로 이동, 더블클릭으로 삭제)</span></span>';
+  var curveResetLink=document.createElement('span');
+  curveResetLink.textContent='초기화';
+  curveResetLink.style.cssText='color:var(--ac,#00e5cc);cursor:pointer;font-weight:700;flex-shrink:0;margin-left:8px';
+  curveLbl.appendChild(curveResetLink);
+  curveWrap.appendChild(curveLbl);
+  var CV_SZ=220;
+  var curveCanvas=document.createElement('canvas');
+  curveCanvas.width=CV_SZ; curveCanvas.height=CV_SZ;
+  curveCanvas.style.cssText='width:100%;max-width:'+CV_SZ+'px;aspect-ratio:1/1;background:#0a0a0a;border-radius:8px;border:1px solid var(--bd2,#2a2a2a);cursor:crosshair;display:block;margin:0 auto';
+  curveWrap.appendChild(curveCanvas);
+  panel.appendChild(curveWrap);
+
+  function toCanvasXY(px){ return {cx: (px.x/255)*CV_SZ, cy: CV_SZ-(px.y/255)*CV_SZ}; }
+  function fromCanvasXY(cx,cy){
+    return { x:Math.max(0,Math.min(255,Math.round((cx/CV_SZ)*255))), y:Math.max(0,Math.min(255,Math.round((1-cy/CV_SZ)*255))) };
+  }
+  function drawCurveEditor(){
+    var cctx=curveCanvas.getContext('2d');
+    cctx.clearRect(0,0,CV_SZ,CV_SZ);
+    // 격자
+    cctx.strokeStyle='rgba(255,255,255,.08)'; cctx.lineWidth=1;
+    for(var g=1;g<4;g++){
+      var p=g*CV_SZ/4;
+      cctx.beginPath(); cctx.moveTo(p,0); cctx.lineTo(p,CV_SZ); cctx.stroke();
+      cctx.beginPath(); cctx.moveTo(0,p); cctx.lineTo(CV_SZ,p); cctx.stroke();
+    }
+    // 기준 대각선(변화 없음)
+    cctx.strokeStyle='rgba(255,255,255,.18)'; cctx.setLineDash([3,3]);
+    cctx.beginPath(); cctx.moveTo(0,CV_SZ); cctx.lineTo(CV_SZ,0); cctx.stroke();
+    cctx.setLineDash([]);
+    // 실제 커브
+    rebuildCurveLUT();
+    cctx.strokeStyle='#00e5cc'; cctx.lineWidth=2; cctx.beginPath();
+    for(var x=0;x<=255;x++){
+      var y = curveLUT ? curveLUT[x] : x;
+      var pt=toCanvasXY({x:x,y:y});
+      if(x===0) cctx.moveTo(pt.cx,pt.cy); else cctx.lineTo(pt.cx,pt.cy);
+    }
+    cctx.stroke();
+    // 조절점
+    curvePoints.forEach(function(p){
+      var cp=toCanvasXY(p);
+      cctx.beginPath(); cctx.arc(cp.cx,cp.cy,5,0,Math.PI*2);
+      cctx.fillStyle='#fff'; cctx.fill();
+      cctx.strokeStyle='#00e5cc'; cctx.lineWidth=2; cctx.stroke();
+    });
+    drawPreview();
+  }
+  var dragPt=null;
+  function ptAtCanvasPos(cx,cy){
+    for(var i=0;i<curvePoints.length;i++){
+      var cp=toCanvasXY(curvePoints[i]);
+      if(Math.hypot(cp.cx-cx,cp.cy-cy)<=10) return curvePoints[i];
+    }
+    return null;
+  }
+  function curveEvtPos(e){
+    var rect=curveCanvas.getBoundingClientRect();
+    var scaleX=CV_SZ/rect.width, scaleY=CV_SZ/rect.height;
+    var clientX=e.touches?e.touches[0].clientX:e.clientX;
+    var clientY=e.touches?e.touches[0].clientY:e.clientY;
+    return {cx:(clientX-rect.left)*scaleX, cy:(clientY-rect.top)*scaleY};
+  }
+  curveCanvas.addEventListener('mousedown',function(e){
+    var pos=curveEvtPos(e);
+    var hit=ptAtCanvasPos(pos.cx,pos.cy);
+    if(hit){ dragPt=hit; return; }
+    if(curvePoints.length>=8) return; // 점 너무 많아지는 것 방지
+    var np=fromCanvasXY(pos.cx,pos.cy);
+    curvePoints.push(np);
+    dragPt=np;
+    drawCurveEditor();
+  });
+  window.addEventListener('mousemove',function(e){
+    if(!dragPt) return;
+    var pos=curveEvtPos(e);
+    var np=fromCanvasXY(pos.cx,pos.cy);
+    var isLeftEnd = dragPt.x===0;
+    var isRightEnd = dragPt.x===255;
+    dragPt.y=np.y;
+    if(!isLeftEnd && !isRightEnd) dragPt.x=Math.max(1,Math.min(254,np.x)); // 끝점은 x 고정, 중간점은 0/255와 안 겹치게
+    drawCurveEditor();
+  });
+  window.addEventListener('mouseup',function(){ dragPt=null; });
+  curveCanvas.addEventListener('dblclick',function(e){
+    var pos=curveEvtPos(e);
+    var hit=ptAtCanvasPos(pos.cx,pos.cy);
+    if(!hit) return;
+    var sorted=curvePoints.slice().sort(function(a,b){return a.x-b.x;});
+    if(hit===sorted[0]||hit===sorted[sorted.length-1]) return; // 양 끝점은 삭제 불가
+    curvePoints=curvePoints.filter(function(p){return p!==hit;});
+    drawCurveEditor();
+  });
+  curveResetLink.onclick=function(){ curvePoints=[{x:0,y:0},{x:255,y:255}]; drawCurveEditor(); };
+  drawCurveEditor();
+
   var sliders=[
     mkSlider('밝기','brightness',-60,60),
     mkSlider('대비','contrast',-60,60),
@@ -3507,7 +3696,8 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
   resetBtn.onclick=function(){
     vals={brightness:0,contrast:0,saturation:0,warmth:0};
     sliders.forEach(function(s){ s.input.value=0; s.lblVal.textContent='0'; });
-    drawPreview();
+    curvePoints=[{x:0,y:0},{x:255,y:255}];
+    drawCurveEditor();
   };
   var errNote=document.createElement('div');
   errNote.style.cssText='display:none;color:#f87171;font-size:11px;margin-top:8px;text-align:center';
@@ -3524,6 +3714,7 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
     octx.filter='brightness('+(100+vals.brightness)+'%) contrast('+(100+vals.contrast)+'%) saturate('+(100+vals.saturation)+'%)';
     octx.drawImage(fullImg,0,0);
     octx.filter='none';
+    applyCurveLUT(octx,out.width,out.height);
     if(vals.warmth!==0){
       octx.save();
       octx.globalCompositeOperation='overlay';
@@ -24287,8 +24478,8 @@ function buildUpscaleSliders(eng,container){
     // 모델인데, 매그니픽처럼 "재질감을 살짝 더 사실적으로 새로 그려주는" 느낌까지는 부족할 수
     // 있음 — Topaz 라인업에는 실제로 그 역할을 하는 'Redefine' 모델이 따로 있어서(creativity를
     // 낮게 주면 구도·형태는 그대로 두고 재질 표현만 살짝 더 사실적으로 다시 그려줌), 두 모드를
-    // 직접 고를 수 있게 토글을 추가함. Redefine은 creativity가 높아지면 Creative Upscaler처럼
-    // 구도가 흔들릴 위험이 있어서, 슬라이더 범위를 1~3(전체 6단계 중 낮은 쪽)으로만 제한함.
+    // 직접 고를 수 있게 토글을 추가함. Redefine의 creativity는 fal.ai 스펙상 1~6까지 지원되므로
+    // 슬라이더도 전체 범위(1~6)를 노출함 — 다만 4단계 이상은 구도가 흔들릴 수 있어 설명 문구로 안내.
     if(!G.tabs.upscale) G.tabs.upscale={};
     var utT=G.tabs.upscale;
     if(!utT.topazModel) utT.topazModel='Standard MAX';
@@ -24330,9 +24521,9 @@ function buildUpscaleSliders(eng,container){
       var rVal=document.createElement('span');rVal.style.cssText='float:right;color:var(--ac);font-weight:700';rVal.textContent=utT.topazCreativity;
       var rLbl=dv('lbl');rLbl.textContent='재질 사실감 강도';rLbl.appendChild(rVal);
       rWrap.appendChild(rLbl);
-      var rDesc=dv('');rDesc.style.cssText='font-size:10px;color:var(--m2);margin-bottom:4px';rDesc.textContent='낮을수록 원본에 가깝게, 높을수록 재질을 더 적극적으로 다시 그림 (구도가 흔들릴 위험이 있어 낮은 구간으로 제한해뒀어요)';
+      var rDesc=dv('');rDesc.style.cssText='font-size:10px;color:var(--m2);margin-bottom:4px';rDesc.textContent='낮을수록 원본에 가깝게, 높을수록 재질을 더 적극적으로 다시 그림 (4단계 이상은 구도가 흔들릴 수 있어요)';
       rWrap.appendChild(rDesc);
-      var rRng=document.createElement('input');rRng.type='range';rRng.min=1;rRng.max=3;rRng.step=1;rRng.value=utT.topazCreativity;
+      var rRng=document.createElement('input');rRng.type='range';rRng.min=1;rRng.max=6;rRng.step=1;rRng.value=utT.topazCreativity;
       rRng.style.cssText='width:100%';
       rRng.oninput=function(){ utT.topazCreativity=parseInt(rRng.value,10); rVal.textContent=utT.topazCreativity; };
       rWrap.appendChild(rRng);
@@ -27127,7 +27318,12 @@ function addHistEl(item, scroll, targetHs, atBottom){
     // 업스케일 엔진 표시는 우상단 ptags에 통합됨
 
 
-    // 확대/축소: +/- 버튼 제거, Z키+마우스휠로 동작
+    // ⚠️ 요청 반영("비포에프터가 아니더라도 이미지생성된거에서 바로 확대축소도 휠마우스로
+    // 되게해줘"): 예전엔 Z키를 누른 채로만 휠 확대가 됐음(그것도 전체 화면 확대) — 이제는 이
+    // 카드의 사진 영역(mediaBox) 위에서 키 없이 바로 휠로 그 사진만 확대/축소되게 함. Before/After
+    // 비교 중(hasBefore)에도 BEFORE·AFTER 이미지를 함께 같은 배율로 확대해서 슬라이더 비교와
+    // 동시에 사용 가능함.
+    _wireMediaBoxWheelZoom(mediaBox);
     } // end else (non-video)
 
     // ⚠️ 요청 반영("계속 캡쳐해서 알려주는 것 말고 더 좋은 방법"): AI가 방금 만든 이미지를
@@ -27420,6 +27616,22 @@ function addHistEl(item, scroll, targetHs, atBottom){
       })(item);
       sdw.addEventListener('mousedown',function(e){e.stopPropagation();},false);
       sebar.insertBefore(sdw, sebar.firstChild);
+    }
+
+    // ⚠️ 요청 반영("색상보정도 갤러리탭에서 눌러서 하는거말고도 전체적으로 이미지생성되는거
+    // 하단에 색상조정할수있게해주고"): 지금까지 색상 보정 버튼은 갤러리 탭 카드에만 있었음 —
+    // 방금 만든 결과 카드(렌더링/AI편집/업스케일 등 모든 탭 공통)에도 똑같이 노출함.
+    if(item.result && !item.loading && !item.preview && item.wf!=='video' && item.wf!=='shorts' && item.wf!=='world3d'){
+      var sadj=mk('button','se-btn');sadj.type='button';sadj.innerHTML='&#127912; 색상 보정';sadj.title='밝기·대비·채도·색온도·커브 조정 (크레딧 소모 없음)';
+      sadj.style.cssText='background:rgba(168,85,247,.12);border-color:rgba(168,85,247,.4);color:#c4b5fd;padding:4px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid;font-family:inherit';
+      (function(theItem){
+        sadj.addEventListener('click',function(e){
+          e.stopPropagation();
+          _openColorAdjustPanel(theItem.result, theItem.wf);
+        },false);
+      })(item);
+      sadj.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      sebar.appendChild(sadj);
     }
 
     // Tags — 영상이면 엔진명 + 해상도 맨 앞에 표시
@@ -32767,6 +32979,10 @@ function _buildBeforeAfterSlider(beforeUrl, afterUrl, label){
   var afterTag=document.createElement('div'); afterTag.textContent='AFTER';
   afterTag.style.cssText='position:absolute;top:14px;right:14px;background:rgba(0,229,204,.92);color:#000;font-size:10px;font-weight:800;padding:4px 9px;border-radius:5px;letter-spacing:.05em;pointer-events:none;z-index:2';
   wrap.appendChild(afterImg); wrap.appendChild(beforeImg); wrap.appendChild(beforeTag); wrap.appendChild(afterTag); wrap.appendChild(line);
+  // ⚠️ 요청 반영("비교하면서 확대축소가 안된다, 마우스 휠로 되게 해줘"): 드래그로 좌우 비교하는
+  // 동작과는 완전히 분리해서(같은 wrap 위에서 휠은 확대/축소, 마우스 드래그는 그대로 비교선 이동),
+  // beforeImg/afterImg 배경 두 장을 항상 같은 배율로 함께 확대해서 비교 정렬이 어긋나지 않게 함.
+  _wireWheelZoomCore(wrap, function(){ return [beforeImg, afterImg]; }, {defaultCursor:'ew-resize'});
   if(label){
     var cap=document.createElement('div');
     cap.style.cssText='position:absolute;left:0;right:0;bottom:0;padding:40px 28px 20px;background:linear-gradient(transparent,rgba(0,0,0,.82));color:#fff;font-size:13px;font-weight:700;letter-spacing:-.01em;pointer-events:none';
