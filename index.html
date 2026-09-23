@@ -24254,9 +24254,57 @@ function updW3DPriceLabel(){
 function buildUpscaleSliders(eng,container){
   if(!container)return;
   if(eng==='topaz'){
+    // ⚠️ 요청 반영("매그니픽처럼 원본에서 아주 조금 더 사실적으로 바꿔서 화질 개선은 안 돼?"):
+    // 기본값 'Standard MAX'는 구조·사물은 절대 안 건드리고 디테일·선명도만 보강하는 안전한
+    // 모델인데, 매그니픽처럼 "재질감을 살짝 더 사실적으로 새로 그려주는" 느낌까지는 부족할 수
+    // 있음 — Topaz 라인업에는 실제로 그 역할을 하는 'Redefine' 모델이 따로 있어서(creativity를
+    // 낮게 주면 구도·형태는 그대로 두고 재질 표현만 살짝 더 사실적으로 다시 그려줌), 두 모드를
+    // 직접 고를 수 있게 토글을 추가함. Redefine은 creativity가 높아지면 Creative Upscaler처럼
+    // 구도가 흔들릴 위험이 있어서, 슬라이더 범위를 1~3(전체 6단계 중 낮은 쪽)으로만 제한함.
+    if(!G.tabs.upscale) G.tabs.upscale={};
+    var utT=G.tabs.upscale;
+    if(!utT.topazModel) utT.topazModel='Standard MAX';
+    if(utT.topazCreativity==null) utT.topazCreativity=1;
+    if(utT.topazTexture==null) utT.topazTexture=2;
+
     var note=dv('note');
-    note.innerHTML='<strong style="color:var(--ac)">Topaz Upscaler</strong><span style="background:rgba(0,229,204,.15);color:var(--ac);font-size:9px;padding:1px 6px;border-radius:3px;margin-left:6px">High Fidelity V2</span><br>전문가용 정밀 업스케일. 재질 복원, 에지 선명도, 원본 구조 완벽 보존. 건축·인테리어 렌더에 최적화.';
+    note.innerHTML='<strong style="color:var(--ac)">Topaz Upscaler</strong><br>결과물 크기 제한이 없어서(2x/4x 그대로 적용, 4096px대 원본이면 4x 시 약 8K까지도 가능) 축소 후 재확대 없이 진짜 원본 해상도 기준으로 업스케일돼요.';
     container.appendChild(note);
+
+    var modeWrap=dv('ss');modeWrap.innerHTML='<div class="lbl">보강 방식</div>';
+    var modeRow=dv('');modeRow.style.cssText='display:flex;flex-direction:column;gap:6px';
+    [
+      ['Standard MAX','디테일·선명도만 보강 (기본)','구조·재질·사물은 절대 안 바뀌고, 선명도·미세 디테일만 실제로 채워 넣어요. 가장 안전한 기본값.'],
+      ['Redefine','재질감도 살짝 더 사실적으로 (매그니픽 느낌)','구도·형태는 그대로 유지하면서, 재질 표현(질감·반사·마감재의 사실감)을 매그니픽처럼 한 단계 더 사실적으로 다시 그려줘요. 아주 낮은 강도로만 제한해뒀어요.']
+    ].forEach(function(m){
+      var isOn=utT.topazModel===m[0];
+      var b=mk('button','');b.type='button';
+      b.style.cssText='padding:8px 10px;border-radius:8px;border:1.5px solid '+(isOn?'var(--acb)':'var(--bd2)')+';background:'+(isOn?'var(--acg)':'var(--card)')+';cursor:pointer;font-family:inherit;text-align:left';
+      b.innerHTML='<div style="font-size:12px;font-weight:700;color:'+(isOn?'var(--ac)':'var(--t)')+'">'+m[1]+'</div>'+
+        '<div style="font-size:10px;color:var(--m2);margin-top:2px;line-height:1.4">'+m[2]+'</div>';
+      b.onclick=function(){
+        utT.topazModel=m[0];
+        var sl=document.getElementById('upscale-sl-area');
+        if(sl){sl.innerHTML='';buildUpscaleSliders('topaz',sl);}
+      };
+      modeRow.appendChild(b);
+    });
+    modeWrap.appendChild(modeRow);
+    container.appendChild(modeWrap);
+
+    if(utT.topazModel==='Redefine'){
+      var rWrap=dv('ss');
+      var rVal=document.createElement('span');rVal.style.cssText='float:right;color:var(--ac);font-weight:700';rVal.textContent=utT.topazCreativity;
+      var rLbl=dv('lbl');rLbl.textContent='재질 사실감 강도';rLbl.appendChild(rVal);
+      rWrap.appendChild(rLbl);
+      var rDesc=dv('');rDesc.style.cssText='font-size:10px;color:var(--m2);margin-bottom:4px';rDesc.textContent='낮을수록 원본에 가깝게, 높을수록 재질을 더 적극적으로 다시 그림 (구도가 흔들릴 위험이 있어 낮은 구간으로 제한해뒀어요)';
+      rWrap.appendChild(rDesc);
+      var rRng=document.createElement('input');rRng.type='range';rRng.min=1;rRng.max=3;rRng.step=1;rRng.value=utT.topazCreativity;
+      rRng.style.cssText='width:100%';
+      rRng.oninput=function(){ utT.topazCreativity=parseInt(rRng.value,10); rVal.textContent=utT.topazCreativity; };
+      rWrap.appendChild(rRng);
+      container.appendChild(rWrap);
+    }
   } else if(eng==='clarity'){
     // ⚠️ 요청 반영("매그니픽처럼 원본은 그대로 두고 재질만 더 사실적으로 디테일하게"): 매그니픽이
     // 쓰는 것과 같은 계열의 오픈소스 모델(philz1337x/clarity-upscaler, "무료 매그니픽 대안"으로
@@ -29910,12 +29958,29 @@ function _checkAndResizeForUpscaler(url, ldst, eng, scaleFactor, onDone, onErr){
     if(eng==='topaz'){
       // ── Topaz Upscaler (fal.ai) ───────────────────────────────────
       if(ldst)ldst.textContent='Topaz 업스케일 중 (20~60초)...';
-      // 건축·렌더 최적: CGI 모델 우선, High Fidelity V2 폴백
-      falRun('fal-ai/topaz/upscale/image',{
+      // ⚠️ 요청 반영("토파즈는 거의 이미지 변화 없이 그냥 픽셀수만 키워준다"): 'High Fidelity V2'는
+      // Topaz 라인업 중에서도 일부러 원본을 거의 그대로 보존하도록 설계된(변화를 최소화하는) 모델이라
+      // "디테일이 실제로 살아나는 업스케일"을 기대한 사용자 입장에선 "그냥 커지기만 했다"고 느껴질
+      // 수밖에 없었음 — 이 엔드포인트는 사실 'Standard MAX'·'Redefine'·'Wonder' 같은 생성형(디테일을
+      // 실제로 새로 그려 넣는) 모델도 지원해서, 사실감 있는 디테일 보강이 필요한 일반 용도엔
+      // 'Standard MAX'가 더 적합함(구조/사물을 새로 창작하는 Redefine·Wonder만큼 과감하진 않으면서도
+      // High Fidelity보다 훨씬 뚜렷하게 선명해짐). sharpen·denoise도 함께 살짝 올려서 체감 화질을 더 높임.
+      var _tzModel = (G.tabs.upscale && G.tabs.upscale.topazModel) || 'Standard MAX';
+      var _tzParams = {
         image_url: imgUrl,
         upscale_factor: Math.min(4, scaleFactor||2),
-        model: 'High Fidelity V2'
-      }, function(d){
+        model: _tzModel,
+        sharpen: 0.35,
+        denoise: 0.15
+      };
+      if(_tzModel==='Redefine'){
+        // ⚠️ 요청 반영("매그니픽처럼 재질감도 살짝 더 사실적으로"): Redefine 모델 전용 파라미터 —
+        // creativity를 낮게(1~3) 줘서 구도·형태는 그대로 두고 재질 표현만 살짝 더 사실적으로 강화.
+        _tzParams.creativity = (G.tabs.upscale && G.tabs.upscale.topazCreativity) || 1;
+        _tzParams.texture = (G.tabs.upscale && G.tabs.upscale.topazTexture) || 2;
+        _tzParams.prompt = 'Keep the exact same composition, camera angle, structure, objects and layout — only make the surface materials, textures and reflections look slightly more realistic and true-to-life, like a high-quality real photograph.';
+      }
+      falRun('fal-ai/topaz/upscale/image', _tzParams, function(d){
         var url=falExtractImageUrl(d);
         if(url){urlToDataUrl(url,function(r){onDone(r||url);});return;}
         console.warn('[Topaz] URL 없음 → Clarity 폴백');
@@ -31162,7 +31227,17 @@ function procImgWithTask(task, onDone, onErr){
       if(ldst)ldst.textContent='Topaz 업스케일 중 (10~30초)...';
       _doUpload(img, function(imgUrl){
         var _sf={'2x':2,'4x':4}[task.scale||'2x']||2;
-        falRun('fal-ai/topaz/upscale/image',{image_url:imgUrl,upscale_factor:_sf,model:'High Fidelity V2'},
+        // ⚠️ 요청 반영("토파즈는 거의 이미지 변화 없이 그냥 픽셀수만 키워준다"): 위 다른 Topaz 호출과
+        // 동일한 이유로 'High Fidelity V2'(변화 최소화 모델) 대신 'Standard MAX'(디테일을 실제로
+        // 보강하는 모델)로 교체 + sharpen/denoise 추가.
+        var _tzModel2 = (G.tabs.upscale && G.tabs.upscale.topazModel) || 'Standard MAX';
+        var _tzParams2 = {image_url:imgUrl,upscale_factor:_sf,model:_tzModel2,sharpen:0.35,denoise:0.15};
+        if(_tzModel2==='Redefine'){
+          _tzParams2.creativity = (G.tabs.upscale && G.tabs.upscale.topazCreativity) || 1;
+          _tzParams2.texture = (G.tabs.upscale && G.tabs.upscale.topazTexture) || 2;
+          _tzParams2.prompt = 'Keep the exact same composition, camera angle, structure, objects and layout — only make the surface materials, textures and reflections look slightly more realistic and true-to-life, like a high-quality real photograph.';
+        }
+        falRun('fal-ai/topaz/upscale/image', _tzParams2,
           function(d){var u=falExtractImageUrl(d);if(u)onDone(u);else onErr('Topaz URL 없음');},
           function(err){console.warn('[Topaz 실패]→Clarity',err);runClarityUpscale(img,_sf,onDone,onErr);}
         , _bill);
