@@ -20248,19 +20248,18 @@ function sbRender(p){
   var vwHint=dv('');vwHint.style.cssText='font-size:10px;color:var(--m2);margin:-4px 0 10px;line-height:1.5';
   vwHint.innerHTML='캡처한 배경을 참고 이미지로 넣은 뒤, 아래 프리셋에서 눈높이 컷이면 <b style="color:var(--t2)">"실제 대지 배경 합성 - 투시도(눈높이)"</b>, 항공뷰 컷이면 <b style="color:var(--t2)">"실제 대지 배경 합성 - 조감도(항공뷰)"</b>를 선택하세요 — 업로드한 설계안 건물은 그대로 두고 배경만 실제 대지 환경으로 바꿔줘요.';
   p.appendChild(vwHint);
-  // ⚠️ 요청 반영("카카오맵/네이버맵 좌표로 위치 잡아서 주변 건물 인식할 수 없나"): 로드뷰 화면
-  // 자체를 캡처해서 저장·재사용하는 건 약관상 애매해서 안 만들었지만, 주소 검색으로 좌표를 잡고
-  // 위성/하이브리드 지도로 "주변에 어떤 건물이 어디 있는지" 눈으로 확인하는 건 지도 API의 정상
-  // 사용 범위라 문제없음 — 로드뷰 캡처하러 가기 전에 먼저 여기서 방향·배치를 파악하는 용도.
-  // 이 모달엔 일부러 "캡처해서 참고 이미지로 추가" 버튼을 안 넣음(지도 자체를 참고 이미지로
-  // 쓰는 건 브이월드처럼 안전하다고 확신할 수 없어서) — 순수 "위치 확인용" 도구로만 씀.
+  // ⚠️ 요청 반영("카카오맵 로드뷰도 홈페이지 안에서 안돼나 브이월드처럼 화면 크게해서"): 로드뷰를
+  // 새 탭으로 내보내지 않고 이 모달 안에 브이월드와 같은 크기(96vh)로 바로 embed함. 다만 로드뷰
+  // 화면 자체를 캡처해서 저장·재사용하는 건 카카오 약관상("로컬 API 응답 결과 데이터는 별도
+  // 저장하여 사용할 수 없음") 안 되는 부분이라 이 모달엔 캡처 버튼을 일부러 안 넣음 — 화면에
+  // 띄워서 눈으로 보고 방향·배치를 파악하는(정상적인 API 사용 범위) 용도로만 씀.
   var kmBtn=mk('button','');kmBtn.type='button';
   kmBtn.style.cssText='width:100%;margin:4px 0 10px;padding:9px;border-radius:8px;border:1px solid rgba(250,204,21,.4);background:rgba(250,204,21,.1);color:#fde047;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px';
-  kmBtn.innerHTML='📍 위치 확인 (카카오맵 - 주변 건물 배치)';
+  kmBtn.innerHTML='📍 위치 확인 · 로드뷰 (카카오맵)';
   kmBtn.onclick=function(){ _openKakaoMapModal(); };
   p.appendChild(kmBtn);
   var kmHint=dv('');kmHint.style.cssText='font-size:10px;color:var(--m2);margin:-4px 0 10px;line-height:1.5';
-  kmHint.innerHTML='주소 검색 → 위성/하이브리드 지도로 주변 건물 배치를 먼저 확인하고, 어느 방향에서 로드뷰를 찍어야 할지 가늠하는 용도예요(이 지도 자체는 참고 이미지로 저장되지 않아요).';
+  kmHint.innerHTML='주소 검색 → 위성/하이브리드 지도로 주변 건물 배치를 확인하고, 탭을 눌러 로드뷰로 바로 둘러볼 수 있어요(이 화면 자체는 참고 이미지로 저장되지 않아요 — 카카오 약관상 캡처·재저장은 지원하지 않습니다).';
   p.appendChild(kmHint);
   // ⚠️ 요청 반영("렌더링 완성본 고품질화 눌렀는데 화질이 더 안 좋아지고 팔걸이 마감재가 바뀐다"):
   // ① 참고 이미지는 이 3개 프리셋(실사화/고급 실사화/렌더링 완성본 고품질화)엔 이제 아예 반영이
@@ -20600,8 +20599,38 @@ function _openVworldModal(){
     panel.querySelector('#vw-capture').onclick=function(){
       var cv=mapDiv.querySelector('canvas');
       if(!cv){ showErr('캡처할 화면을 찾지 못했어요.'); return; }
-      setBasemap('PHOTO', function(){ doCapture(function(){ setBasemap('HYBRID', function(){}); }); });
+      setBasemap('PHOTO', function(){ doHiResCapture(); });
     };
+    // ⚠️ 화질 개선 시도("로드뷰보다 화질이 너무 안 좋다"): 브이월드는 카메라 고도가 높을수록 그
+    // 자리에 더 낮은 해상도의 항공사진 타일을 씀 — 캡처하는 그 순간만 살짝 더 가까이(고도를
+    // 낮춰서) 당겨서 고해상도 타일이 로딩될 시간을 준 다음 찍고, 찍고 나면 사용자가 보고 있던
+    // 원래 위치/각도로 정확히 되돌려놓음(화면상으론 캡처 버튼 누르면 잠깐 확대됐다가 원래대로
+    // 돌아오는 것처럼 보임). getExportImg/saveAsImage 같은 미확인 메서드는 예전에 loadMap()으로
+    // 지도가 복구 불가능하게 깨진 적이 있어서 안 씀 — moveTo(이미 검증된 안전한 메서드)만 이용.
+    function doHiResCapture(){
+      var pos=null;
+      try{ if(_vwMapInstance && typeof _vwMapInstance.getCurrentPosition==='function') pos=_vwMapInstance.getCurrentPosition(); }catch(e){}
+      var pt = pos && (pos.point || pos.coord || pos.position || pos);
+      var lon = pt && pt.x!=null ? parseFloat(pt.x) : curLon;
+      var lat = pt && pt.y!=null ? parseFloat(pt.y) : curLat;
+      var curH = pt && pt.z!=null ? parseFloat(pt.z) : (pt&&pt.height!=null?parseFloat(pt.height):null);
+      var dir = pos && (pos.direction || pos.dir);
+      var curPitch = dir && (dir.pitch!=null?parseFloat(dir.pitch):(dir.tilt!=null?parseFloat(dir.tilt):null));
+      if(curH==null || curH<=220){
+        // 이미 충분히 가까운 높이 — 더 당길 필요 없이 바로 캡처
+        doCapture(function(){ setBasemap('HYBRID', function(){}); });
+        return;
+      }
+      var targetH=Math.max(80, curH*0.35);
+      flyTo(lon, lat, targetH, curPitch!=null?curPitch:-60);
+      showOk('📸 고화질 타일 로딩 중... 잠시만요');
+      setTimeout(function(){
+        doCapture(function(){
+          flyTo(lon, lat, curH, curPitch!=null?curPitch:-50); // 원래 보던 위치/각도로 복귀
+          setBasemap('HYBRID', function(){});
+        });
+      }, 1300); // 더 가까운 고도의 고해상도 타일이 로드될 시간을 줌
+    }
     function doCapture(after){
       var cv=mapDiv.querySelector('canvas');
       // ⚠️ 버그 수정("캡처하면 검은 화면으로 추가됨"): WebGL은 한 프레임을 그린 직후 다음 프레임을
@@ -20642,16 +20671,19 @@ function _openVworldModal(){
   });
 }
 
-// ══ 카카오맵 위치 확인 도구 ═══════════════════════════════════════════
-// ⚠️ 요청 반영("카카오맵/네이버맵 좌표로 위치 잡아서 주변 건물 인식할 수 없나"): 로드뷰 화면을
-// 캡처해서 저장·재사용하는 건 지난번에 확인했듯 카카오 약관상("로컬 API 응답 결과 데이터는
-// 별도 저장하여 사용할 수 없음") 애매한 부분이 있어서 이 모달엔 일부러 안 넣음 — 순수하게
-// "주소로 좌표 찾고, 위성/하이브리드 지도로 주변에 어떤 건물이 있는지 눈으로 확인"하는
-// 용도로만 씀(지도 API의 정상적인 사용 범위). 로드뷰는 여기서 방향만 가늠한 뒤, 실제로는
-// 사용자가 카카오맵/네이버맵 사이트에서 직접 캡처해서 올리는 기존 방식 그대로 감.
+// ══ 카카오맵 위치 확인 · 로드뷰 도구 ═════════════════════════════════
+// ⚠️ 요청 반영("카카오맵 로드뷰도 홈페이지 안에서 안돼나 브이월드처럼 화면 크게해서"): 예전엔
+// "로드뷰 보기" 버튼이 새 탭(map.kakao.com)을 여는 방식이었는데, 이제 이 모달 안에 브이월드와
+// 같은 크기(96vh, flex-column)로 로드뷰를 직접 embed함(kakao.maps.Roadview). 다만 로드뷰
+// 화면을 캡처해서 저장·재사용하는 건 카카오 약관상("로컬 API 응답 결과 데이터는 별도 저장하여
+// 사용할 수 없음") 안 되는 부분이라 이 모달엔 여전히 캡처 버튼을 넣지 않음 — 화면에 띄워서
+// 눈으로 보고 방향·배치를 파악하는(지도 API의 정상적인 사용 범위) 용도로만 씀.
 var KAKAO_MAP_API_KEY = '4d8d7f29f40a3469972ba73528712ed4';
 var _kakaoScriptLoaded = false;
 var _kakaoMapInstance = null;
+// ⚠️ 브이월드와 동일한 패턴: 닫을 때 마지막으로 보고 있던 위치/모드(지도·로드뷰)를 저장해뒀다가
+// 다시 열면 그대로 이어서 시작함(매번 처음부터 다시 검색해야 하는 번거로움 방지).
+var _kmLastLat=null, _kmLastLng=null, _kmLastAddr='', _kmLastMode='map';
 function _loadKakaoMapScript(cb){
   if(_kakaoScriptLoaded && window.kakao && window.kakao.maps){ cb(); return; }
   if(!KAKAO_MAP_API_KEY){ cb('카카오맵 API 키가 아직 설정되지 않았어요 — dapi.kakao.com에서 JavaScript 키를 발급받아 코드에 넣어야 해요.'); return; }
@@ -20667,45 +20699,113 @@ function _openKakaoMapModal(){
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:20px';
   var panel=document.createElement('div');
-  panel.style.cssText='background:var(--c1,#151519);border-radius:14px;width:100%;max-width:920px;max-height:92vh;overflow:auto;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5)';
+  panel.style.cssText='background:var(--c1,#151519);border-radius:14px;width:100%;max-width:1600px;height:96vh;overflow:hidden;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column';
   panel.innerHTML=
-    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'+
-      '<div style="font-size:15px;font-weight:800;color:var(--t)">📍 위치 확인 (카카오맵)</div>'+
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">'+
+      '<div style="font-size:15px;font-weight:800;color:var(--t)">📍 위치 확인 · 로드뷰 (카카오맵)</div>'+
       '<button id="km-close" style="border:none;background:transparent;color:var(--m2);font-size:20px;cursor:pointer;line-height:1">✕</button>'+
     '</div>'+
-    '<div style="display:flex;gap:6px;margin-bottom:8px">'+
-      '<input id="km-addr" type="text" placeholder="주소 입력 (예: 서울 마포구 합정역)" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit">'+
+    '<div style="display:flex;gap:6px;margin-bottom:8px;flex-shrink:0">'+
+      '<input id="km-addr" type="text" placeholder="주소/장소 입력 (예: 서울 마포구 합정역)" value="'+(_kmLastAddr||'').replace(/"/g,'&quot;')+'" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit">'+
       '<button id="km-search" style="padding:9px 14px;border-radius:8px;border:none;background:#fde047;color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">검색</button>'+
     '</div>'+
-    '<div id="km-err" style="font-size:11px;color:#f87171;margin-bottom:6px;display:none"></div>'+
-    '<div id="kmap" style="width:100%;height:480px;border-radius:10px;overflow:hidden;background:#111"></div>'+
-    '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">'+
-      '<button id="km-normal" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🗺️ 일반 지도</button>'+
-      '<button id="km-sat" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🛰️ 위성</button>'+
-      '<button id="km-hybrid" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🏙️ 하이브리드(위성+라벨)</button>'+
+    '<div style="display:flex;gap:6px;margin-bottom:8px;flex-shrink:0">'+
+      '<button id="km-tab-map" type="button" style="flex:1;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:#fde047;color:#000;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🗺️ 지도</button>'+
+      '<button id="km-tab-road" type="button" style="flex:1;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📷 로드뷰</button>'+
     '</div>'+
-    '<button id="km-roadview" style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:none;background:#fde047;color:#000;font-weight:800;font-size:12.5px;cursor:pointer;font-family:inherit">📷 이 위치 카카오맵 로드뷰로 새 탭에서 바로 열기 (주소 다시 안 쳐도 돼요)</button>'+
-    '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5">위 버튼을 누르면 지금 검색한 좌표로 카카오맵 로드뷰가 새 탭에서 바로 열려요 — 거기서 원하는 각도로 화면 캡처해서 "실사 참고 이미지"에 올려주세요(이 모달 자체엔 캡처 기능이 없어요).</div>';
+    '<div id="km-err" style="font-size:11px;color:#f87171;margin-bottom:6px;display:none;flex-shrink:0"></div>'+
+    '<div style="position:relative;flex:1;min-height:0;border-radius:10px;overflow:hidden;background:#111">'+
+      '<div id="kmap" style="position:absolute;inset:0"></div>'+
+      '<div id="kroad" style="position:absolute;inset:0;display:none">'+
+        '<div id="kroad-inner" style="position:absolute;inset:0"></div>'+
+        '<div id="kroad-msg" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--m2);font-size:12px;text-align:center;padding:24px;background:#111;line-height:1.7"></div>'+
+      '</div>'+
+    '</div>'+
+    '<div id="km-maptools" style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;flex-shrink:0">'+
+      '<button id="km-normal" style="flex:1;min-width:100px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🗺️ 일반 지도</button>'+
+      '<button id="km-sat" style="flex:1;min-width:100px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🛰️ 위성</button>'+
+      '<button id="km-hybrid" style="flex:1;min-width:100px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🏙️ 하이브리드</button>'+
+      '<button id="km-goroad" style="flex:1;min-width:150px;padding:8px;border-radius:7px;border:none;background:#fde047;color:#000;font-weight:800;font-size:11.5px;cursor:pointer;font-family:inherit">📷 이 위치 로드뷰로 보기</button>'+
+    '</div>'+
+    '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5;flex-shrink:0">로드뷰 화면에서는 마우스로 드래그해서 시점을 돌리고, 바닥의 화살표를 클릭해 이동할 수 있어요. 카카오 API 약관상 이 화면 자체를 캡처해서 참고 이미지로 저장하는 기능은 넣지 않았어요 — 눈으로 보고 방향·배치를 파악하는 용도로만 써주세요.</div>';
   ov.appendChild(panel);
   document.body.appendChild(ov);
 
   var errEl=panel.querySelector('#km-err');
-  function showErr(msg){ errEl.textContent=msg; errEl.style.display='block'; }
+  function showErr(msg){ errEl.style.color='#f87171'; errEl.textContent=msg; errEl.style.display='block'; }
 
-  panel.querySelector('#km-close').onclick=function(){ ov.remove(); };
-  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
-
-  var mapDiv=panel.querySelector('#kmap');
+  var mapDiv=panel.querySelector('#kmap'), roadDiv=panel.querySelector('#kroad');
+  var roadInner=panel.querySelector('#kroad-inner'), roadMsg=panel.querySelector('#kroad-msg');
+  function showRoadMsg(html){ roadMsg.innerHTML=html; roadMsg.style.display='flex'; }
+  function hideRoadMsg(){ roadMsg.style.display='none'; }
   mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--m2);font-size:12px">카카오맵 불러오는 중...</div>';
+
+  var mode='map', map=null, roadview=null, roadviewClient=null;
+  var curLat=(_kmLastLat!=null)?_kmLastLat:37.5665, curLng=(_kmLastLng!=null)?_kmLastLng:126.9780;
+
+  function closeModal(){
+    try{
+      if(mode==='map' && map){ var c=map.getCenter(); curLat=c.getLat(); curLng=c.getLng(); }
+      else if(mode==='roadview' && roadview){ var pos=roadview.getPosition(); if(pos){ curLat=pos.getLat(); curLng=pos.getLng(); } }
+    }catch(e){}
+    _kmLastLat=curLat; _kmLastLng=curLng; _kmLastMode=mode;
+    _kmLastAddr=panel.querySelector('#km-addr').value;
+    ov.remove();
+  }
+  panel.querySelector('#km-close').onclick=closeModal;
+  // ⚠️ 브이월드와 동일한 버그 수정: 검색창 안에서 드래그하다 마우스를 배경 위에서 놓으면 모달이
+  // 닫혀버리던 문제 — mousedown이 배경에서 "시작"했을 때만 닫히게 함.
+  var _kmDownOnBg=false;
+  ov.addEventListener('mousedown', function(e){ _kmDownOnBg=(e.target===ov); });
+  ov.onclick=function(e){ if(e.target===ov && _kmDownOnBg) closeModal(); };
+  ['mousedown','mousemove','touchstart','touchmove','pointerdown','pointermove'].forEach(function(evn){
+    panel.querySelector('#km-addr').addEventListener(evn, function(e){ e.stopPropagation(); });
+  });
+
+  function setActiveTab(m){
+    var mb=panel.querySelector('#km-tab-map'), rb=panel.querySelector('#km-tab-road');
+    mb.style.background=(m==='map')?'#fde047':'var(--c2)'; mb.style.color=(m==='map')?'#000':'var(--t2)';
+    rb.style.background=(m==='roadview')?'#fde047':'var(--c2)'; rb.style.color=(m==='roadview')?'#000':'var(--t2)';
+  }
+  function goRoadview(lat,lng){
+    showRoadMsg('로드뷰 불러오는 중...');
+    if(!roadview) roadview=new kakao.maps.Roadview(roadInner);
+    if(!roadviewClient) roadviewClient=new kakao.maps.RoadviewClient();
+    var pos=new kakao.maps.LatLng(lat,lng);
+    roadviewClient.getNearestPanoId(pos, 50, function(panoId){
+      if(!panoId){
+        showRoadMsg('이 위치 근처(반경 50m)엔 로드뷰가 없어요.<br>지도에서 다른 위치를 검색하거나 큰 도로 쪽으로 옮겨서 다시 시도해주세요.');
+        return;
+      }
+      hideRoadMsg();
+      roadview.setPanoId(panoId, pos);
+      setTimeout(function(){ roadview.relayout(); }, 0);
+    });
+  }
+  function setMode(m){
+    mode=m; setActiveTab(m);
+    if(m==='map'){
+      mapDiv.style.display=''; roadDiv.style.display='none';
+      panel.querySelector('#km-maptools').style.display='flex';
+      if(map){ setTimeout(function(){ map.relayout(); map.setCenter(new kakao.maps.LatLng(curLat,curLng)); }, 0); }
+    } else {
+      mapDiv.style.display='none'; roadDiv.style.display='';
+      panel.querySelector('#km-maptools').style.display='none';
+      goRoadview(curLat, curLng);
+    }
+  }
+  panel.querySelector('#km-tab-map').onclick=function(){ setMode('map'); };
+  panel.querySelector('#km-tab-road').onclick=function(){ setMode('roadview'); };
+  panel.querySelector('#km-goroad').onclick=function(){ setMode('roadview'); };
 
   _loadKakaoMapScript(function(err){
     if(err){ mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:12px;padding:20px;text-align:center">'+err+'</div>'; return; }
     mapDiv.innerHTML='';
     var kakao=window.kakao;
-    var defaultPos=new kakao.maps.LatLng(37.5665, 126.9780); // 서울시청 기본값
-    var map=new kakao.maps.Map(mapDiv, {center:defaultPos, level:3});
+    var startPos=new kakao.maps.LatLng(curLat, curLng);
+    map=new kakao.maps.Map(mapDiv, {center:startPos, level:3});
     _kakaoMapInstance=map;
-    var marker=new kakao.maps.Marker({position:defaultPos, map:map});
+    var marker=new kakao.maps.Marker({position:startPos, map:map});
     var geocoder=new kakao.maps.services.Geocoder();
     var places=new kakao.maps.services.Places();
 
@@ -20714,13 +20814,8 @@ function _openKakaoMapModal(){
       map.setCenter(pos);
       map.setLevel(3);
       marker.setPosition(pos);
-      _kmCurLat=lat; _kmCurLng=lng;
+      curLat=lat; curLng=lng;
     }
-    var _kmCurLat=37.5665, _kmCurLng=126.9780;
-
-    panel.querySelector('#km-roadview').onclick=function(){
-      window.open('https://map.kakao.com/link/roadview/'+_kmCurLat+','+_kmCurLng, '_blank');
-    };
 
     panel.querySelector('#km-search').onclick=function(){
       var addr=panel.querySelector('#km-addr').value.trim();
@@ -20731,10 +20826,12 @@ function _openKakaoMapModal(){
       geocoder.addressSearch(addr, function(result, status){
         if(status===kakao.maps.services.Status.OK && result[0]){
           moveTo(result[0].y, result[0].x);
+          if(mode==='map') setMode('map'); else goRoadview(curLat,curLng);
         } else {
           places.keywordSearch(addr, function(data, status2){
             if(status2===kakao.maps.services.Status.OK && data[0]){
               moveTo(data[0].y, data[0].x);
+              if(mode==='map') setMode('map'); else goRoadview(curLat,curLng);
             } else {
               showErr('주소/장소를 찾지 못했어요. 다른 표현으로 다시 검색해보세요.');
             }
@@ -20747,6 +20844,9 @@ function _openKakaoMapModal(){
     panel.querySelector('#km-normal').onclick=function(){ map.setMapTypeId(kakao.maps.MapTypeId.ROADMAP); };
     panel.querySelector('#km-sat').onclick=function(){ map.setMapTypeId(kakao.maps.MapTypeId.SKYVIEW); };
     panel.querySelector('#km-hybrid').onclick=function(){ map.setMapTypeId(kakao.maps.MapTypeId.HYBRID); };
+
+    // ⚠️ 요청 반영("닫고 다시 열면 마지막 화면 그대로"): 마지막으로 보고 있던 모드로 복원
+    setMode(_kmLastMode==='roadview' ? 'roadview' : 'map');
   });
 }
 
