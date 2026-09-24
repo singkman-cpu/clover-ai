@@ -4546,7 +4546,7 @@ var PS_FILTERS=[
 var PS_FILTER_ICON={curves:'📈',cbal:'🎛️',color:'🎨',blur:'🌫️',sharpen:'🔪',noise:'❄️',vignette:'🕯️',gray:'⬛',sepia:'🟤',pixelate:'▦',bc:'☀️',hs:'🌈',invert:'🔄'};
 var PS_TOOLS=[
   {k:'move',l:'이동 (V)',key:'v',ic:'<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>'},
-  {k:'transform',l:'자유 변형 (크기·회전)',ic:'<rect x="6" y="6" width="12" height="12"/><rect x="3" y="3" width="4" height="4"/><rect x="17" y="3" width="4" height="4"/><rect x="3" y="17" width="4" height="4"/><rect x="17" y="17" width="4" height="4"/>'},
+  {k:'transform',l:'자유 변형 (크기·회전) (R)',key:'r',ic:'<rect x="6" y="6" width="12" height="12"/><rect x="3" y="3" width="4" height="4"/><rect x="17" y="3" width="4" height="4"/><rect x="3" y="17" width="4" height="4"/><rect x="17" y="17" width="4" height="4"/>'},
   {k:'marquee',l:'사각형 선택 (M)',key:'m',ic:'<rect x="4" y="4" width="16" height="16" stroke-dasharray="3 2.5"/>'},
   {k:'emarquee',l:'원형 선택',ic:'<ellipse cx="12" cy="12" rx="9" ry="7" stroke-dasharray="3 2.5"/>'},
   {k:'lasso',l:'올가미 (L)',key:'l',ic:'<path d="M7 17c-3-2-4-6-1-9s10-4 13-1 1 8-5 9c-2 .3-4 0-5-1"/><path d="M7 17l-1 4"/>'},
@@ -5944,20 +5944,34 @@ function _psMove(e){
       if(e.shiftKey){ var st=Math.PI/12; a=Math.round(a/st)*st; }
       T.rot=a;
     } else if(A.mode==='scale'){
-      // ⚠️ 반대쪽 모서리를 고정점(anchor)으로 두고 크기 조절 — 기본은 비율 유지, Shift를 누르면 자유 비율
+      // ⚠️ 기본: 반대쪽 모서리를 고정점(anchor)으로 두고 크기 조절 — 비율 유지, Shift 누르면 자유 비율
+      //    Alt(⌥): 중심을 고정점으로 두고 사방으로 같이 커짐/작아짐 (포토샵 Alt+드래그와 동일)
       var g=PS_CORNERS[A.ci], hw0=A.w/2*Math.abs(t0.sx), hh0=A.h/2*Math.abs(t0.sy);
-      var ax=-g[0]*hw0, ay=-g[1]*hh0;
+      var alt=e.altKey;
       var c0=Math.cos(-t0.rot), s0=Math.sin(-t0.rot), ddx=p.x-t0.cx, ddy=p.y-t0.cy;
       var px=ddx*c0-ddy*s0, py=ddx*s0+ddy*c0;
-      var nw=(px-ax)*g[0], nh=(py-ay)*g[1];
-      if(!e.shiftKey){
-        var W0=2*hw0, H0=2*hh0, kk=(nw*W0+nh*H0)/Math.max(1e-6,W0*W0+H0*H0);
-        nw=W0*kk; nh=H0*kk;
+      var nw,nh;
+      if(alt){
+        nw=Math.abs(px)*2; nh=Math.abs(py)*2;
+        if(!e.shiftKey){
+          var W0=2*hw0, H0=2*hh0, kk=(nw*W0+nh*H0)/Math.max(1e-6,W0*W0+H0*H0);
+          nw=W0*kk; nh=H0*kk;
+        }
+        var mn=2*p.k; nw=Math.max(mn,nw); nh=Math.max(mn,nh);
+        T.sx=(t0.sx<0?-1:1)*nw/A.w; T.sy=(t0.sy<0?-1:1)*nh/A.h;
+        T.cx=t0.cx; T.cy=t0.cy; // 중심 고정 — 반대쪽 고정점 계산 생략
+      } else {
+        var ax=-g[0]*hw0, ay=-g[1]*hh0;
+        nw=(px-ax)*g[0]; nh=(py-ay)*g[1];
+        if(!e.shiftKey){
+          var W0b=2*hw0, H0b=2*hh0, kkb=(nw*W0b+nh*H0b)/Math.max(1e-6,W0b*W0b+H0b*H0b);
+          nw=W0b*kkb; nh=H0b*kkb;
+        }
+        var mnb=2*p.k; nw=Math.max(mnb,nw); nh=Math.max(mnb,nh);
+        T.sx=(t0.sx<0?-1:1)*nw/A.w; T.sy=(t0.sy<0?-1:1)*nh/A.h;
+        var clx=ax+g[0]*nw/2, cly=ay+g[1]*nh/2, cr=Math.cos(t0.rot), sr=Math.sin(t0.rot);
+        T.cx=t0.cx+clx*cr-cly*sr; T.cy=t0.cy+clx*sr+cly*cr;
       }
-      var mn=2*p.k; nw=Math.max(mn,nw); nh=Math.max(mn,nh);
-      T.sx=(t0.sx<0?-1:1)*nw/A.w; T.sy=(t0.sy<0?-1:1)*nh/A.h;
-      var clx=ax+g[0]*nw/2, cly=ay+g[1]*nh/2, cr=Math.cos(t0.rot), sr=Math.sin(t0.rot);
-      T.cx=t0.cx+clx*cr-cly*sr; T.cy=t0.cy+clx*sr+cly*cr;
     }
     _psRefreshOpts(true);
     _psRequestRender(); return;
@@ -6688,7 +6702,7 @@ function _psRefreshOpts(light){
         o.appendChild(_psB('✓ 적용 (Enter)',function(){ _psRtCommit(); _psRefreshPanels(); _psRequestRender(); },'pri'));
         o.appendChild(_psB('취소 (Esc)',function(){ PSE.rt=null; _psRefreshPanels(); _psRequestRender(); }));
       }
-      hint('모서리: 크기 (Shift: 자유 비율) · 위 동그라미: 회전 (Shift: 15°)');
+      hint('모서리: 크기 (Shift: 자유 비율 · Alt: 중심 고정하고 사방으로) · 위 동그라미: 회전 (Shift: 15°)');
     } else hint('변형할 레이어를 선택하세요 (빈 레이어는 변형할 수 없어요)');
   }
   else if(t==='text'){ hint('캔버스를 클릭하면 새 텍스트 · 기존 텍스트를 클릭하면 선택/이동 · 글자·폰트·색은 오른쪽 "속성"에서 수정'); }
@@ -7166,7 +7180,9 @@ function _psOnKey(e){
   else if(e.key===']'){ PSE.o.size=Math.min(500,Math.round(PSE.o.size*1.18)+1); _psRefreshOpts(); _psRequestOverlay(); }
   else if(k==='x'){ var t=PSE.o.fg; PSE.o.fg=PSE.o.bg; PSE.o.bg=t; _psRefreshColors(); }
   else {
-    var map={v:'move',m:'marquee',l:'lasso',w:'wand',b:'brush',e:'eraser',g:'bucket',i:'picker',t:'text',u:'srect',c:'crop'};
+    // ⚠️ Ctrl+T는 브라우저가 "새 탭"으로 예약해놔서 웹페이지에서 절대 가로챌 수 없음(어느 브라우저든 동일) —
+    // 그래서 자유 변형 도구는 단일 키 R로도 바로 켤 수 있게 해줌(Ctrl+T는 그대로 남겨둠, 혹시 되는 환경 대비)
+    var map={v:'move',m:'marquee',l:'lasso',w:'wand',b:'brush',e:'eraser',g:'bucket',i:'picker',t:'text',u:'srect',c:'crop',r:'transform'};
     if(map[k] && !e.altKey) _psSetTool(map[k]); else done=false;
   }
   if(done){ e.preventDefault(); e.stopPropagation(); }
@@ -20280,7 +20296,7 @@ var _vwMapInstance = null;
 // ⚠️ 요청 반영("캡처하고 옆에도 캡처하고 싶은데 처음부터 다시 해야 하는 번거로움"): 창을 닫았다 다시
 // 열어도 마지막으로 검색/이동했던 위치·주소·화질 설정을 기억해뒀다가 그대로 이어서 시작하게 함
 // (모듈 전역에 저장 — 페이지 새로고침하면 초기화됨, 딱 "이번 방문 동안"만 기억).
-var _vwLastLon=null, _vwLastLat=null, _vwLastAddr='', _vwLastHigh=true;
+var _vwLastLon=null, _vwLastLat=null, _vwLastAddr='', _vwLastHigh=true, _vwLastHeight=null, _vwLastPitch=null;
 // ⚠️ 버그 수정("닫기 누르고 다시 열면 마지막 작업했던 화면이 아니라 다른 화면"): 이전엔 검색으로
 // "이동시켰을 때"만 위치를 기억했는데, 실제로는 검색 후 마우스로 드래그·회전해서 원하는 구도를
 // 잡는 경우가 대부분이라 그 수동 이동은 하나도 기억을 못 했음 — 창 닫기 직전에 지도가 실제로
@@ -20289,15 +20305,23 @@ function _vwSaveCurrentPos(){
   try{
     if(!_vwMapInstance || typeof _vwMapInstance.getCurrentPosition!=='function') return;
     var p=_vwMapInstance.getCurrentPosition();
-    var lon=null, lat=null;
-    if(p){
-      if(p.x!=null && p.y!=null){ lon=p.x; lat=p.y; }
-      else if(p.point && p.point.x!=null){ lon=p.point.x; lat=p.point.y; }
-      else if(p.coord && p.coord.x!=null){ lon=p.coord.x; lat=p.coord.y; }
-      else if(p.position && p.position.x!=null){ lon=p.position.x; lat=p.position.y; }
+    var lon=null, lat=null, hgt=null, pit=null;
+    var pt = p && (p.point || p.coord || p.position || p);
+    if(pt){
+      if(pt.x!=null) lon=pt.x;
+      if(pt.y!=null) lat=pt.y;
+      if(pt.z!=null) hgt=pt.z; // ⚠️ 버그 수정("닫았다 열면 위치는 같은데 카메라가 멀리 있음"): lon/lat만
+      else if(pt.height!=null) hgt=pt.height; // 저장하고 높이(z)/각도는 저장 안 해서 재접속 시 항상 고정된
+    }                                          // 기본 높이(500m)로만 열렸음 — 실제 마지막 높이·각도도 같이 저장.
+    var dir = p && (p.direction || p.dir);
+    if(dir){ if(dir.pitch!=null) pit=dir.pitch; else if(dir.tilt!=null) pit=dir.tilt; }
+    if(lon!=null && lat!=null){
+      _vwLastLon=parseFloat(lon); _vwLastLat=parseFloat(lat);
+      if(hgt!=null) _vwLastHeight=parseFloat(hgt);
+      if(pit!=null) _vwLastPitch=parseFloat(pit);
+    } else {
+      console.warn('[VWorld] getCurrentPosition 결과 구조를 못 알아봄(다음에 정확히 맞출게요):', p);
     }
-    if(lon!=null && lat!=null){ _vwLastLon=parseFloat(lon); _vwLastLat=parseFloat(lat); }
-    else console.warn('[VWorld] getCurrentPosition 결과 구조를 못 알아봄(다음에 정확히 맞출게요):', p);
   }catch(e){ console.warn('[VWorld] 현재 위치 저장 실패', e); }
 }
 function _loadVworldScript(cb){
@@ -20446,7 +20470,11 @@ function _openVworldModal(){
     // 저희가 가정한 옛날 방식(빈 new vw.Map() 뒤에 .setOption()/.setMapId())을 안 쓰는 것으로 보여서,
     // ① 최신 문서에서 쓰는 "new vw.Map(컨테이너id, vw.MapOptions(...))" 생성자 방식도 같이 시도하고,
     // ② 그것도 실패하면 실제 vw 객체 구조를 화면에 그대로 찍어서(진단용) 다음에 정확히 맞출 수 있게 함.
-    var initPos=new vw.CameraPosition(new vw.CoordZ(curLon, curLat, (_vwLastLon!=null)?500:1200), new vw.Direction(0,(_vwLastLon!=null)?-50:-60,0));
+    // ⚠️ 버그 수정("닫고 다시 열면 위치는 같은 곳인데 카메라가 엄청 멀리 있네"): 재오픈 시 높이/각도를
+    // 항상 500m/-50°로 고정해서 썼던 게 원인 — 실제 마지막으로 봤던 높이(_vwLastHeight)/각도(_vwLastPitch)를
+    // 저장해뒀다가 그대로 복원함(닫을 때 getCurrentPosition()으로 읽어서 저장 — _vwSaveCurrentPos 참고).
+    var resumeHeight=(_vwLastHeight!=null)?_vwLastHeight:500, resumePitch=(_vwLastPitch!=null)?_vwLastPitch:-50;
+    var initPos=new vw.CameraPosition(new vw.CoordZ(curLon, curLat, (_vwLastLon!=null)?resumeHeight:1200), new vw.Direction(0,(_vwLastLon!=null)?resumePitch:-60,0));
     var mapInitErr=null;
     try{
       // preserveDrawingBuffer: true — WebGL은 기본적으로 매 프레임이 그려진 직후 버퍼를 비워버려서,
