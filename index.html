@@ -20289,7 +20289,16 @@ function _loadVworldScript(cb){
   var pending=0, outerDone=false, restored=false;
   var origWrite=document.write, origWriteln=document.writeln;
   function restore(){ if(!restored){ restored=true; document.write=origWrite; document.writeln=origWriteln; } }
-  function maybeFinish(){ if(outerDone && pending<=0 && !restored){ restore(); setTimeout(function(){ _vwScriptLoaded=true; cb(); },150); } }
+  // ⚠️ 추가 버그 수정("_vwMapInstance.setOption is not a function"): document.write로 새로 붙은
+  // <script> 태그들이 전부 load 이벤트를 쐈다고 해서 vw.Map 클래스가 100% 완성된 게 아닐 수 있음
+  // (SDK 내부에서 한 번 더 비동기로 지도 엔진을 초기화하는 경우) — vw.Map.prototype.setOption이
+  // 실제로 생길 때까지 짧게 폴링해서, 너무 이른 타이밍에 콜백을 부르지 않게 함.
+  function waitVwReady(tries){
+    tries=tries||0;
+    if((window.vw && window.vw.Map && window.vw.Map.prototype && typeof window.vw.Map.prototype.setOption==='function') || tries>25){ _vwScriptLoaded=true; cb(); return; }
+    setTimeout(function(){ waitVwReady(tries+1); }, 200);
+  }
+  function maybeFinish(){ if(outerDone && pending<=0 && !restored){ restore(); setTimeout(function(){ waitVwReady(0); },150); } }
   function shim(html){
     var d=document.createElement('div'); d.innerHTML=html;
     Array.prototype.slice.call(d.childNodes).forEach(function(n){
@@ -20304,7 +20313,7 @@ function _loadVworldScript(cb){
   }
   document.write=shim; document.writeln=shim;
   // 안전장치: SDK 내부 구현이 예상과 달라 pending 카운트가 안 맞아도 4초 뒤엔 무조건 진행
-  setTimeout(function(){ if(!restored){ restore(); _vwScriptLoaded=true; cb(); } }, 4000);
+  setTimeout(function(){ if(!restored){ restore(); waitVwReady(0); } }, 4000);
   var s=document.createElement('script');
   s.src='https://map.vworld.kr/js/webglMapInit.js.do?version=2.0&apiKey='+VWORLD_API_KEY+'&domain='+encodeURIComponent(location.hostname);
   s.onload=function(){ outerDone=true; maybeFinish(); };
