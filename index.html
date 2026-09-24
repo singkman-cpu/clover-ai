@@ -2981,13 +2981,15 @@ var PS_VIDEO=[
 
 // ⚠️ 요청 반영("클라리티/크리에이티브 안 쓸 것 같은데 지워줘"): 두 엔진 모두 크레딧이 Topaz와
 // 같거나 더 비싼데(2x 20/35cr vs Topaz 20cr, 4x 40/60cr vs Topaz 30cr), 결과물 크기 제한(약
-// 2048×2048px)까지 있어서 화질 면에서 Topaz보다 나을 이유가 없었음 — 목록에서 제거하고 Topaz +
-// 매그니픽 외부 링크만 남김. (내부 구현 함수 runClarityUpscale 등은 다른 기능의 폴백 경로로도
-// 쓰이고 있어서 코드 자체는 남겨두되, 사용자가 직접 고르는 목록에서만 제외함.)
+// 2048×2048px)까지 있어서 화질 면에서 Topaz보다 나을 이유가 없었음 — 목록에서 제거함. (내부 구현
+// 함수 runClarityUpscale 등은 다른 기능의 폴백 경로로도 쓰이고 있어서 코드 자체는 남겨두되,
+// 사용자가 직접 고르는 목록에서만 제외함.)
+// ⚠️ 요청 반영("매그니픽 2개도 삭제해줘, 토파즈업스케일 이름을 clover 업스케일로 바꿔줘"): 외부
+// 링크로 나가는 Magnific Creative/Precision v2 두 항목을 완전히 제거함(자체 서비스 안에서 다
+// 해결되니 굳이 외부로 보낼 필요가 없다는 판단). 내부적으로는 여전히 fal.ai Topaz 엔진(k:'topaz')을
+// 쓰지만, 사용자에게 보이는 이름은 자체 브랜드명인 "Clover 업스케일"로 표시함.
 var EU=[
-  {k:'topaz',n:'Topaz Upscaler',t:'Best,Pro',d:'크기 제한 없음 · 디테일 실제로 보강(2x/4x, 최대 8K대까지)',lg:'f'},
-  {k:'magnific_creative',n:'Magnific Creative',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'},
-  {k:'magnific_precision',n:'Magnific Precision v2',t:'External',d:'magnific.com에서 직접 업스케일 → 새 탭 열림',lg:'r',ext:'https://www.magnific.com/app/tools/upscaler'}
+  {k:'topaz',n:'Clover 업스케일',t:'Best,Pro',d:'크기 제한 없음 · 디테일 실제로 보강(2x/4x, 최대 8K대까지)',lg:'f'}
 ];
 var G_UPSCALE_ENG='topaz';
 // 3D 투어 생성 비용 — World Labs 실제 API 원가 구조에 맞춰 미니/플러스를 분리함.
@@ -3246,6 +3248,18 @@ function _wireWheelZoomCore(container, getTargets, opts){
   var excludeSel=opts.excludeDblClick; // 더블클릭 리셋을 무시할 셀렉터(예: 슬라이더 손잡이)
   var requireCtrl=!!opts.requireCtrl; // true면 Ctrl/Cmd+휠일 때만 확대, 일반 휠은 페이지 스크롤 그대로 통과
   var zScale=1;
+  function applyScale(newScale, ox, oy){
+    newScale=Math.max(1,Math.min(4,newScale));
+    if(newScale===zScale) return;
+    var targets=getTargets();
+    if(!targets||!targets.length) return;
+    zScale=newScale;
+    for(var i=0;i<targets.length;i++){
+      targets[i].style.transformOrigin=ox+'% '+oy+'%';
+      targets[i].style.transform= zScale>1 ? ('scale('+zScale+')') : '';
+    }
+    container.style.cursor = zScale>1 ? 'zoom-out' : (opts.defaultCursor||'');
+  }
   container.addEventListener('wheel',function(e){
     if(requireCtrl && !(e.ctrlKey||e.metaKey)) return; // ⚠️ 요청 반영("휠로 확대되니까 아래 이미지로
     // 스크롤 내리기가 안 된다"): 스크롤 가능한 피드 안에 있는 카드는 그냥 휠은 페이지 스크롤로
@@ -3258,14 +3272,7 @@ function _wireWheelZoomCore(container, getTargets, opts){
     var ox=(((e.clientX-rect.left)/rect.width)*100).toFixed(1);
     var oy=(((e.clientY-rect.top)/rect.height)*100).toFixed(1);
     var delta=e.deltaY>0?-0.15:0.15;
-    var newScale=Math.max(1,Math.min(4,zScale+delta));
-    if(newScale===zScale) return;
-    zScale=newScale;
-    for(var i=0;i<targets.length;i++){
-      targets[i].style.transformOrigin=ox+'% '+oy+'%';
-      targets[i].style.transform= zScale>1 ? ('scale('+zScale+')') : '';
-    }
-    container.style.cursor = zScale>1 ? 'zoom-out' : (opts.defaultCursor||'');
+    applyScale(zScale+delta, ox, oy);
   },{passive:false});
   container.addEventListener('dblclick',function(e){
     if(excludeSel && e.target && e.target.closest && e.target.closest(excludeSel)) return;
@@ -3275,13 +3282,38 @@ function _wireWheelZoomCore(container, getTargets, opts){
     for(var i=0;i<targets.length;i++){ targets[i].style.transform=''; targets[i].style.transformOrigin=''; }
     container.style.cursor = opts.defaultCursor||'';
   });
+  // ⚠️ 요청 반영("모바일에서도 손가락으로 벌리고 오므려서 확대축소 되게 해줘 — 갤러리랑 렌더링된
+  // 이미지 있는 곳 전부"): 두 손가락 핀치 제스처로도 같은 zScale을 조작하게 함. 한 손가락
+  // 터치(Before/After 비교선 드래그 등)와 안 겹치게, 정확히 손가락 2개일 때만 반응함.
+  var _pinchDist=null, _pinchStartScale=1;
+  container.addEventListener('touchstart',function(e){
+    if(e.touches.length===2){
+      _pinchDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+      _pinchStartScale=zScale;
+    }
+  },{passive:true});
+  container.addEventListener('touchmove',function(e){
+    if(e.touches.length===2 && _pinchDist){
+      var targets=getTargets();
+      if(!targets||!targets.length) return;
+      e.preventDefault();
+      var d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX, e.touches[0].clientY-e.touches[1].clientY);
+      var midX=(e.touches[0].clientX+e.touches[1].clientX)/2, midY=(e.touches[0].clientY+e.touches[1].clientY)/2;
+      var rect=container.getBoundingClientRect();
+      if(!rect.width||!rect.height) return;
+      var ox=(((midX-rect.left)/rect.width)*100).toFixed(1);
+      var oy=(((midY-rect.top)/rect.height)*100).toFixed(1);
+      applyScale(_pinchStartScale*(d/_pinchDist), ox, oy);
+    }
+  },{passive:false});
+  container.addEventListener('touchend',function(e){ if(e.touches.length<2) _pinchDist=null; });
   return { reset:function(){ zScale=1; var targets=getTargets(); for(var i=0;i<targets.length;i++){ targets[i].style.transform=''; targets[i].style.transformOrigin=''; } } };
 }
 function _wireMediaBoxWheelZoom(mediaBox){
   try{
     var imgs=mediaBox.querySelectorAll('img');
     if(!imgs.length) return;
-    mediaBox.title='Ctrl(⌘)+휠로 확대/축소';
+    mediaBox.title='Ctrl(⌘)+휠 또는 손가락 핀치로 확대/축소';
     _wireWheelZoomCore(mediaBox, function(){ return mediaBox.querySelectorAll('img'); }, {excludeDblClick:'.cmp-ln', requireCtrl:true});
   }catch(e){}
 }
@@ -17213,7 +17245,7 @@ function sbUpscale(p){
   // 거의 달라진 게 없어 보일 수 있음 — 이걸 모르고 쓰면 "왜 안 바뀌지"로 헷갈리기 쉬워서 미리 안내함.
   var capNote=dv('note');
   capNote.style.cssText='margin-bottom:10px;padding:9px 11px;border-radius:8px;border:1px solid rgba(0,229,204,.3);background:rgba(0,229,204,.06);font-size:10.5px;line-height:1.6;color:var(--ac)';
-  capNote.innerHTML='✓ <b>Topaz Upscaler는 결과물 크기 제한이 없어요.</b> 원본을 축소하는 과정 없이 그대로 2x/4x 배율로 확대되고, 아래 "보강 방식"에서 디테일만 보강할지(Standard MAX) 재질감까지 살짝 더 사실적으로 만들지(Redefine)를 고를 수 있어요.';
+  capNote.innerHTML='✓ <b>Clover 업스케일은 결과물 크기 제한이 없어요.</b> 원본을 축소하는 과정 없이 그대로 2x/4x 배율로 확대되고, 아래 "보강 방식"에서 디테일만 보강할지(Standard MAX) 재질감까지 살짝 더 사실적으로 만들지(Redefine)를 고를 수 있어요.';
   p.appendChild(capNote);
   // ⚠️ 요청 반영("클라리티/크리에이티브 안 쓸 것 같은데 지워줘"): 두 엔진을 EU 목록에서 제거하면서
   // 이 둘의 2048px 크기 제한 때문에 만들었던 동적 경고 배너(_refreshUpscaleCapWarning)도 더 이상
@@ -17304,6 +17336,26 @@ function sbUpscale(p){
   var cropHint=dv('note');cropHint.id='crop-hint';cropHint.style.cssText='font-size:10px;margin-top:6px;display:none';
   cropHint.textContent='이미지 위에서 드래그해서 확대할 영역을 선택하세요';
   areaWrap.appendChild(cropHint);
+  // ⚠️ 요청 반영("모바일에서 부분업스케일쪽에 강제로 드래그가 계속 잡혀서 빠져나오기 힘들다"):
+  // 예전엔 이 캔버스 위를 터치하는 순간 무조건 영역 선택 드래그로 잡아서(e.preventDefault로
+  // 페이지 스크롤까지 막아버림) — 모바일에서 이 부분을 그냥 스크롤해서 지나가려던 손가락이
+  // 캔버스에 닿기만 해도 스크롤이 안 먹히고 갇혀버렸음. 이제 "영역 선택 시작" 버튼을 눌러야만
+  // (모바일 터치에 한해) 선택 모드가 켜지고, 그 전까지는 터치해도 그냥 페이지가 스크롤됨 —
+  // 선택을 하나 완성하거나 취소하면 자동으로 다시 꺼져서 스크롤이 막히는 일이 재발하지 않음.
+  var cropArmBtn=mk('button','');cropArmBtn.id='crop-arm-btn';cropArmBtn.type='button';
+  cropArmBtn.style.cssText='display:none;width:100%;margin-top:6px;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+  cropArmBtn.textContent='👆 (모바일) 터치로 영역 선택 시작';
+  areaWrap.appendChild(cropArmBtn);
+  var cropTouchArmed=false;
+  function _setCropArmed(on){
+    cropTouchArmed=on;
+    cropArmBtn.textContent = on ? '✕ 영역 선택 취소 (선택 없이 스크롤하려면 눌러주세요)' : '👆 (모바일) 터치로 영역 선택 시작';
+    cropArmBtn.style.background = on ? 'rgba(0,229,204,.15)' : 'var(--c2)';
+    cropArmBtn.style.color = on ? 'var(--ac)' : 'var(--t2)';
+    cropArmBtn.style.borderColor = on ? 'var(--acb)' : 'var(--bd2)';
+    cropCanvas.style.cursor = on ? 'crosshair' : 'default';
+  }
+  cropArmBtn.onclick=function(){ _setCropArmed(!cropTouchArmed); };
   var cropBtnRow=dv('');cropBtnRow.style.cssText='display:flex;gap:6px;margin-top:8px';
   var cropRunBtn=mk('button','actbtn ok');cropRunBtn.style.cssText='flex:1;font-size:12px;padding:9px;display:none';cropRunBtn.id='crop-run-btn';
   cropRunBtn.textContent='선택 영역만 업스케일';
@@ -17319,7 +17371,7 @@ function sbUpscale(p){
   var cropImgNatural={w:0,h:0};
   function _initCropCanvas(){
     var srcImg=getTab('upscale').inputImg;
-    if(!srcImg){ cropCanvasWrap.style.display='none'; cropHint.style.display='none'; cropRunBtn.style.display='none'; cropClearBtn.style.display='none'; return; }
+    if(!srcImg){ cropCanvasWrap.style.display='none'; cropHint.style.display='none'; cropRunBtn.style.display='none'; cropClearBtn.style.display='none'; cropArmBtn.style.display='none'; _setCropArmed(false); return; }
     var im=new Image();
     // ⚠️ 원격 URL(예: 이전 생성 결과 — fal.media CDN)을 crossOrigin 설정 없이 캔버스에 그리면
     // 캔버스가 "오염(tainted)"되어서, 이후 cropRunBtn에서 toDataURL()을 부르는 순간
@@ -17330,8 +17382,9 @@ function sbUpscale(p){
       cropImgNatural.w=im.naturalWidth; cropImgNatural.h=im.naturalHeight;
       cropCanvas.width=im.naturalWidth; cropCanvas.height=im.naturalHeight;
       var ctx=cropCanvas.getContext('2d'); ctx.drawImage(im,0,0);
-      cropCanvasWrap.style.display='block'; cropHint.style.display='block';
+      cropCanvasWrap.style.display='block'; cropHint.style.display='block'; cropArmBtn.style.display='block';
       cropSel=null; cropSelDiv.style.display='none'; cropRunBtn.style.display='none'; cropClearBtn.style.display='none';
+      _setCropArmed(false);
     };
     im.src=srcImg;
   }
@@ -17368,22 +17421,26 @@ function sbUpscale(p){
     var pos=_canvasPos(e);
     _updateSelDiv(cropStart.x,cropStart.y,pos.x,pos.y);
   }
-  function _endDrag(e){
+  function _endDrag(e, isTouch){
     if(!cropDragging) return; cropDragging=false;
     var pos=_canvasPos(e);
     var x=Math.max(0,Math.min(cropStart.x,pos.x)), y=Math.max(0,Math.min(cropStart.y,pos.y));
     var w=Math.abs(pos.x-cropStart.x), h=Math.abs(pos.y-cropStart.y);
-    if(w<10||h<10){ cropSelDiv.style.display='none'; cropSel=null; cropRunBtn.style.display='none'; cropClearBtn.style.display='none'; return; }
+    if(w<10||h<10){ cropSelDiv.style.display='none'; cropSel=null; cropRunBtn.style.display='none'; cropClearBtn.style.display='none'; if(isTouch) _setCropArmed(false); return; }
     cropSel={x:x,y:y,w:w,h:h};
     cropRunBtn.style.display='block'; cropClearBtn.style.display='block';
+    if(isTouch) _setCropArmed(false); // 선택 하나가 완성되면 자동으로 선택모드를 꺼서, 그 다음 터치부턴 다시 스크롤이 먹히게 함
   }
+  // 데스크탑 마우스는 스크롤과 충돌하지 않으므로 예전처럼 바로 드래그 가능.
   cropCanvas.addEventListener('mousedown',_startDrag);
   cropCanvas.addEventListener('mousemove',_moveDrag);
-  window.addEventListener('mouseup',_endDrag);
-  cropCanvas.addEventListener('touchstart',_startDrag,{passive:false});
-  cropCanvas.addEventListener('touchmove',_moveDrag,{passive:false});
-  cropCanvas.addEventListener('touchend',_endDrag);
-  cropClearBtn.onclick=function(){ cropSel=null; cropSelDiv.style.display='none'; cropRunBtn.style.display='none'; cropClearBtn.style.display='none'; };
+  window.addEventListener('mouseup',function(e){ _endDrag(e,false); });
+  // 모바일 터치는 "영역 선택 시작" 버튼으로 켜야만(cropTouchArmed) 드래그가 시작되고, 그 전까지는
+  // 페이지 스크롤이 그대로 통과함(preventDefault 자체를 안 함) — 이게 이번 수정의 핵심.
+  cropCanvas.addEventListener('touchstart',function(e){ if(!cropTouchArmed) return; _startDrag(e); },{passive:false});
+  cropCanvas.addEventListener('touchmove',function(e){ if(!cropTouchArmed||!cropDragging) return; _moveDrag(e); },{passive:false});
+  cropCanvas.addEventListener('touchend',function(e){ if(!cropDragging) return; _endDrag(e,true); });
+  cropClearBtn.onclick=function(){ cropSel=null; cropSelDiv.style.display='none'; cropRunBtn.style.display='none'; cropClearBtn.style.display='none'; _setCropArmed(false); };
   cropRunBtn.onclick=function(){
     if(!cropSel) return;
     if(!_supaUser){ openMd('account'); return; }
@@ -17651,7 +17708,7 @@ function sbAgent(p){
     u1.appendChild(scaleRow);
 
     var engRow=dv('');engRow.style.cssText='display:flex;gap:6px;margin-bottom:10px';
-    [['topaz','Topaz']].forEach(function(pair){
+    [['topaz','Clover 업스케일']].forEach(function(pair){
       var key=pair[0];
       var isOn=tab.upscaleEngine===key;
       var cost=(SCR[tab.upscaleScale]&&SCR[tab.upscaleScale][key])||20;
@@ -24517,7 +24574,7 @@ function buildUpscaleSliders(eng,container){
     if(utT.topazTexture==null) utT.topazTexture=2;
 
     var note=dv('note');
-    note.innerHTML='<strong style="color:var(--ac)">Topaz Upscaler</strong><br>결과물 크기 제한이 없어서(2x/4x 그대로 적용, 4096px대 원본이면 4x 시 약 8K까지도 가능) 축소 후 재확대 없이 진짜 원본 해상도 기준으로 업스케일돼요.';
+    note.innerHTML='<strong style="color:var(--ac)">Clover 업스케일</strong><br>결과물 크기 제한이 없어서(2x/4x 그대로 적용, 4096px대 원본이면 4x 시 약 8K까지도 가능) 축소 후 재확대 없이 진짜 원본 해상도 기준으로 업스케일돼요.';
     container.appendChild(note);
 
     var modeWrap=dv('ss');modeWrap.innerHTML='<div class="lbl">보강 방식</div>';
@@ -27661,7 +27718,9 @@ function addHistEl(item, scroll, targetHs, atBottom){
         },false);
       })(item);
       sadj.addEventListener('mousedown',function(e){e.stopPropagation();},false);
-      sebar.appendChild(sadj);
+      // ⚠️ 요청 반영("색상보정 하단에 들어간거 제일 끝쪽 말고 가장 첫번째 위치로 변경해"):
+      // 맨 끝에 추가되던 걸 버튼줄 맨 앞으로 옮김.
+      sebar.insertBefore(sadj, sebar.firstChild);
     }
 
     // Tags — 영상이면 엔진명 + 해상도 맨 앞에 표시
@@ -27723,6 +27782,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
     });
     cw.addEventListener('touchstart',function(e){
       if(e.target.closest('.ib')||e.target.closest('.se-btn'))return;
+      if(e.touches.length!==1)return; // 손가락 2개(핀치 확대/축소)는 비교선 드래그로 취급하지 않음
       var t=e.touches[0];
       G._touchStartX=t.clientX; G._touchStartY=t.clientY;
       G._touchLocked=null; // 아직 방향 판단 전
@@ -28272,6 +28332,10 @@ document.addEventListener('mouseup',function(){G.dragId=-1;G.drawing=false;G.las
 window.addEventListener('blur',function(){ G.dragId=-1; G.drawing=false; });
 document.addEventListener('mouseleave',function(){ G.dragId=-1; G.drawing=false; });
 document.addEventListener('touchmove',function(e){
+  // ⚠️ 요청 반영("핀치로 확대축소 되게 해줘"): 손가락이 2개 이상이면 핀치 확대/축소 제스처이지
+  // 비교선 드래그가 아니므로, 진행 중이던 드래그가 있으면 즉시 취소하고 핀치 쪽(각 카드의
+  // _wireWheelZoomCore 터치 핸들러)이 처리하게 넘겨줌.
+  if(e.touches.length>1){ if(G.dragId!==-1||G._touchDragId!=null){ G.dragId=-1; G._touchDragId=null; G._touchLocked=null; } return; }
   if(G.dragId!==-1){e.preventDefault();moveDragX(e.touches[0].clientX);return;}
   // 슬라이더 영역에서 터치가 시작됐지만, 아직 가로/세로 방향이 판단 안 된 경우
   if(G._touchDragId!=null && G._touchLocked===null){
@@ -30244,7 +30308,7 @@ function _checkAndResizeForUpscaler(url, ldst, eng, scaleFactor, onDone, onErr){
     _checkAndResizeForUpscaler(imgUrl0, ldst, eng, scaleFactor, function(imgUrl){
     if(eng==='topaz'){
       // ── Topaz Upscaler (fal.ai) ───────────────────────────────────
-      if(ldst)ldst.textContent='Topaz 업스케일 중 (20~60초)...';
+      if(ldst)ldst.textContent='Clover 업스케일 중 (20~60초)...';
       // ⚠️ 요청 반영("토파즈는 거의 이미지 변화 없이 그냥 픽셀수만 키워준다"): 'High Fidelity V2'는
       // Topaz 라인업 중에서도 일부러 원본을 거의 그대로 보존하도록 설계된(변화를 최소화하는) 모델이라
       // "디테일이 실제로 살아나는 업스케일"을 기대한 사용자 입장에선 "그냥 커지기만 했다"고 느껴질
@@ -31517,7 +31581,7 @@ function procImgWithTask(task, onDone, onErr){
   if(wf==='upscale'){
     var upEng = task.upscaleEng || G_UPSCALE_ENG || 'topaz';
     if(upEng==='topaz'){
-      if(ldst)ldst.textContent='Topaz 업스케일 중 (10~30초)...';
+      if(ldst)ldst.textContent='Clover 업스케일 중 (10~30초)...';
       _doUpload(img, function(imgUrl){
         var _sf={'2x':2,'4x':4}[task.scale||'2x']||2;
         // ⚠️ 요청 반영("토파즈는 거의 이미지 변화 없이 그냥 픽셀수만 키워준다"): 위 다른 Topaz 호출과
@@ -33033,8 +33097,9 @@ function _buildBeforeAfterSlider(beforeUrl, afterUrl, label){
   wrap.addEventListener('mousedown', function(e){ dragging=true; setPct(posFromEvent(e)); e.preventDefault(); });
   window.addEventListener('mousemove', function(e){ if(dragging) setPct(posFromEvent(e)); });
   window.addEventListener('mouseup', function(){ dragging=false; });
-  wrap.addEventListener('touchstart', function(e){ dragging=true; setPct(posFromEvent(e)); }, {passive:true});
-  wrap.addEventListener('touchmove', function(e){ if(dragging) setPct(posFromEvent(e)); }, {passive:true});
+  // ⚠️ 손가락 1개일 때만 비교선 드래그로 취급 — 2개(핀치 확대/축소)는 _wireWheelZoomCore가 처리함.
+  wrap.addEventListener('touchstart', function(e){ if(e.touches.length!==1) return; dragging=true; setPct(posFromEvent(e)); }, {passive:true});
+  wrap.addEventListener('touchmove', function(e){ if(e.touches.length!==1){ dragging=false; return; } if(dragging) setPct(posFromEvent(e)); }, {passive:true});
   wrap.addEventListener('touchend', function(){ dragging=false; });
   // 처음 보여줄 때 살짝 좌우로 움직여서 "이거 드래그할 수 있다"는 걸 은근히 알려줌 (한 번만)
   setTimeout(function(){ if(!dragging) setPct(28); }, 550);
