@@ -20368,18 +20368,36 @@ function _openVworldModal(){
     if(!window.vw){ mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:12px;padding:20px;text-align:center;line-height:1.7">브이월드 지도 객체를 초기화하지 못했어요.<br>지금 이 화면의 주소창 도메인: <b>'+location.hostname+'</b><br>브이월드 인증키관리 페이지에 등록된 도메인과 <b>정확히(www 유무까지)</b> 같은지 확인해주세요.<br>도메인이 맞다면 키가 아직 "운영심사" 중이라 승인 전이라 그럴 수 있어요.</div>'; return; }
     mapDiv.innerHTML='';
     var defaultLon=126.9783, defaultLat=37.5665; // 서울시청 기본값
+    // ⚠️ 버그 수정("setOption is not a function" — 폴링해도 계속 없음): 이 버전의 브이월드 SDK는
+    // 저희가 가정한 옛날 방식(빈 new vw.Map() 뒤에 .setOption()/.setMapId())을 안 쓰는 것으로 보여서,
+    // ① 최신 문서에서 쓰는 "new vw.Map(컨테이너id, vw.MapOptions(...))" 생성자 방식도 같이 시도하고,
+    // ② 그것도 실패하면 실제 vw 객체 구조를 화면에 그대로 찍어서(진단용) 다음에 정확히 맞출 수 있게 함.
+    var initPos=new vw.CameraPosition(new vw.CoordZ(defaultLon, defaultLat, 1200), new vw.Direction(0,-60,0));
+    var mapInitErr=null;
     try{
-      var options={
-        mapId:'vmap',
-        initPosition:new vw.CameraPosition(new vw.CoordZ(defaultLon, defaultLat, 1200), new vw.Direction(0,-60,0)),
-        logo:false,
-        navigation:true
-      };
+      var options={ mapId:'vmap', initPosition:initPos, logo:false, navigation:true };
       _vwMapInstance=new vw.Map();
+      if(typeof _vwMapInstance.setOption!=='function') throw new Error('no setOption');
       _vwMapInstance.setOption(options);
       _vwMapInstance.setMapId('vmap');
-    }catch(e){
-      mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:12px;padding:20px;text-align:center">지도 초기화 중 오류: '+e.message+'</div>';
+    }catch(e1){
+      mapInitErr=e1;
+      try{
+        var mapOptions = (typeof vw.MapOptions==='function')
+          ? new vw.MapOptions(vw.BasemapType?vw.BasemapType.GRAPHIC:undefined, 'vmap', vw.DensityType?vw.DensityType.BASIC:undefined, vw.DensityType?vw.DensityType.BASIC:undefined, false, initPos, initPos)
+          : { mapId:'vmap', initPosition:initPos, logo:false, navigation:true };
+        _vwMapInstance=new vw.Map('vmap', mapOptions);
+        mapInitErr=null;
+      }catch(e2){ mapInitErr=e2; }
+    }
+    if(mapInitErr){
+      var diag='(진단 정보 없음)';
+      try{
+        var vwKeys=Object.keys(window.vw||{}).join(', ');
+        var protoKeys = (window.vw&&window.vw.Map&&window.vw.Map.prototype) ? Object.getOwnPropertyNames(window.vw.Map.prototype).join(', ') : '(vw.Map 없음)';
+        diag='vw 안의 이름들: '+vwKeys+'<br>vw.Map.prototype 메서드: '+protoKeys;
+      }catch(e3){}
+      mapDiv.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#f87171;font-size:11.5px;padding:20px;text-align:center;gap:8px;overflow:auto"><div>지도 초기화 중 오류: '+mapInitErr.message+'</div><div style="font-size:10px;color:var(--m2);word-break:break-all;max-width:100%">'+diag+'</div></div>';
       return;
     }
 
