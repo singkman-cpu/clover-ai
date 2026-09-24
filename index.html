@@ -20277,6 +20277,10 @@ function sbRender(p){
 var VWORLD_API_KEY = 'CCA2A6BE-4D04-47E6-9D6A-1F5C6764281D';
 var _vwScriptLoaded = false;
 var _vwMapInstance = null;
+// ⚠️ 요청 반영("캡처하고 옆에도 캡처하고 싶은데 처음부터 다시 해야 하는 번거로움"): 창을 닫았다 다시
+// 열어도 마지막으로 검색/이동했던 위치·주소·화질 설정을 기억해뒀다가 그대로 이어서 시작하게 함
+// (모듈 전역에 저장 — 페이지 새로고침하면 초기화됨, 딱 "이번 방문 동안"만 기억).
+var _vwLastLon=null, _vwLastLat=null, _vwLastAddr='', _vwLastHigh=true;
 function _loadVworldScript(cb){
   if(_vwScriptLoaded && window.vw){ cb(); return; }
   // ⚠️ 버그 수정("도메인 정확히 일치하는데도 브이월드 지도 객체 초기화 실패" — 콘솔에 "Failed to execute
@@ -20338,6 +20342,9 @@ function _vworldGeocode(address, cb){
   // ⚠️ 버그 수정("지번주소(예: '반송동 892') 검색 안 됨"): 브이월드 주소 API는 도로명주소(road)와
   // 지번주소(parcel)를 서로 다른 type 값으로 검색해야 함 — 도로명으로 먼저 시도해보고 실패하면
   // 지번으로 자동 재시도함(둘 다 실패해야 진짜 "못 찾음"으로 처리).
+  // ⚠️ 버그 수정("역 이름 같은 장소명 검색 안 됨"): 주소 API(road/parcel)는 정식 도로명/지번 주소만
+  // 인식하고 "합정역" 같은 장소명(POI)은 못 찾음 — 주소로 둘 다 실패하면 브이월드 "장소검색" API로
+  // 한 번 더 시도함(응답 구조가 주소 API와 달라서 t==='place'일 때 다르게 파싱).
   function tryType(t, onFail){
     fetch(SUPA_URL+'/functions/v1/vworld-geocode',{
       method:'POST',
@@ -20345,13 +20352,18 @@ function _vworldGeocode(address, cb){
       body:JSON.stringify({address:address, key:VWORLD_API_KEY, type:t})
     }).then(function(r){return r.json();}).then(function(d){
       try{
-        var pt=d.response.result.point;
+        var pt = (t==='place') ? d.response.result.items[0].point : d.response.result.point;
         cb(parseFloat(pt.x), parseFloat(pt.y));
-      }catch(e){ onFail(); }
+      }catch(e){ onFail(d); }
     }).catch(onFail);
   }
   tryType('road', function(){
-    tryType('parcel', function(){ cb(null,null,'주소를 찾지 못했어요. 지번/도로명 주소를 정확히 입력해보세요.'); });
+    tryType('parcel', function(){
+      tryType('place', function(d){
+        console.warn('[VWorld] 장소 검색도 실패, 원본 응답:', d);
+        cb(null,null,'주소/장소를 찾지 못했어요. 지번·도로명 주소나 정확한 장소명을 입력해보세요.');
+      });
+    });
   });
 }
 function _openVworldModal(){
@@ -20367,7 +20379,7 @@ function _openVworldModal(){
       '<button id="vw-close" style="border:none;background:transparent;color:var(--m2);font-size:20px;cursor:pointer;line-height:1">✕</button>'+
     '</div>'+
     '<div style="display:flex;gap:6px;margin-bottom:8px;flex-shrink:0">'+
-      '<input id="vw-addr" type="text" placeholder="주소 입력 (예: 서울 강남구 테헤란로 123)" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit">'+
+      '<input id="vw-addr" type="text" placeholder="주소 입력 (예: 서울 강남구 테헤란로 123)" value="'+(_vwLastAddr||'').replace(/"/g,'&quot;')+'" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit">'+
       '<button id="vw-search" style="padding:9px 14px;border-radius:8px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">검색</button>'+
     '</div>'+
     '<div id="vw-err" style="font-size:11px;color:#f87171;margin-bottom:6px;display:none;flex-shrink:0"></div>'+
@@ -20375,6 +20387,7 @@ function _openVworldModal(){
     '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;flex-shrink:0">'+
       '<button id="vw-persp" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">👁️ 투시도(눈높이)</button>'+
       '<button id="vw-aerial" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🚁 조감도(항공뷰)</button>'+
+      '<button id="vw-quality" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🔍 고화질 타일: 켜짐</button>'+
       '<button id="vw-capture" style="flex:2;min-width:180px;padding:8px;border-radius:7px;border:none;background:var(--acg,rgba(0,229,204,.15));color:var(--ac,#00e5cc);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">📸 이 화면 캡처해서 참고 이미지로 추가</button>'+
     '</div>'+
     '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5;flex-shrink:0">드래그로 회전, 스크롤로 확대/축소, 화면 캡처가 잘 안 되면(오류 메시지 뜨면) 직접 스크린샷 찍어서 "실사 참고 이미지"에 수동으로 올려주세요.<br>참고: 브이월드 3D 건물 모델은 서울 등 일부 지역에만 상세히 구축돼 있어요.</div>';
@@ -20382,10 +20395,17 @@ function _openVworldModal(){
   document.body.appendChild(ov);
 
   var errEl=panel.querySelector('#vw-err');
-  function showErr(msg){ errEl.textContent=msg; errEl.style.display='block'; }
+  function showErr(msg){ errEl.style.color='#f87171'; errEl.textContent=msg; errEl.style.display='block'; }
+  function showOk(msg){ errEl.style.color='#4ade80'; errEl.textContent=msg; errEl.style.display='block'; setTimeout(function(){ if(errEl.textContent===msg) errEl.style.display='none'; }, 2500); }
 
   panel.querySelector('#vw-close').onclick=function(){ ov.remove(); };
-  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  // ⚠️ 버그 수정("검색창에서 왼쪽으로 드래그하면 창이 닫힘"): 기존엔 click 이벤트의 target이 배경(ov)
+  // 자체이면 무조건 닫았는데, 입력창 안에서 글자를 드래그로 선택하다가 마우스가 입력창 밖(어두운
+  // 배경 위)으로 나간 채 손을 떼면 그 click의 target도 배경(ov)이 돼서 똑같이 닫혀버렸음 — "마우스를
+  // 누르기 시작한 지점도 배경이었을 때만" 닫히게 해서, 안에서 시작된 드래그는 밖에서 끝나도 안 닫힘.
+  var _ovDownOnBg=false;
+  ov.addEventListener('mousedown', function(e){ _ovDownOnBg=(e.target===ov); });
+  ov.onclick=function(e){ if(e.target===ov && _ovDownOnBg) ov.remove(); };
 
   var mapDiv=panel.querySelector('#vmap');
   mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--m2);font-size:12px">브이월드 3D 지도 불러오는 중...</div>';
@@ -20398,18 +20418,26 @@ function _openVworldModal(){
     // ⚠️ 버그 수정("투시도/조감도 누르면 검색한 위치가 아니라 서울시청으로 감"): 이 두 버튼이 매번
     // defaultLon/defaultLat(서울시청 고정값)만 바라보고 있었음 — 주소 검색 성공 시 curLon/curLat을
     // 갱신해서, 투시도/조감도가 "마지막으로 이동한 위치" 기준으로 카메라 높이/각도만 바꾸게 함.
-    var curLon=defaultLon, curLat=defaultLat;
+    // ⚠️ 요청 반영("옆에도 캡처하고 싶은데 처음부터 다시 해야 하는 번거로움"): 창을 닫았다 다시 열면
+    // 마지막으로 검색/이동했던 위치(_vwLastLon/_vwLastLat)에서 그대로 이어서 시작함.
+    var curLon=(_vwLastLon!=null)?_vwLastLon:defaultLon, curLat=(_vwLastLat!=null)?_vwLastLat:defaultLat;
     // ⚠️ 버그 수정("setOption is not a function" — 폴링해도 계속 없음): 이 버전의 브이월드 SDK는
     // 저희가 가정한 옛날 방식(빈 new vw.Map() 뒤에 .setOption()/.setMapId())을 안 쓰는 것으로 보여서,
     // ① 최신 문서에서 쓰는 "new vw.Map(컨테이너id, vw.MapOptions(...))" 생성자 방식도 같이 시도하고,
     // ② 그것도 실패하면 실제 vw 객체 구조를 화면에 그대로 찍어서(진단용) 다음에 정확히 맞출 수 있게 함.
-    var initPos=new vw.CameraPosition(new vw.CoordZ(defaultLon, defaultLat, 1200), new vw.Direction(0,-60,0));
+    var initPos=new vw.CameraPosition(new vw.CoordZ(curLon, curLat, (_vwLastLon!=null)?500:1200), new vw.Direction(0,(_vwLastLon!=null)?-50:-60,0));
     var mapInitErr=null;
     try{
       // preserveDrawingBuffer: true — WebGL은 기본적으로 매 프레임이 그려진 직후 버퍼를 비워버려서,
       // 이 옵션 없이는 캡처(toDataURL) 시 새까만 화면만 찍힘. SDK가 이 값을 읽어서 내부 WebGL 컨텍스트
       // 생성에 반영해주길 기대하고 넣어둠(무시되더라도 다른 동작엔 영향 없음).
-      var options={ mapId:'vmap', initPosition:initPos, logo:false, navigation:true, preserveDrawingBuffer:true };
+      // ⚠️ 요청 반영("브이월드 화질 조정할 수 있는 거 있잖아"): 브이월드는 타일/지형 해상도를
+      // BASIC(기본)/HIGH(고화질) 두 단계로 선택할 수 있음 — 처음부터 고화질로 요청하고, 아래에
+      // 토글 버튼도 추가해둠(키 이름이 SDK 버전마다 달라서 여러 후보를 다 같이 넣어둠, 모르는 키는
+      // 그냥 무시되니 안전함).
+      var hiVal = _vwLastHigh ? (vw.DensityType?vw.DensityType.HIGH:'HIGH') : (vw.DensityType?vw.DensityType.BASIC:'BASIC');
+      var hybridVal = vw.BasemapType ? vw.BasemapType.HYBRID : 'HYBRID';
+      var options={ mapId:'vmap', initPosition:initPos, logo:false, navigation:true, preserveDrawingBuffer:true, tileType:hiVal, imageDensity:hiVal, terrainDensity:hiVal, density:hiVal, basemapType:hybridVal };
       _vwMapInstance=new vw.Map();
       if(typeof _vwMapInstance.setOption!=='function') throw new Error('no setOption');
       _vwMapInstance.setOption(options);
@@ -20418,7 +20446,7 @@ function _openVworldModal(){
       mapInitErr=e1;
       try{
         var mapOptions = (typeof vw.MapOptions==='function')
-          ? new vw.MapOptions(vw.BasemapType?vw.BasemapType.GRAPHIC:undefined, 'vmap', vw.DensityType?vw.DensityType.BASIC:undefined, vw.DensityType?vw.DensityType.BASIC:undefined, false, initPos, initPos)
+          ? new vw.MapOptions(vw.BasemapType?vw.BasemapType.GRAPHIC:undefined, 'vmap', vw.DensityType?vw.DensityType.HIGH:undefined, vw.DensityType?vw.DensityType.HIGH:undefined, false, initPos, initPos)
           : { mapId:'vmap', initPosition:initPos, logo:false, navigation:true };
         _vwMapInstance=new vw.Map('vmap', mapOptions);
         mapInitErr=null;
@@ -20464,9 +20492,32 @@ function _openVworldModal(){
       errEl.style.display='none';
       _vworldGeocode(addr, function(lon,lat,err2){
         if(err2){ showErr(err2); return; }
-        curLon=lon; curLat=lat;
+        curLon=lon; curLat=lat; _vwLastLon=lon; _vwLastLat=lat; _vwLastAddr=addr;
         flyTo(lon, lat, 500, -50);
       });
+    };
+
+    // ⚠️ 요청 반영("브이월드 화질 조정할 수 있는 거 있잖아 근데 여기는 없네"): BASIC(기본)/HIGH(고화질)
+    // 타일 밀도를 토글하는 버튼 — 키 이름이 SDK 버전마다 달라서 여러 후보를 순서대로 시도함.
+    var _hiOn=_vwLastHigh; // 마지막으로 켜뒀던 화질 상태를 그대로 이어감
+    panel.querySelector('#vw-quality').textContent='🔍 고화질 타일: '+(_hiOn?'켜짐':'꺼짐');
+    panel.querySelector('#vw-quality').onclick=function(){
+      var wantHigh=!_hiOn;
+      var d = vw.DensityType ? (wantHigh?vw.DensityType.HIGH:vw.DensityType.BASIC) : (wantHigh?'HIGH':'BASIC');
+      var tried=[], ok=false;
+      [
+        function(){ _vwMapInstance.setOption({tileType:d, imageDensity:d, terrainDensity:d, density:d}); },
+        function(){ _vwMapInstance.setImageDensity(d); },
+        function(){ _vwMapInstance.setTileType(d); },
+        function(){ _vwMapInstance.setDensity(d); }
+      ].forEach(function(fn,i){ if(ok) return; try{ fn(); ok=true; }catch(e){ tried.push(i+':'+e.message); } });
+      if(ok){
+        _hiOn=wantHigh; _vwLastHigh=wantHigh;
+        panel.querySelector('#vw-quality').textContent='🔍 고화질 타일: '+(_hiOn?'켜짐':'꺼짐');
+      } else {
+        console.warn('[VWorld] 화질 전환 실패 — 시도한 방법:', tried, '실제 사용 가능한 메서드:', Object.getOwnPropertyNames(Object.getPrototypeOf(_vwMapInstance||{})));
+        showErr('이 지도는 화질 전환 기능을 지원 안 하는 것 같아요(콘솔에 자세한 정보를 남겼어요).');
+      }
     };
     panel.querySelector('#vw-addr').onkeydown=function(e){ if(e.key==='Enter') panel.querySelector('#vw-search').click(); };
     // ⚠️ 버그 수정("입력창에서 드래그하면 지도가 튐"): 브이월드 3D 라이브러리가 카메라 회전을 위해
@@ -20485,9 +20536,30 @@ function _openVworldModal(){
       flyTo(curLon, curLat, 800, -70);
     };
 
+    // ⚠️ 요청 반영("캡처할 때는 약국·횟집·은행 같은 명칭 라벨 다 꺼줘, 이미지만 들어가게"): 지금 보이는
+    // 위성사진+라벨 모드는 브이월드에서 보통 "HYBRID"(사진+명칭)이고, 라벨 없는 순수 위성사진은
+    // "PHOTO" 모드임 — 캡처 직전에 잠깐 PHOTO로 바꿔서 라벨 없이 찍고, 찍은 뒤 다시 원래 모드(HYBRID)로
+    // 복원함. 메서드 이름이 SDK 버전마다 달라서 여러 후보를 순서대로 시도함.
+    function setBasemap(typeName, done){
+      var t = vw.BasemapType ? vw.BasemapType[typeName] : typeName;
+      var tried=[], ok=false;
+      [
+        function(){ _vwMapInstance.setBasemap(t); },
+        function(){ _vwMapInstance.setBaseMap(t); },
+        function(){ _vwMapInstance.setBaseMapType(t); },
+        function(){ _vwMapInstance.setOption({basemapType:t}); }
+      ].forEach(function(fn,i){ if(ok) return; try{ fn(); ok=true; }catch(e){ tried.push(i+':'+e.message); } });
+      if(!ok) console.warn('[VWorld] 지도유형('+typeName+') 전환 실패 — 시도한 방법:', tried);
+      setTimeout(done, ok?450:0); // 라벨/타일이 실제로 바뀌어 다시 그려질 시간을 잠깐 줌
+    }
+
     panel.querySelector('#vw-capture').onclick=function(){
       var cv=mapDiv.querySelector('canvas');
       if(!cv){ showErr('캡처할 화면을 찾지 못했어요.'); return; }
+      setBasemap('PHOTO', function(){ doCapture(function(){ setBasemap('HYBRID', function(){}); }); });
+    };
+    function doCapture(after){
+      var cv=mapDiv.querySelector('canvas');
       // ⚠️ 버그 수정("캡처하면 검은 화면으로 추가됨"): WebGL은 한 프레임을 그린 직후 다음 프레임을
       // 그리기 전에 버퍼를 비워버려서, 렌더링 "직후" 타이밍(requestAnimationFrame 콜백 안)에서 캡처해야
       // 화면이 남아있을 확률이 높음. 그래도 새까맣게 나오면(거의 모든 픽셀이 검정) 그 이미지를 그냥
@@ -20509,14 +20581,20 @@ function _openVworldModal(){
           if(emptyIdx===-1){ showErr('실사 참고 이미지 슬롯이 이미 6개 다 찼어요 — 하나 비우고 다시 시도해주세요.'); return; }
           rTab.refs[emptyIdx]=dataUrl;
           _saveMainTabImagesDraft(); // ⚠️ 버그 수정("레퍼런스 이미지가 없어진다"): 이 캡처 경로가 자동저장 함수를 안 부르고 있어서, 화면엔 보여도 실제로는 저장이 안 되고 있었음
-          ov.remove();
           renderSB();
+          // ⚠️ 요청 반영("캡처하면 자동으로 닫히던데 안 닫히게 해줘, 옆에도 캡처하고 싶은데"): 캡처 후
+          // 창을 자동으로 닫지 않고 그대로 열어둠 — 각도만 조금 바꿔서 여러 장 연속으로 캡처할 수 있게.
+          // 닫기는 사용자가 직접 ✕ 버튼을 눌러야만 닫힘.
+          var filled=rTab.refs.filter(function(r){return !!r;}).length;
+          showOk('✅ 실사 참고 이미지로 추가됐어요 ('+filled+'/6) — 계속 다른 각도로 캡처하려면 지도를 움직인 뒤 다시 캡처 버튼을 눌러주세요.');
         }catch(e){
           showErr('화면 캡처에 실패했어요(브라우저 보안 정책). 대신 브라우저 스크린샷 기능으로 직접 캡처해서 "실사 참고 이미지"에 올려주세요.');
           console.warn('[VWorld 캡처 실패]', e);
+        }finally{
+          if(after) after(); // 라벨 껐던 걸 성공/실패 상관없이 항상 원래대로(HYBRID) 복원
         }
       }); });
-    };
+    }
   });
 }
 
