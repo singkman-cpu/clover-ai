@@ -3537,8 +3537,8 @@ function _openMaskEditor(bgCanvas, existingMask, cb){
   ov2.style.cssText='position:fixed;inset:0;z-index:100010;background:rgba(0,0,0,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
 
   var title=document.createElement('div');
-  title.innerHTML='&#128396;&#65039; 적용할 영역을 칠해주세요 <span style="color:#888;font-weight:400;font-size:11.5px">— 칠한 부분에만 이 레이어의 보정이 적용돼요</span>';
-  title.style.cssText='color:#fff;font-size:14px;font-weight:700;margin-bottom:12px;text-align:center';
+  title.innerHTML='&#128396;&#65039; 적용할 영역을 표시해주세요 <span style="color:#888;font-weight:400;font-size:11.5px">— 브러시로 칠하거나 다각형으로 꼭짓점을 찍어 선택하고, 필요하면 "AI로 사물 정밀 선택"으로 실제 사물 윤곽에 딱 맞게 다듬을 수 있어요</span>';
+  title.style.cssText='color:#fff;font-size:14px;font-weight:700;margin-bottom:12px;text-align:center;max-width:92vw';
 
   var W=bgCanvas.width, H=bgCanvas.height;
   var stageWrap=document.createElement('div');
@@ -3547,7 +3547,11 @@ function _openMaskEditor(bgCanvas, existingMask, cb){
   dispCanvas.style.cssText='max-width:92vw;max-height:66vh;width:auto;height:auto;display:block;border-radius:8px;cursor:crosshair';
   var overlayCanvas=document.createElement('canvas'); overlayCanvas.width=W; overlayCanvas.height=H;
   overlayCanvas.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;border-radius:8px';
-  stageWrap.appendChild(dispCanvas); stageWrap.appendChild(overlayCanvas);
+  // ⚠️ 요청 반영("다각형툴도 넣어줘"): 다각형 꼭짓점/선의 "미리보기"만 그리는 별도 캔버스.
+  // 실제 마스크(maskCanvas)에는 영향 없고, 점을 다 찍고 확정(polyFinish)할 때만 마스크에 반영됨.
+  var polyCanvas=document.createElement('canvas'); polyCanvas.width=W; polyCanvas.height=H;
+  polyCanvas.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;border-radius:8px';
+  stageWrap.appendChild(dispCanvas); stageWrap.appendChild(overlayCanvas); stageWrap.appendChild(polyCanvas);
 
   var maskCanvas=document.createElement('canvas'); maskCanvas.width=W; maskCanvas.height=H;
   var mctx=maskCanvas.getContext('2d');
@@ -3567,7 +3571,42 @@ function _openMaskEditor(bgCanvas, existingMask, cb){
   }
   renderOverlay();
 
+  // ⚠️ 요청 반영("레이어 안에서 브러시랑 다각형툴 선택하다가 뒤로가기 ctrl+z로 가능하게해줘"):
+  // 브러시 획/다각형 확정/전체선택/전체지우기/AI 정밀 선택 등 마스크가 바뀔 때마다 스냅샷을
+  // 쌓아두고 Ctrl(⌘)+Z로 되돌리기, Ctrl+Shift+Z(또는 Ctrl+Y)로 다시 실행할 수 있게 함.
+  var mHistStack=[], mHistIdx=-1;
+  function mSnapshot(){ return maskCanvas.toDataURL('image/png'); }
+  function mPushHistory(){
+    var snap=mSnapshot();
+    if(mHistIdx>=0 && mHistStack[mHistIdx]===snap) return;
+    mHistStack=mHistStack.slice(0,mHistIdx+1);
+    mHistStack.push(snap);
+    mHistIdx=mHistStack.length-1;
+    if(mHistStack.length>25){ mHistStack.shift(); mHistIdx--; }
+  }
+  function mRestore(snap){
+    var im=new Image();
+    im.onload=function(){ mctx.clearRect(0,0,W,H); mctx.drawImage(im,0,0); renderOverlay(); };
+    im.src=snap;
+  }
+  function mUndo(){ if(mHistIdx<=0) return; mHistIdx--; mRestore(mHistStack[mHistIdx]); }
+  function mRedo(){ if(mHistIdx>=mHistStack.length-1) return; mHistIdx++; mRestore(mHistStack[mHistIdx]); }
+  function onMaskKeydown(e){
+    var mod=e.ctrlKey||e.metaKey;
+    if(!mod) return;
+    var k=(e.key||'').toLowerCase();
+    if(k==='z' && e.shiftKey){ e.preventDefault(); mRedo(); return; }
+    if(k==='z'){ e.preventDefault(); mUndo(); return; }
+    if(k==='y'){ e.preventDefault(); mRedo(); return; }
+  }
+  document.addEventListener('keydown', onMaskKeydown);
+  mPushHistory(); // 초기 상태(기존 마스크 또는 빈 상태)를 0번으로 저장
+
+  var AI_SELECT_COST=20;
+  var hasMarked = !!existingMask;
   var brushSize=Math.max(20, Math.round(W*0.08)), erasing=false;
+  // ⚠️ 요청 반영("브러시랑 다각형툴"): 두 가지 선택 도구 중 하나를 고르는 상태값.
+  var curTool='brush'; // 'brush' | 'polygon'
   function posOnCanvas(e){
     var rect=dispCanvas.getBoundingClientRect();
     var clientX=(e.touches?e.touches[0].clientX:e.clientX), clientY=(e.touches?e.touches[0].clientY:e.clientY);
@@ -3583,11 +3622,12 @@ function _openMaskEditor(bgCanvas, existingMask, cb){
     mctx.fillStyle=grad;
     mctx.beginPath(); mctx.arc(x,y,brushSize/2,0,Math.PI*2); mctx.fill();
     mctx.globalCompositeOperation='source-over';
+    hasMarked=true;
   }
   var painting=false, lastPt=null;
-  function startPaint(e){ painting=true; var p=posOnCanvas(e); lastPt=p; paintAt(p.x,p.y); renderOverlay(); }
+  function startPaint(e){ if(curTool!=='brush') return; painting=true; var p=posOnCanvas(e); lastPt=p; paintAt(p.x,p.y); renderOverlay(); }
   function movePaint(e){
-    if(!painting) return; e.preventDefault();
+    if(curTool!=='brush' || !painting) return; e.preventDefault();
     var p=posOnCanvas(e);
     if(lastPt){
       var dist=Math.hypot(p.x-lastPt.x,p.y-lastPt.y);
@@ -3600,45 +3640,205 @@ function _openMaskEditor(bgCanvas, existingMask, cb){
     lastPt=p;
     renderOverlay();
   }
-  function endPaint(){ painting=false; lastPt=null; }
-  dispCanvas.addEventListener('mousedown',function(e){ if(e.button!==0) return; startPaint(e); });
+  function endPaint(){ if(!painting) return; painting=false; lastPt=null; mPushHistory(); }
+  dispCanvas.addEventListener('mousedown',function(e){ if(curTool!=='brush' || e.button!==0) return; startPaint(e); });
   dispCanvas.addEventListener('mousemove',movePaint);
   window.addEventListener('mouseup',endPaint);
-  dispCanvas.addEventListener('touchstart',function(e){ e.preventDefault(); startPaint(e); },{passive:false});
+  dispCanvas.addEventListener('touchstart',function(e){ if(curTool!=='brush') return; e.preventDefault(); startPaint(e); },{passive:false});
   dispCanvas.addEventListener('touchmove',movePaint,{passive:false});
-  dispCanvas.addEventListener('touchend',endPaint);
+  dispCanvas.addEventListener('touchend',function(){ if(curTool==='brush') endPaint(); });
+
+  // ⚠️ 요청 반영("다각형툴 이라고해야하나 그것도 넣어줘... 브러시칠하기도힘들고"): 브러시는
+  // 손으로 정교하게 사물 경계를 따라가기 어려우니, 점을 찍어서 각진 윤곽선으로 정확하게 선택할
+  // 수 있는 다각형(폴리곤) 도구를 추가함. 점 3개 이상 찍은 뒤 첫 점 근처를 다시 클릭하거나
+  // "선택 완료" 버튼을 누르면 그 다각형 내부가 마스크에 흰색으로 채워짐(지우개 켜져 있으면
+  // 반대로 그 부분만 지워짐).
+  var polyPoints=[];
+  function drawPolyPreview(){
+    var pctx=polyCanvas.getContext('2d');
+    pctx.clearRect(0,0,W,H);
+    if(curTool!=='polygon' || polyPoints.length===0) return;
+    pctx.lineWidth=Math.max(2,W*0.0025);
+    pctx.strokeStyle='#00e5cc';
+    pctx.fillStyle='rgba(0,229,204,.22)';
+    pctx.beginPath();
+    pctx.moveTo(polyPoints[0].x,polyPoints[0].y);
+    for(var i=1;i<polyPoints.length;i++) pctx.lineTo(polyPoints[i].x,polyPoints[i].y);
+    if(polyPoints.length>2){ pctx.closePath(); pctx.fill(); }
+    pctx.stroke();
+    polyPoints.forEach(function(p,i){
+      pctx.beginPath(); pctx.arc(p.x,p.y,Math.max(4,W*0.006),0,Math.PI*2);
+      pctx.fillStyle = i===0 ? '#fff' : '#00e5cc';
+      pctx.fill();
+      pctx.strokeStyle='#000'; pctx.lineWidth=1.5; pctx.stroke();
+    });
+  }
+  function polyAddPoint(pos){
+    if(polyPoints.length>2){
+      var first=polyPoints[0];
+      var closeR=Math.max(10,W*0.02);
+      if(Math.hypot(pos.x-first.x,pos.y-first.y)<=closeR){ polyFinish(); return; }
+    }
+    polyPoints.push(pos);
+    drawPolyPreview();
+  }
+  function polyFinish(){
+    if(polyPoints.length<3){ polyPoints=[]; drawPolyPreview(); return; }
+    mctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+    mctx.beginPath();
+    mctx.moveTo(polyPoints[0].x,polyPoints[0].y);
+    for(var i=1;i<polyPoints.length;i++) mctx.lineTo(polyPoints[i].x,polyPoints[i].y);
+    mctx.closePath();
+    mctx.fillStyle='#fff';
+    mctx.fill();
+    mctx.globalCompositeOperation='source-over';
+    if(!erasing) hasMarked=true;
+    polyPoints=[];
+    drawPolyPreview();
+    renderOverlay();
+    mPushHistory();
+  }
+  function polyCancelPts(){ polyPoints=[]; drawPolyPreview(); }
+  dispCanvas.addEventListener('click', function(e){ if(curTool==='polygon') polyAddPoint(posOnCanvas(e)); });
+  dispCanvas.addEventListener('dblclick', function(e){ if(curTool==='polygon'){ e.preventDefault(); polyFinish(); } });
+  var _touchStartPos=null;
+  dispCanvas.addEventListener('touchstart', function(e){
+    if(curTool!=='polygon' || e.touches.length!==1) return;
+    _touchStartPos=posOnCanvas(e);
+  }, {passive:true});
+  dispCanvas.addEventListener('touchend', function(e){
+    if(curTool!=='polygon' || !_touchStartPos) return;
+    polyAddPoint(_touchStartPos);
+    _touchStartPos=null;
+  });
 
   var ctrlRow=document.createElement('div');
-  ctrlRow.style.cssText='display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;justify-content:center';
+  ctrlRow.style.cssText='display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap;justify-content:center;max-width:92vw';
   var brushBtn=document.createElement('button'); brushBtn.type='button'; brushBtn.innerHTML='&#128396;&#65039; 브러시';
+  var polyBtn=document.createElement('button'); polyBtn.type='button'; polyBtn.innerHTML='&#11040; 다각형';
+  polyBtn.title='점을 찍어 사물의 외곽선을 따라 정확하게 선택해요';
   var eraseBtn=document.createElement('button'); eraseBtn.type='button'; eraseBtn.innerHTML='&#129529; 지우개';
   function styleToggle(btn,on){ btn.style.cssText='padding:8px 14px;border-radius:20px;border:1.5px solid '+(on?'#00e5cc':'rgba(255,255,255,.25)')+';background:'+(on?'rgba(0,229,204,.15)':'rgba(255,255,255,.08)')+';color:'+(on?'#00e5cc':'#fff')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit'; }
-  styleToggle(brushBtn,true); styleToggle(eraseBtn,false);
-  brushBtn.onclick=function(){ erasing=false; styleToggle(brushBtn,true); styleToggle(eraseBtn,false); };
-  eraseBtn.onclick=function(){ erasing=true; styleToggle(brushBtn,false); styleToggle(eraseBtn,true); };
+  function refreshToolBtns(){
+    styleToggle(brushBtn, curTool==='brush' && !erasing);
+    styleToggle(polyBtn, curTool==='polygon');
+    styleToggle(eraseBtn, curTool==='brush' && erasing);
+    polyDoneBtn.style.display = curTool==='polygon' ? 'inline-block' : 'none';
+    polyCancelBtn.style.display = curTool==='polygon' ? 'inline-block' : 'none';
+    sizeLbl.style.display = curTool==='brush' ? '' : 'none';
+    sizeRng.style.display = curTool==='brush' ? '' : 'none';
+  }
+  brushBtn.onclick=function(){ curTool='brush'; erasing=false; polyPoints=[]; drawPolyPreview(); refreshToolBtns(); };
+  eraseBtn.onclick=function(){ curTool='brush'; erasing=true; polyPoints=[]; drawPolyPreview(); refreshToolBtns(); };
+  polyBtn.onclick=function(){ curTool='polygon'; refreshToolBtns(); };
+  var polyDoneBtn=document.createElement('button'); polyDoneBtn.type='button'; polyDoneBtn.textContent='선택 완료';
+  polyDoneBtn.style.cssText='padding:8px 14px;border-radius:20px;border:1px solid rgba(0,229,204,.5);background:rgba(0,229,204,.15);color:#00e5cc;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:none';
+  polyDoneBtn.onclick=function(){ polyFinish(); };
+  var polyCancelBtn=document.createElement('button'); polyCancelBtn.type='button'; polyCancelBtn.textContent='점 취소';
+  polyCancelBtn.title='지금까지 찍은 점을 모두 취소해요';
+  polyCancelBtn.style.cssText='padding:8px 14px;border-radius:20px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;display:none';
+  polyCancelBtn.onclick=function(){ polyCancelPts(); };
   var sizeLbl=document.createElement('span'); sizeLbl.style.cssText='color:#ccc;font-size:12px'; sizeLbl.textContent='브러시 크기';
   var sizeRng=document.createElement('input'); sizeRng.type='range'; sizeRng.min=Math.max(5,Math.round(W*0.01)); sizeRng.max=Math.round(W*0.4); sizeRng.value=brushSize;
   sizeRng.style.cssText='width:140px'; sizeRng.oninput=function(){ brushSize=parseInt(sizeRng.value,10); };
   var clearBtn=document.createElement('button'); clearBtn.type='button'; clearBtn.textContent='전체 지우기';
   clearBtn.style.cssText='padding:8px 14px;border-radius:20px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
-  clearBtn.onclick=function(){ mctx.clearRect(0,0,W,H); renderOverlay(); };
+  clearBtn.onclick=function(){ mctx.clearRect(0,0,W,H); hasMarked=false; renderOverlay(); mPushHistory(); };
   var fillBtn=document.createElement('button'); fillBtn.type='button'; fillBtn.textContent='전체 이미지 선택';
   fillBtn.title='이미지 전체에 이 레이어를 적용해요(마스크 없음)';
   fillBtn.style.cssText='padding:8px 14px;border-radius:20px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
-  fillBtn.onclick=function(){ mctx.fillStyle='#fff'; mctx.globalCompositeOperation='source-over'; mctx.fillRect(0,0,W,H); renderOverlay(); };
-  ctrlRow.appendChild(brushBtn); ctrlRow.appendChild(eraseBtn); ctrlRow.appendChild(sizeLbl); ctrlRow.appendChild(sizeRng); ctrlRow.appendChild(fillBtn); ctrlRow.appendChild(clearBtn);
+  fillBtn.onclick=function(){ mctx.fillStyle='#fff'; mctx.globalCompositeOperation='source-over'; mctx.fillRect(0,0,W,H); hasMarked=true; renderOverlay(); mPushHistory(); };
+
+  // ⚠️ 요청 반영("비즈메카보면 영역안에 들어가있는 사물을 특정해서 그사물을 레이어로 잡아서...
+  // 브러시 칠한 범위 그대로 칼라가 변경하면 사물위치에 벗어난 곳까지 다 변경되자나 당연히
+  // 이렇게하면안돼지"): 브러시/다각형은 사람이 대충 표시한 "힌트"일 뿐이고, 그 힌트 영역 안에
+  // 실제로 있는 사물의 정확한 윤곽선을 AI(나노바나나2, 기존 "마스크 추출" 프리셋과 같은 방식)가
+  // 다시 찾아서 마스크를 그 사물 모양에 딱 맞게 새로 그려줌 — 대충 칠한 브러시 범위 밖까지
+  // 색이 번지는 문제를 해결함. 이미 마스크 추출 프리셋들이 검증된 방식이라 그대로 재사용.
+  var aiSelectBtn=document.createElement('button'); aiSelectBtn.type='button'; aiSelectBtn.innerHTML='&#127919; AI로 사물 정밀 선택 ('+AI_SELECT_COST+'cr)';
+  aiSelectBtn.title='대략 칠하거나 다각형으로 표시한 영역 안에서 실제 사물의 정확한 윤곽을 AI가 찾아 마스크를 다시 그려줘요';
+  aiSelectBtn.style.cssText='padding:8px 14px;border-radius:20px;border:1.5px solid rgba(255,193,7,.5);background:rgba(255,193,7,.12);color:#ffc107;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+  aiSelectBtn.onclick=function(){ _runAiPreciseSelect(); };
+  function _runAiPreciseSelect(){
+    if(!hasMarked){ alert('먼저 브러시나 다각형으로 원하는 사물 위치를 대략 표시해주세요.'); return; }
+    if(G.supaRole!=='admin' && G.plan!=='admin' && (G.cr||0) < AI_SELECT_COST){
+      alert('크레딧이 부족합니다. 필요: '+AI_SELECT_COST+'cr, 현재: '+(G.cr||0)+'cr');
+      if(typeof openMd==='function') openMd('credits');
+      return;
+    }
+    var origLabel=aiSelectBtn.innerHTML;
+    var hintUrl;
+    try{
+      var hint=document.createElement('canvas'); hint.width=W; hint.height=H;
+      var hctx=hint.getContext('2d');
+      hctx.drawImage(bgCanvas,0,0,W,H);
+      hctx.save();
+      hctx.globalAlpha=0.55;
+      hctx.drawImage(maskCanvas,0,0);
+      hctx.globalCompositeOperation='source-in';
+      hctx.fillStyle='#39ff14';
+      hctx.fillRect(0,0,W,H);
+      hctx.restore();
+      hintUrl=hint.toDataURL('image/jpeg',0.92);
+    }catch(e){
+      alert('이미지 준비 중 오류가 발생했어요: '+e.message);
+      return;
+    }
+    aiSelectBtn.disabled=true; aiSelectBtn.style.opacity='.6';
+    aiSelectBtn.innerHTML='&#8987; AI가 찾는 중...';
+    var segPrompt='This is a binary segmentation MASK task, not a photo edit — the output must be a pure black-and-white mask image, same exact pixel dimensions, camera angle and framing as the input image (do not crop, zoom, or reposition). The input image has a rough, imprecise bright green highlighted area painted over part of it — this highlight is ONLY a loose hint pointing at roughly which object is meant, not an accurate outline, so completely ignore its exact shape/edges. TARGET: identify the single specific real-world object, furniture piece, surface, or element that this green highlight is mainly pointing at, and output a pure black-and-white mask where: (1) that exact object\'s real silhouette — precisely following its true edges, corners and contours exactly as it actually appears in the photo — is filled solid pure white (#FFFFFF), (2) absolutely everything else in the frame (including any part of the green highlight that falls outside that object\'s real boundary) is filled solid pure black (#000000). No gradients, no gray, no color, no partial transparency, no shading, no photographic detail anywhere in the output — only flat pure white and flat pure black regions. The white region must be an accurate, tight segmentation of the actual object\'s real shape, not a rough blob and not simply the shape of the green highlight. Output nothing but this two-tone mask image.';
+    function _restoreBtn(){ aiSelectBtn.disabled=false; aiSelectBtn.style.opacity='1'; aiSelectBtn.innerHTML=origLabel; }
+    falRun('fal-ai/nano-banana-2/edit', {prompt:segPrompt, image_urls:[hintUrl], num_images:1}, function(d){
+      var url=falExtractImageUrl(d);
+      if(!url){ _restoreBtn(); alert('AI가 결과를 반환하지 않았어요. 다시 시도해주세요.'); return; }
+      var im=new Image(); im.crossOrigin='anonymous';
+      im.onload=function(){
+        try{
+          var tmp=document.createElement('canvas'); tmp.width=W; tmp.height=H;
+          var tctx=tmp.getContext('2d');
+          tctx.drawImage(im,0,0,W,H);
+          var idata=tctx.getImageData(0,0,W,H);
+          var d2=idata.data;
+          for(var i=0;i<d2.length;i+=4){
+            var lum=(d2[i]+d2[i+1]+d2[i+2])/3;
+            d2[i]=255; d2[i+1]=255; d2[i+2]=255; d2[i+3]=lum;
+          }
+          tctx.putImageData(idata,0,0);
+          mctx.clearRect(0,0,W,H);
+          mctx.drawImage(tmp,0,0);
+          hasMarked=true;
+          renderOverlay();
+          mPushHistory();
+          if(G.supaRole!=='admin' && G.plan!=='admin') deductCredits(AI_SELECT_COST, 'AI 사물 정밀 선택');
+        }catch(e){ alert('마스크 적용 중 오류: '+e.message); }
+        _restoreBtn();
+      };
+      im.onerror=function(){ _restoreBtn(); alert('결과 이미지를 불러오지 못했어요.'); };
+      im.src=url;
+    }, function(err){ _restoreBtn(); alert('AI 정밀 선택 실패: '+String(err).slice(0,150)); });
+  }
+
+  ctrlRow.appendChild(brushBtn); ctrlRow.appendChild(polyBtn); ctrlRow.appendChild(eraseBtn);
+  ctrlRow.appendChild(polyDoneBtn); ctrlRow.appendChild(polyCancelBtn);
+  ctrlRow.appendChild(sizeLbl); ctrlRow.appendChild(sizeRng);
+  ctrlRow.appendChild(fillBtn); ctrlRow.appendChild(clearBtn); ctrlRow.appendChild(aiSelectBtn);
+  refreshToolBtns();
 
   var btnRow2=document.createElement('div');
   btnRow2.style.cssText='display:flex;gap:8px;margin-top:14px';
   var cancelBtn=document.createElement('button'); cancelBtn.type='button'; cancelBtn.textContent='취소';
   cancelBtn.style.cssText='padding:11px 22px;border-radius:9px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-  cancelBtn.onclick=function(){ ov2.remove(); };
+  cancelBtn.onclick=function(){ document.removeEventListener('keydown', onMaskKeydown); ov2.remove(); };
   var doneBtn=document.createElement('button'); doneBtn.type='button'; doneBtn.innerHTML='&#10003; 완료';
   doneBtn.style.cssText='padding:11px 22px;border-radius:9px;border:none;background:#00e5cc;color:#000;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
-  doneBtn.onclick=function(){ ov2.remove(); cb(maskCanvas); };
+  doneBtn.onclick=function(){ document.removeEventListener('keydown', onMaskKeydown); ov2.remove(); cb(maskCanvas); };
   btnRow2.appendChild(cancelBtn); btnRow2.appendChild(doneBtn);
 
-  ov2.appendChild(title); ov2.appendChild(stageWrap); ov2.appendChild(ctrlRow); ov2.appendChild(btnRow2);
+  var histHint=document.createElement('div');
+  histHint.textContent='Ctrl(⌘)+Z 로 되돌리기 · Ctrl+Shift+Z 로 다시 실행';
+  histHint.style.cssText='color:#777;font-size:10.5px;text-align:center;margin-top:8px';
+
+  ov2.appendChild(title); ov2.appendChild(stageWrap); ov2.appendChild(ctrlRow); ov2.appendChild(btnRow2); ov2.appendChild(histHint);
   document.body.appendChild(ov2);
 }
 
@@ -4043,6 +4243,35 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
   layerSection.appendChild(layerAddRow);
   panel.appendChild(layerSection);
 
+  // ⚠️ 요청 반영("색조부분은 0~100이렇게 보여주지말고 포토샵처럼 칼라를 보이게해줘"): 색조
+  // 회전 값을 숫자로만 보여주지 않고, 포토샵 Hue/Saturation 대화상자처럼 슬라이더 트랙 자체를
+  // 무지개 스펙트럼으로 칠하고, 라벨 자리엔 숫자 대신 현재 회전값에 해당하는 색상 스와치(원)를
+  // 보여줌 — 몇 도만큼 돌렸는지 숫자를 계산할 필요 없이 "무슨 색 쪽으로 가는지"를 바로 눈으로
+  // 확인할 수 있음.
+  if(!document.getElementById('hue-range-style')){
+    var hueStyle=document.createElement('style'); hueStyle.id='hue-range-style';
+    hueStyle.textContent=
+      '.hue-range{-webkit-appearance:none;appearance:none;height:10px;border-radius:5px;background:linear-gradient(to right,#ff0000,#ffbf00,#80ff00,#00ff40,#00ffff,#0040ff,#8000ff,#ff00bf,#ff0000);outline:none;cursor:pointer}'+
+      '.hue-range::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid #000;box-shadow:0 0 0 1px rgba(255,255,255,.7);cursor:pointer}'+
+      '.hue-range::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid #000;cursor:pointer}';
+    document.head.appendChild(hueStyle);
+  }
+  function mkHueSlider(layer, label, key, min, max){
+    var r=document.createElement('div'); r.style.cssText='margin-bottom:6px';
+    var l=document.createElement('div'); l.style.cssText='display:flex;align-items:center;justify-content:space-between;color:var(--m2,#999);font-size:10.5px;margin-bottom:3px';
+    var lt=document.createElement('span'); lt.textContent=label;
+    var swatch=document.createElement('span');
+    swatch.style.cssText='display:inline-block;width:16px;height:16px;border-radius:50%;border:1.5px solid rgba(255,255,255,.5);vertical-align:middle;flex-shrink:0';
+    function updateSwatch(){ swatch.style.background='hsl('+(((layer[key]%360)+360)%360)+',85%,55%)'; }
+    updateSwatch();
+    l.appendChild(lt); l.appendChild(swatch);
+    var inp=document.createElement('input'); inp.type='range'; inp.className='hue-range'; inp.min=min; inp.max=max; inp.value=layer[key]; inp.step=1;
+    inp.style.width='100%';
+    inp.oninput=function(){ layer[key]=parseInt(inp.value,10); updateSwatch(); drawPreview(); };
+    inp.addEventListener('change', function(){ pushHistory(); });
+    r.appendChild(l); r.appendChild(inp);
+    return r;
+  }
   function mkLayerSlider(layer, label, key, min, max){
     var r=document.createElement('div'); r.style.cssText='margin-bottom:6px';
     var l=document.createElement('div'); l.style.cssText='display:flex;justify-content:space-between;color:var(--m2,#999);font-size:10.5px;margin-bottom:3px';
@@ -4086,7 +4315,7 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
         row.appendChild(mkLayerSlider(layer,'밝기','b',-60,60));
         row.appendChild(mkLayerSlider(layer,'대비','c',-60,60));
       }else{
-        row.appendChild(mkLayerSlider(layer,'색조 회전','h',-180,180));
+        row.appendChild(mkHueSlider(layer,'색조 회전','h',-180,180));
         row.appendChild(mkLayerSlider(layer,'채도','s',-80,80));
       }
       layerList.appendChild(row);
