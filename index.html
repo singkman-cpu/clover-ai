@@ -20409,7 +20409,6 @@ function _openVworldModal(){
     '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;flex-shrink:0">'+
       '<button id="vw-persp" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">👁️ 투시도(눈높이)</button>'+
       '<button id="vw-aerial" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🚁 조감도(항공뷰)</button>'+
-      '<button id="vw-quality" style="flex:1;min-width:110px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🔍 고화질 타일: 켜짐</button>'+
       '<button id="vw-capture" style="flex:2;min-width:180px;padding:8px;border-radius:7px;border:none;background:var(--acg,rgba(0,229,204,.15));color:var(--ac,#00e5cc);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit">📸 이 화면 캡처해서 참고 이미지로 추가</button>'+
     '</div>'+
     '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5;flex-shrink:0">드래그로 회전, 스크롤로 확대/축소, 화면 캡처가 잘 안 되면(오류 메시지 뜨면) 직접 스크린샷 찍어서 "실사 참고 이미지"에 수동으로 올려주세요.<br>참고: 브이월드 3D 건물 모델은 서울 등 일부 지역에만 상세히 구축돼 있어요.</div>';
@@ -20519,34 +20518,11 @@ function _openVworldModal(){
       });
     };
 
-    // ⚠️ 요청 반영("브이월드 화질 조정할 수 있는 거 있잖아 근데 여기는 없네"): BASIC(기본)/HIGH(고화질)
-    // 타일 밀도를 토글하는 버튼 — 키 이름이 SDK 버전마다 달라서 여러 후보를 순서대로 시도함.
-    var _hiOn=_vwLastHigh; // 마지막으로 켜뒀던 화질 상태를 그대로 이어감
-    panel.querySelector('#vw-quality').textContent='🔍 고화질 타일: '+(_hiOn?'켜짐':'꺼짐');
-    panel.querySelector('#vw-quality').onclick=function(){
-      var wantHigh=!_hiOn;
-      var d = vw.DensityType ? (wantHigh?vw.DensityType.HIGH:vw.DensityType.BASIC) : (wantHigh?'HIGH':'BASIC');
-      var tried=[], ok=false;
-      // ⚠️ 콘솔 진단 결과 setOption류 메서드가 아예 없는 SDK라서, options 직접 수정+loadMap() 재적용과
-      // globe/layer 쪽 후보도 같이 시도함.
-      [
-        function(){ if(!_vwMapInstance.options) throw new Error('no options'); _vwMapInstance.options.tileType=d; _vwMapInstance.options.imageDensity=d; _vwMapInstance.options.terrainDensity=d; _vwMapInstance.loadMap(); },
-        function(){ _vwMapInstance.globe.setImageDensity(d); },
-        function(){ _vwMapInstance.globe.setTerrainDensity(d); },
-        function(){ _vwMapInstance.setImageDensity(d); },
-        function(){ _vwMapInstance.setTileType(d); },
-        function(){ _vwMapInstance.setDensity(d); }
-      ].forEach(function(fn,i){ if(ok) return; try{ fn(); ok=true; }catch(e){ tried.push(i+':'+e.message); } });
-      if(ok){
-        _hiOn=wantHigh; _vwLastHigh=wantHigh;
-        panel.querySelector('#vw-quality').textContent='🔍 고화질 타일: '+(_hiOn?'켜짐':'꺼짐');
-      } else {
-        console.warn('[VWorld] 화질 전환 실패 — 시도한 방법:', tried,
-          '\nglobe 객체 안 메서드들:', _vwMapInstance.globe?Object.getOwnPropertyNames(Object.getPrototypeOf(_vwMapInstance.globe)):'(globe 없음)',
-          '\noptions 안 키들:', _vwMapInstance.options?Object.keys(_vwMapInstance.options):'(options 없음)');
-        showErr('이 지도는 화질 전환 기능을 지원 안 하는 것 같아요(콘솔에 자세한 정보를 남겼어요).');
-      }
-    };
+    // ⚠️ 기능 제거("고화질 꺼짐 누르니까 지도 전체가 깨짐 — MapJson 로딩 실패, 렌더링 중단"): 화질을
+    // 런타임에 바꾸려고 options를 고친 뒤 loadMap()으로 강제 재로드했더니 이 SDK가 아예 복구 불가능한
+    // 상태로 깨져버림(콘솔: "raiseEvent" 크래시, 창을 닫았다 열어도 안 고쳐지고 새로고침해야 했음).
+    // 위험도가 너무 커서 런타임 토글 버튼은 완전히 제거하고, 대신 지도를 열 때 처음부터 고화질(HIGH)로
+    // 요청하는 것만 유지함(이미 위 options에 반영돼 있음 — 여기선 더 손댈 게 없음).
     panel.querySelector('#vw-addr').onkeydown=function(e){ if(e.key==='Enter') panel.querySelector('#vw-search').click(); };
     // ⚠️ 버그 수정("입력창에서 드래그하면 지도가 튐"): 브이월드 3D 라이브러리가 카메라 회전을 위해
     // document 전체에 마우스 드래그 리스너를 걸어두고 있어서, 주소 입력창 안에서 글자를 드래그로
@@ -20580,8 +20556,10 @@ function _openVworldModal(){
         function(){ _vwMapInstance.layer.changeBaseLayer(t); },
         function(){ _vwMapInstance.setBasemap(t); },
         function(){ _vwMapInstance.setBaseMap(t); },
-        function(){ _vwMapInstance.setBaseMapType(t); },
-        function(){ if(!_vwMapInstance.options) throw new Error('no options'); _vwMapInstance.options.basemapType=t; _vwMapInstance.loadMap(); }
+        function(){ _vwMapInstance.setBaseMapType(t); }
+        // ⚠️ loadMap() 강제 재로드 후보는 뺐음 — 화질 토글에서 이걸 썼다가 지도 전체가 복구 불가능하게
+        // 깨진 적이 있어서(콘솔 "raiseEvent" 크래시, 새로고침 전까진 안 고쳐짐), 여기서도 같은 위험을
+        // 감수할 필요 없음.
       ].forEach(function(fn,i){ if(ok) return; try{ fn(); ok=true; }catch(e){ tried.push(i+':'+e.message); } });
       if(!ok){
         console.warn('[VWorld] 지도유형('+typeName+') 전환 실패 — 시도한 방법:', tried,
