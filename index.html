@@ -20279,10 +20279,36 @@ var _vwScriptLoaded = false;
 var _vwMapInstance = null;
 function _loadVworldScript(cb){
   if(_vwScriptLoaded && window.vw){ cb(); return; }
+  // ⚠️ 버그 수정("도메인 정확히 일치하는데도 브이월드 지도 객체 초기화 실패" — 콘솔에 "Failed to execute
+  // 'write' on 'Document': It isn't possible to write into a document from an asynchronously-loaded
+  // external script..." 에러 확인): 브이월드 SDK가 내부적으로 document.write()로 지도 엔진 보조
+  // 스크립트를 추가로 불러오는데, 우리가 <script>를 동적으로(비동기) head에 붙이면 브라우저가 이미
+  // 문서 파싱을 끝낸 상태라 document.write 호출을 막아버려서 그 보조 스크립트들이 전혀 안 불러와지고
+  // window.vw가 끝내 안 생김. document.write를 잠깐 가로채서(shim) <script src=...> 태그를 실제로
+  // head에 append하는 방식으로 우회하고, 그렇게 새로 붙은 스크립트들까지 다 로드된 뒤에 콜백을 부름.
+  var pending=0, outerDone=false, restored=false;
+  var origWrite=document.write, origWriteln=document.writeln;
+  function restore(){ if(!restored){ restored=true; document.write=origWrite; document.writeln=origWriteln; } }
+  function maybeFinish(){ if(outerDone && pending<=0 && !restored){ restore(); setTimeout(function(){ _vwScriptLoaded=true; cb(); },150); } }
+  function shim(html){
+    var d=document.createElement('div'); d.innerHTML=html;
+    Array.prototype.slice.call(d.childNodes).forEach(function(n){
+      if(!n.tagName) return;
+      if(n.tagName==='SCRIPT'){
+        var ns=document.createElement('script');
+        for(var i=0;i<n.attributes.length;i++){ ns.setAttribute(n.attributes[i].name, n.attributes[i].value); }
+        if(n.src){ pending++; ns.onload=ns.onerror=function(){ pending--; maybeFinish(); }; document.head.appendChild(ns); }
+        else { ns.text=n.textContent; document.head.appendChild(ns); }
+      } else { document.head.appendChild(n); }
+    });
+  }
+  document.write=shim; document.writeln=shim;
+  // 안전장치: SDK 내부 구현이 예상과 달라 pending 카운트가 안 맞아도 4초 뒤엔 무조건 진행
+  setTimeout(function(){ if(!restored){ restore(); _vwScriptLoaded=true; cb(); } }, 4000);
   var s=document.createElement('script');
   s.src='https://map.vworld.kr/js/webglMapInit.js.do?version=2.0&apiKey='+VWORLD_API_KEY+'&domain='+encodeURIComponent(location.hostname);
-  s.onload=function(){ _vwScriptLoaded=true; setTimeout(cb, 300); }; // vw 전역객체 초기화 시간 약간 대기
-  s.onerror=function(){ cb('브이월드 스크립트 로드 실패 — API 키 또는 도메인 등록을 확인해주세요.'); };
+  s.onload=function(){ outerDone=true; maybeFinish(); };
+  s.onerror=function(){ restore(); cb('브이월드 스크립트 로드 실패 — API 키 또는 도메인 등록을 확인해주세요.'); };
   document.head.appendChild(s);
 }
 function _vworldGeocode(address, cb){
