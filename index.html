@@ -20281,6 +20281,25 @@ var _vwMapInstance = null;
 // 열어도 마지막으로 검색/이동했던 위치·주소·화질 설정을 기억해뒀다가 그대로 이어서 시작하게 함
 // (모듈 전역에 저장 — 페이지 새로고침하면 초기화됨, 딱 "이번 방문 동안"만 기억).
 var _vwLastLon=null, _vwLastLat=null, _vwLastAddr='', _vwLastHigh=true;
+// ⚠️ 버그 수정("닫기 누르고 다시 열면 마지막 작업했던 화면이 아니라 다른 화면"): 이전엔 검색으로
+// "이동시켰을 때"만 위치를 기억했는데, 실제로는 검색 후 마우스로 드래그·회전해서 원하는 구도를
+// 잡는 경우가 대부분이라 그 수동 이동은 하나도 기억을 못 했음 — 창 닫기 직전에 지도가 실제로
+// "지금 보고 있는" 위치(getCurrentPosition)를 읽어서 저장하도록 바꿈.
+function _vwSaveCurrentPos(){
+  try{
+    if(!_vwMapInstance || typeof _vwMapInstance.getCurrentPosition!=='function') return;
+    var p=_vwMapInstance.getCurrentPosition();
+    var lon=null, lat=null;
+    if(p){
+      if(p.x!=null && p.y!=null){ lon=p.x; lat=p.y; }
+      else if(p.point && p.point.x!=null){ lon=p.point.x; lat=p.point.y; }
+      else if(p.coord && p.coord.x!=null){ lon=p.coord.x; lat=p.coord.y; }
+      else if(p.position && p.position.x!=null){ lon=p.position.x; lat=p.position.y; }
+    }
+    if(lon!=null && lat!=null){ _vwLastLon=parseFloat(lon); _vwLastLat=parseFloat(lat); }
+    else console.warn('[VWorld] getCurrentPosition 결과 구조를 못 알아봄(다음에 정확히 맞출게요):', p);
+  }catch(e){ console.warn('[VWorld] 현재 위치 저장 실패', e); }
+}
 function _loadVworldScript(cb){
   if(_vwScriptLoaded && window.vw){ cb(); return; }
   // ⚠️ 버그 수정("도메인 정확히 일치하는데도 브이월드 지도 객체 초기화 실패" — 콘솔에 "Failed to execute
@@ -20303,7 +20322,10 @@ function _loadVworldScript(cb){
   function restore(){ if(!restored){ restored=true; document.write=origWrite; document.writeln=origWriteln; } }
   function waitVwReady(tries){
     tries=tries||0;
-    if((window.vw && window.vw.Map && window.vw.Map.prototype && typeof window.vw.Map.prototype.setOption==='function') || tries>25){ _vwScriptLoaded=true; cb(); return; }
+    // ⚠️ 버그 수정: 실제 콘솔 진단으로 확인해보니 이 SDK 버전의 vw.Map은 'setOption'이 아예 없고
+    // 대신 'moveTo'/'getCurrentPosition' 같은 메서드를 씀 — 예전엔 없는 메서드(setOption)를 기다리다
+    // 매번 5초 안전장치 타임아웃에 걸려서 불필요하게 느렸음. 실제로 있는 메서드로 판정 기준을 바꿈.
+    if((window.vw && window.vw.Map && window.vw.Map.prototype && typeof window.vw.Map.prototype.moveTo==='function') || tries>25){ _vwScriptLoaded=true; cb(); return; }
     setTimeout(function(){ waitVwReady(tries+1); }, 200);
   }
   function checkDone(){ if(outerDone && queue.length===0 && !processing && !restored){ restore(); setTimeout(function(){ waitVwReady(0); },150); } }
@@ -20398,14 +20420,14 @@ function _openVworldModal(){
   function showErr(msg){ errEl.style.color='#f87171'; errEl.textContent=msg; errEl.style.display='block'; }
   function showOk(msg){ errEl.style.color='#4ade80'; errEl.textContent=msg; errEl.style.display='block'; setTimeout(function(){ if(errEl.textContent===msg) errEl.style.display='none'; }, 2500); }
 
-  panel.querySelector('#vw-close').onclick=function(){ ov.remove(); };
+  panel.querySelector('#vw-close').onclick=function(){ _vwSaveCurrentPos(); ov.remove(); };
   // ⚠️ 버그 수정("검색창에서 왼쪽으로 드래그하면 창이 닫힘"): 기존엔 click 이벤트의 target이 배경(ov)
   // 자체이면 무조건 닫았는데, 입력창 안에서 글자를 드래그로 선택하다가 마우스가 입력창 밖(어두운
   // 배경 위)으로 나간 채 손을 떼면 그 click의 target도 배경(ov)이 돼서 똑같이 닫혀버렸음 — "마우스를
   // 누르기 시작한 지점도 배경이었을 때만" 닫히게 해서, 안에서 시작된 드래그는 밖에서 끝나도 안 닫힘.
   var _ovDownOnBg=false;
   ov.addEventListener('mousedown', function(e){ _ovDownOnBg=(e.target===ov); });
-  ov.onclick=function(e){ if(e.target===ov && _ovDownOnBg) ov.remove(); };
+  ov.onclick=function(e){ if(e.target===ov && _ovDownOnBg){ _vwSaveCurrentPos(); ov.remove(); } };
 
   var mapDiv=panel.querySelector('#vmap');
   mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--m2);font-size:12px">브이월드 3D 지도 불러오는 중...</div>';
@@ -20505,8 +20527,12 @@ function _openVworldModal(){
       var wantHigh=!_hiOn;
       var d = vw.DensityType ? (wantHigh?vw.DensityType.HIGH:vw.DensityType.BASIC) : (wantHigh?'HIGH':'BASIC');
       var tried=[], ok=false;
+      // ⚠️ 콘솔 진단 결과 setOption류 메서드가 아예 없는 SDK라서, options 직접 수정+loadMap() 재적용과
+      // globe/layer 쪽 후보도 같이 시도함.
       [
-        function(){ _vwMapInstance.setOption({tileType:d, imageDensity:d, terrainDensity:d, density:d}); },
+        function(){ if(!_vwMapInstance.options) throw new Error('no options'); _vwMapInstance.options.tileType=d; _vwMapInstance.options.imageDensity=d; _vwMapInstance.options.terrainDensity=d; _vwMapInstance.loadMap(); },
+        function(){ _vwMapInstance.globe.setImageDensity(d); },
+        function(){ _vwMapInstance.globe.setTerrainDensity(d); },
         function(){ _vwMapInstance.setImageDensity(d); },
         function(){ _vwMapInstance.setTileType(d); },
         function(){ _vwMapInstance.setDensity(d); }
@@ -20515,7 +20541,9 @@ function _openVworldModal(){
         _hiOn=wantHigh; _vwLastHigh=wantHigh;
         panel.querySelector('#vw-quality').textContent='🔍 고화질 타일: '+(_hiOn?'켜짐':'꺼짐');
       } else {
-        console.warn('[VWorld] 화질 전환 실패 — 시도한 방법:', tried, '실제 사용 가능한 메서드:', Object.getOwnPropertyNames(Object.getPrototypeOf(_vwMapInstance||{})));
+        console.warn('[VWorld] 화질 전환 실패 — 시도한 방법:', tried,
+          '\nglobe 객체 안 메서드들:', _vwMapInstance.globe?Object.getOwnPropertyNames(Object.getPrototypeOf(_vwMapInstance.globe)):'(globe 없음)',
+          '\noptions 안 키들:', _vwMapInstance.options?Object.keys(_vwMapInstance.options):'(options 없음)');
         showErr('이 지도는 화질 전환 기능을 지원 안 하는 것 같아요(콘솔에 자세한 정보를 남겼어요).');
       }
     };
@@ -20541,15 +20569,25 @@ function _openVworldModal(){
     // "PHOTO" 모드임 — 캡처 직전에 잠깐 PHOTO로 바꿔서 라벨 없이 찍고, 찍은 뒤 다시 원래 모드(HYBRID)로
     // 복원함. 메서드 이름이 SDK 버전마다 달라서 여러 후보를 순서대로 시도함.
     function setBasemap(typeName, done){
+      // ⚠️ 실제 콘솔 진단 결과(vw.Map.prototype 실제 메서드 목록)엔 setBasemap류 메서드가 아예 없고,
+      // 대신 'layer'(레이어 관리자로 추정), 'options'(생성시 넣은 옵션 객체), 'loadMap'(재로드)만 확인됨
+      // — layer 쪽 후보 메서드들과, options를 직접 바꾸고 loadMap()으로 재적용하는 방식을 같이 시도함.
       var t = vw.BasemapType ? vw.BasemapType[typeName] : typeName;
       var tried=[], ok=false;
       [
+        function(){ _vwMapInstance.layer.setBaseLayer(t); },
+        function(){ _vwMapInstance.layer.setBasemap(t); },
+        function(){ _vwMapInstance.layer.changeBaseLayer(t); },
         function(){ _vwMapInstance.setBasemap(t); },
         function(){ _vwMapInstance.setBaseMap(t); },
         function(){ _vwMapInstance.setBaseMapType(t); },
-        function(){ _vwMapInstance.setOption({basemapType:t}); }
+        function(){ if(!_vwMapInstance.options) throw new Error('no options'); _vwMapInstance.options.basemapType=t; _vwMapInstance.loadMap(); }
       ].forEach(function(fn,i){ if(ok) return; try{ fn(); ok=true; }catch(e){ tried.push(i+':'+e.message); } });
-      if(!ok) console.warn('[VWorld] 지도유형('+typeName+') 전환 실패 — 시도한 방법:', tried);
+      if(!ok){
+        console.warn('[VWorld] 지도유형('+typeName+') 전환 실패 — 시도한 방법:', tried,
+          '\nlayer 객체 안 메서드들:', _vwMapInstance.layer?Object.getOwnPropertyNames(Object.getPrototypeOf(_vwMapInstance.layer)):'(layer 없음)',
+          '\noptions 안 키들:', _vwMapInstance.options?Object.keys(_vwMapInstance.options):'(options 없음)');
+      }
       setTimeout(done, ok?450:0); // 라벨/타일이 실제로 바뀌어 다시 그려질 시간을 잠깐 줌
     }
 
