@@ -20321,13 +20321,22 @@ function _loadVworldScript(cb){
   document.head.appendChild(s);
 }
 function _vworldGeocode(address, cb){
-  var url='https://api.vworld.kr/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&address='+encodeURIComponent(address)+'&format=json&type=road&key='+VWORLD_API_KEY;
-  fetch(url).then(function(r){return r.json();}).then(function(d){
+  // ⚠️ 버그 수정("주소 검색 중 오류" — 콘솔에 CORS 에러 확인): 브이월드 주소 검색(geocoder) API는
+  // 브라우저에서 직접 fetch하는 걸 애초에 지원 안 함(Access-Control-Allow-Origin 헤더가 없음) —
+  // 도메인 등록/승인 여부와 무관하게 항상 막힘. 지도 타일 스크립트와 달리 이건 서버-서버 호출 전용
+  // API라서, 이메일 발송(send-mail)과 같은 방식으로 Supabase Edge Function을 한 번 거쳐서 호출함.
+  // ⚠️ 주의: 이 기능이 되려면 Supabase 프로젝트에 'vworld-geocode'라는 Edge Function을 새로 배포해야
+  // 함(아직 배포 안 돼있으면 계속 실패함) — 필요한 함수 코드는 채팅으로 안내드림.
+  fetch(SUPA_URL+'/functions/v1/vworld-geocode',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SUPA_KEY},
+    body:JSON.stringify({address:address, key:VWORLD_API_KEY})
+  }).then(function(r){return r.json();}).then(function(d){
     try{
       var pt=d.response.result.point;
       cb(parseFloat(pt.x), parseFloat(pt.y));
     }catch(e){ cb(null,null,'주소를 찾지 못했어요. 지번/도로명 주소를 정확히 입력해보세요.'); }
-  }).catch(function(){ cb(null,null,'주소 검색 중 오류가 발생했어요.'); });
+  }).catch(function(){ cb(null,null,'주소 검색 중 오류가 발생했어요 (서버 프록시 함수가 아직 배포되지 않았을 수 있어요).'); });
 }
 function _openVworldModal(){
   var ov=document.createElement('div');
