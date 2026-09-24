@@ -20286,37 +20286,45 @@ function _loadVworldScript(cb){
   // 문서 파싱을 끝낸 상태라 document.write 호출을 막아버려서 그 보조 스크립트들이 전혀 안 불러와지고
   // window.vw가 끝내 안 생김. document.write를 잠깐 가로채서(shim) <script src=...> 태그를 실제로
   // head에 append하는 방식으로 우회하고, 그렇게 새로 붙은 스크립트들까지 다 로드된 뒤에 콜백을 부름.
-  var pending=0, outerDone=false, restored=false;
+  // ⚠️ 버그 수정 2차("ol is not defined", "ws3d is not defined" — 지도가 아예 안 뜸): 처음 shim은
+  // document.write로 나온 <script>들을 전부 한꺼번에(병렬로) appendChild 했는데, 브라우저는 동적으로
+  // 추가된 <script>를 기본적으로 비동기·순서 무관하게 실행함. 근데 이 SDK는 OpenLayers(ol.js) 같은
+  // 라이브러리를 먼저 로드하고 그걸 쓰는 다음 스크립트가 "그 다음에" 실행되는 걸 전제로 짜여있어서,
+  // 순서가 안 지켜지면 "ol/ws3d is not defined"로 깨짐 — document.write가 원래 보장하던 "한 줄씩
+  // 순서대로 실행"을 큐(queue)로 재현해서, 이전 스크립트가 완전히 로드·실행된 뒤에만 다음 스크립트를
+  // 추가하도록 고침.
+  var outerDone=false, restored=false;
+  var queue=[], processing=false;
   var origWrite=document.write, origWriteln=document.writeln;
   function restore(){ if(!restored){ restored=true; document.write=origWrite; document.writeln=origWriteln; } }
-  // ⚠️ 추가 버그 수정("_vwMapInstance.setOption is not a function"): document.write로 새로 붙은
-  // <script> 태그들이 전부 load 이벤트를 쐈다고 해서 vw.Map 클래스가 100% 완성된 게 아닐 수 있음
-  // (SDK 내부에서 한 번 더 비동기로 지도 엔진을 초기화하는 경우) — vw.Map.prototype.setOption이
-  // 실제로 생길 때까지 짧게 폴링해서, 너무 이른 타이밍에 콜백을 부르지 않게 함.
   function waitVwReady(tries){
     tries=tries||0;
     if((window.vw && window.vw.Map && window.vw.Map.prototype && typeof window.vw.Map.prototype.setOption==='function') || tries>25){ _vwScriptLoaded=true; cb(); return; }
     setTimeout(function(){ waitVwReady(tries+1); }, 200);
   }
-  function maybeFinish(){ if(outerDone && pending<=0 && !restored){ restore(); setTimeout(function(){ waitVwReady(0); },150); } }
+  function checkDone(){ if(outerDone && queue.length===0 && !processing && !restored){ restore(); setTimeout(function(){ waitVwReady(0); },150); } }
+  function stepQueue(){
+    if(queue.length===0){ processing=false; checkDone(); return; }
+    processing=true;
+    var n=queue.shift();
+    if(n.tagName==='SCRIPT'){
+      var ns=document.createElement('script'); ns.async=false;
+      for(var i=0;i<n.attributes.length;i++){ ns.setAttribute(n.attributes[i].name, n.attributes[i].value); }
+      if(n.src){ ns.onload=ns.onerror=function(){ stepQueue(); }; document.head.appendChild(ns); } // 다음 건 이게 끝난 뒤에만 진행
+      else { ns.text=n.textContent; document.head.appendChild(ns); stepQueue(); } // 인라인 스크립트는 append 시 바로(동기) 실행됨
+    } else { document.head.appendChild(n); stepQueue(); }
+  }
   function shim(html){
     var d=document.createElement('div'); d.innerHTML=html;
-    Array.prototype.slice.call(d.childNodes).forEach(function(n){
-      if(!n.tagName) return;
-      if(n.tagName==='SCRIPT'){
-        var ns=document.createElement('script');
-        for(var i=0;i<n.attributes.length;i++){ ns.setAttribute(n.attributes[i].name, n.attributes[i].value); }
-        if(n.src){ pending++; ns.onload=ns.onerror=function(){ pending--; maybeFinish(); }; document.head.appendChild(ns); }
-        else { ns.text=n.textContent; document.head.appendChild(ns); }
-      } else { document.head.appendChild(n); }
-    });
+    Array.prototype.slice.call(d.childNodes).forEach(function(n){ if(n.tagName) queue.push(n); });
+    if(!processing) stepQueue();
   }
   document.write=shim; document.writeln=shim;
-  // 안전장치: SDK 내부 구현이 예상과 달라 pending 카운트가 안 맞아도 4초 뒤엔 무조건 진행
-  setTimeout(function(){ if(!restored){ restore(); waitVwReady(0); } }, 4000);
+  // 안전장치: SDK 내부 구현이 예상과 달라 큐가 안 맞아도 8초 뒤엔 무조건 진행
+  setTimeout(function(){ if(!restored){ restore(); waitVwReady(0); } }, 8000);
   var s=document.createElement('script');
   s.src='https://map.vworld.kr/js/webglMapInit.js.do?version=2.0&apiKey='+VWORLD_API_KEY+'&domain='+encodeURIComponent(location.hostname);
-  s.onload=function(){ outerDone=true; maybeFinish(); };
+  s.onload=function(){ outerDone=true; checkDone(); };
   s.onerror=function(){ restore(); cb('브이월드 스크립트 로드 실패 — API 키 또는 도메인 등록을 확인해주세요.'); };
   document.head.appendChild(s);
 }
