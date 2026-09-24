@@ -20419,9 +20419,26 @@ function _openVworldModal(){
     }
 
     function flyTo(lon, lat, height, pitch){
-      try{
-        _vwMapInstance.setInitPosition(new vw.CameraPosition(new vw.CoordZ(lon, lat, height), new vw.Direction(0, pitch, 0)));
-      }catch(e){ console.warn('[VWorld] flyTo 실패', e); }
+      // ⚠️ 버그 수정("setInitPosition is not a function"): 초기 생성 때 쓰는 setOption과 달리, 이미
+      // 떠 있는 지도의 카메라를 "옮기는" 메서드 이름은 SDK 버전마다 달라서, 흔히 쓰이는 후보들을
+      // 순서대로 시도하고 전부 실패하면 실제 인스턴스에 어떤 메서드가 있는지 콘솔에 찍어서 다음에
+      // 정확히 맞출 수 있게 함.
+      var pos=new vw.CameraPosition(new vw.CoordZ(lon, lat, height), new vw.Direction(0, pitch, 0));
+      var tried=[], ok=false;
+      [
+        function(){ _vwMapInstance.setInitPosition(pos); },
+        function(){ _vwMapInstance.setOption({initPosition:pos}); },
+        function(){ _vwMapInstance.moveTo(pos); },
+        function(){ _vwMapInstance.flyTo(pos); },
+        function(){ _vwMapInstance.setCameraPosition(pos); },
+        function(){ _vwMapInstance.getCamera().setPosition(pos); }
+      ].forEach(function(fn,i){
+        if(ok) return;
+        try{ fn(); ok=true; }catch(e){ tried.push(i+':'+e.message); }
+      });
+      if(!ok){
+        console.warn('[VWorld] flyTo 실패 — 시도한 방법:', tried, '실제 사용 가능한 메서드:', Object.getOwnPropertyNames(Object.getPrototypeOf(_vwMapInstance||{})));
+      }
     }
 
     panel.querySelector('#vw-search').onclick=function(){
