@@ -20335,16 +20335,24 @@ function _vworldGeocode(address, cb){
   // API라서, 이메일 발송(send-mail)과 같은 방식으로 Supabase Edge Function을 한 번 거쳐서 호출함.
   // ⚠️ 주의: 이 기능이 되려면 Supabase 프로젝트에 'vworld-geocode'라는 Edge Function을 새로 배포해야
   // 함(아직 배포 안 돼있으면 계속 실패함) — 필요한 함수 코드는 채팅으로 안내드림.
-  fetch(SUPA_URL+'/functions/v1/vworld-geocode',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','apikey':SUPA_KEY},
-    body:JSON.stringify({address:address, key:VWORLD_API_KEY})
-  }).then(function(r){return r.json();}).then(function(d){
-    try{
-      var pt=d.response.result.point;
-      cb(parseFloat(pt.x), parseFloat(pt.y));
-    }catch(e){ cb(null,null,'주소를 찾지 못했어요. 지번/도로명 주소를 정확히 입력해보세요.'); }
-  }).catch(function(){ cb(null,null,'주소 검색 중 오류가 발생했어요 (서버 프록시 함수가 아직 배포되지 않았을 수 있어요).'); });
+  // ⚠️ 버그 수정("지번주소(예: '반송동 892') 검색 안 됨"): 브이월드 주소 API는 도로명주소(road)와
+  // 지번주소(parcel)를 서로 다른 type 값으로 검색해야 함 — 도로명으로 먼저 시도해보고 실패하면
+  // 지번으로 자동 재시도함(둘 다 실패해야 진짜 "못 찾음"으로 처리).
+  function tryType(t, onFail){
+    fetch(SUPA_URL+'/functions/v1/vworld-geocode',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPA_KEY},
+      body:JSON.stringify({address:address, key:VWORLD_API_KEY, type:t})
+    }).then(function(r){return r.json();}).then(function(d){
+      try{
+        var pt=d.response.result.point;
+        cb(parseFloat(pt.x), parseFloat(pt.y));
+      }catch(e){ onFail(); }
+    }).catch(onFail);
+  }
+  tryType('road', function(){
+    tryType('parcel', function(){ cb(null,null,'주소를 찾지 못했어요. 지번/도로명 주소를 정확히 입력해보세요.'); });
+  });
 }
 function _openVworldModal(){
   var ov=document.createElement('div');
@@ -20451,6 +20459,14 @@ function _openVworldModal(){
       });
     };
     panel.querySelector('#vw-addr').onkeydown=function(e){ if(e.key==='Enter') panel.querySelector('#vw-search').click(); };
+    // ⚠️ 버그 수정("입력창에서 드래그하면 지도가 튐"): 브이월드 3D 라이브러리가 카메라 회전을 위해
+    // document 전체에 마우스 드래그 리스너를 걸어두고 있어서, 주소 입력창 안에서 글자를 드래그로
+    // 선택할 때도 그 이벤트가 지도까지 새어나가 회전 제스처로 오인됨 — 입력창·검색버튼에서 나는
+    // 마우스/터치 이벤트는 지도로 전파되지 않게 막음.
+    ['mousedown','mousemove','mouseup','touchstart','touchmove','touchend','pointerdown','pointermove','pointerup','wheel'].forEach(function(ev){
+      panel.querySelector('#vw-addr').addEventListener(ev, function(e){ e.stopPropagation(); });
+      panel.querySelector('#vw-search').addEventListener(ev, function(e){ e.stopPropagation(); });
+    });
 
     panel.querySelector('#vw-persp').onclick=function(){
       // 현재 위치는 유지하고 카메라만 눈높이(투시도)로 낮춤 — 정확한 현재 좌표 추적이 어려워
