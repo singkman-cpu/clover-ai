@@ -20626,19 +20626,14 @@ function _openVworldModal(){
       // ⚠️ 실제 콘솔 진단 결과(vw.Map.prototype 실제 메서드 목록)엔 setBasemap류 메서드가 아예 없고,
       // 대신 'layer'(레이어 관리자로 추정), 'options'(생성시 넣은 옵션 객체), 'loadMap'(재로드)만 확인됨
       // — layer 쪽 후보 메서드들과, options를 직접 바꾸고 loadMap()으로 재적용하는 방식을 같이 시도함.
-      var t = vw.BasemapType ? vw.BasemapType[typeName] : typeName;
-      // ⚠️ 버그 의심("PHOTO로 바꿔서 라벨 없이 캡처한다더니 캡처된 이미지에 명칭 라벨이 그대로 남아있다"):
-      // 아래 forEach는 "호출이 예외를 던지지 않았다"만으로 ok=true 처리하는데, vw.BasemapType[typeName]가
-      // undefined면(즉 실제 SDK의 enum 키 이름이 'PHOTO'가 아니면) 메서드에 undefined를 넘겨도 조용히
-      // 아무 일도 안 하고 넘어갈 수 있어서 — 실제로는 전환이 하나도 안 됐는데 성공한 것처럼 보일 수 있음.
-      // 그래서 t 자체가 undefined인 경우를 먼저 걸러내고, 최종 실패/미확인 상태를 콘솔뿐 아니라 화면에도
-      // 보여줘서(showErr) 다음에 이 문제가 재현되면 바로 알아챌 수 있게 함.
-      if(t===undefined){
-        console.warn('[VWorld] vw.BasemapType.'+typeName+'가 존재하지 않음 — 이 SDK 버전의 실제 enum 키 목록:', vw.BasemapType?Object.keys(vw.BasemapType):'(vw.BasemapType 없음)');
-        showErr('⚠️ 지도 유형("'+typeName+'") 전환에 필요한 값을 찾지 못했어요 — 캡처된 이미지에 건물명 라벨이 그대로 남아있을 수 있습니다.');
-        setTimeout(done, 0);
-        return;
-      }
+      // ⚠️ 버그 수정("PHOTO로 바꿔서 라벨 없이 캡처한다더니 캡처된 이미지에 명칭 라벨이 그대로 남아있다"):
+      // 콘솔로 실제 확인한 결과 vw.BasemapType엔 {GRAPHIC:"GRAPHIC"} 딱 하나만 들어있고 PHOTO/HYBRID
+      // 키는 아예 없음 — 근데 있는 그 GRAPHIC 값도 "GRAPHIC"이라는 문자열 자체라, 이 SDK의 basemap
+      // 타입은 "이름=값"인 단순 문자열 상수로 보임(별도 enum 객체 조회가 필요 없음). 그래서 이제
+      // vw.BasemapType[typeName]가 없으면(undefined) 무작정 실패 처리하지 말고, 문자열 그대로(typeName)
+      // 넘기는 걸 기본으로 삼음 — 이전엔 이 경우 t가 undefined가 돼서 메서드에 빈 값을 넘기며 조용히
+      // 아무 일도 안 하고 있었음.
+      var t = (vw.BasemapType && vw.BasemapType[typeName]!==undefined) ? vw.BasemapType[typeName] : typeName;
       var tried=[], ok=false;
       [
         function(){ _vwMapInstance.layer.setBaseLayer(t); },
