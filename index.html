@@ -20627,6 +20627,18 @@ function _openVworldModal(){
       // 대신 'layer'(레이어 관리자로 추정), 'options'(생성시 넣은 옵션 객체), 'loadMap'(재로드)만 확인됨
       // — layer 쪽 후보 메서드들과, options를 직접 바꾸고 loadMap()으로 재적용하는 방식을 같이 시도함.
       var t = vw.BasemapType ? vw.BasemapType[typeName] : typeName;
+      // ⚠️ 버그 의심("PHOTO로 바꿔서 라벨 없이 캡처한다더니 캡처된 이미지에 명칭 라벨이 그대로 남아있다"):
+      // 아래 forEach는 "호출이 예외를 던지지 않았다"만으로 ok=true 처리하는데, vw.BasemapType[typeName]가
+      // undefined면(즉 실제 SDK의 enum 키 이름이 'PHOTO'가 아니면) 메서드에 undefined를 넘겨도 조용히
+      // 아무 일도 안 하고 넘어갈 수 있어서 — 실제로는 전환이 하나도 안 됐는데 성공한 것처럼 보일 수 있음.
+      // 그래서 t 자체가 undefined인 경우를 먼저 걸러내고, 최종 실패/미확인 상태를 콘솔뿐 아니라 화면에도
+      // 보여줘서(showErr) 다음에 이 문제가 재현되면 바로 알아챌 수 있게 함.
+      if(t===undefined){
+        console.warn('[VWorld] vw.BasemapType.'+typeName+'가 존재하지 않음 — 이 SDK 버전의 실제 enum 키 목록:', vw.BasemapType?Object.keys(vw.BasemapType):'(vw.BasemapType 없음)');
+        showErr('⚠️ 지도 유형("'+typeName+'") 전환에 필요한 값을 찾지 못했어요 — 캡처된 이미지에 건물명 라벨이 그대로 남아있을 수 있습니다.');
+        setTimeout(done, 0);
+        return;
+      }
       var tried=[], ok=false;
       [
         function(){ _vwMapInstance.layer.setBaseLayer(t); },
@@ -20643,6 +20655,7 @@ function _openVworldModal(){
         console.warn('[VWorld] 지도유형('+typeName+') 전환 실패 — 시도한 방법:', tried,
           '\nlayer 객체 안 메서드들:', _vwMapInstance.layer?Object.getOwnPropertyNames(Object.getPrototypeOf(_vwMapInstance.layer)):'(layer 없음)',
           '\noptions 안 키들:', _vwMapInstance.options?Object.keys(_vwMapInstance.options):'(options 없음)');
+        showErr('⚠️ 지도 유형("'+typeName+'") 전환이 모두 실패했어요(콘솔에 상세 로그 남김) — 캡처된 이미지에 건물명 라벨이 그대로 남아있을 수 있습니다. 개발자 도구(F12) 콘솔의 "[VWorld] 지도유형" 로그를 복사해서 알려주시면 정확히 고칠 수 있어요.');
       }
       setTimeout(done, ok?450:0); // 라벨/타일이 실제로 바뀌어 다시 그려질 시간을 잠깐 줌
     }
