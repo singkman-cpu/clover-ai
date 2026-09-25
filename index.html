@@ -20672,13 +20672,23 @@ function _openVworldModal(){
       }
       var targetH=Math.max(80, curH*0.35);
       flyTo(lon, lat, targetH, curPitch!=null?curPitch:-60);
-      showOk('📸 고화질 타일 로딩 중... 잠시만요');
-      setTimeout(function(){
+      // ⚠️ 요청 반영("고화질로 바뀌는 거 퍼센테이지로 보여줄 수 있어? 100% 됐는지 몰랐어"): 브이월드
+      // SDK엔 "타일이 몇 % 로드됐는지" 알려주는 메서드가 없어서(문서화된 이벤트가 없음) 실제 로딩
+      // 진행률을 그대로 읽어올 수는 없음 — 대신 어차피 정해서 기다리던 시간(1.3초)을 0→100%로
+      // 채워지는 진행 표시줄로 보여줘서, 100%가 되는 순간이 곧 "지금 캡처합니다" 시점이라는 걸
+      // 명확히 알 수 있게 함(실제 타일 다운로드 진행률이 아니라 "대기 시간" 기준 표시라는 점은
+      // 정직하게 밝혀둠 — 아래 라벨 문구 참고).
+      errEl.style.color='#00e5cc'; errEl.style.display='block';
+      var WAIT=1300, t0=Date.now();
+      (function tick(){
+        var pct=Math.min(100, Math.round((Date.now()-t0)/WAIT*100));
+        errEl.textContent='📸 고화질 타일 로딩 중... '+pct+'%';
+        if(pct<100){ requestAnimationFrame(tick); return; }
         doCapture(function(){
           flyTo(lon, lat, curH, curPitch!=null?curPitch:-50); // 원래 보던 위치/각도로 복귀
           setBasemap('HYBRID', function(){});
         });
-      }, 1300); // 더 가까운 고도의 고해상도 타일이 로드될 시간을 줌
+      })();
     }
     function doCapture(after){
       var cv=mapDiv.querySelector('canvas');
@@ -27108,8 +27118,21 @@ function _shortsGenerate(){
         // 내림(오디오 호환성보다 "일단 영상이 제대로 녹화되는 것"이 우선이므로).
         mimeType='video/webm;codecs=vp9';
         if(!MediaRecorder.isTypeSupported(mimeType)){
-          mimeType='video/mp4';
-          if(!MediaRecorder.isTypeSupported(mimeType)) mimeType='video/webm';
+          // ⚠️ 버그 수정("틱톡에 올리면 디코더를 못 찾는다고 뜬다" — 실제 파일 분석으로 원인 확정):
+          // 여기서 그냥 'video/mp4'만 넘기면, h.264 하드웨어 인코더가 없는 기기/브라우저는
+          // "MP4 컨테이너 안에 VP9 코덱"이라는 조합으로 녹화해버림 — 파일 자체는 스펙상 정상
+          // mp4라 크롬에서는 잘 열리지만, 틱톡·인스타그램 같은 업로드 서버는 mp4 안에 VP9가
+          // 들어있는 걸 거의 지원 안 함(H.264만 기대) → "디코더를 찾을 수 없음" 에러로 튕겨나감.
+          // 그래서 mp4로 갈 땐 반드시 H.264(avc1) 코덱을 명시적으로 요청해서 지원 여부를 먼저
+          // 확인하고, 그것도 안 되면(이 기기에 H.264 인코더 자체가 없는 것) mp4는 포기하고
+          // webm(vp9 다음은 vp8)으로 감 — "vp9-in-mp4"처럼 아무 데도 못 올리는 어중간한
+          // 조합은 아예 안 만들어지게 함.
+          var _mp4H264=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs="avc1.42E01E"','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1','video/mp4;codecs=h264'];
+          var _foundH264=null;
+          for(var _mi=0;_mi<_mp4H264.length;_mi++){ if(MediaRecorder.isTypeSupported(_mp4H264[_mi])){ _foundH264=_mp4H264[_mi]; break; } }
+          if(_foundH264) mimeType=_foundH264;
+          else if(MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) mimeType='video/webm;codecs=vp8';
+          else mimeType='video/webm';
         }
       }
       _sdbg('[쇼츠 녹화 진단] 선택된 mimeType:', mimeType, '| vp9 지원여부:', MediaRecorder.isTypeSupported('video/webm;codecs=vp9'));
