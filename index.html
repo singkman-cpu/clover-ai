@@ -5544,8 +5544,21 @@ function _psRunFilter(key,p,src){
     });
   }
   if(key==='curves'){
-    var lut=_psCurveLUT(p.pts); if(!lut) return _psClone(src);
-    return _psPixelOp(src,function(D){ for(var i=0;i<D.length;i+=4){ D[i]=lut[D[i]]; D[i+1]=lut[D[i+1]]; D[i+2]=lut[D[i+2]]; } });
+    // ⚠️ RGB(마스터) 커브를 먼저 세 채널에 똑같이 적용한 뒤, R/G/B 채널별 커브를 각각 그 채널에만
+    // 추가로 적용함(포토샵과 동일한 순서) — p.ptsR/G/B가 없는 옛날 문서(마스터 커브만 있던 시절)도
+    // _psCurveLUT(undefined)가 null을 돌려주니 그냥 무시되고 기존처럼 동작함.
+    var lutM=_psCurveLUT(p.pts), lutR=_psCurveLUT(p.ptsR), lutG=_psCurveLUT(p.ptsG), lutB=_psCurveLUT(p.ptsB);
+    if(!lutM && !lutR && !lutG && !lutB) return _psClone(src);
+    return _psPixelOp(src,function(D){
+      for(var i=0;i<D.length;i+=4){
+        var r=D[i], g=D[i+1], b=D[i+2];
+        if(lutM){ r=lutM[r]; g=lutM[g]; b=lutM[b]; }
+        if(lutR) r=lutR[r];
+        if(lutG) g=lutG[g];
+        if(lutB) b=lutB[b];
+        D[i]=r; D[i+1]=g; D[i+2]=b;
+      }
+    });
   }
   if(key==='color'){
     var out=src, done=false;
@@ -5665,7 +5678,11 @@ function _psAddAdjustLayer(key, opts){
   _psCommitPending();
   var def=_psFilterDef(key); if(!def) return null;
   var p={}; def.params.forEach(function(q){ p[q.k]=q.v; });
-  if(def.curve) p.pts=[{x:0,y:0},{x:255,y:255}];
+  // ⚠️ 요청 반영("커브 쪽에 RGB 컬러 수정하는 것도 있나"): 기존엔 R/G/B에 다 같이 적용되는
+  // 마스터 커브 하나뿐이었음 — 이제 채널별(R/G/B) 커브를 따로 추가해서 포토샵처럼 그림자에
+  // 파란기를 넣거나 하이라이트에 노란기를 빼는 식의 색보정도 가능하게 함(각 배열은 반드시
+  // 따로 만들어야 함 — 같은 배열을 참조하면 한 채널만 만져도 다른 채널까지 같이 움직여버림).
+  if(def.curve){ p.pts=[{x:0,y:0},{x:255,y:255}]; p.ptsR=[{x:0,y:0},{x:255,y:255}]; p.ptsG=[{x:0,y:0},{x:255,y:255}]; p.ptsB=[{x:0,y:0},{x:255,y:255}]; }
   var A=_psActive(), idx=_psIndexOf(d.activeId);
   var L=_psBaseLayer('adjust', def.l.replace(/\s*\(.*\)$/,'')); // 레이어 이름엔 단축키 표기 제외(예: '커브')
   L.key=key; L.p=p; L.mask=d.sel?_psClone(d.sel):null;
@@ -6902,11 +6919,29 @@ function _psPropsSec(L){
 }
 // 커브 편집기 — _openColorAdjustPanel의 커브 편집기와 같은 조작법: 빈 곳 클릭=점 추가, 점 드래그=이동,
 // 점 더블클릭(또는 위/아래로 멀리 끌어내기)=삭제. 양 끝점은 좌우 위치 고정(위아래만).
+// ⚠️ 요청 반영("커브 쪽에 RGB 컬러 수정하는 것도 있나"): RGB(마스터) 탭 + R/G/B 채널별 탭을
+// 추가해서, 채널 하나를 골라 그 채널만의 커브를 따로 그릴 수 있음(포토샵과 동일). 예: R 채널
+// 그림자 쪽을 내리면 그림자에 파란기(청록)가 생기는 식의 색보정용 커브 조정이 가능해짐.
+var PS_CURVE_CH={rgb:{key:'pts',label:'RGB',color:'#00e5cc'},r:{key:'ptsR',label:'R',color:'#f87171'},g:{key:'ptsG',label:'G',color:'#4ade80'},b:{key:'ptsB',label:'B',color:'#60a5fa'}};
 function _psCurveEditor(L){
+  if(!L.p.ptsR) L.p.ptsR=[{x:0,y:0},{x:255,y:255}];
+  if(!L.p.ptsG) L.p.ptsG=[{x:0,y:0},{x:255,y:255}];
+  if(!L.p.ptsB) L.p.ptsB=[{x:0,y:0},{x:255,y:255}];
+  var ch=L._curCh||'rgb';
   var SZ=232, wrap=_psEl('div'); wrap.style.cssText='margin:2px 0 8px';
+  var tabs=_psEl('div'); tabs.style.cssText='display:flex;gap:4px;margin-bottom:6px';
+  Object.keys(PS_CURVE_CH).forEach(function(k){
+    var info=PS_CURVE_CH[k], on=(ch===k);
+    var b=_psEl('button','',info.label); b.type='button';
+    b.style.cssText='flex:1;padding:5px 0;border-radius:6px;border:1px solid '+(on?info.color:'var(--bd2)')+';background:'+(on?info.color:'var(--c2)')+';color:'+(on?'#000':'var(--t2)')+';font-size:11px;font-weight:800;cursor:pointer;font-family:inherit';
+    b.onclick=function(){ L._curCh=k; _psRefreshPanels(); };
+    tabs.appendChild(b);
+  });
+  wrap.appendChild(tabs);
   var cv=document.createElement('canvas'), dpr=Math.min(2,window.devicePixelRatio||1);
   cv.width=SZ*dpr; cv.height=SZ*dpr; cv.style.cssText='width:'+SZ+'px;height:'+SZ+'px;display:block;border-radius:6px;background:#101014;border:1px solid var(--bd2);touch-action:none;cursor:crosshair';
   var c=cv.getContext('2d'); c.scale(dpr,dpr);
+  function pts(){ return L.p[PS_CURVE_CH[ch].key]; }
   function toC(p){ return {x:p.x/255*SZ, y:SZ-p.y/255*SZ}; }
   function fromE(e){ var r=cv.getBoundingClientRect(); return {x:Math.max(0,Math.min(255,Math.round((e.clientX-r.left)/r.width*255))), y:Math.max(0,Math.min(255,Math.round(255-(e.clientY-r.top)/r.height*255)))}; }
   function draw(){
@@ -6915,47 +6950,55 @@ function _psCurveEditor(L){
     for(var i=1;i<4;i++){ c.moveTo(SZ*i/4,0); c.lineTo(SZ*i/4,SZ); c.moveTo(0,SZ*i/4); c.lineTo(SZ,SZ*i/4); }
     c.stroke();
     c.strokeStyle='rgba(255,255,255,.18)'; c.beginPath(); c.moveTo(0,SZ); c.lineTo(SZ,0); c.stroke();
-    var lut=_psCurveLUT(L.p.pts);
-    c.strokeStyle='#00e5cc'; c.lineWidth=2; c.beginPath();
+    // 지금 보고 있지 않은 채널들도 옅게 참고선으로 같이 보여줌(포토샵처럼 — 어디를 만졌는지 한눈에)
+    Object.keys(PS_CURVE_CH).forEach(function(k){
+      if(k===ch) return;
+      var lut2=_psCurveLUT(L.p[PS_CURVE_CH[k].key]); if(!lut2) return;
+      c.strokeStyle=PS_CURVE_CH[k].color; c.globalAlpha=0.25; c.lineWidth=1.2; c.beginPath();
+      for(var x=0;x<256;x++){ var y=lut2[x], pt=toC({x:x,y:y}); if(x===0) c.moveTo(pt.x,pt.y); else c.lineTo(pt.x,pt.y); }
+      c.stroke(); c.globalAlpha=1;
+    });
+    var lut=_psCurveLUT(pts());
+    c.strokeStyle=PS_CURVE_CH[ch].color; c.lineWidth=2; c.beginPath();
     for(var x=0;x<256;x++){ var y=lut?lut[x]:x, pt=toC({x:x,y:y}); if(x===0) c.moveTo(pt.x,pt.y); else c.lineTo(pt.x,pt.y); }
     c.stroke();
-    L.p.pts.forEach(function(p){ var q=toC(p); c.beginPath(); c.arc(q.x,q.y,4.5,0,Math.PI*2); c.fillStyle='#fff'; c.fill(); c.strokeStyle='#000'; c.lineWidth=1.2; c.stroke(); });
+    pts().forEach(function(p){ var q=toC(p); c.beginPath(); c.arc(q.x,q.y,4.5,0,Math.PI*2); c.fillStyle='#fff'; c.fill(); c.strokeStyle='#000'; c.lineWidth=1.2; c.stroke(); });
   }
   var drag=-1, moved=false;
-  function nearest(p){ var best=-1, bd=1e9; L.p.pts.forEach(function(q,i){ var d=Math.hypot(q.x-p.x,q.y-p.y); if(d<bd){ bd=d; best=i; } }); return bd<=12?best:-1; }
+  function nearest(p){ var best=-1, bd=1e9; pts().forEach(function(q,i){ var d=Math.hypot(q.x-p.x,q.y-p.y); if(d<bd){ bd=d; best=i; } }); return bd<=12?best:-1; }
   cv.addEventListener('pointerdown',function(e){
     e.preventDefault(); e.stopPropagation();
     try{ cv.setPointerCapture(e.pointerId); }catch(er){}
     var p=fromE(e); drag=nearest(p); moved=false;
     if(drag<0){
-      L.p.pts.push(p); L.p.pts.sort(function(a,b){return a.x-b.x;});
-      drag=L.p.pts.indexOf(p); moved=true; _psRequestRender(); draw();
+      var arr=pts(); arr.push(p); arr.sort(function(a,b){return a.x-b.x;});
+      drag=arr.indexOf(p); moved=true; _psRequestRender(); draw();
     }
   });
   cv.addEventListener('pointermove',function(e){
-    if(drag<0) return; var p=fromE(e), pts=L.p.pts, q=pts[drag]; if(!q) return;
-    var isEnd=(drag===0||drag===pts.length-1);
+    if(drag<0) return; var p=fromE(e), arr=pts(), q=arr[drag]; if(!q) return;
+    var isEnd=(drag===0||drag===arr.length-1);
     if(!isEnd){
-      var lo=pts[drag-1].x+1, hi=pts[drag+1].x-1; q.x=Math.max(lo,Math.min(hi,p.x));
+      var lo=arr[drag-1].x+1, hi=arr[drag+1].x-1; q.x=Math.max(lo,Math.min(hi,p.x));
       var r=cv.getBoundingClientRect();
       q._out=(e.clientY<r.top-24||e.clientY>r.bottom+24); // 편집기 밖으로 멀리 끌어내면 삭제 예고
     }
     q.y=p.y; moved=true; draw(); _psRequestRender();
   });
   function end(){
-    if(drag<0) return; var q=L.p.pts[drag];
-    if(q && q._out) L.p.pts.splice(drag,1);
-    L.p.pts.forEach(function(p){ delete p._out; });
+    if(drag<0) return; var arr=pts(), q=arr[drag];
+    if(q && q._out) arr.splice(drag,1);
+    arr.forEach(function(p){ delete p._out; });
     drag=-1; draw(); _psRequestRender();
     if(moved) _psPush('커브 조정');
   }
   cv.addEventListener('pointerup',end); cv.addEventListener('pointercancel',end);
   cv.addEventListener('dblclick',function(e){
-    var i=nearest(fromE(e)); if(i>0 && i<L.p.pts.length-1){ L.p.pts.splice(i,1); draw(); _psPush('커브 점 삭제'); _psRequestRender(); }
+    var i=nearest(fromE(e)); var arr=pts(); if(i>0 && i<arr.length-1){ arr.splice(i,1); draw(); _psPush('커브 점 삭제'); _psRequestRender(); }
   });
   draw();
   wrap.appendChild(cv);
-  wrap.appendChild(_psEl('div','ps-note','빈 곳 클릭: 점 추가 · 점 드래그: 조절 · 점 더블클릭(또는 밖으로 끌어내기): 삭제'));
+  wrap.appendChild(_psEl('div','ps-note','RGB/R/G/B 탭으로 채널을 골라보세요(예: R 탭에서 그림자 쪽을 내리면 그림자에 청록빛이 생겨요). 빈 곳 클릭: 점 추가 · 점 드래그: 조절 · 점 더블클릭(또는 밖으로 끌어내기): 삭제'));
   return wrap;
 }
 // Ctrl+M: 지금 선택한 레이어가 커브 조정 레이어면 그 편집기로, 아니면 선택한 레이어 위에 커브 조정 레이어를 새로 추가
@@ -7024,7 +7067,13 @@ function _psAdjustPropsSec(L){
     box.appendChild(r3);
   }
   var r4=_psRowEl(); r4.style.marginTop='6px';
-  r4.appendChild(_psB('초기화',function(){ def.params.forEach(function(q){ L.p[q.k]=q.v; }); if(def.curve) L.p.pts=[{x:0,y:0},{x:255,y:255}]; _psPush(def.l+' 초기화'); _psRequestRender(); }));
+  r4.appendChild(_psB('초기화',function(){
+    def.params.forEach(function(q){ L.p[q.k]=q.v; });
+    // ⚠️ 커브는 채널이 여러 개라 "초기화"는 지금 보고 있는 채널 탭만 초기화함(포토샵과 동일) —
+    // 전체를 한 번에 밀어버리면 다른 채널에 힘들게 그려둔 색보정까지 같이 날아가서 곤란함.
+    if(def.curve){ var ch=L._curCh||'rgb'; L.p[PS_CURVE_CH[ch].key]=[{x:0,y:0},{x:255,y:255}]; }
+    _psPush(def.l+' 초기화'); _psRequestRender();
+  },'','커브는 지금 선택된 채널 탭만 초기화돼요'));
   r4.appendChild(_psB(L.visible?'👁 보정 끄고 비교':'👁 보정 켜기',function(){ L.visible=!L.visible; _psPush(L.visible?'레이어 보이기':'레이어 숨기기'); _psRequestRender(true); }));
   r4.appendChild(_psB('아래 레이어에 병합',_psMergeDown,'','효과를 아래 레이어 픽셀에 실제로 적용해서 합침'));
   box.appendChild(r4);
@@ -20714,12 +20763,13 @@ function _openKakaoMapModal(){
       '<button id="km-tab-road" type="button" style="flex:1;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📷 로드뷰</button>'+
     '</div>'+
     '<div id="km-err" style="font-size:11px;color:#f87171;margin-bottom:6px;display:none;flex-shrink:0"></div>'+
-    '<div style="position:relative;flex:1;min-height:0;border-radius:10px;overflow:hidden;background:#111">'+
+    '<div id="km-view" style="position:relative;flex:1;min-height:0;border-radius:10px;overflow:hidden;background:#111">'+
       '<div id="kmap" style="position:absolute;inset:0"></div>'+
       '<div id="kroad" style="position:absolute;inset:0;display:none">'+
         '<div id="kroad-inner" style="position:absolute;inset:0"></div>'+
         '<div id="kroad-msg" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--m2);font-size:12px;text-align:center;padding:24px;background:#111;line-height:1.7"></div>'+
       '</div>'+
+      '<button id="km-fullscreen" type="button" title="전체화면으로 보기(다시 누르면 나가기 · Esc로도 나가짐)" style="position:absolute;top:10px;right:10px;z-index:5;padding:8px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-size:15px;cursor:pointer;line-height:1">⛶ 전체화면</button>'+
     '</div>'+
     '<div id="km-maptools" style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;flex-shrink:0">'+
       '<button id="km-normal" style="flex:1;min-width:100px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🗺️ 일반 지도</button>'+
@@ -20727,7 +20777,7 @@ function _openKakaoMapModal(){
       '<button id="km-hybrid" style="flex:1;min-width:100px;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;cursor:pointer;font-family:inherit">🏙️ 하이브리드</button>'+
       '<button id="km-goroad" style="flex:1;min-width:150px;padding:8px;border-radius:7px;border:none;background:#fde047;color:#000;font-weight:800;font-size:11.5px;cursor:pointer;font-family:inherit">📷 이 위치 로드뷰로 보기</button>'+
     '</div>'+
-    '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5;flex-shrink:0">로드뷰 화면에서는 마우스로 드래그해서 시점을 돌리고, 바닥의 화살표를 클릭해 이동할 수 있어요. 카카오 API 약관상 이 화면 자체를 캡처해서 참고 이미지로 저장하는 기능은 넣지 않았어요 — 눈으로 보고 방향·배치를 파악하는 용도로만 써주세요.</div>';
+    '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5;flex-shrink:0">로드뷰 화면에서는 마우스로 드래그해서 시점을 돌리고, 바닥의 화살표를 클릭해 이동할 수 있어요. 우측 상단 "⛶ 전체화면" 버튼으로 화면 전체를 채운 뒤, 브라우저 자체 스크린샷 기능(Windows: Win+Shift+S, Mac: Cmd+Shift+4)으로 원하는 각도를 캡처해서 "실사 참고 이미지"에 올려주세요 — 카카오 API 약관상 이 화면 자체를 자동으로 캡처·저장하는 기능은 넣지 않았어요.</div>';
   ov.appendChild(panel);
   document.body.appendChild(ov);
 
@@ -20750,6 +20800,16 @@ function _openKakaoMapModal(){
     }catch(e){}
     _kmLastLat=curLat; _kmLastLng=curLng; _kmLastMode=mode;
     _kmLastAddr=panel.querySelector('#km-addr').value;
+    try{
+      // 전체화면 상태로 닫으면 사용자가 빈 화면에 갇힌 것처럼 보일 수 있어서 같이 빠져나옴
+      if(document.fullscreenElement||document.webkitFullscreenElement||document.mozFullScreenElement||document.msFullscreenElement){
+        var exit=document.exitFullscreen||document.webkitExitFullscreen||document.mozCancelFullScreen||document.msExitFullscreen;
+        if(exit) exit.call(document);
+      }
+      ['fullscreenchange','webkitfullscreenchange','mozfullscreenchange','MSFullscreenChange'].forEach(function(evn){
+        document.removeEventListener(evn, onFsChange);
+      });
+    }catch(e){}
     ov.remove();
   }
   panel.querySelector('#km-close').onclick=closeModal;
@@ -20760,6 +20820,34 @@ function _openKakaoMapModal(){
   ov.onclick=function(e){ if(e.target===ov && _kmDownOnBg) closeModal(); };
   ['mousedown','mousemove','touchstart','touchmove','pointerdown','pointermove'].forEach(function(evn){
     panel.querySelector('#km-addr').addEventListener(evn, function(e){ e.stopPropagation(); });
+  });
+
+  // ⚠️ 요청 반영("전체화면으로 볼 수 있게 해주는 버튼, 전체화면 상태에서 캡처하면 되니까"): 표준
+  // Fullscreen API로 지도/로드뷰 영역만 모니터 전체를 채우게 함 — 이 상태에서 브라우저 자체
+  // 스크린샷 단축키(Windows: Win+Shift+S, Mac: Cmd+Shift+4)로 캡처하면 브라우저 UI 없이 화면
+  // 전체가 로드뷰로 꽉 찬 깨끗한 이미지를 찍을 수 있음. 전체화면 자체를 위한 별도의 "캡처
+  // 단축키"는 없음(그건 OS 스크린샷 기능의 역할) — Esc 키는 브라우저가 기본으로 전체화면을 뺌.
+  var viewEl=panel.querySelector('#km-view'), fsBtn=panel.querySelector('#km-fullscreen');
+  function isFs(){ return !!(document.fullscreenElement||document.webkitFullscreenElement||document.mozFullScreenElement||document.msFullscreenElement); }
+  fsBtn.onclick=function(){
+    if(isFs()){
+      var exit=document.exitFullscreen||document.webkitExitFullscreen||document.mozCancelFullScreen||document.msExitFullscreen;
+      if(exit) exit.call(document);
+    } else {
+      var req=viewEl.requestFullscreen||viewEl.webkitRequestFullscreen||viewEl.mozRequestFullScreen||viewEl.msRequestFullscreen;
+      if(req) req.call(viewEl);
+      else showErr('이 브라우저는 전체화면 기능을 지원하지 않아요 — 키보드 F11로 브라우저 자체 전체화면을 대신 써보세요.');
+    }
+  };
+  function onFsChange(){
+    fsBtn.textContent=isFs()?'⛶ 전체화면 나가기':'⛶ 전체화면';
+    // 전체화면 진입/이탈로 컨테이너 크기가 바뀌므로, 지도/로드뷰가 새 크기에 맞게 다시 그려지게 함
+    setTimeout(function(){
+      try{ if(mode==='map' && map) map.relayout(); else if(mode==='roadview' && roadview) roadview.relayout(); }catch(e){}
+    }, 60);
+  }
+  ['fullscreenchange','webkitfullscreenchange','mozfullscreenchange','MSFullscreenChange'].forEach(function(evn){
+    document.addEventListener(evn, onFsChange);
   });
 
   function setActiveTab(m){
