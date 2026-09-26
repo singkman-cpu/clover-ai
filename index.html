@@ -3584,7 +3584,12 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   // 실제 마스크(maskCanvas)에는 영향 없고, 점을 다 찍고 확정(polyFinish)할 때만 마스크에 반영됨.
   var polyCanvas=document.createElement('canvas'); polyCanvas.width=W; polyCanvas.height=H;
   polyCanvas.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;border-radius:8px';
-  stageWrap.appendChild(dispCanvas); stageWrap.appendChild(overlayCanvas); stageWrap.appendChild(polyCanvas);
+  // ⚠️ 요청 반영("지우개를 클릭했는데+가 모양이던데 이것도 브러시랑 같은 마우스포인트로해줘"):
+  // 메인 포토샵 캔버스(_psToolCursor/PSE.hover 원 미리보기)와 똑같이, 브러시·지우개일 때
+  // 네이티브 커서(십자선)를 숨기고 대신 실제 브러시 크기만큼의 원을 마우스 위치에 그려서 보여줌.
+  var cursorCanvas=document.createElement('canvas'); cursorCanvas.width=W; cursorCanvas.height=H;
+  cursorCanvas.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;border-radius:8px';
+  stageWrap.appendChild(dispCanvas); stageWrap.appendChild(overlayCanvas); stageWrap.appendChild(polyCanvas); stageWrap.appendChild(cursorCanvas);
 
   var maskCanvas=document.createElement('canvas'); maskCanvas.width=W; maskCanvas.height=H;
   var mctx=maskCanvas.getContext('2d');
@@ -3661,6 +3666,18 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
     mctx.globalCompositeOperation='source-over';
     hasMarked=true;
   }
+  var cursorPos=null;
+  function drawCursor(){
+    var cctx=cursorCanvas.getContext('2d');
+    cctx.clearRect(0,0,W,H);
+    if(!cursorPos || curTool!=='brush') return;
+    var rr=Math.max(1,brushSize/2), k=Math.max(1,W/600);
+    cctx.save(); cctx.lineWidth=1*k; cctx.strokeStyle='rgba(0,0,0,.8)'; cctx.beginPath(); cctx.arc(cursorPos.x,cursorPos.y,rr,0,Math.PI*2); cctx.stroke();
+    cctx.strokeStyle='rgba(255,255,255,.9)'; cctx.beginPath(); cctx.arc(cursorPos.x,cursorPos.y,rr+1*k,0,Math.PI*2); cctx.stroke(); cctx.restore();
+  }
+  function updateDispCursorStyle(){ dispCanvas.style.cursor = curTool==='brush' ? 'none' : 'crosshair'; }
+  dispCanvas.addEventListener('mousemove', function(e){ cursorPos=posOnCanvas(e); drawCursor(); });
+  dispCanvas.addEventListener('mouseleave', function(){ cursorPos=null; drawCursor(); });
   var painting=false, lastPt=null;
   function startPaint(e){ if(curTool!=='brush') return; painting=true; var p=posOnCanvas(e); lastPt=p; paintAt(p.x,p.y); renderOverlay(); }
   function movePaint(e){
@@ -3764,6 +3781,8 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
     polyCancelBtn.style.display = curTool==='polygon' ? 'inline-block' : 'none';
     sizeLbl.style.display = curTool==='brush' ? '' : 'none';
     sizeRng.style.display = curTool==='brush' ? '' : 'none';
+    updateDispCursorStyle();
+    drawCursor();
   }
   brushBtn.onclick=function(){ curTool='brush'; erasing=false; polyPoints=[]; drawPolyPreview(); refreshToolBtns(); };
   eraseBtn.onclick=function(){ curTool='brush'; erasing=true; polyPoints=[]; drawPolyPreview(); refreshToolBtns(); };
@@ -3777,7 +3796,7 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   polyCancelBtn.onclick=function(){ polyCancelPts(); };
   var sizeLbl=document.createElement('span'); sizeLbl.style.cssText='color:#ccc;font-size:12px'; sizeLbl.textContent='브러시 크기';
   var sizeRng=document.createElement('input'); sizeRng.type='range'; sizeRng.min=Math.max(5,Math.round(W*0.01)); sizeRng.max=Math.round(W*0.4); sizeRng.value=brushSize;
-  sizeRng.style.cssText='width:140px'; sizeRng.oninput=function(){ brushSize=parseInt(sizeRng.value,10); };
+  sizeRng.style.cssText='width:140px'; sizeRng.oninput=function(){ brushSize=parseInt(sizeRng.value,10); drawCursor(); };
   var clearBtn=document.createElement('button'); clearBtn.type='button'; clearBtn.textContent='전체 지우기';
   clearBtn.style.cssText='padding:8px 14px;border-radius:20px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
   clearBtn.onclick=function(){ mctx.clearRect(0,0,W,H); hasMarked=false; renderOverlay(); mPushHistory(); };
@@ -4813,7 +4832,19 @@ function _psComposite(target, onlyVisible, upto){
   ctx.clearRect(0,0,target.width,target.height);
   var sc=null, sctx=null, sig='';
   var n=(upto==null)?d.layers.length:Math.min(upto,d.layers.length);
-  for(var i=0;i<n;i++){
+  var i0=0;
+  // ⚠️ 성능 최적화("포토샵 편집 왜이렇게 느리지 사이즈가 커서 그런가 버벅"): 브러시로 칠하는 동안
+  // 매 프레임 전체 레이어 스택을 처음부터 다시 합성하면 레이어가 많은 큰 문서에서 매우 느려짐.
+  // 지금 칠하는 레이어보다 "아래" 레이어들은 이 획이 끝날 때까지 안 바뀌므로, 획 시작할 때 한 번
+  // 미리 합성해둔 belowCache(_psBrushStart 참고)를 그대로 붙여넣고, 그 위(지금 칠하는 레이어부터)만
+  // 다시 그림 — 아래 레이어 개수만큼 매 프레임 반복하던 작업을 통째로 건너뜀.
+  var act=PSE.act;
+  if(act && act.type==='brush' && act.belowCache && target===PSE.ui.cv && onlyVisible!==false && upto==null && act.layerIdx>0 && act.layerIdx<=n){
+    ctx.drawImage(act.belowCache,0,0);
+    i0=act.layerIdx;
+    sig='belowcache'+act.layerId;
+  }
+  for(var i=i0;i<n;i++){
     var L=d.layers[i];
     if(onlyVisible!==false && !L.visible) continue;
     if(L.opacity<=0) continue;
@@ -5785,6 +5816,15 @@ function _psDab(ctx,x,y,size,hard,color){
   g.addColorStop(0,_psRgba(color,1)); g.addColorStop(0.45,_psRgba(color,0.75)); g.addColorStop(1,_psRgba(color,0));
   ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
 }
+// ⚠️ 성능 최적화("포토샵 편집 왜이렇게 느리지 사이즈가 커서 그런가 버벅"): 큰 문서(예: 4096×2265px)에서
+// 브러시로 칠하는 동안 매 프레임 "지금까지 칠해진 범위"의 사각형(bbox)을 누적해서, 레이어 캔버스를
+// 다시 그릴 때 문서 전체가 아니라 실제로 붓이 지나간 작은 영역만 clearRect/drawImage 하도록 함.
+function _psExpandRect(A,x,y,r){
+  var x0=x-r,y0=y-r,x1=x+r,y1=y+r;
+  if(!A.rect){ A.rect={x0:x0,y0:y0,x1:x1,y1:y1}; return; }
+  var rc=A.rect;
+  if(x0<rc.x0)rc.x0=x0; if(y0<rc.y0)rc.y0=y0; if(x1>rc.x1)rc.x1=x1; if(y1>rc.y1)rc.y1=y1;
+}
 function _psBrushStart(x,y,erase){
   var d=PSE.doc, L=_psActive(); if(!L) return false;
   if(L.type!=='raster'){
@@ -5799,15 +5839,25 @@ function _psBrushStart(x,y,erase){
   var base=L.canvas;
   L.canvas=_psClone(base); // copy-on-write
   var buf=_psCanvas(d.w,d.h);
-  PSE.act={type:'brush', layerId:L.id, base:base, buf:buf, clip:d.sel?_psCanvas(d.w,d.h):null, last:{x:x,y:y}, erase:!!erase, dirty:true};
+  // ⚠️ 성능 최적화: 지금 칠하는 레이어보다 "아래"에 있는 레이어들은 이 획(stroke)이 끝날 때까지
+  // 절대 바뀌지 않으므로, 시작할 때 딱 한 번만 합쳐서 캐시해두고(belowCache) 매 프레임 재사용함.
+  // 레이어가 많은 큰 문서일수록 매 프레임 전체 재합성을 피할 수 있어 효과가 큼(_psComposite 참고).
+  var idx=d.layers.indexOf(L), belowCache=null;
+  if(idx>0){ belowCache=_psCanvas(d.w,d.h); _psComposite(belowCache, true, idx); }
+  PSE.act={type:'brush', layerId:L.id, layerIdx:idx, belowCache:belowCache, base:base, buf:buf, clip:d.sel?_psCanvas(d.w,d.h):null, last:{x:x,y:y}, erase:!!erase, dirty:true, rect:null};
   _psDab(buf.getContext('2d'),x,y,PSE.o.size,PSE.o.hard,erase?'#000000':PSE.o.fg);
+  _psExpandRect(PSE.act,x,y,PSE.o.size/2);
   return true;
 }
 function _psBrushMove(x,y){
   var A=PSE.act; if(!A) return;
   var bx=A.buf.getContext('2d'), p=A.last, dist=Math.hypot(x-p.x,y-p.y);
   var step=Math.max(1,PSE.o.size/4), n=Math.max(1,Math.floor(dist/step));
-  for(var i=1;i<=n;i++){ var t=i/n; _psDab(bx,p.x+(x-p.x)*t,p.y+(y-p.y)*t,PSE.o.size,PSE.o.hard,A.erase?'#000000':PSE.o.fg); }
+  for(var i=1;i<=n;i++){
+    var t=i/n, px=p.x+(x-p.x)*t, py=p.y+(y-p.y)*t;
+    _psDab(bx,px,py,PSE.o.size,PSE.o.hard,A.erase?'#000000':PSE.o.fg);
+    _psExpandRect(A,px,py,PSE.o.size/2);
+  }
   A.last={x:x,y:y}; A.dirty=true;
 }
 function _psBrushCompose(){
@@ -5815,9 +5865,25 @@ function _psBrushCompose(){
   A.dirty=false;
   var L=_psLayer(A.layerId); if(!L) return;
   var d=PSE.doc, lx=L.canvas.getContext('2d'), stroke=A.buf;
-  if(A.clip){ var cx=A.clip.getContext('2d'); cx.globalCompositeOperation='source-over'; cx.clearRect(0,0,d.w,d.h); cx.drawImage(A.buf,0,0); cx.globalCompositeOperation='destination-in'; cx.drawImage(d.sel,0,0); stroke=A.clip; }
-  lx.save(); lx.globalAlpha=1; lx.globalCompositeOperation='source-over'; lx.clearRect(0,0,d.w,d.h); lx.drawImage(A.base,0,0);
-  lx.globalAlpha=PSE.o.opacity/100; lx.globalCompositeOperation=A.erase?'destination-out':'source-over'; lx.drawImage(stroke,0,0);
+  // ⚠️ 성능 최적화: 이번 프레임에 새로 칠해진 영역(A.rect)만 다시 그림 — 문서 전체를 매번
+  // clearRect/drawImage 하지 않아서 큰 이미지(예: 4096×2265px)에서도 붓질이 버벅이지 않음.
+  var rc=A.rect; A.rect=null;
+  var rx=0, ry=0, rw=d.w, rh=d.h;
+  if(rc){
+    rx=Math.max(0, Math.floor(rc.x0-1)); ry=Math.max(0, Math.floor(rc.y0-1));
+    var rx2=Math.min(d.w, Math.ceil(rc.x1+1)), ry2=Math.min(d.h, Math.ceil(rc.y1+1));
+    rw=Math.max(0, rx2-rx); rh=Math.max(0, ry2-ry);
+    if(rw<=0||rh<=0) return;
+  }
+  if(A.clip){
+    var cx=A.clip.getContext('2d');
+    cx.globalCompositeOperation='source-over'; cx.clearRect(rx,ry,rw,rh); cx.drawImage(A.buf,rx,ry,rw,rh,rx,ry,rw,rh);
+    cx.globalCompositeOperation='destination-in'; cx.drawImage(d.sel,rx,ry,rw,rh,rx,ry,rw,rh);
+    stroke=A.clip;
+  }
+  lx.save(); lx.beginPath(); lx.rect(rx,ry,rw,rh); lx.clip();
+  lx.globalAlpha=1; lx.globalCompositeOperation='source-over'; lx.clearRect(rx,ry,rw,rh); lx.drawImage(A.base,rx,ry,rw,rh,rx,ry,rw,rh);
+  lx.globalAlpha=PSE.o.opacity/100; lx.globalCompositeOperation=A.erase?'destination-out':'source-over'; lx.drawImage(stroke,rx,ry,rw,rh,rx,ry,rw,rh);
   lx.restore();
 }
 function _psBrushEnd(){
