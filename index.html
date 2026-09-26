@@ -3574,8 +3574,13 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   title.style.cssText='color:#fff;font-size:14px;font-weight:700;margin-bottom:12px;text-align:center;max-width:92vw';
 
   var W=bgCanvas.width, H=bgCanvas.height;
+  // ⚠️ 요청 반영("레이어마스크 여기도 휠마우스로 화면 확대축소 할수있게해줘 작아서 안보여"):
+  // 이미지가 커서 화면에 맞춰 축소 표시되면 세밀한 브러시 작업이 어려우니, 마우스 휠로
+  // 확대/축소하고(zoomWrap이 스크롤 컨테이너 역할) stageWrap에 CSS transform:scale을 적용함.
+  var zoomWrap=document.createElement('div');
+  zoomWrap.style.cssText='max-width:92vw;max-height:66vh;overflow:auto;display:flex;align-items:center;justify-content:center;position:relative;border-radius:8px';
   var stageWrap=document.createElement('div');
-  stageWrap.style.cssText='position:relative;max-width:92vw;max-height:66vh;display:inline-block;line-height:0';
+  stageWrap.style.cssText='position:relative;display:inline-block;line-height:0;transition:transform .05s linear;flex-shrink:0';
   var dispCanvas=document.createElement('canvas'); dispCanvas.width=W; dispCanvas.height=H;
   dispCanvas.style.cssText='max-width:92vw;max-height:66vh;width:auto;height:auto;display:block;border-radius:8px;cursor:crosshair';
   var overlayCanvas=document.createElement('canvas'); overlayCanvas.width=W; overlayCanvas.height=H;
@@ -3590,6 +3595,14 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   var cursorCanvas=document.createElement('canvas'); cursorCanvas.width=W; cursorCanvas.height=H;
   cursorCanvas.style.cssText='position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;border-radius:8px';
   stageWrap.appendChild(dispCanvas); stageWrap.appendChild(overlayCanvas); stageWrap.appendChild(polyCanvas); stageWrap.appendChild(cursorCanvas);
+
+  var mZoom=1;
+  function applyMZoom(){ stageWrap.style.transform='scale('+mZoom+')'; zoomLbl.textContent=Math.round(mZoom*100)+'%'; }
+  function setMZoom(z){ mZoom=Math.max(0.3,Math.min(6,z)); applyMZoom(); }
+  zoomWrap.addEventListener('wheel', function(e){
+    e.preventDefault();
+    setMZoom(mZoom * (e.deltaY<0 ? 1.12 : 1/1.12));
+  }, {passive:false});
 
   var maskCanvas=document.createElement('canvas'); maskCanvas.width=W; maskCanvas.height=H;
   var mctx=maskCanvas.getContext('2d');
@@ -3629,10 +3642,23 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   }
   function mUndo(){ if(mHistIdx<=0) return; mHistIdx--; mRestore(mHistStack[mHistIdx]); }
   function mRedo(){ if(mHistIdx>=mHistStack.length-1) return; mHistIdx++; mRestore(mHistStack[mHistIdx]); }
+  // ⚠️ 요청 반영("포토샵에서 브러시 크기 크게하고 줄이게하고 하는 단축키있잖아 그것도 적용시켜줘"):
+  // 메인 포토샵 캔버스와 똑같이 [ 키로 브러시를 작게, ] 키로 크게 조절할 수 있게 함.
+  function changeMaskBrushSize(mult){
+    var min=parseFloat(sizeRng.min)||1, max=parseFloat(sizeRng.max)||500;
+    var nv = mult>1 ? Math.round(brushSize*mult)+1 : Math.round(brushSize*mult);
+    brushSize=Math.max(min,Math.min(max,nv));
+    sizeRng.value=brushSize;
+    drawCursor();
+  }
   function onMaskKeydown(e){
+    var k=(e.key||'').toLowerCase();
+    if(!e.ctrlKey && !e.metaKey && curTool==='brush'){
+      if(k==='['){ e.preventDefault(); changeMaskBrushSize(0.85); return; }
+      if(k===']'){ e.preventDefault(); changeMaskBrushSize(1.18); return; }
+    }
     var mod=e.ctrlKey||e.metaKey;
     if(!mod) return;
-    var k=(e.key||'').toLowerCase();
     if(k==='z' && e.shiftKey){ e.preventDefault(); mRedo(); return; }
     if(k==='z'){ e.preventDefault(); mUndo(); return; }
     if(k==='y'){ e.preventDefault(); mRedo(); return; }
@@ -3765,6 +3791,19 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
     polyAddPoint(_touchStartPos);
     _touchStartPos=null;
   });
+
+  var zoomRow=document.createElement('div');
+  zoomRow.style.cssText='display:flex;gap:6px;align-items:center;margin-top:10px;justify-content:center';
+  var zoomOutBtn=document.createElement('button'); zoomOutBtn.type='button'; zoomOutBtn.textContent='－'; zoomOutBtn.title='축소';
+  var zoomInBtn=document.createElement('button'); zoomInBtn.type='button'; zoomInBtn.textContent='＋'; zoomInBtn.title='확대';
+  var zoomResetBtn=document.createElement('button'); zoomResetBtn.type='button'; zoomResetBtn.textContent='100%'; zoomResetBtn.title='원래 크기로';
+  [zoomOutBtn,zoomInBtn,zoomResetBtn].forEach(function(b){ b.style.cssText='padding:5px 10px;border-radius:14px;border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit'; });
+  var zoomLbl=document.createElement('span'); zoomLbl.style.cssText='color:#aaa;font-size:11px;min-width:38px;text-align:center'; zoomLbl.textContent='100%';
+  zoomOutBtn.onclick=function(){ setMZoom(mZoom/1.25); };
+  zoomInBtn.onclick=function(){ setMZoom(mZoom*1.25); };
+  zoomResetBtn.onclick=function(){ setMZoom(1); };
+  var zoomHint=document.createElement('span'); zoomHint.style.cssText='color:#666;font-size:10.5px'; zoomHint.textContent='마우스 휠로 확대/축소';
+  zoomRow.appendChild(zoomOutBtn); zoomRow.appendChild(zoomLbl); zoomRow.appendChild(zoomInBtn); zoomRow.appendChild(zoomResetBtn); zoomRow.appendChild(zoomHint);
 
   var ctrlRow=document.createElement('div');
   ctrlRow.style.cssText='display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap;justify-content:center;max-width:92vw';
@@ -3910,10 +3949,11 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   btnRow2.appendChild(cancelBtn); btnRow2.appendChild(doneBtn);
 
   var histHint=document.createElement('div');
-  histHint.textContent='Ctrl(⌘)+Z 로 되돌리기 · Ctrl+Shift+Z 로 다시 실행';
+  histHint.textContent='Ctrl(⌘)+Z 로 되돌리기 · Ctrl+Shift+Z 로 다시 실행 · [ ] 로 브러시 크기 조절 · 마우스 휠로 확대/축소';
   histHint.style.cssText='color:#777;font-size:10.5px;text-align:center;margin-top:8px';
 
-  ov2.appendChild(title); ov2.appendChild(stageWrap); ov2.appendChild(ctrlRow); ov2.appendChild(btnRow2); ov2.appendChild(histHint);
+  zoomWrap.appendChild(stageWrap);
+  ov2.appendChild(title); ov2.appendChild(zoomWrap); ov2.appendChild(zoomRow); ov2.appendChild(ctrlRow); ov2.appendChild(btnRow2); ov2.appendChild(histHint);
   document.body.appendChild(ov2);
 }
 
