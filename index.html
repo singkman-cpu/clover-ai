@@ -4887,28 +4887,41 @@ function _psClipBaseCanvas(layers, i){
   return null;
 }
 // 조정 레이어 L을 target(지금까지 합쳐진 아래 결과)에 적용. sig=아래 상태 서명(캐시 키)
-function _psApplyAdjust(target, L, layers, i, sig){
+// rect={x,y,w,h}(문서 좌표, 선택)가 있으면 브러시로 지금 칠하고 있는 작은 영역만 다시 필터링함.
+// ⚠️ 성능 수정("레이어 마스크 브러시 칠하는거 다시 엄청 느려졌어"): 브러시(마스크 포함)로 칠하는
+// 동안 위에 조정 레이어(커브 등)가 있으면, 지금까지는 매 프레임 _psRunFilter가 문서 전체 크기로
+// getImageData/putImageData를 새로 돌렸음(칠하는 레이어의 서명이 매 프레임 'dyn'+난수라 캐시가 매번
+// 무효화되기 때문) — 4096×2265처럼 큰 문서에서 이게 프레임마다 반복되니 브러시가 심하게 버벅였음.
+// rect가 있을 때는 target에서 그 작은 영역만 잘라내 그 부분에만 필터를 돌리고, 결과도 그 영역에만
+// 다시 합성함 — 비용이 "문서 전체 크기"가 아니라 "브러시로 칠해진 영역 크기"에 비례하게 줄어듦.
+function _psApplyAdjust(target, L, layers, i, sig, rect){
   var d=PSE.doc;
-  var key=sig+'#'+_psLayerSig(L), f;
-  if(L._cache && L._cache.sig===key && L._cache.canvas.width===d.w && L._cache.canvas.height===d.h) f=L._cache.canvas;
-  else { f=_psRunFilter(L.key, L.p, target); L._cache={sig:key, canvas:f}; }
-  var M=_psAdjustMask(L, layers, i);
+  var key=sig+'#'+_psLayerSig(L)+(rect?('@'+rect.x+','+rect.y+','+rect.w+','+rect.h):''), f;
+  var srcForFilter=target;
+  if(rect){ srcForFilter=_psCanvas(rect.w,rect.h); srcForFilter.getContext('2d').drawImage(target,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h); }
+  if(L._cache && L._cache.sig===key && L._cache.canvas.width===srcForFilter.width && L._cache.canvas.height===srcForFilter.height) f=L._cache.canvas;
+  else { f=_psRunFilter(L.key, L.p, srcForFilter); L._cache={sig:key, canvas:f}; }
+  var M=_psAdjustMask(L, layers, i, rect);
   if(!M) return;
   var F=_psClone(f), fx=F.getContext('2d'); fx.globalCompositeOperation='destination-in'; fx.drawImage(M,0,0);
   var tx=target.getContext('2d');
   tx.save(); tx.setTransform(1,0,0,1,0,0); tx.globalAlpha=1;
+  if(rect) tx.translate(rect.x,rect.y);
   tx.globalCompositeOperation='destination-out'; tx.drawImage(M,0,0);
   tx.globalCompositeOperation='lighter'; tx.drawImage(F,0,0);
   tx.restore();
 }
 // 조정 레이어의 적용 범위 마스크(알파 = 불투명도 × 선택 마스크 × 클리핑 범위). 적용할 곳이 없으면 null
-function _psAdjustMask(L, layers, i){
-  var d=PSE.doc, M=_psCanvas(d.w,d.h), mx=M.getContext('2d');
+// rect가 있으면 그 영역 크기로만 만듦(위 _psApplyAdjust의 dirty-rect 최적화와 짝)
+function _psAdjustMask(L, layers, i, rect){
+  var d=PSE.doc, w=rect?rect.w:d.w, h=rect?rect.h:d.h, M=_psCanvas(w,h), mx=M.getContext('2d');
   mx.globalAlpha=Math.max(0,Math.min(1,L.opacity));
-  if(L.mask) mx.drawImage(L.mask,0,0); else { mx.fillStyle='#fff'; mx.fillRect(0,0,d.w,d.h); }
+  if(L.mask){ if(rect) mx.drawImage(L.mask,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h); else mx.drawImage(L.mask,0,0); }
+  else { mx.fillStyle='#fff'; mx.fillRect(0,0,w,h); }
   if(L.clip){
     var base=_psClipBaseCanvas(layers,i); if(!base) return null;
-    mx.globalAlpha=1; mx.globalCompositeOperation='destination-in'; mx.drawImage(base,0,0);
+    mx.globalAlpha=1; mx.globalCompositeOperation='destination-in';
+    if(rect) mx.drawImage(base,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h); else mx.drawImage(base,0,0);
   }
   return M;
 }
@@ -4925,7 +4938,19 @@ function _psComposite(target, onlyVisible, upto){
   // 미리 합성해둔 belowCache(_psBrushStart 참고)를 그대로 붙여넣고, 그 위(지금 칠하는 레이어부터)만
   // 다시 그림 — 아래 레이어 개수만큼 매 프레임 반복하던 작업을 통째로 건너뜀.
   var act=PSE.act;
-  if(act && act.type==='brush' && act.belowCache && target===PSE.ui.cv && onlyVisible!==false && upto==null && act.layerIdx>0 && act.layerIdx<=n){
+  var fast = act && act.type==='brush' && act.belowCache && target===PSE.ui.cv && onlyVisible!==false && upto==null && act.layerIdx>0 && act.layerIdx<=n;
+  // ⚠️ 성능 최적화(dirty-rect, "레이어 마스크 브러시 칠하는거 다시 엄청 느려졌어" 수정): 브러시로
+  // 칠하는 동안 위(현재 레이어보다 높은 자리)에 커브 같은 조정 레이어가 있으면, 문서 전체 크기로
+  // 매 프레임 다시 필터링하던 게 큰 문서에서 아주 느렸음(_psApplyAdjust 참고). act.rect(이번 획에서
+  // 지금까지 칠해진 영역)를 조금 여유 있게 넓힌 rect를 넘겨서, 그 작은 영역만 다시 필터링하도록 함.
+  var rect=null;
+  if(fast && act.rect){
+    var pad=4;
+    var rx=Math.max(0,Math.floor(act.rect.x0-pad)), ry=Math.max(0,Math.floor(act.rect.y0-pad));
+    var rx2=Math.min(d.w,Math.ceil(act.rect.x1+pad)), ry2=Math.min(d.h,Math.ceil(act.rect.y1+pad));
+    if(rx2>rx && ry2>ry) rect={x:rx,y:ry,w:rx2-rx,h:ry2-ry};
+  }
+  if(fast){
     ctx.drawImage(act.belowCache,0,0);
     i0=act.layerIdx;
     sig='belowcache'+act.layerId;
@@ -4936,7 +4961,7 @@ function _psComposite(target, onlyVisible, upto){
     if(L.opacity<=0) continue;
     if(L.type==='adjust'){
       ctx.restore();
-      _psApplyAdjust(target, L, d.layers, i, sig);
+      _psApplyAdjust(target, L, d.layers, i, sig, rect);
       ctx.save(); ctx.setTransform(1,0,0,1,0,0);
       sig+='|'+_psLayerSig(L);
       continue;
@@ -5495,8 +5520,14 @@ function _psSetActive(id){
 // v = 마스크를 편집할 레이어의 id, 또는 꺼려면 null/false. 레이어 id로 저장해두면(단순 on/off
 // 불리언이 아니라) 그 레이어가 삭제/병합/실행취소 등으로 사라져도 다른 레이어의 마스크를 잘못
 // 계속 칠하는 사고 없이, "그 레이어가 여전히 활성 레이어일 때만" 마스크 모드가 자동으로 유효함.
+function _psIsWhiteColor(c){ c=(c||'').toLowerCase(); return c==='#fff'||c==='#ffffff'; }
 function _psSetMaskEdit(v){
+  var wasOn=!!PSE.maskEdit;
   PSE.maskEdit=v||null;
+  // ⚠️ 요청 반영("우측 마스크레이어 클릭했을때 브러시 칼라가 블랙/화이트로... X누르면서 마스크 그리기
+  // 편하지"): 마스크 편집을 켤 때 전경/배경색을 검정/흰색으로 맞춰둠 — 포토샵처럼 브러시가 기본
+  // "검정=가림"으로 시작하고, 기존 X 단축키(전경/배경색 교체)만 눌러도 바로 흰색(보임)으로 바뀜.
+  if(PSE.maskEdit && !wasOn){ PSE.o.fg='#000000'; PSE.o.bg='#ffffff'; _psRefreshColors(); }
   // ⚠️ 버그 수정("마스크 클릭했다가 이미지 썸네일로 돌아오면 썸네일들이 빈 화면(체크무늬)으로 나옴"):
   // _psRefreshSide()가 레이어 패널을 다시 그리면서 썸네일 <canvas>를 전부 새로 만드는데(ui.thumbs 초기화),
   // _psRequestRender()는 인자가 없으면 "화면(캔버스) 다시 그리기"만 예약하고 "썸네일 다시 그리기"는
@@ -5944,7 +5975,13 @@ function _psBrushStart(x,y,erase){
     var mbuf=_psCanvas(d.w,d.h);
     var midx=d.layers.indexOf(L), mBelowCache=null;
     if(midx>0){ mBelowCache=_psCanvas(d.w,d.h); _psComposite(mBelowCache, true, midx); }
-    PSE.act={type:'brush', maskMode:true, layerId:L.id, layerIdx:midx, belowCache:mBelowCache, base:mbase, buf:mbuf, clip:d.sel?_psCanvas(d.w,d.h):null, last:{x:x,y:y}, erase:!!erase, dirty:true, rect:null};
+    // ⚠️ 요청 반영("마스크 클릭하면 브러시 칼라가 블랙/화이트로... X누르면서 마스크 그리기 편하지"):
+    // 마스크 모드에 들어갈 때 전경/배경색을 검정·흰색으로 맞춰두므로(_psSetMaskEdit 참고), 포토샵처럼
+    // "브러시" 색이 검정이면 칠한 부분이 가려지고(hide) 흰색이면 다시 보이도록(reveal) 함 — X키(기존
+    // 전경/배경색 교체 단축키)를 누르면 자연스럽게 가림↔보임이 바뀜. "지우개" 도구는 색과 상관없이
+    // 항상 보이게(reveal)만 하는 보조 수단으로 그대로 둠(색을 매번 안 바꾸고도 빠르게 되돌릴 때 편함).
+    var mHide = erase ? false : !_psIsWhiteColor(PSE.o.fg);
+    PSE.act={type:'brush', maskMode:true, hide:mHide, layerId:L.id, layerIdx:midx, belowCache:mBelowCache, base:mbase, buf:mbuf, clip:d.sel?_psCanvas(d.w,d.h):null, last:{x:x,y:y}, erase:!!erase, dirty:true, rect:null};
     _psDab(mbuf.getContext('2d'),x,y,PSE.o.size,PSE.o.hard,'#ffffff');
     _psExpandRect(PSE.act,x,y,PSE.o.size/2);
     return true;
@@ -6005,10 +6042,14 @@ function _psBrushCompose(){
   }
   lx.save(); lx.beginPath(); lx.rect(rx,ry,rw,rh); lx.clip();
   lx.globalAlpha=1; lx.globalCompositeOperation='source-over'; lx.clearRect(rx,ry,rw,rh); lx.drawImage(A.base,rx,ry,rw,rh,rx,ry,rw,rh);
-  // ⚠️ 요청 반영("브러시로 칠하면 현재 레이어마스크로 투명해지는거지 그러면 아래 레이어가 보이게"):
+  // ⚠️ 요청 반영("마스크 클릭하면 브러시 칼라가 블랙/화이트로... X누르면서 마스크 그리기 편하지"):
   // 마스크 편집 중일 땐 픽셀 편집과 반대로 동작함 — "브러시"로 칠하면 그 부분이 투명해져서(가려져서)
-  // 아래 레이어가 비쳐 보이고, "지우개"로 지우면 다시 불투명해져서(=흰색) 이 레이어가 보임.
-  var hide = A.maskMode ? !A.erase : A.erase;
+  // 아래 레이어가 비쳐 보이고, "지우개"로 지우면 다시 불투명해져서(=흰색) 이 레이어가 보임. 여기에
+  // 더해 포토샵처럼 브러시 색이 검정이면 가림, 흰색이면 보임이 되도록(X키로 전경/배경색 교체 =
+  // 가림/보임 전환) A.hide를 _psBrushStart에서 브러시 색 기준으로 한 번 정해두고 그대로 씀
+  // (획 중간에 색이 바뀌어도 이번 획은 시작할 때 정해진 대로 — A.erase/A.maskMode를 매번 다시 읽던
+  // 예전 방식과 동일하게, 획 하나 안에서는 방향이 안 바뀜).
+  var hide = A.maskMode ? A.hide : A.erase;
   lx.globalAlpha=PSE.o.opacity/100; lx.globalCompositeOperation=hide?'destination-out':'source-over'; lx.drawImage(stroke,rx,ry,rw,rh,rx,ry,rw,rh);
   lx.restore();
 }
@@ -6978,12 +7019,14 @@ function _psRefreshOpts(light){
     o.appendChild(_psCheckEl('모든 레이어 기준',O.sampleAll,function(v){ O.sampleAll=v; }));
   }
   if(t==='brush'||t==='eraser'){
-    // ⚠️ 요청 반영: 마스크 편집 모드일 땐 색이 항상 흰색으로 고정되니(_psBrushStart 참고) 색상
-    // 선택 UI를 숨기고, 지금 마스크를 칠하는 중이라는 걸 눈에 띄게 표시 + 바로 빠져나올 수 있게 함.
+    // ⚠️ 요청 반영("마스크 클릭하면 브러시 칼라가 블랙 화이트로... X누르면서 마스크 그리기 편하지"):
+    // 마스크 편집 모드에서는 브러시 색(전경색)이 검정이면 가림, 흰색이면 보임으로 실제로 쓰이므로
+    // (_psBrushStart 참고), 색상 선택 UI를 숨기지 않고 그대로 보여줘서 지금 색이 뭔지, X키를 누르면
+    // 어떻게 바뀌는지 눈에 보이게 함.
     var inMaskEdit = PSE.maskEdit===d.activeId;
     if(inMaskEdit){
-      var mb=_psEl('div'); mb.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--acg);border:1px solid var(--acb);width:100%;box-sizing:border-box';
-      mb.appendChild(_psEl('span','',''+'🎭 마스크 편집 중 — 브러시=가림(투명) · 지우개=보임'));
+      var mb=_psEl('div'); mb.style.cssText='display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:var(--acg);border:1px solid var(--acb);width:100%;box-sizing:border-box;flex-wrap:wrap';
+      mb.appendChild(_psEl('span','',''+'🎭 마스크 편집 중 — 브러시색 검정=가림·흰색=보임(X로 전환) · 지우개=항상 보임'));
       var doneBtn2=_psB('완료',function(){ _psSetMaskEdit(null); },'pri');
       doneBtn2.style.marginLeft='auto';
       mb.appendChild(doneBtn2);
@@ -6992,7 +7035,7 @@ function _psRefreshOpts(light){
     sizeCtl(); opacityCtl();
     o.appendChild(_psB('하드',function(){ O.hard=true; _psRefreshOpts(); },O.hard?'on':'','가장자리가 또렷한 브러시'));
     o.appendChild(_psB('소프트',function(){ O.hard=false; _psRefreshOpts(); },!O.hard?'on':'','가장자리가 부드러운 브러시'));
-    if(t==='brush' && !inMaskEdit){ fgCtl(); hint('Alt+클릭: 색 추출 · [ ] 크기'); }
+    if(t==='brush'){ fgCtl(); hint(inMaskEdit?'X: 브러시 색 검정↔흰색(가림↔보임) 전환 · [ ] 크기':'Alt+클릭: 색 추출 · [ ] 크기'); }
     else hint('[ ] 크기 조절');
     if(d.sel) hint('선택 영역 안에만 칠해져요');
   } else if(t==='bucket'){ fgCtl(); opacityCtl(); tolCtl(); }
