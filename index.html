@@ -4868,7 +4868,15 @@ function _psLayerSig(L){
   return 'v'+JSON.stringify(o);
 }
 // 클리핑용: 조정 레이어 바로 아래의 일반 레이어(조정 레이어 제외)를 단독으로 그린 캔버스
-function _psClipBaseCanvas(layers, i){
+// rect가 있으면 그 작은 영역만 잘라서 그 크기로 반환함(0,0 기준으로 맞춰서) — 아래 참고.
+// ⚠️ 성능 수정("블랙화이트 칼라는 적용되는데 브러시 칠할때 엄청 버벅되는건 수정이 안됐어"): 마스크
+// 편집 중인 레이어 바로 위에 클리핑된 조정 레이어(예: 커브, "조정 ↓")가 있으면, 이 함수가 매 프레임
+// _psCanvas(전체 문서 크기)로 새 캔버스를 하나씩 새로 만들고 있었음 — 4096×2265 같은 큰 문서에서
+// 드래그 내내 매 프레임 대형 캔버스를 새로 할당하니(가비지 컬렉션 압박) 그게 실제 버벅임의 정체였음
+// (앞서 고친 _psRunFilter 쪽 최적화와는 별개의 병목). rect를 받으면 처음부터 그 작은 크기로만
+// 할당·렌더링해서 이 비용을 브러시로 칠한 영역 크기만큼으로 줄임.
+function _psClipBaseCanvas(layers, i, rect){
+  var d=PSE.doc, w=rect?rect.w:d.w, h=rect?rect.h:d.h;
   for(var j=i-1;j>=0;j--){
     var B=layers[j]; if(B.type==='adjust') continue;
     if(!B.visible) return null;
@@ -4877,10 +4885,18 @@ function _psClipBaseCanvas(layers, i){
     // 조정 레이어 효과가 새어나감 — 마스크가 있으면 무조건 스크래치를 거쳐 destination-in으로
     // 마스크를 먼저 적용한 뒤 반환.
     var plain = B.type==='raster' && !B.mask && !(PSE.rt&&PSE.rt.layerId===B.id) && !(PSE.filter&&PSE.filter.layerId===B.id);
-    if(plain) return B.canvas;
-    var c=_psCanvas(PSE.doc.w,PSE.doc.h); _psRenderLayerTo(c.getContext('2d'),B);
+    if(plain){
+      if(!rect) return B.canvas;
+      var pc=_psCanvas(w,h); pc.getContext('2d').drawImage(B.canvas,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h); return pc;
+    }
+    var c=_psCanvas(w,h), cctx=c.getContext('2d');
+    if(rect) cctx.translate(-rect.x,-rect.y);
+    _psRenderLayerTo(cctx,B);
     if(B.type==='raster' && B.mask){
-      var cx=c.getContext('2d'); cx.globalCompositeOperation='destination-in'; cx.drawImage(B.mask,0,0,PSE.doc.w,PSE.doc.h); cx.globalCompositeOperation='source-over';
+      cctx.setTransform(1,0,0,1,0,0);
+      cctx.globalCompositeOperation='destination-in';
+      if(rect) cctx.drawImage(B.mask,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h); else cctx.drawImage(B.mask,0,0,d.w,d.h);
+      cctx.globalCompositeOperation='source-over';
     }
     return c;
   }
@@ -4919,9 +4935,10 @@ function _psAdjustMask(L, layers, i, rect){
   if(L.mask){ if(rect) mx.drawImage(L.mask,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h); else mx.drawImage(L.mask,0,0); }
   else { mx.fillStyle='#fff'; mx.fillRect(0,0,w,h); }
   if(L.clip){
-    var base=_psClipBaseCanvas(layers,i); if(!base) return null;
+    var base=_psClipBaseCanvas(layers,i,rect); if(!base) return null;
+    // base는 rect가 있으면 이미 그 작은 크기로 잘려서(0,0 기준) 나오므로 그대로 (0,0)에 그리면 됨.
     mx.globalAlpha=1; mx.globalCompositeOperation='destination-in';
-    if(rect) mx.drawImage(base,rect.x,rect.y,rect.w,rect.h,0,0,rect.w,rect.h); else mx.drawImage(base,0,0);
+    mx.drawImage(base,0,0);
   }
   return M;
 }
