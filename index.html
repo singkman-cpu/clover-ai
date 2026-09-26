@@ -3609,8 +3609,30 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   if(existingMask) mctx.drawImage(existingMask,0,0,W,H);
   dispCanvas.getContext('2d').drawImage(bgCanvas,0,0);
 
-  function renderOverlay(){
+  // ⚠️ 성능 최적화("마스크기능안에들어가서 브러시 사용하는것이랑 지우개 등등 한탬포 아직도 느려"):
+  // 큰 이미지에서 브러시로 칠할 때마다 전체 화면(overlay)을 매번 처음부터 다시 그리는 게 원인이었음
+  // (게다가 마우스가 한 프레임에 여러 번 움직이면 그만큼 여러 번 다시 그렸음). 두 가지로 고침:
+  // ① rect를 넘기면 실제로 칠해진 작은 영역만 다시 그림(전체 갱신 대신)
+  // ② mRequestOverlay()로 한 프레임에 한 번만 실행되도록 묶음(requestAnimationFrame)
+  function renderOverlay(rect){
     var octx=overlayCanvas.getContext('2d');
+    if(rect){
+      var rx=Math.max(0,Math.floor(rect.x0-1)), ry=Math.max(0,Math.floor(rect.y0-1));
+      var rx2=Math.min(W,Math.ceil(rect.x1+1)), ry2=Math.min(H,Math.ceil(rect.y1+1));
+      var rw=Math.max(0,rx2-rx), rh=Math.max(0,ry2-ry);
+      if(rw<=0||rh<=0) return;
+      octx.save(); octx.beginPath(); octx.rect(rx,ry,rw,rh); octx.clip();
+      octx.clearRect(rx,ry,rw,rh);
+      octx.globalAlpha=0.5;
+      octx.drawImage(maskCanvas,rx,ry,rw,rh,rx,ry,rw,rh);
+      octx.globalCompositeOperation='source-in';
+      octx.fillStyle='#00e5cc';
+      octx.fillRect(rx,ry,rw,rh);
+      octx.globalCompositeOperation='source-over';
+      octx.globalAlpha=1;
+      octx.restore();
+      return;
+    }
     octx.clearRect(0,0,W,H);
     octx.globalAlpha=0.5;
     octx.drawImage(maskCanvas,0,0);
@@ -3619,6 +3641,21 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
     octx.fillRect(0,0,W,H);
     octx.globalCompositeOperation='source-over';
     octx.globalAlpha=1;
+  }
+  var mDirtyRect=null, mOvRafPending=false;
+  function mExpandDirty(x,y,r){
+    var x0=x-r,y0=y-r,x1=x+r,y1=y+r;
+    if(!mDirtyRect){ mDirtyRect={x0:x0,y0:y0,x1:x1,y1:y1}; return; }
+    var rc=mDirtyRect;
+    if(x0<rc.x0)rc.x0=x0; if(y0<rc.y0)rc.y0=y0; if(x1>rc.x1)rc.x1=x1; if(y1>rc.y1)rc.y1=y1;
+  }
+  function mRequestOverlay(){
+    if(mOvRafPending) return; mOvRafPending=true;
+    requestAnimationFrame(function(){
+      mOvRafPending=false;
+      var r=mDirtyRect; mDirtyRect=null;
+      renderOverlay(r);
+    });
   }
   renderOverlay();
 
@@ -3691,13 +3728,22 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
     mctx.beginPath(); mctx.arc(x,y,brushSize/2,0,Math.PI*2); mctx.fill();
     mctx.globalCompositeOperation='source-over';
     hasMarked=true;
+    mExpandDirty(x,y,brushSize/2);
   }
-  var cursorPos=null;
+  // ⚠️ 성능 최적화: 커서 미리보기도 전체 캔버스를 지우지 않고, 이전 위치+새 위치를 감싸는 작은
+  // 영역만 지우고 다시 그림(큰 이미지에서 마우스를 움직일 때마다 전체 지우기 방지).
+  var cursorPos=null, lastCursorRect=null;
   function drawCursor(){
     var cctx=cursorCanvas.getContext('2d');
-    cctx.clearRect(0,0,W,H);
-    if(!cursorPos || curTool!=='brush') return;
-    var rr=Math.max(1,brushSize/2), k=Math.max(1,W/600);
+    var newRect=null, rr=0, k=Math.max(1,W/600);
+    if(cursorPos && curTool==='brush'){
+      rr=Math.max(1,brushSize/2);
+      var pad=3*k+2;
+      newRect={x:cursorPos.x-rr-pad,y:cursorPos.y-rr-pad,w:(rr+pad)*2,h:(rr+pad)*2};
+    }
+    if(lastCursorRect) cctx.clearRect(lastCursorRect.x,lastCursorRect.y,lastCursorRect.w,lastCursorRect.h);
+    lastCursorRect=newRect;
+    if(!newRect) return;
     cctx.save(); cctx.lineWidth=1*k; cctx.strokeStyle='rgba(0,0,0,.8)'; cctx.beginPath(); cctx.arc(cursorPos.x,cursorPos.y,rr,0,Math.PI*2); cctx.stroke();
     cctx.strokeStyle='rgba(255,255,255,.9)'; cctx.beginPath(); cctx.arc(cursorPos.x,cursorPos.y,rr+1*k,0,Math.PI*2); cctx.stroke(); cctx.restore();
   }
@@ -3705,7 +3751,7 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   dispCanvas.addEventListener('mousemove', function(e){ cursorPos=posOnCanvas(e); drawCursor(); });
   dispCanvas.addEventListener('mouseleave', function(){ cursorPos=null; drawCursor(); });
   var painting=false, lastPt=null;
-  function startPaint(e){ if(curTool!=='brush') return; painting=true; var p=posOnCanvas(e); lastPt=p; paintAt(p.x,p.y); renderOverlay(); }
+  function startPaint(e){ if(curTool!=='brush') return; painting=true; var p=posOnCanvas(e); lastPt=p; paintAt(p.x,p.y); mRequestOverlay(); }
   function movePaint(e){
     if(curTool!=='brush' || !painting) return; e.preventDefault();
     var p=posOnCanvas(e);
@@ -3718,7 +3764,7 @@ function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
       }
     } else paintAt(p.x,p.y);
     lastPt=p;
-    renderOverlay();
+    mRequestOverlay();
   }
   function endPaint(){ if(!painting) return; painting=false; lastPt=null; mPushHistory(); }
   dispCanvas.addEventListener('mousedown',function(e){ if(curTool!=='brush' || e.button!==0) return; startPaint(e); });
