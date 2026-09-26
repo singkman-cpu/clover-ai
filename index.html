@@ -4767,9 +4767,17 @@ function _psClipBaseCanvas(layers, i){
   for(var j=i-1;j>=0;j--){
     var B=layers[j]; if(B.type==='adjust') continue;
     if(!B.visible) return null;
-    var plain = B.type==='raster' && !(PSE.rt&&PSE.rt.layerId===B.id) && !(PSE.filter&&PSE.filter.layerId===B.id);
+    // ⚠️ 버그 수정: 클리핑 기준이 되는 아래 레이어에 마스크가 있으면(픽셀 레이어 마스크로 일부를
+    // 가려둔 경우), 마스크 적용 전 원본 픽셀 그대로를 클리핑 범위로 쓰면 마스크로 가린 부분까지
+    // 조정 레이어 효과가 새어나감 — 마스크가 있으면 무조건 스크래치를 거쳐 destination-in으로
+    // 마스크를 먼저 적용한 뒤 반환.
+    var plain = B.type==='raster' && !B.mask && !(PSE.rt&&PSE.rt.layerId===B.id) && !(PSE.filter&&PSE.filter.layerId===B.id);
     if(plain) return B.canvas;
-    var c=_psCanvas(PSE.doc.w,PSE.doc.h); _psRenderLayerTo(c.getContext('2d'),B); return c;
+    var c=_psCanvas(PSE.doc.w,PSE.doc.h); _psRenderLayerTo(c.getContext('2d'),B);
+    if(B.type==='raster' && B.mask){
+      var cx=c.getContext('2d'); cx.globalCompositeOperation='destination-in'; cx.drawImage(B.mask,0,0,PSE.doc.w,PSE.doc.h); cx.globalCompositeOperation='source-over';
+    }
+    return c;
   }
   return null;
 }
@@ -6997,10 +7005,16 @@ function _psPropsSec(L){
     var mr=_psRowEl(); mr.style.marginTop='6px';
     mr.appendChild(_psB(L.mask?'🎭 레이어 마스크 편집':'🎭 레이어 마스크 추가',function(){
       _psCommitPending();
-      _openMaskEditor(L.canvas, L.mask, function(maskCanvas){
+      // ⚠️ 새 마스크는 포토샵과 동일하게 "전체 흰색(=레이어가 지금처럼 다 보임)"으로 시작함 —
+      // 빈(투명) 캔버스로 시작하면 아무것도 안 칠한 채 "완료"만 눌러도 레이어 전체가 갑자기
+      // 사라져버리는 문제가 있었음. 사용자는 팝업 안의 "지우개" 도구로 원하는 부분만 지워서
+      // 아래 레이어가 비쳐 보이게 하면 됨(요청하신 "브러시로 지워서 아래가 보이게"와 일치).
+      var startMask=L.mask;
+      if(!startMask){ startMask=_psCanvas(PSE.doc.w,PSE.doc.h); var sctx0=startMask.getContext('2d'); sctx0.fillStyle='#fff'; sctx0.fillRect(0,0,startMask.width,startMask.height); }
+      _openMaskEditor(L.canvas, startMask, function(maskCanvas){
         L.mask=maskCanvas; commit('레이어 마스크');
-      }, '&#127917; 이 레이어에서 보일 부분을 칠해주세요 <span style="color:#888;font-weight:400;font-size:11.5px">— 흰색(칠한 부분)만 이 레이어가 보이고, 지운(투명) 부분은 바로 아래 레이어가 비쳐 보여요. 원본 픽셀은 그대로 남아있어서 언제든 다시 칠하거나 마스크를 해제할 수 있어요.</span>');
-    },'',L.mask?'현재 마스크를 다시 칠하거나 넓혀요':'브러시로 지운 부분에 아래 레이어가 비쳐 보이게 해요'));
+      }, '&#127917; 지우개로 지운 부분에 아래 레이어가 비쳐 보여요 <span style="color:#888;font-weight:400;font-size:11.5px">— 처음엔 이 레이어가 그대로 다 보이는 상태예요. 위쪽 "지우개"를 골라서 원하는 부분을 지우면 그 자리에 바로 아래 레이어가 나타나요. 원본 픽셀은 지워지지 않아서 다시 칠하거나 마스크를 해제하면 언제든 되돌릴 수 있어요.</span>');
+    },'',L.mask?'현재 마스크를 다시 칠하거나 넓혀요':'지우개로 지운 부분에 아래 레이어가 비쳐 보이게 해요'));
     if(L.mask){
       mr.appendChild(_psB('마스크 해제(전체 표시)',function(){ L.mask=null; commit('마스크 해제'); },'dng','이 레이어를 다시 전체 다 보이게'));
     }
