@@ -3559,14 +3559,18 @@ function _openImageLightbox(url, urls, idx){
 // + 마스크" 방식(포토샵의 조정 레이어와 동일한 개념)을 우리도 구현 — 원하는 영역만 브러시로 칠하면
 // 그 영역에만 보정이 적용됨. bgCanvas(그 레이어 적용 전까지의 합성 이미지)를 배경으로 보여주고,
 // 그 위에 브러시로 흰색(=적용) 마스크를 그리게 한 뒤 완성된 마스크 캔버스를 콜백으로 돌려줌.
-function _openMaskEditor(bgCanvas, existingMask, cb){
+function _openMaskEditor(bgCanvas, existingMask, cb, titleHtml){
   var old=document.getElementById('mask-editor-ov'); if(old) old.remove();
   var ov2=document.createElement('div');
   ov2.id='mask-editor-ov';
   ov2.style.cssText='position:fixed;inset:0;z-index:100010;background:rgba(0,0,0,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
 
   var title=document.createElement('div');
-  title.innerHTML='&#128396;&#65039; 적용할 영역을 표시해주세요 <span style="color:#888;font-weight:400;font-size:11.5px">— 브러시로 칠하거나 다각형으로 꼭짓점을 찍어 선택하고, 필요하면 "AI로 사물 정밀 선택"으로 실제 사물 윤곽에 딱 맞게 다듬을 수 있어요</span>';
+  // ⚠️ 요청 반영("배경 레이어에 마스크를 만들어서 브러시로 지운 부분은 아래 레이어가 보이게"):
+  // 원래는 "필터 적용 범위 표시"라는 문구 하나만 있었는데, 픽셀 레이어 마스크(칠한 부분=이
+  // 레이어가 보임, 지운 부분=아래 레이어가 비쳐 보임)에서는 의미가 달라서 호출하는 쪽에서
+  // 상황에 맞는 안내문구를 넘길 수 있게 4번째 인자(titleHtml)를 추가함 — 안 넘기면 기존 문구 그대로.
+  title.innerHTML = titleHtml || '&#128396;&#65039; 적용할 영역을 표시해주세요 <span style="color:#888;font-weight:400;font-size:11.5px">— 브러시로 칠하거나 다각형으로 꼭짓점을 찍어 선택하고, 필요하면 "AI로 사물 정밀 선택"으로 실제 사물 윤곽에 딱 맞게 다듬을 수 있어요</span>';
   title.style.cssText='color:#fff;font-size:14px;font-weight:700;margin-bottom:12px;text-align:center;max-width:92vw';
 
   var W=bgCanvas.width, H=bgCanvas.height;
@@ -4752,7 +4756,7 @@ function _psCvId(c){ if(!c||!_psCvIds) return 0; var v=_psCvIds.get(c); if(!v){ 
 function _psLayerSig(L){
   if(L.type==='raster'){
     if((PSE.act&&PSE.act.layerId===L.id) || (PSE.rt&&PSE.rt.layerId===L.id) || (PSE.filter&&PSE.filter.layerId===L.id)) return 'dyn'+Math.random();
-    return 'r'+L.id+'|'+L.visible+'|'+L.opacity+'|'+L.blend+'|'+_psCvId(L.canvas);
+    return 'r'+L.id+'|'+L.visible+'|'+L.opacity+'|'+L.blend+'|'+_psCvId(L.canvas)+'|'+_psCvId(L.mask);
   }
   if(L.type==='adjust') return 'a'+L.id+'|'+L.visible+'|'+L.opacity+'|'+L.key+'|'+JSON.stringify(L.p)+'|'+_psCvId(L.mask)+'|'+!!L.clip;
   var o={}; for(var k in L){ if(k!=='_cache' && Object.prototype.hasOwnProperty.call(L,k)) o[k]=L[k]; }
@@ -4814,13 +4818,22 @@ function _psComposite(target, onlyVisible, upto){
     }
     sig+='|'+_psLayerSig(L);
     var src;
-    var plain = L.type==='raster' && !(PSE.rt&&PSE.rt.layerId===L.id) && !(PSE.filter&&PSE.filter.layerId===L.id);
+    // ⚠️ 요청 반영("배경 레이어에 마스크를 만들어서 브러시로 지운 부분은 아래 레이어가 보이게"):
+    // 픽셀(raster) 레이어에도 조정 레이어와 똑같은 방식의 마스크(L.mask)를 지원함 — 마스크가
+    // 있으면 무조건 스크래치 캔버스를 거쳐서 destination-in으로 마스크 모양만 남기고 나머지는
+    // 투명하게 잘라냄(마스크 흰색=이 레이어가 보임, 검정/투명=아래 레이어가 비쳐 보임).
+    var plain = L.type==='raster' && !L.mask && !(PSE.rt&&PSE.rt.layerId===L.id) && !(PSE.filter&&PSE.filter.layerId===L.id);
     if(plain) src=L.canvas;
     else{
       if(!sc){ sc=_psScratch(); sctx=sc.getContext('2d'); }
       sctx.setTransform(1,0,0,1,0,0); sctx.globalAlpha=1; sctx.globalCompositeOperation='source-over';
       sctx.clearRect(0,0,sc.width,sc.height);
       _psRenderLayerTo(sctx,L);
+      if(L.type==='raster' && L.mask){
+        sctx.globalCompositeOperation='destination-in';
+        sctx.drawImage(L.mask,0,0,sc.width,sc.height);
+        sctx.globalCompositeOperation='source-over';
+      }
       src=sc;
     }
     ctx.globalAlpha=L.opacity; ctx.globalCompositeOperation=L.blend||'source-over';
@@ -5326,6 +5339,10 @@ function _psMergeDown(){
   [B,L].forEach(function(X){
     if(!X.visible) return;
     sx.clearRect(0,0,d.w,d.h); _psRenderLayerTo(sx,X);
+    // ⚠️ 버그 수정: 픽셀 레이어에 마스크가 있는 채로 "아래와 병합"하면, 마스크로 가려뒀던
+    // 부분이 병합 후 다시 보여버림(마스크 적용 없이 원본 픽셀 그대로 합쳐졌기 때문) — 합성 때와
+    // 똑같이 destination-in으로 마스크를 먼저 적용한 뒤에 합침.
+    if(X.type==='raster' && X.mask){ sx.globalCompositeOperation='destination-in'; sx.drawImage(X.mask,0,0,d.w,d.h); sx.globalCompositeOperation='source-over'; }
     ctx.globalAlpha=X.opacity; ctx.globalCompositeOperation=(X===B?'source-over':X.blend)||'source-over'; ctx.drawImage(sc,0,0);
   });
   var M={id:B.id,type:'raster',name:B.name,visible:true,opacity:1,blend:B.blend,canvas:c};
@@ -5363,7 +5380,7 @@ function _psDocXform(kind){
     x.drawImage(c,0,0); return n;
   }
   d.layers.forEach(function(L){
-    if(L.type==='raster'){ L.canvas=xc(L.canvas); return; }
+    if(L.type==='raster'){ L.canvas=xc(L.canvas); if(L.mask) L.mask=xc(L.mask); return; }
     if(L.type==='adjust'){ if(L.mask) L.mask=xc(L.mask); return; }
     var t=L.t, cx=t.cx, cy=t.cy;
     if(kind==='cw'){ t.cx=H-cy; t.cy=cx; t.rot+=Math.PI/2; }
@@ -5386,7 +5403,7 @@ function _psResizeDoc(){
   if(nw>PS_MAX_DIM||nh>PS_MAX_DIM){ alert('가로·세로 모두 '+PS_MAX_DIM+'px 이하로 입력해주세요'); return; }
   _psCommitPending();
   d.layers.forEach(function(L){
-    if(L.type==='raster'){ var n=_psCanvas(nw,nh), x=n.getContext('2d'); x.imageSmoothingQuality='high'; x.drawImage(L.canvas,0,0,nw,nh); L.canvas=n; return; }
+    if(L.type==='raster'){ var n=_psCanvas(nw,nh), x=n.getContext('2d'); x.imageSmoothingQuality='high'; x.drawImage(L.canvas,0,0,nw,nh); L.canvas=n; if(L.mask){ var nm2=_psCanvas(nw,nh); nm2.getContext('2d').drawImage(L.mask,0,0,nw,nh); L.mask=nm2; } return; }
     if(L.type==='adjust'){ if(L.mask){ var nm=_psCanvas(nw,nh); nm.getContext('2d').drawImage(L.mask,0,0,nw,nh); L.mask=nm; } return; }
     L.t.cx*=s; L.t.cy*=s; L.t.sx*=s; L.t.sy*=s;
   });
@@ -5401,7 +5418,7 @@ function _psApplyCrop(){
   if(w<2||h<2){ _psToast('자를 영역을 드래그로 지정해주세요'); return; }
   PSE.crop=null; _psCommitPending();
   d.layers.forEach(function(L){
-    if(L.type==='raster'){ L.canvas=_psCrop(L.canvas,{x:x,y:y,w:w,h:h}); return; }
+    if(L.type==='raster'){ L.canvas=_psCrop(L.canvas,{x:x,y:y,w:w,h:h}); if(L.mask) L.mask=_psCrop(L.mask,{x:x,y:y,w:w,h:h}); return; }
     if(L.type==='adjust'){ if(L.mask) L.mask=_psCrop(L.mask,{x:x,y:y,w:w,h:h}); return; }
     L.t.cx-=x; L.t.cy-=y;
   });
@@ -6406,6 +6423,43 @@ function _psRange(min,max,val,onInput,onChange,w){
   r.oninput=function(){ onInput(+r.value); }; if(onChange) r.onchange=function(){ onChange(+r.value); };
   return r;
 }
+// ⚠️ 요청 반영("수치로 조절하는거 숫자 더블클릭해서 키보드로 숫자입력하게 하는것도... 모든
+// 포토샵 수치로 조절할수있는것들은 다"): 슬라이더 옆에 값만 보여주던 <span>을 더블클릭하면 그
+// 자리에서 숫자 입력창으로 바뀌어서 키보드로 정확한 값을 바로 타이핑할 수 있게 함 — 슬라이더로
+// 드래그하기 힘든 미세 조정(예: 밝기 딱 +7)에 유용함. range=연결된 슬라이더(있으면 값 동기화),
+// suffix='px'/'%'/'°' 등 표시 단위, onInput=값 반영(렌더까지), onCommit=되돌리기 기록(선택).
+function _psMakeValEditable(span, range, min, max, suffix, onInput, onCommit){
+  suffix=suffix||'';
+  span.style.cursor='text';
+  span.title='더블클릭하면 숫자로 직접 입력할 수 있어요';
+  span.ondblclick=function(e){
+    e.stopPropagation();
+    if(span.querySelector('input')) return; // 이미 입력 중
+    var cur=range?parseFloat(range.value):parseFloat(span.textContent);
+    if(isNaN(cur)) cur=0;
+    var prevText=span.textContent;
+    var inp=document.createElement('input');
+    inp.type='number'; inp.value=cur; if(min!=null)inp.min=min; if(max!=null)inp.max=max;
+    inp.style.cssText='width:52px;font-size:11px;text-align:right;background:var(--card,#1c1c1c);color:var(--t,#fff);border:1px solid var(--acb,#00e5cc);border-radius:4px;padding:1px 4px;font-family:inherit';
+    span.textContent=''; span.appendChild(inp); inp.focus(); inp.select();
+    var done=false;
+    function commit(cancel){
+      if(done) return; done=true;
+      var v=cancel?cur:parseFloat(inp.value);
+      if(isNaN(v)) v=cur;
+      if(min!=null) v=Math.max(min,v); if(max!=null) v=Math.min(max,v);
+      if(span.contains(inp)) span.removeChild(inp);
+      span.textContent=cancel?prevText:(v+suffix);
+      if(!cancel){ if(range) range.value=v; onInput(v); if(onCommit) onCommit(v); }
+    }
+    inp.onblur=function(){ commit(false); };
+    inp.onkeydown=function(ev){
+      ev.stopPropagation();
+      if(ev.key==='Enter'){ ev.preventDefault(); commit(false); }
+      else if(ev.key==='Escape'){ ev.preventDefault(); commit(true); }
+    };
+  };
+}
 function _psNum(val,min,max,onChange,w){
   var n=document.createElement('input'); n.type='number'; n.className='ps-in'; n.min=min; n.max=max; n.value=val; n.style.width=(w||56)+'px';
   n.onchange=function(){ var v=parseFloat(n.value); if(isNaN(v)) return; v=Math.max(min,Math.min(max,v)); n.value=v; onChange(v); };
@@ -6688,16 +6742,22 @@ function _psRefreshOpts(light){
   function hint(s){ o.appendChild(_psEl('span','ps-hint',s)); }
   function sizeCtl(){
     var l=_psLbl('크기'); var val=_psEl('span','',O.size+'px');
-    l.appendChild(_psRange(1,500,O.size,function(v){ O.size=v; val.textContent=v+'px'; _psRequestOverlay(); })); l.appendChild(val); o.appendChild(l);
+    var rg=_psRange(1,500,O.size,function(v){ O.size=v; val.textContent=v+'px'; _psRequestOverlay(); });
+    _psMakeValEditable(val,rg,1,500,'px',function(v){ O.size=v; _psRequestOverlay(); });
+    l.appendChild(rg); l.appendChild(val); o.appendChild(l);
   }
   function opacityCtl(){
     var l=_psLbl('불투명도'); var val=_psEl('span','',O.opacity+'%');
-    l.appendChild(_psRange(1,100,O.opacity,function(v){ O.opacity=v; val.textContent=v+'%'; })); l.appendChild(val); o.appendChild(l);
+    var rg=_psRange(1,100,O.opacity,function(v){ O.opacity=v; val.textContent=v+'%'; });
+    _psMakeValEditable(val,rg,1,100,'%',function(v){ O.opacity=v; });
+    l.appendChild(rg); l.appendChild(val); o.appendChild(l);
   }
   function fgCtl(){ var l=_psLbl('색'); l.appendChild(_psColorIn(O.fg,function(v){ O.fg=v; if(ui.fgIn) ui.fgIn.value=v; })); o.appendChild(l); }
   function tolCtl(){
     var l=_psLbl('허용치'); var val=_psEl('span','',String(O.tol));
-    l.appendChild(_psRange(0,255,O.tol,function(v){ O.tol=v; val.textContent=v; })); l.appendChild(val); o.appendChild(l);
+    var rg=_psRange(0,255,O.tol,function(v){ O.tol=v; val.textContent=v; });
+    _psMakeValEditable(val,rg,0,255,'',function(v){ O.tol=v; });
+    l.appendChild(rg); l.appendChild(val); o.appendChild(l);
     o.appendChild(_psCheckEl('인접 영역만',O.contig,function(v){ O.contig=v; }));
     o.appendChild(_psCheckEl('모든 레이어 기준',O.sampleAll,function(v){ O.sampleAll=v; }));
   }
@@ -6779,7 +6839,9 @@ function _psLayersSec(){
   if(A){
     var r=_psRowEl();
     var lab=_psLbl('불투명도'), val=_psEl('span','',Math.round(A.opacity*100)+'%');
-    lab.appendChild(_psRange(0,100,Math.round(A.opacity*100),function(v){ A.opacity=v/100; val.textContent=v+'%'; _psRequestRender(); },function(){ _psPush('불투명도'); },80));
+    var opRg=_psRange(0,100,Math.round(A.opacity*100),function(v){ A.opacity=v/100; val.textContent=v+'%'; _psRequestRender(); },function(){ _psPush('불투명도'); },80);
+    _psMakeValEditable(val,opRg,0,100,'%',function(v){ A.opacity=v/100; _psRequestRender(); },function(){ _psPush('불투명도'); });
+    lab.appendChild(opRg);
     lab.appendChild(val); r.appendChild(lab);
     s.appendChild(r);
     var r2=_psRowEl(); r2.appendChild(_psLbl('블렌드'));
@@ -6794,7 +6856,7 @@ function _psLayersSec(){
       eye.onclick=function(e){ e.stopPropagation(); _psCommitPending(); L.visible=!L.visible; _psPush(L.visible?'레이어 보이기':'레이어 숨기기'); _psRequestRender(); };
       var tc=_psCanvas(92,68); ui_thumbReg(L.id,tc);
       var nm=_psEl('div','ps-lname'); nm.textContent=L.name; nm.title='더블클릭해서 이름 바꾸기';
-      var tag=_psEl('span','ps-ltag',L.type==='text'?'T':L.type==='shape'?'도형':L.type==='adjust'?('조정'+(L.clip?' ↓':'')+(L.mask?' ▣':'')):'픽셀');
+      var tag=_psEl('span','ps-ltag',L.type==='text'?'T':L.type==='shape'?'도형':L.type==='adjust'?('조정'+(L.clip?' ↓':'')+(L.mask?' ▣':'')):('픽셀'+(L.mask?' ▣':'')));
       var grip=_psEl('span','ps-grip','⋮⋮'); grip.title='끌어서 순서 바꾸기';
       row.appendChild(grip); row.appendChild(eye); row.appendChild(tc); row.appendChild(nm); row.appendChild(tag);
       row.setAttribute('data-lid',L.id);
@@ -6915,7 +6977,10 @@ function _psPropsSec(L){
     s.appendChild(f2);
     if(L.shape==='rect'){
       var f3=_psRowEl(), lr=_psLbl('모서리 둥글기'), rv=_psEl('span','',String(L.radius||0));
-      lr.appendChild(_psRange(0,Math.round(Math.max(Math.abs(L.w),Math.abs(L.h))/2)||1,L.radius||0,function(v){ L.radius=v; rv.textContent=v; _psRequestRender(); },function(){ commit('모서리'); },110));
+      var radMax=Math.round(Math.max(Math.abs(L.w),Math.abs(L.h))/2)||1;
+      var radRg=_psRange(0,radMax,L.radius||0,function(v){ L.radius=v; rv.textContent=v; _psRequestRender(); },function(){ commit('모서리'); },110);
+      _psMakeValEditable(rv,radRg,0,radMax,'',function(v){ L.radius=v; _psRequestRender(); },function(){ commit('모서리'); });
+      lr.appendChild(radRg);
       lr.appendChild(rv); f3.appendChild(lr); s.appendChild(f3);
     }
   } else {
@@ -6923,6 +6988,24 @@ function _psPropsSec(L){
     var rr=_psRowEl(); rr.style.marginTop='6px';
     rr.appendChild(_psB('레이어 내용 전체 지우기',function(){ if(!confirm('이 레이어의 내용을 모두 지울까요?')) return; _psCommitPending(); L.canvas=_psCanvas(PSE.doc.w,PSE.doc.h); commit('레이어 비우기'); },'dng'));
     s.appendChild(rr);
+    // ⚠️ 요청 반영("배경에다가 마스크를 만들어서 브러쉬로 원하는 부분을 지워서 아래 레이어
+    // 이미지가 보이게하고싶은데 기능넣어줘"): 픽셀 레이어에 조정 레이어와 같은 방식의 마스크를
+    // 추가함 — 브러시/다각형/AI 정밀 선택으로 칠한(흰색) 부분만 이 레이어가 보이고, 나머지는
+    // 투명해져서 바로 아래 레이어가 그대로 비쳐 보임. "지우개" 도구와 달리 원본 픽셀을 실제로
+    // 지우지 않는 비파괴 방식이라, 마스크를 다시 칠하거나 "마스크 해제"로 언제든 원래대로
+    // 되돌릴 수 있음(기존 마스크 편집기 — 브러시/다각형/undo/redo/AI 정밀 선택 — 그대로 재사용).
+    var mr=_psRowEl(); mr.style.marginTop='6px';
+    mr.appendChild(_psB(L.mask?'🎭 레이어 마스크 편집':'🎭 레이어 마스크 추가',function(){
+      _psCommitPending();
+      _openMaskEditor(L.canvas, L.mask, function(maskCanvas){
+        L.mask=maskCanvas; commit('레이어 마스크');
+      }, '&#127917; 이 레이어에서 보일 부분을 칠해주세요 <span style="color:#888;font-weight:400;font-size:11.5px">— 흰색(칠한 부분)만 이 레이어가 보이고, 지운(투명) 부분은 바로 아래 레이어가 비쳐 보여요. 원본 픽셀은 그대로 남아있어서 언제든 다시 칠하거나 마스크를 해제할 수 있어요.</span>');
+    },'',L.mask?'현재 마스크를 다시 칠하거나 넓혀요':'브러시로 지운 부분에 아래 레이어가 비쳐 보이게 해요'));
+    if(L.mask){
+      mr.appendChild(_psB('마스크 해제(전체 표시)',function(){ L.mask=null; commit('마스크 해제'); },'dng','이 레이어를 다시 전체 다 보이게'));
+    }
+    s.appendChild(mr);
+    if(L.mask) s.appendChild(_psEl('div','ps-note','▣ 마스크 적용 중 — 마스크에서 칠한(흰색) 부분만 이 레이어가 보이고, 지운 부분은 아래 레이어가 비쳐 보여요.'));
   }
   if(L.type!=='raster'){
     var rv2=_psRowEl();
@@ -7044,6 +7127,7 @@ function _psColorBalanceUI(L,def){
     var rg=_psRange(-100,100,p[k]||0,function(v){ p[k]=v; val.textContent=v; _psRequestRender(); },function(){ _psPush('색상 균형 조정'); },0);
     rg.style.cssText='flex:1;width:auto;accent-color:'+c[4];
     rg.ondblclick=function(){ p[k]=0; _psPush('색상 균형 초기화'); _psRequestRender(); _psRefreshPanels(); };
+    _psMakeValEditable(val,rg,-100,100,'',function(v){ p[k]=v; _psRequestRender(); },function(){ _psPush('색상 균형 조정'); });
     r.appendChild(a); r.appendChild(rg); r.appendChild(z); r.appendChild(val); w.appendChild(r);
   });
   w.appendChild(_psCheckEl('광도 유지',p.lum,function(v){ p.lum=v?1:0; _psPush('광도 유지'); _psRequestRender(); }));
@@ -7067,6 +7151,7 @@ function _psAdjustPropsSec(L){
       var rg=_psRange(q.min,q.max,L.p[q.k],function(v){ L.p[q.k]=v; val.textContent=v+(q.u||''); _psRequestRender(); },function(){ _psPush(def.l+' 조정'); },0);
       rg.style.flex='1'; rg.style.width='auto';
       rg.ondblclick=function(){ L.p[q.k]=q.v; _psPush(def.l+' 초기화'); _psRequestRender(); };
+      _psMakeValEditable(val,rg,q.min,q.max,q.u||'',function(v){ L.p[q.k]=v; _psRequestRender(); },function(){ _psPush(def.l+' 조정'); });
       lab.appendChild(rg); val.style.cssText='width:40px;text-align:right'; lab.appendChild(val); r.appendChild(lab);
     }
     box.appendChild(r);
@@ -7107,7 +7192,9 @@ function _psFilterSec(){
       else {
         var lab=_psLbl(q.l), val=_psEl('span','',F.p[q.k]+(q.u||''));
         lab.style.flexWrap='wrap';
-        lab.appendChild(_psRange(q.min,q.max,F.p[q.k],function(v){ F.p[q.k]=v; val.textContent=v+(q.u||''); _psFilterPreview(); },null,130));
+        var frg=_psRange(q.min,q.max,F.p[q.k],function(v){ F.p[q.k]=v; val.textContent=v+(q.u||''); _psFilterPreview(); },null,130);
+        _psMakeValEditable(val,frg,q.min,q.max,q.u||'',function(v){ F.p[q.k]=v; _psFilterPreview(); });
+        lab.appendChild(frg);
         lab.appendChild(val); r.appendChild(lab);
       }
       box.appendChild(r);
@@ -20810,14 +20897,20 @@ function _openKakaoMapModal(){
         '<div id="kroad-inner" style="position:absolute;inset:0"></div>'+
         '<div id="kroad-msg" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--m2);font-size:12px;text-align:center;padding:24px;background:#111;line-height:1.7"></div>'+
       '</div>'+
-      '<button id="km-fullscreen" type="button" title="전체화면으로 보기(다시 누르면 나가기 · Esc로도 나가짐)" style="position:absolute;top:10px;right:10px;z-index:5;padding:8px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-size:15px;cursor:pointer;line-height:1">⛶ 전체화면</button>'+
+      // ⚠️ 버그 수정("캡처모드랑 전체화면 나가기 버튼이 겹친다"): 두 버튼을 각각 고정 px(right:10px/118px)로
+      // 절대배치했었는데, 버튼 글자가 "캡처 모드"→"캡처 모드 끄기", "전체화면"→"전체화면 나가기"로
+      // 길어지면 폭이 늘어나서 고정 위치가 서로 겹침 — flex 래퍼로 감싸서 옆 버튼이 길어지면 자동으로
+      // 밀려나게 함(고정 px 좌표 계산 자체를 없앰).
+      '<div id="km-topbtns" style="position:absolute;top:10px;right:10px;z-index:5;display:flex;gap:8px;align-items:center">'+
       // ⚠️ 요청 반영("캡처 버튼 만들어주고 캡처될때 방향 화살표 삭제해줘"): 카카오 로드뷰 화면을
       // 직접 캡처·저장하는 기능은 카카오 API 약관상 넣지 않음(위 안내문 참고, devtalk 공식 답변도
       // "서비스에 캡처 기능을 넣어 이미지를 추출하는 형태"는 허용되지 않는다는 취지) — 대신 이
       // "캡처 모드" 버튼은 카카오가 로드뷰 위에 얹는 이동 화살표·컨트롤(별도 DOM/CSS 오버레이임,
       // WebGL에 그려지는 게 아니라 CSS로 얹혀지는 요소라 숨기는 게 가능함)만 화면에서 안 보이게
       // 숨기고, 실제 이미지 저장은 여전히 사용자가 OS 자체 스크린샷 기능으로 직접 하도록 안내함.
-      '<button id="km-capture-mode" type="button" title="이동 화살표·버튼을 잠깐 숨겨서 깨끗하게 캡처할 수 있게 해줘요" style="position:absolute;top:10px;right:118px;z-index:5;padding:8px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-size:13px;font-weight:700;cursor:pointer;line-height:1;white-space:nowrap">📸 캡처 모드</button>'+
+      '<button id="km-capture-mode" type="button" title="이동 화살표·버튼을 잠깐 숨겨서 깨끗하게 캡처할 수 있게 해줘요" style="padding:8px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-size:13px;font-weight:700;cursor:pointer;line-height:1;white-space:nowrap;flex-shrink:0">📸 캡처 모드</button>'+
+      '<button id="km-fullscreen" type="button" title="전체화면으로 보기(다시 누르면 나가기 · Esc로도 나가짐)" style="padding:8px 11px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.6);color:#fff;font-size:15px;cursor:pointer;line-height:1;white-space:nowrap;flex-shrink:0">⛶ 전체화면</button>'+
+      '</div>'+
       '<div id="km-capture-hint" style="display:none;position:absolute;top:56px;right:10px;z-index:6;max-width:240px;background:rgba(0,0,0,.82);border:1px solid rgba(253,224,71,.5);border-radius:10px;padding:10px 12px;color:#fff;font-size:11.5px;line-height:1.6;backdrop-filter:blur(4px)">'+
         '<div style="font-weight:800;color:#fde047;margin-bottom:4px">🧹 화살표·버튼 숨김 — 지금 캡처하세요</div>'+
         '<div>Windows: <b style="color:#fde047">Win + Shift + S</b><br>Mac: <b style="color:#fde047">Cmd + Shift + 4</b></div>'+
@@ -20911,14 +21004,21 @@ function _openKakaoMapModal(){
   var captureHint=panel.querySelector('#km-capture-hint');
   var _kmCaptureOn=false, _kmHiddenEls=[], _kmCaptureObserver=null;
   function _kmHideOverlaysIn(root){
-    // 로드뷰 canvas 자체(및 canvas를 담고 있는 조상 래퍼)는 그대로 두고, 그 외에 얹혀있는
-    // 모든 오버레이 요소(이동 화살표, 나침반, 저작권 표기, 확대/축소 버튼 등)만 숨김 —
-    // 카카오 쪽 클래스명을 알 수 없어도 항상 동작하도록 "canvas가 아니고, canvas를 포함하고
-    // 있지도 않은" 요소만 골라서 숨기는 방식.
+    // ⚠️ 버그 수정(치명적, "캡처 모드 켜면 화면이 통째로 빈 타일만 나온다"): 카카오 로드뷰는
+    // 파노라마 자체를 canvas/WebGL 하나가 아니라 여러 개의 <img> 타일(DOM/CSS 방식 — 카카오
+    // 개발자 지원팀도 "예전 Flash 버전과 달리 지금은 CSS 버전"이라고 확인함)로 그려서 붙여넣는
+    // 방식이라, "canvas가 아니면 다 숨긴다"는 이전 로직이 화살표뿐 아니라 파노라마 타일 이미지
+    // 자체까지 전부 숨겨버려서 화면이 텅 빈 배경 타일만 남았음 — canvas와 img(파노라마 타일)를
+    // 둘 다 절대 건드리지 않고, 그 외에 "작은(대략 220px 이하) 오버레이 요소"만 골라서 숨기도록
+    // 훨씬 보수적으로 바꿈. 이동 화살표·확대축소 버튼·저작권 배지 같은 작은 UI 컨트롤은 대부분
+    // 이 크기 안에 들어오고, 파노라마 타일/배경 래퍼처럼 큰 요소는 크기 조건 때문에 절대 안 숨겨짐.
     root.querySelectorAll('*').forEach(function(el){
       if(el.id==='km-capture-hint' || el.closest('#km-capture-hint')) return;
-      if(el.tagName==='CANVAS') return;
-      if(el.querySelector('canvas')) return; // canvas를 담고 있는 래퍼는 유지
+      if(el.tagName==='CANVAS' || el.tagName==='IMG') return; // 파노라마 타일(이미지)·캔버스는 절대 유지
+      if(el.querySelector('canvas,img')) return; // 그런 타일/캔버스를 담고 있는 래퍼도 유지
+      var r; try{ r=el.getBoundingClientRect(); }catch(e){ return; }
+      if(!r || r.width===0 || r.height===0) return; // 이미 안 보이는 요소는 건드릴 필요 없음
+      if(r.width>220 || r.height>220) return; // 큰 요소(파노라마 배경/래퍼 등)는 절대 안 건드림
       if(el.style.display!=='none'){
         _kmHiddenEls.push([el, el.style.display]);
         el.style.setProperty('display','none','important');
@@ -28581,6 +28681,14 @@ function buildUpscaleSliders(eng,container){
       rWrap.appendChild(rLbl);
       var rDesc=dv('');rDesc.style.cssText='font-size:10px;color:var(--m2);margin-bottom:4px';rDesc.textContent='낮을수록 원본에 가깝게, 높을수록 재질을 더 적극적으로 다시 그림 (4단계 이상은 구도가 흔들릴 수 있어요)';
       rWrap.appendChild(rDesc);
+      // ⚠️ 요청 반영("업스케일하면 사람이 엄청 이상하게 변한다"): 재질 사실감 강도가 높을수록
+      // Topaz Redefine이 이미지를 더 적극적으로 "다시 그리는" 방식이라, 그 과정에서 사람(특히
+      // 작게 보이는 배경 인물)의 얼굴·몸도 같이 재해석되면서 왜곡되는 경우가 많음 — 프롬프트에
+      // "사람은 절대 건드리지 마라"를 추가했지만(아래 API 호출부), 그래도 값 자체를 낮추거나
+      // 안전 모드를 쓰는 게 가장 확실하므로 슬라이더 바로 아래에 안내를 덧붙임.
+      var rPplWarn=dv('');rPplWarn.style.cssText='font-size:10px;color:#fbbf24;margin-bottom:6px;line-height:1.5';
+      rPplWarn.textContent='💡 사진에 사람(특히 작게 보이는 인물)이 많다면 이 값을 1~2로 낮추거나, 위에서 "디테일·선명도만 보강(안전 모드)"을 선택하면 사람 왜곡이 훨씬 줄어들어요.';
+      rWrap.appendChild(rPplWarn);
       var rRng=document.createElement('input');rRng.type='range';rRng.min=1;rRng.max=6;rRng.step=1;rRng.value=utT.topazCreativity;
       rRng.style.cssText='width:100%';
       rRng.oninput=function(){ utT.topazCreativity=parseInt(rRng.value,10); rVal.textContent=utT.topazCreativity; };
@@ -34328,7 +34436,7 @@ function _checkAndResizeForUpscaler(url, ldst, eng, scaleFactor, onDone, onErr){
         // 기본값을 요청하신 4/0.8로 올림(사용자가 슬라이더로 직접 낮출 수 있음).
         _tzParams.creativity = (G.tabs.upscale && G.tabs.upscale.topazCreativity) || 4;
         _tzParams.texture = (G.tabs.upscale && G.tabs.upscale.topazTexture) || 2;
-        _tzParams.prompt = 'Keep the exact same composition, camera angle, structure, objects and layout — only make the surface materials, textures and reflections look slightly more realistic and true-to-life, like a high-quality real photograph.';
+        _tzParams.prompt = 'Keep the exact same composition, camera angle, structure, objects and layout — only make the surface materials, textures and reflections look slightly more realistic and true-to-life, like a high-quality real photograph. CRITICAL — DO NOT REDRAW OR ALTER PEOPLE: if any people are visible (even small/distant figures), keep every person exactly as they are in the original — same face, same identity, same pose, same body proportions, same clothing, same hairstyle — do not regenerate, reinterpret, warp, deform, or add/remove any facial features or body parts. Treat people as fixed, off-limits content: only apply the material/texture enhancement to non-human surfaces (buildings, ground, furniture, objects) and leave every person pixel-for-pixel as close to the original as possible.';
         // ⚠️ 요청 반영("재질 2단계로 했더니 선명도가 오히려 떨어진 느낌" → 이후 "디테일선명보만 이거
         // 외곽선 하얀색으로변하는거 안되게 해줘"): denoise를 완전히 0으로 두면 sharpen이 높을 때
         // (기본 0.8) 경계선에 링잉/헤일로(하얀 테두리)가 그대로 다 드러남 — denoise를 아주
@@ -35593,7 +35701,7 @@ function procImgWithTask(task, onDone, onErr){
         if(_tzModel2==='Redefine'){
           _tzParams2.creativity = (G.tabs.upscale && G.tabs.upscale.topazCreativity) || 4;
           _tzParams2.texture = (G.tabs.upscale && G.tabs.upscale.topazTexture) || 2;
-          _tzParams2.prompt = 'Keep the exact same composition, camera angle, structure, objects and layout — only make the surface materials, textures and reflections look slightly more realistic and true-to-life, like a high-quality real photograph.';
+          _tzParams2.prompt = 'Keep the exact same composition, camera angle, structure, objects and layout — only make the surface materials, textures and reflections look slightly more realistic and true-to-life, like a high-quality real photograph. CRITICAL — DO NOT REDRAW OR ALTER PEOPLE: if any people are visible (even small/distant figures), keep every person exactly as they are in the original — same face, same identity, same pose, same body proportions, same clothing, same hairstyle — do not regenerate, reinterpret, warp, deform, or add/remove any facial features or body parts. Treat people as fixed, off-limits content: only apply the material/texture enhancement to non-human surfaces (buildings, ground, furniture, objects) and leave every person pixel-for-pixel as close to the original as possible.';
           // ⚠️ 요청 반영("디테일선명보만 이거 외곽선 하얀색으로변하는거 안되게 해줘"): 위 다른
           // Topaz 호출과 동일한 이유로 denoise를 완전히 0으로 두지 않고 0.1만 남겨서 헤일로(하얀
           // 테두리) 링잉을 눌러줌.
