@@ -21039,13 +21039,35 @@ function _openKakaoMapModal(){
       }
     });
   }
+  // ⚠️ 요청 반영("화살표 숨겨봤자 우측상단에 캡처모드/전체화면나가기/캡처완료 버튼들이 그대로
+  // 있으면 뭐하냐"): 카카오 화살표만 숨기고 정작 우리 자신의 버튼·안내창은 화면에 그대로 남아있어서
+  // 캡처해도 깨끗하지 않았음 — 캡처 모드를 켜면 우리 버튼(전체화면/캡처모드)과 단축키 안내창도
+  // 잠깐(2.5초) 보여준 뒤 전부 자동으로 숨겨지게 함. 다시 보고 싶으면 화면 우측 상단 구석에
+  // 마우스를 갖다 대면(호버) 다시 나타나고, 커서를 떼면 다시 사라짐 — 실제 스크린샷을 찍는
+  // 순간(마우스가 그 구석에 없을 때)엔 화면에 아무 버튼도 안 남아있게 됨. Esc 키로도 캡처 모드를
+  // 바로 끌 수 있음.
+  var _kmChromeTimer=null;
+  function _kmShowChrome(temp){
+    var topbtns=panel.querySelector('#km-topbtns');
+    topbtns.style.opacity='1'; topbtns.style.pointerEvents='auto';
+    captureHint.style.opacity='1';
+    clearTimeout(_kmChromeTimer);
+    if(_kmCaptureOn && temp!==false){
+      _kmChromeTimer=setTimeout(function(){
+        topbtns.style.opacity='0'; topbtns.style.pointerEvents='none';
+        captureHint.style.opacity='0';
+      }, 2500);
+    }
+  }
   function _kmSetCaptureMode(on){
     _kmCaptureOn=on;
     captureBtn.textContent = on ? '📸 캡처 모드 끄기' : '📸 캡처 모드';
     captureBtn.style.background = on ? '#fde047' : 'rgba(0,0,0,.6)';
     captureBtn.style.color = on ? '#000' : '#fff';
-    captureHint.style.display = on ? 'block' : 'none';
+    var topbtns=panel.querySelector('#km-topbtns');
+    topbtns.style.transition='opacity .25s'; captureHint.style.transition='opacity .25s';
     if(on){
+      captureHint.style.display='block';
       var target = (mode==='roadview') ? roadInner : mapDiv;
       _kmHiddenEls=[];
       _kmHideOverlaysIn(target);
@@ -21053,7 +21075,11 @@ function _openKakaoMapModal(){
       // 캡처 모드가 켜져있는 동안은 새로 추가되는 오버레이도 계속 감시해서 바로 숨김.
       _kmCaptureObserver=new MutationObserver(function(){ _kmHideOverlaysIn(target); });
       _kmCaptureObserver.observe(target, {childList:true, subtree:true});
+      _kmShowChrome(); // 켜지는 순간엔 잠깐 보여줘서 단축키를 읽을 시간을 줌 → 2.5초 뒤 자동 숨김
     } else {
+      clearTimeout(_kmChromeTimer);
+      topbtns.style.opacity='1'; topbtns.style.pointerEvents='auto';
+      captureHint.style.opacity='1'; captureHint.style.display='none';
       if(_kmCaptureObserver){ _kmCaptureObserver.disconnect(); _kmCaptureObserver=null; }
       _kmHiddenEls.forEach(function(pair){ pair[0].style.display=pair[1]; });
       _kmHiddenEls=[];
@@ -21061,6 +21087,23 @@ function _openKakaoMapModal(){
   }
   captureBtn.onclick=function(){ _kmSetCaptureMode(!_kmCaptureOn); };
   panel.querySelector('#km-capture-hint-close').onclick=function(){ _kmSetCaptureMode(false); };
+  // 우측 상단 구석(버튼이 원래 있던 자리)에 마우스를 갖다 대면 숨겨졌던 버튼·안내창이 다시
+  // 나타남(호버하는 동안은 계속 보임) — 구석에 들어가고 나가는 순간에만 반응해서, 화면 안에서
+  // 이리저리 마우스를 움직여도(로드뷰 시점 조작 등) 매번 다시 나타났다 숨었다 깜빡이지 않음.
+  var _kmHoverCorner=false;
+  viewEl.addEventListener('mousemove', function(e){
+    if(!_kmCaptureOn) return;
+    var r=viewEl.getBoundingClientRect();
+    var inCorner = (e.clientX-r.left) > (r.width-170) && (e.clientY-r.top) < 100;
+    if(inCorner && !_kmHoverCorner){ _kmHoverCorner=true; _kmShowChrome(false); }
+    else if(!inCorner && _kmHoverCorner){ _kmHoverCorner=false; _kmShowChrome(true); }
+  });
+  viewEl.addEventListener('mouseleave', function(){
+    if(_kmCaptureOn && _kmHoverCorner){ _kmHoverCorner=false; _kmShowChrome(true); }
+  });
+  document.addEventListener('keydown', function(e){
+    if(_kmCaptureOn && e.key==='Escape'){ _kmSetCaptureMode(false); }
+  });
 
   function setActiveTab(m){
     var mb=panel.querySelector('#km-tab-map'), rb=panel.querySelector('#km-tab-road');
