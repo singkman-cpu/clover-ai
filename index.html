@@ -29842,10 +29842,16 @@ function mkMask(p){
   // 브러시 크기
   var szr=dv('');szr.style.cssText='display:flex;align-items:center;gap:7px;margin-bottom:10px';
   var szlb=mk('span','');szlb.style.cssText='font-size:11px;color:var(--t2)';szlb.textContent='크기:';
-  var szvl=mk('span','');szvl.style.cssText='font-size:11px;font-weight:700;color:var(--t);min-width:26px';szvl.textContent=G.bsz+'px';
-  var szrng=mk('input','');szrng.type='range';szrng.min=4;szrng.max=80;szrng.style.flex='1';szrng.value=G.bsz;slBg(szrng,G.bsz,4,80);
-  szrng.oninput=function(){G.bsz=+szrng.value;szvl.textContent=G.bsz+'px';slBg(szrng,G.bsz,4,80);};
+  var szvl=mk('span','');szvl.id='edit-bsz-val';szvl.style.cssText='font-size:11px;font-weight:700;color:var(--t);min-width:26px';szvl.textContent=G.bsz+'px';
+  var szrng=mk('input','');szrng.id='edit-bsz-rng';szrng.type='range';szrng.min=4;szrng.max=80;szrng.style.flex='1';szrng.value=G.bsz;slBg(szrng,G.bsz,4,80);
+  szrng.oninput=function(){G.bsz=+szrng.value;szvl.textContent=G.bsz+'px';slBg(szrng,G.bsz,4,80);_updateEditBrushCursor();};
   szr.appendChild(szlb);szr.appendChild(szrng);szr.appendChild(szvl);s.appendChild(szr);
+  // ⚠️ 요청 반영("ai편집탭에 브러시도 포토샵 브러시처럼 해줘 단축키로 사이즈 크게 작게 할수도있게해줘"):
+  // 실제 브러시 크기만큼 커지고 작아지는 원형 커서(포토샵과 동일한 방식)를 보여주고, [ ]로 즉시
+  // 크기를 조절할 수 있게 함(포토샵 편집 탭의 마스크 에디터에 이미 있던 것과 동일한 단축키).
+  var szhint=dv('');szhint.style.cssText='font-size:9.5px;color:var(--m2);margin-top:-6px;margin-bottom:8px';szhint.textContent='단축키: [ 작게 · ] 크게';
+  s.appendChild(szhint);
+  setTimeout(_updateEditBrushCursor, 0);
 
   // 마스크 편집 엔진 선택 — flux는 칠한 영역만 정확히 제한해서 바꾸는 데 강하고,
   // 나노바나나는 전반적인 이미지 퀄리티·사실감이 더 좋음(단, 진짜 픽셀 마스크는 못 씀,
@@ -30406,6 +30412,17 @@ function _mkMaskExecuteInner(){
       combined = combined ? (combined+' '+polyInstr) : polyInstr;
     }
   }
+  // ⚠️ 요청 반영(반복 신고, "다각형 여러 개 지정했는데 어떤 건 삭제되고 어떤 건 안 된다"): 개별
+  // 화살표·영역마다 각각 지시문을 붙이는 것과 별개로, 맨 마지막에 "총 몇 개의 지시가 있고 전부
+  // 빠짐없이 실행해야 한다"는 요약 체크리스트를 한 번 더 명시함 — 여러 개의 개별 지시가 길게
+  // 나열되면 생성 모델이 그중 일부만 처리하고 마는 경향이 있다는 게 반복 확인돼서, 실행 직전에
+  // 전체 개수를 다시 상기시켜 누락을 줄이기 위한 보강 지시.
+  (function(){
+    var _totalRegionCount = (G.arrows?G.arrows.length:0) + (G.polyAreas?G.polyAreas.length:0);
+    if(_totalRegionCount>1 && combined.trim()){
+      combined += ' ⚠️⚠️⚠️ 최종 확인(매우 중요): 위에서 지시한 개별 수정 대상은 총 '+_totalRegionCount+'개입니다. 이 '+_totalRegionCount+'개를 하나도 빠짐없이 전부 실행하세요 — 몇 개만 처리하고 나머지를 건드리지 않은 채로 결과를 내놓으면 명백한 실패입니다. 각 지시는 오직 그 지시에서 지목한 위치·오브젝트에만 적용하고, 지목되지 않은 다른 위치는 그대로 원본을 유지하세요.';
+    }
+  })();
   if(!combined.trim()){ alert('수정할 내용을 입력해주세요.'); return; }
   // ⚠️ 요청 반영(반복 지적, "여전히 붉은끼가 있다"): 원인을 다시 추적해서 찾음 — 이 코드베이스
   // 어딘가에 "마스크 밖(칠 안 한 나머지)은 AI 결과를 안 쓰고 원본 픽셀을 강제로 그대로 써서
@@ -30761,7 +30778,7 @@ function togDraw(on, mode){
         cv.classList.remove('brush-mode','eyedrop-mode','polygon-mode');
         if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
       if(mode==='rect'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initRectMode(cv);}
-        else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';}
+        else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';if(mode==='erase'||mode==='brush'){setTimeout(_updateEditBrushCursor,0);}}
         if(mode!=='arrow'){ var _aOv=gE('arrow-overlay'); if(_aOv) _aOv.style.display='none'; }
         // ⚠️ 버그 수정(핵심): 사각형(rect) 도구는 다각형(polygon) 도구와 같은 SVG 오버레이
         // (#poly-overlay)를 공유하는데, 예전엔 이 조건이 "polygon이 아니면 숨김"이라 rect 모드일
@@ -30782,7 +30799,7 @@ function togDraw(on, mode){
       cv.classList.remove('brush-mode','eyedrop-mode','polygon-mode');
       if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
       if(mode==='rect'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initRectMode(cv);}
-      else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';}
+      else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';if(mode==='erase'||mode==='brush'){setTimeout(_updateEditBrushCursor,0);}}
       if(mode!=='arrow'){ var _aOv2=gE('arrow-overlay'); if(_aOv2) _aOv2.style.display='none'; }
       if(mode!=='polygon' && mode!=='rect'){ var _pOv2=gE('poly-overlay'); if(_pOv2){ _pOv2.style.display='none'; _pOv2.style.pointerEvents='none'; } }
     }
@@ -33072,6 +33089,47 @@ document.addEventListener('touchmove',function(e){
   }
 },{passive:false});
 document.addEventListener('touchend',function(){G.dragId=-1;G._touchDragId=null;G._touchLocked=null;});
+// ⚠️ 요청 반영("ai편집탭에 브러시도 포토샵 브러시처럼 해줘 단축키로 사이즈 크게 작게 할수도있게해줘"):
+// AI 편집 탭의 #draw-canvas 브러시에도 포토샵과 똑같이 (1) 실제 브러시 지름만큼 커지고 작아지는
+// 원형 커서, (2) [ 키로 작게·] 키로 크게 조절하는 단축키를 추가함. 기존엔 고정된 연필 아이콘
+// 커서만 있어서 지금 브러시가 얼마나 큰지 화면에서 가늠할 수 없었음.
+function _updateEditBrushCursor(){
+  var cv=gE('draw-canvas');
+  if(!cv || !cv.classList.contains('active') || !cv.classList.contains('brush-mode')) return;
+  if(cv.classList.contains('polygon-mode')) return; // 다각형·사각형 모드는 기존 십자선 커서 유지
+  try{
+    var rect=cv.getBoundingClientRect();
+    if(!rect.width || !cv.width) return;
+    var ratio=rect.width/cv.width;
+    var dispR=Math.max(3, Math.round((G.bsz/2)*ratio));
+    var d=dispR*2+4;
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+d+'" height="'+d+'">'+
+      '<circle cx="'+(d/2)+'" cy="'+(d/2)+'" r="'+dispR+'" fill="rgba(0,229,204,0.15)" stroke="#00e5cc" stroke-width="1.5"/>'+
+      '<circle cx="'+(d/2)+'" cy="'+(d/2)+'" r="1.5" fill="#00e5cc"/>'+
+      '</svg>';
+    var url='data:image/svg+xml,'+encodeURIComponent(svg);
+    cv.style.cursor='url("'+url+'") '+(d/2)+' '+(d/2)+', crosshair';
+  }catch(e){ console.warn('[브러시 커서 갱신 실패]', e); }
+}
+// ⚠️ 요청 반영: 메인 포토샵 캔버스·마스크 에디터와 동일하게 [ ] 로 브러시 크기를 조절할 수 있게 함.
+function _changeEditBrushSize(mult){
+  var min=4, max=80;
+  var nv = mult>1 ? Math.round(G.bsz*mult)+1 : Math.round(G.bsz*mult);
+  G.bsz = Math.max(min, Math.min(max, nv));
+  var rng=gE('edit-bsz-rng'); if(rng){ rng.value=G.bsz; slBg(rng,G.bsz,min,max); }
+  var vl=gE('edit-bsz-val'); if(vl) vl.textContent=G.bsz+'px';
+  _updateEditBrushCursor();
+}
+document.addEventListener('keydown', function(e){
+  if(e.key!=='[' && e.key!==']') return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  if(document.activeElement && (document.activeElement.tagName==='TEXTAREA' || document.activeElement.tagName==='INPUT')) return;
+  var cv=gE('draw-canvas');
+  if(!cv || !cv.classList.contains('active') || !cv.classList.contains('brush-mode') || cv.classList.contains('polygon-mode')) return;
+  e.preventDefault();
+  _changeEditBrushSize(e.key===']' ? 1.18 : 0.85);
+});
+window.addEventListener('resize', function(){ try{ _updateEditBrushCursor(); }catch(e){} });
 // ── Draw ──────────────────────────────────────────────────────
 function drawMv(e){
   var cv=gE('draw-canvas');if(!cv||!cv.classList.contains('active'))return;
@@ -36860,33 +36918,57 @@ function procImg(onDone, onErr) {
     var editMask2 = null;
     var hasMask2 = false;
     console.log('[마스크 추출 진단] draw-canvas:', drawCv2, drawCv2 ? (drawCv2.width+'x'+drawCv2.height) : '(캔버스 없음)');
+    // ⚠️ 버그 수정(치명적, 반복 신고 — "다각형·사각형으로 자동차/나무 삭제 지정했는데 엉뚱한 다른
+    // 곳까지 같이 바뀐다", "어떤 영역은 삭제되고 어떤 영역은 안 된다"): 진짜 원인을 찾음 — 바로
+    // 아래에서는 지금까지 #draw-canvas에 "실제로 칠해진 픽셀"만 마스크로 읽고 있었는데, 다각형·
+    // 사각형 도구로 지정한 범위는 브러시처럼 캔버스에 실제로 칠해지는 게 아니라 별도의 SVG
+    // 오버레이(poly-overlay)에만 그려짐 — 그래서 다각형·사각형만 쓰고 브러시를 안 섞으면 이
+    // 마스크가 항상 완전히 비어있는 것으로 판정됐고(hasMask2=false), 그러면 아래쪽 "마스크 밖은
+    // 결과에 반영하지 않고 원본 그대로 강제 합성"하는 안전장치(_compositeMaskedResult)가 아예
+    // 작동하지 않아서 AI가 지정 범위 밖 아무 데나 손대도(또는 지정 범위를 놓쳐도) 그 결과가
+    // 그대로 다 반영되고 있었음. 정작 _mkMaskExecuteInner에서 실행 직전에 브러시+다각형+사각형+
+    // 화살표 범위를 전부 합친 완전한 흑백 마스크(getTab('edit')._pendingCompositeMask)를 이미
+    // 만들어서 task.maskData로 큐에 실어 보내고 있었는데, 여기서는 그 값을 아예 안 쓰고
+    // draw-canvas 픽셀만 다시(불완전하게) 스캔하고 있었던 것 — task.maskData가 있으면 그걸
+    // 최우선으로 신뢰해서 쓰도록 고침. 이러면 브러시든 다각형이든 사각형이든 화살표든, 어떤
+    // 선택 도구를 썼든 지정한 범위 밖은 항상 원본 그대로 유지되는 게 구조적으로 보장됨.
+    if(task && task.maskData){
+      hasMask2 = true;
+      editMask2 = task.maskData;
+      console.log('[마스크 추출] task.maskData(브러시+다각형+사각형+화살표 통합 마스크) 사용');
+    }
     if(drawCv2 && drawCv2.width>0 && drawCv2.height>0){
       try{
-        var mdata2 = drawCv2.getContext('2d',{willReadFrequently:true}).getImageData(0,0,drawCv2.width,drawCv2.height);
-        var mpx2   = mdata2.data;
-        // 브러시 칠한 픽셀 있는지 확인
-        for(var mi3=3; mi3<mpx2.length; mi3+=4){
-          if(mpx2[mi3]>10){ hasMask2=true; break; }
+        if(!hasMask2){
+          // task.maskData가 없는 경우에만(과거 호환) draw-canvas 픽셀을 직접 스캔 — 이 경로는
+          // 브러시로 칠한 것만 잡을 수 있음(다각형·사각형은 위 task.maskData 경로로만 커버됨).
+          var mdata2 = drawCv2.getContext('2d',{willReadFrequently:true}).getImageData(0,0,drawCv2.width,drawCv2.height);
+          var mpx2   = mdata2.data;
+          for(var mi3=3; mi3<mpx2.length; mi3+=4){
+            if(mpx2[mi3]>10){ hasMask2=true; break; }
+          }
+          if(hasMask2){
+            // 흰색=수정, 검정=유지 마스크 PNG 생성
+            var maskCv2 = document.createElement('canvas');
+            maskCv2.width  = drawCv2.width;
+            maskCv2.height = drawCv2.height;
+            var mCtx2 = maskCv2.getContext('2d');
+            mCtx2.fillStyle = '#000';
+            mCtx2.fillRect(0,0,maskCv2.width,maskCv2.height);
+            for(var mi4=0; mi4<mpx2.length; mi4+=4){
+              if(mpx2[mi4+3]>10){
+                var pp=mi4/4;
+                mCtx2.fillStyle='#fff';
+                mCtx2.fillRect(pp%drawCv2.width, Math.floor(pp/drawCv2.width), 1, 1);
+              }
+            }
+            editMask2 = maskCv2.toDataURL('image/png');
+          }
         }
         if(hasMask2){
-          // 흰색=수정, 검정=유지 마스크 PNG 생성
-          var maskCv2 = document.createElement('canvas');
-          maskCv2.width  = drawCv2.width;
-          maskCv2.height = drawCv2.height;
-          var mCtx2 = maskCv2.getContext('2d');
-          mCtx2.fillStyle = '#000';
-          mCtx2.fillRect(0,0,maskCv2.width,maskCv2.height);
-          for(var mi4=0; mi4<mpx2.length; mi4+=4){
-            if(mpx2[mi4+3]>10){
-              var pp=mi4/4;
-              mCtx2.fillStyle='#fff';
-              mCtx2.fillRect(pp%drawCv2.width, Math.floor(pp/drawCv2.width), 1, 1);
-            }
-          }
-          editMask2 = maskCv2.toDataURL('image/png');
-
           // 나노바나나로 갈 경우, 진짜 픽셀 마스크를 못 읽으니 "어디를 칠했는지" 눈으로 보여주기
-          // 위해 원본 사진 위에 칠한 색을 반투명하게 합성한 이미지도 같이 만들어둠.
+          // 위해 원본 사진 위에 칠한 색(+다각형·사각형·화살표 범위)을 반투명하게 합성한 이미지도
+          // 같이 만들어둠 — editMask2 자체(흑백)를 겹쳐서, 어떤 도구로 지정했든 항상 시각화됨.
           try{
             var baseCv2 = gE('canvas');
             if(baseCv2 && baseCv2.width>0){
@@ -36902,6 +36984,14 @@ function procImg(onDone, onErr) {
           }catch(e){ console.warn('[mask annotate]',e); window._maskAnnotatedRef=null; }
         }
       }catch(e){ console.warn('[mask extract]',e); }
+    } else if(hasMask2){
+      // draw-canvas 엘리먼트가 이 시점에 없어도(다른 워크플로우 탭으로 이미 넘어간 경우 등)
+      // task.maskData만으로 "범위 밖 원본 강제 유지" 안전장치는 그대로 동작해야 하므로,
+      // 시각 확인용 annotated ref만 원본 이미지로 대체해서 isMaskedNB2 조건을 만족시켜둠.
+      try{
+        var baseCv2b = gE('canvas');
+        if(baseCv2b && baseCv2b.width>0) window._maskAnnotatedRef = baseCv2b.toDataURL('image/jpeg',0.9);
+      }catch(e){ console.warn('[mask annotate fallback]',e); }
     }
 
     // ── 분기 실행 ──────────────────────────────────
