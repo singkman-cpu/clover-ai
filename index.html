@@ -8714,9 +8714,17 @@ function renderMain(callWf, preserveScroll){
       // 수 있음 — 화면엔 그냥 "아무것도 없는" 것처럼만 보이고 에러 표시도 없어서 원인 파악이
       // 불가능했던 원인일 가능성이 높음. 항목 하나마다 try/catch로 감싸서, 문제 있는 항목 하나만
       // 콘솔에 에러를 남기고 건너뛰고 나머지(특히 최신 로딩 카드·결과)는 정상적으로 계속 그려지게 함.
+      // ⚠️ 버그 추적("AI편집·공간컨셉디자인만 메인화면에 계속 안 뜬다" — 특정 계정에서만 재현,
+      // 앞서 넣은 개별 try/catch로도 안 고쳐짐): 항목 하나하나는 try/catch로 감싸서 죽지 않게
+      // 했지만, 만약 그 계정의 이 워크플로우 히스토리 "전부"가 이상한 형식이라면(예: 아주 오래된
+      // 계정이라 지금은 안 쓰는 옛날 데이터 구조가 특히 많이 쌓인 탭) 항목이 하나도 안 그려진
+      // 채로 hs만 비어있는 상태로 남아서, 화면엔 "빈 회색 영역"만 보이고 업로드 안내문구조차
+      // 안 뜨는 상황이 될 수 있음 — 몇 개가 실제로 그려졌는지 세어뒀다가, 0개면 아래에서
+      // 업로드 안내 화면으로 강제 전환하고 콘솔에 전체 데이터를 남겨서 원인을 바로 알 수 있게 함.
+      var _renderedCount=0;
       function _safeAddHistEl(item, scroll, targetHs, atBottom){
-        try{ addHistEl(item, scroll, targetHs, atBottom); }
-        catch(e){ console.error('[renderMain] 항목 렌더링 실패(건너뜀):', item && item.id, e); }
+        try{ addHistEl(item, scroll, targetHs, atBottom); _renderedCount++; }
+        catch(e){ console.error('[renderMain] 항목 렌더링 실패(건너뜀):', item && item.id, e, item); }
       }
       // 성능 최적화: 히스토리가 많이 쌓이면(수십~수백 개) 탭을 열 때마다 전부 DOM에
       // 새로 그리느라 버벅였음 → 최근 N개만 먼저 그리고, 나머지는 "더 보기" 버튼으로 지연 로드.
@@ -8743,6 +8751,21 @@ function renderMain(callWf, preserveScroll){
         sorted.forEach(function(item){ _safeAddHistEl(item,false,hs); });
       }
       hs.scrollTop = preserveScroll ? _prevScrollTop : 0;
+      // ⚠️ 위 추적 로직의 안전망: 항목이 있었는데(items.length>0) 단 하나도 못 그렸다면
+      // (전부 예외 발생) 빈 회색 화면 대신 정상적인 업로드 안내 화면으로 대체 표시함 —
+      // 최신 로딩 카드/결과가 있어야 할 자리인데 아무것도 안 보이는 최악의 상황만은 막는다.
+      if(_renderedCount===0){
+        console.error('[renderMain] "'+wf+'" 탭: 항목 '+items.length+'개가 있었지만 전부 렌더링 실패 — 원본 데이터:', items);
+        hs.style.display='none';
+        ub.classList.add('active');
+        var _infoZero=WF_INFO[wf]||WF_INFO.space;
+        var _iconZero=document.querySelectorAll('#cub-icon')[hsIdx]||document.getElementById('cub-icon');
+        var _titleZero=document.querySelectorAll('#cub-title')[hsIdx]||document.getElementById('cub-title');
+        var _subZero=document.querySelectorAll('#cub-sub')[hsIdx]||document.getElementById('cub-sub');
+        if(_iconZero)_iconZero.innerHTML=_infoZero.icon;
+        if(_titleZero)_titleZero.innerHTML=_infoZero.title;
+        if(_subZero)_subZero.textContent='화면 표시 중 문제가 발생했어요. 새로고침 후 다시 시도해주세요. (문제가 계속되면 고객센터로 문의해주세요)';
+      }
     } else {
       G._suppressHistOnce=false; // 1회성 플래그 소비 — 다음 렌더부터는 다시 정상적으로 결과 이력을 보여줌
       hs.style.display='none';
