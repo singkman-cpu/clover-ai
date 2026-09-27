@@ -21459,7 +21459,10 @@ function _openKakaoMapModal(){
   panel.innerHTML=
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">'+
       '<div style="font-size:15px;font-weight:800;color:var(--t)">📍 위치 확인 · 로드뷰 (카카오맵)</div>'+
-      '<button id="km-close" style="border:none;background:transparent;color:var(--m2);font-size:20px;cursor:pointer;line-height:1">✕</button>'+
+      '<div style="display:flex;align-items:center;gap:12px">'+
+        '<button id="km-min" type="button" title="닫지 않고 화면 아래로 내려놓기 — 렌더링 결과를 확인하고 이 각도에서 살짝만 조정하고 싶을 때, 다시 열어서 이어서 캡처할 수 있어요" style="border:none;background:transparent;color:var(--m2);font-size:18px;cursor:pointer;line-height:1">🔽</button>'+
+        '<button id="km-close" title="닫기 (렌더링 결과를 보고 조금만 다시 조정하려면 ✕ 대신 위의 🔽로 내려놓으세요)" style="border:none;background:transparent;color:var(--m2);font-size:20px;cursor:pointer;line-height:1">✕</button>'+
+      '</div>'+
     '</div>'+
     '<div style="display:flex;gap:6px;margin-bottom:8px;flex-shrink:0">'+
       '<input id="km-addr" type="text" placeholder="주소/장소 입력 (예: 서울 마포구 합정역)" value="'+(_kmLastAddr||'').replace(/"/g,'&quot;')+'" style="flex:1;padding:9px 11px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit">'+
@@ -21469,6 +21472,7 @@ function _openKakaoMapModal(){
       '<button id="km-tab-map" type="button" style="flex:1;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:#fde047;color:#000;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🗺️ 지도</button>'+
       '<button id="km-tab-road" type="button" style="flex:1;padding:8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📷 로드뷰</button>'+
     '</div>'+
+    '<div id="km-cur-addr" style="font-size:11.5px;color:#fde047;font-weight:700;margin-bottom:8px;flex-shrink:0;display:flex;align-items:center;gap:6px">📍 <span id="km-cur-addr-txt">주소 확인 중...</span></div>'+
     '<div id="km-err" style="font-size:11px;color:#f87171;margin-bottom:6px;display:none;flex-shrink:0"></div>'+
     '<div id="km-view" style="position:relative;flex:1;min-height:0;border-radius:10px;overflow:hidden;background:#111">'+
       '<div id="kmap" style="position:absolute;inset:0"></div>'+
@@ -21515,8 +21519,37 @@ function _openKakaoMapModal(){
   function hideRoadMsg(){ roadMsg.style.display='none'; }
   mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--m2);font-size:12px">카카오맵 불러오는 중...</div>';
 
-  var mode='map', map=null, roadview=null, roadviewClient=null;
+  var mode='map', map=null, roadview=null, roadviewClient=null, geocoder=null;
   var curLat=(_kmLastLat!=null)?_kmLastLat:37.5665, curLng=(_kmLastLng!=null)?_kmLastLng:126.9780;
+
+  // ⚠️ 요청 반영("주소를 바로 확인할수 있는방법이없나? 로드뷰 포인트를 딱 위치시켜서 로드뷰 보고
+  // 거기 건물 주소를 알고싶은데"): 지도 클릭/드래그·로드뷰 화살표 이동으로 핀(=현재 좌표)이 바뀔
+  // 때마다 coord2Address(역지오코딩)로 실제 도로명/지번 주소를 조회해서 상단에 표시. goRoadview()
+  // (아래 로드뷰 이동 콜백)와 _loadKakaoMapScript 콜백(지도 클릭/드래그) 양쪽에서 모두 써야 해서
+  // 두 콜백이 공유하는 이 바깥 스코프에 둠 — 조회가 너무 잦아지지 않게 살짝 디바운스함.
+  var addrTxtEl=panel.querySelector('#km-cur-addr-txt');
+  var _kmAddrTimer=null, _kmAddrSeq=0;
+  function _kmUpdateAddr(lat, lng){
+    if(!geocoder || !addrTxtEl) return; // 카카오 스크립트가 아직 로드되기 전이면 조용히 넘어감
+    addrTxtEl.textContent='주소 확인 중...';
+    clearTimeout(_kmAddrTimer);
+    var seq=++_kmAddrSeq;
+    _kmAddrTimer=setTimeout(function(){
+      try{
+        geocoder.coord2Address(lng, lat, function(result, status){
+          if(seq!==_kmAddrSeq || !addrTxtEl) return; // 그 사이에 더 최근 위치로 이동했으면 낡은 결과는 버림
+          if(status===window.kakao.maps.services.Status.OK && result[0]){
+            var road = result[0].road_address ? result[0].road_address.address_name : null;
+            var jibun = result[0].address ? result[0].address.address_name : null;
+            addrTxtEl.textContent = road ? road : (jibun || '주소를 찾을 수 없어요');
+            if(road && jibun) addrTxtEl.title = '지번: '+jibun;
+          } else {
+            addrTxtEl.textContent='이 위치의 주소를 찾을 수 없어요';
+          }
+        });
+      }catch(e){ if(addrTxtEl) addrTxtEl.textContent='주소 확인 실패'; }
+    }, 250);
+  }
 
   function closeModal(){
     try{ if(typeof _kmSetCaptureMode==='function') _kmSetCaptureMode(false); }catch(e){} // 캡처 모드 켜둔 채 닫아도 숨긴 요소가 원상복구되게
@@ -21539,6 +21572,32 @@ function _openKakaoMapModal(){
     ov.remove();
   }
   panel.querySelector('#km-close').onclick=closeModal;
+  // ⚠️ 요청 반영("로드뷰 닫기 x말고 화면창 밑으로 내려놓는거 가능한가? 렌더링걸어보고 이상하면
+  // 이 각도에서 살짝만 틀고싶을때 다시 창올려서 캡처하게"): ✕(닫기)는 지도/로드뷰 인스턴스 자체를
+  // 없애버려서 위치·각도·검색 상태가 전부 초기화되지만, 🔽(최소화)는 모달을 화면에서만 안 보이게
+  // 숨길 뿐(display:none) map/roadview 객체는 메모리에 그대로 살아있어서, 렌더링 결과를 보고 각도를
+  // 살짝만 조정하고 싶을 때 다시 열면 방금 보던 그 위치·각도 그대로 이어서 볼 수 있음.
+  function minimizeModal(){
+    try{ if(typeof _kmSetCaptureMode==='function') _kmSetCaptureMode(false); }catch(e){} // 캡처모드 켜둔 채 내려놔도 숨긴 요소 원상복구
+    try{
+      if(document.fullscreenElement||document.webkitFullscreenElement||document.mozFullScreenElement||document.msFullscreenElement){
+        var exit=document.exitFullscreen||document.webkitExitFullscreen||document.mozCancelFullScreen||document.msExitFullscreen;
+        if(exit) exit.call(document);
+      }
+    }catch(e){}
+    ov.style.display='none';
+    _kmShowRestoreBtn();
+  }
+  function _kmShowRestoreBtn(){
+    var old=document.getElementById('km-restore-btn'); if(old) old.remove();
+    var btn=document.createElement('button');
+    btn.id='km-restore-btn'; btn.type='button';
+    btn.textContent='📍 지도·로드뷰 이어서 보기';
+    btn.style.cssText='position:fixed;right:22px;bottom:22px;z-index:99998;padding:13px 18px;border-radius:999px;border:none;background:#fde047;color:#000;font-weight:800;font-size:13px;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.4);font-family:inherit';
+    btn.onclick=function(){ ov.style.display='flex'; btn.remove(); };
+    document.body.appendChild(btn);
+  }
+  panel.querySelector('#km-min').onclick=minimizeModal;
   // ⚠️ 브이월드와 동일한 버그 수정: 검색창 안에서 드래그하다 마우스를 배경 위에서 놓으면 모달이
   // 닫혀버리던 문제 — mousedown이 배경에서 "시작"했을 때만 닫히게 함.
   var _kmDownOnBg=false;
@@ -21595,9 +21654,17 @@ function _openKakaoMapModal(){
       if(el.id==='km-capture-hint' || el.closest('#km-capture-hint')) return;
       if(el.tagName==='CANVAS' || el.tagName==='IMG') return; // 파노라마 타일(이미지)·캔버스는 절대 유지
       if(el.querySelector('canvas,img')) return; // 그런 타일/캔버스를 담고 있는 래퍼도 유지
-      var r; try{ r=el.getBoundingClientRect(); }catch(e){ return; }
-      if(!r || r.width===0 || r.height===0) return; // 이미 안 보이는 요소는 건드릴 필요 없음
-      if(r.width>220 || r.height>220) return; // 큰 요소(파노라마 배경/래퍼 등)는 절대 안 건드림
+      // ⚠️ 버그 수정("각도에 따라 이동 화살표가 둘 다 없어지기도 하고 한쪽만 없어지기도 함"):
+      // getBoundingClientRect()는 CSS transform(rotate)이 적용된 뒤의, 회전된 대각선까지 포함한
+      // "화면상" 크기를 돌려줌 — 카카오가 이동 화살표를 방향(각도)에 맞춰 회전시켜 그리는데, 같은
+      // 화살표라도 회전 각도에 따라 rect.width/height가 최대 약 1.4배(45도 기준)까지 들쭉날쭉
+      // 커졌다 작아졌다 해서, 어떤 각도에선 220px 기준을 넘어 안 숨겨지고 어떤 각도에선 기준 안에
+      // 들어와 숨겨지는 식으로 두 화살표가 서로 다르게(또는 둘 다 불안정하게) 처리됐음.
+      // offsetWidth/offsetHeight는 회전 같은 transform의 영향을 받지 않는 "회전 전 레이아웃 원래
+      // 크기"라서 각도와 무관하게 항상 같은 값을 주므로 이걸로 바꿔서 완전히 일관되게 숨김.
+      var ow=el.offsetWidth, oh=el.offsetHeight;
+      if(ow===0 && oh===0) return; // 이미 안 보이는 요소는 건드릴 필요 없음
+      if(ow>220 || oh>220) return; // 큰 요소(파노라마 배경/래퍼 등)는 절대 안 건드림
       if(el.style.display!=='none'){
         _kmHiddenEls.push([el, el.style.display]);
         el.style.setProperty('display','none','important');
@@ -21675,10 +21742,22 @@ function _openKakaoMapModal(){
     mb.style.background=(m==='map')?'#fde047':'var(--c2)'; mb.style.color=(m==='map')?'#000':'var(--t2)';
     rb.style.background=(m==='roadview')?'#fde047':'var(--c2)'; rb.style.color=(m==='roadview')?'#000':'var(--t2)';
   }
+  var _kmRoadviewPosListenerAdded=false;
   function goRoadview(lat,lng){
     showRoadMsg('로드뷰 불러오는 중...');
     if(!roadview) roadview=new kakao.maps.Roadview(roadInner);
     if(!roadviewClient) roadviewClient=new kakao.maps.RoadviewClient();
+    // 로드뷰 안에서 바닥 화살표를 눌러 다른 지점으로 이동하면(=panoId/좌표가 바뀌면) 그때마다도
+    // 주소를 다시 조회해서 "지금 로드뷰가 보여주는 지점"의 주소가 항상 최신으로 표시되게 함.
+    if(!_kmRoadviewPosListenerAdded){
+      kakao.maps.event.addListener(roadview, 'position_changed', function(){
+        try{
+          var pos=roadview.getPosition();
+          if(pos){ curLat=pos.getLat(); curLng=pos.getLng(); if(typeof _kmUpdateAddr==='function') _kmUpdateAddr(curLat,curLng); }
+        }catch(e){}
+      });
+      _kmRoadviewPosListenerAdded=true;
+    }
     var pos=new kakao.maps.LatLng(lat,lng);
     roadviewClient.getNearestPanoId(pos, 50, function(panoId){
       if(!panoId){
@@ -21717,7 +21796,7 @@ function _openKakaoMapModal(){
     // ⚠️ 요청 반영("지도 로드뷰 위치 마우스로 잡고 옮겨지지않나?"): 지금까지는 주소 검색으로만
     // 위치를 옮길 수 있었음 — 핀을 마우스로 드래그하거나 지도를 클릭해서 바로 옮길 수 있게 함.
     var marker=new kakao.maps.Marker({position:startPos, map:map, draggable:true});
-    var geocoder=new kakao.maps.services.Geocoder();
+    geocoder=new kakao.maps.services.Geocoder();
     var places=new kakao.maps.services.Places();
 
     function moveTo(lat, lng, keepLevel){
@@ -21726,18 +21805,22 @@ function _openKakaoMapModal(){
       if(!keepLevel) map.setLevel(3);
       marker.setPosition(pos);
       curLat=lat; curLng=lng;
+      _kmUpdateAddr(lat, lng);
     }
     // 핀을 직접 드래그해서 옮기기 — 놓는 순간 그 좌표로 확정.
     kakao.maps.event.addListener(marker, 'dragend', function(){
       var pos=marker.getPosition();
       curLat=pos.getLat(); curLng=pos.getLng();
+      _kmUpdateAddr(curLat, curLng);
     });
     // 지도 아무 곳이나 클릭해도 핀이 그 자리로 바로 이동 — 정확한 지번을 몰라도 눈으로 보고 짚을 수 있음.
     kakao.maps.event.addListener(map, 'click', function(e){
       var pos=e.latLng;
       marker.setPosition(pos);
       curLat=pos.getLat(); curLng=pos.getLng();
+      _kmUpdateAddr(curLat, curLng);
     });
+    _kmUpdateAddr(curLat, curLng); // 처음 열었을 때(마지막으로 보던 위치)도 바로 주소 표시
 
     panel.querySelector('#km-search').onclick=function(){
       var addr=panel.querySelector('#km-addr').value.trim();
@@ -30547,12 +30630,9 @@ function _mkMaskExecuteInner(){
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
     G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
-    // ⚠️ 요청 반영("선택툴 선택하고 렌더링 누르면 선택된 부분이 안보이거든 렌더링 끝날 때까지
-    // 보이게해줘"): 예전엔 여기서 곧바로 togDraw(false)+캔버스 지우기를 해서, 결과가 하나도
-    // 안 나온 시점에 칠한 표시가 화면에서 바로 사라져버렸음(내가 칠한 게 맞게 잡혔는지 확인할
-    // 새도 없었음). 실제 지우기·모드 종료는 결과가 실제로 돌아온 뒤(executeSingleRender 완료
-    // 시점)로 미루고, 지금은 렌더링 중 실수로 더 못 그리게 포인터 이벤트만 꺼둠.
-    _mkLockMaskViewDuringRender();
+    // ⚠️ 요청 반영(취소): "렌더링 끝날 때까지 표시 보이게 해달라"고 했던 이전 요청을 사용자가
+    // 다시 취소함 — 예전 방식대로 실행 버튼을 누르는 즉시 표시를 지우고 편집 모드를 끔.
+    _mkFinalizeMaskAfterRender();
     if(canRun())runTool();
     return;
   }
@@ -30567,19 +30647,11 @@ function _mkMaskExecuteInner(){
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
     G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
-    _mkLockMaskViewDuringRender();
+    _mkFinalizeMaskAfterRender();
     if(canRun())runTool();
   });
 }
-// ⚠️ 요청 반영(위와 동일): 결과가 돌아올 때까지는 칠한 표시를 화면에 그대로 두되, 렌더링 도중
-// 실수로 더 그리는 것만 막음(포인터 이벤트 차단). 실제 지우기는 _mkFinalizeMaskAfterRender에서.
-function _mkLockMaskViewDuringRender(){
-  var cv=gE('draw-canvas'); if(cv) cv.style.pointerEvents='none';
-  var po=gE('poly-overlay'); if(po) po.style.pointerEvents='none';
-  var ao=gE('arrow-overlay'); if(ao) ao.style.pointerEvents='none';
-  var bh=gE('brush-hint'); if(bh) bh.style.display='none';
-}
-// 렌더링이 실제로 끝난 뒤(성공/실패 상관없이) 그제서야 마스크 표시를 지우고 편집 모드를 끔.
+// 실행 버튼을 누르면 바로 마스크 표시를 지우고 편집 모드를 끔(예전 방식).
 function _mkFinalizeMaskAfterRender(){
   try{ if(typeof togDraw==='function') togDraw(false); }catch(e){}
   try{
