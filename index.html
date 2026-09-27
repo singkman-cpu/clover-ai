@@ -5252,7 +5252,14 @@ function _psOpenForColorAdjust(url){
 // 1~2장(PNG 수 MB)만으로도 꽉 차는데, IndexedDB는 보통 수백 MB 이상이고 PNG를 Blob 그대로(무손실·투명
 // 유지) 넣을 수 있음. 강제 새로고침(캐시 무시)도 IndexedDB는 지우지 않으므로 그대로 남음.
 // 저장 실패(용량 부족 등)는 조용히 한 번만 안내하고 편집은 계속 가능(절대 편집기를 멈추지 않음).
-var PS_SAVE_KEY='clover_psedit_doc';
+// ⚠️ 버그 수정(치명적, 계정 간 데이터 유출: "관리자 계정으로 포토샵 작업했었는데 다른 계정으로
+// 같은 컴퓨터에서 포토샵 들어가보니까 관리자 계정에서 했던 내용이 있다"): 이 키가 계정 구분 없이
+// 고정 문자열이라 IndexedDB에 브라우저(컴퓨터) 단위로 딱 하나만 저장됐음 — 로그인된 계정이
+// 바뀌어도 똑같은 키를 읽고 쓰니, 같은 컴퓨터에서 다른 계정으로 들어가면 이전 계정이 작업하던
+// 포토샵 문서(레이어 포함)가 그대로 보였음. 현재 로그인한 계정 id를 키에 포함시켜서(비로그인은
+// 'guest') 계정마다 완전히 분리된 자동저장을 쓰도록 함 — 다른 탭에서 이미 이 패턴(_draftKeyUid)을
+// 쓰고 있어서 그대로 재사용함.
+function _psSaveKey(){ return 'clover_psedit_doc_'+(typeof _draftKeyUid==='function'?_draftKeyUid():'guest'); }
 function _psScheduleSave(){ clearTimeout(PSE._saveTimer); PSE._saveTimer=setTimeout(_psSaveNow, 600); }
 function _psCanvasToBlob(c){
   return new Promise(function(res){
@@ -5276,7 +5283,7 @@ function _psSaveNow(){
   if(d.sel) jobs.push(_psCanvasToBlob(d.sel).then(function(b){ rec.sel=b; }));
   Promise.all(jobs).then(function(){
     if(gen!==PSE._saveGen || !PSE.doc) return; // 그 사이에 더 새로운 저장/리셋이 있었으면 이건 버림
-    return idbSaveDraft(PS_SAVE_KEY, rec);
+    return idbSaveDraft(_psSaveKey(), rec);
   }).catch(function(e){
     console.warn('[포토샵 편집] 자동 저장 실패', e);
     if(!PSE._saveWarned){ PSE._saveWarned=true; _psToast('⚠️ 자동 저장 실패(브라우저 저장 공간 부족일 수 있어요) — 편집은 계속 돼요. PSD/PNG 다운로드로 백업하세요'); }
@@ -5294,7 +5301,7 @@ function _psBlobToCanvas(src,w,h){
 function _psTryRestore(){
   if(PSE.doc || PSE._restoreTried || typeof idbLoadDraft!=='function') return;
   PSE._restoreTried=true;
-  idbLoadDraft(PS_SAVE_KEY).then(function(rec){
+  idbLoadDraft(_psSaveKey()).then(function(rec){
     if(!rec || !rec.layers || !rec.layers.length || PSE.doc) return;
     var w=rec.w, h=rec.h, jobs=[];
     var layers=rec.layers.map(function(o){
@@ -5327,7 +5334,7 @@ function _psReset(){
   clearTimeout(PSE._saveTimer); PSE._saveGen=(PSE._saveGen||0)+1;
   PSE.doc=null; PSE.hist=[]; PSE.histIdx=-1; PSE.rt=null; PSE.filter=null; PSE.crop=null; PSE.poly=null; PSE.act=null;
   _psSelChanged();
-  try{ if(typeof idbDeleteDraft==='function') idbDeleteDraft(PS_SAVE_KEY).catch(function(){}); }catch(e){}
+  try{ if(typeof idbDeleteDraft==='function') idbDeleteDraft(_psSaveKey()).catch(function(){}); }catch(e){}
   var tab=getTab('psedit'); if(tab) tab.inputImg=null;
   if(G.wf==='psedit'){ renderMain('psedit'); renderSB(); }
   _psToast('작업 내용을 지웠어요');
@@ -8577,7 +8584,15 @@ function renderMain(callWf, preserveScroll){
   var hsAll=document.querySelectorAll('.hist-s');
   if(!ubAll.length||!hsAll.length){console.error('[renderMain] 요소 없음');return;}
   // G.HIST 필터링 (항상 수행)
+  // ⚠️ 버그 방어("렌더링은 끝났는데 메인화면·로딩중 표시가 둘 다 안 뜬다 — 관리자 계정은 되고
+  // 일반 계정은 안 된다"는 신고): 클라우드 갤러리에서 불러온 항목 중 null/undefined가 하나라도
+  // 섞여 있으면(계정마다 클라우드에 쌓인 데이터가 달라서 특정 계정에서만 있을 수 있음) 아래
+  // filter 콜백이 x.loading에서 바로 예외를 던져서 이 filter() 호출 자체가 실패하고, try/catch가
+  // 없어서 renderMain 전체가 그 지점에서 조용히 멈춰버림 — 방금 push한 로딩 카드도, 그 뒤의 결과도
+  // 전부 화면에 못 그려지는데 콘솔에 에러조차 안 남아 원인 파악이 불가능했던 근본 원인일 수 있음.
+  // null/undefined 항목은 먼저 걸러내서 이 문제 자체를 원천 차단함.
   if(G.HIST[wf]){
+    G.HIST[wf]=G.HIST[wf].filter(function(x){ return !!x; });
     G.HIST[wf]=G.HIST[wf].filter(function(x){
       if(x.loading)return true;
       // ⚠️ 버그 수정: 미리보기(preview) 항목이 orig만 있어야 살아남는 조건이었는데, _previewImageInMain
@@ -8691,13 +8706,25 @@ function renderMain(callWf, preserveScroll){
       // 방금 시작한 로딩 카드가 맨 위가 아니라 중간에 끼어드는 버그가 있었음.
       // → id 값에 의존하지 않고 그냥 배열을 반전(oldest-first)해서 넣는다.
       var sorted=items.slice().reverse();
+      // ⚠️ 버그 방어("렌더링은 분명 끝났는데 메인화면엔 아무것도 안 뜬다, 로딩중 표시도 안 뜬다" —
+      // 관리자 계정에선 재현이 안 되고 일반 계정에서만 재현된다는 신고): addHistEl은 항목 하나하나를
+      // DOM에 그리는 함수인데, 그 계정의 히스토리 안에 형식이 이상한 항목이 하나라도 섞여 있으면
+      // (예: 클라우드에서 불러온 옛날 데이터 중 필드가 빠진 것) forEach 도중 예외가 터지면서 그
+      // 뒤에 있는 항목들(방금 막 추가된 로딩 카드·결과 포함)까지 전부 안 그려지고 조용히 멈춰버릴
+      // 수 있음 — 화면엔 그냥 "아무것도 없는" 것처럼만 보이고 에러 표시도 없어서 원인 파악이
+      // 불가능했던 원인일 가능성이 높음. 항목 하나마다 try/catch로 감싸서, 문제 있는 항목 하나만
+      // 콘솔에 에러를 남기고 건너뛰고 나머지(특히 최신 로딩 카드·결과)는 정상적으로 계속 그려지게 함.
+      function _safeAddHistEl(item, scroll, targetHs, atBottom){
+        try{ addHistEl(item, scroll, targetHs, atBottom); }
+        catch(e){ console.error('[renderMain] 항목 렌더링 실패(건너뜀):', item && item.id, e); }
+      }
       // 성능 최적화: 히스토리가 많이 쌓이면(수십~수백 개) 탭을 열 때마다 전부 DOM에
       // 새로 그리느라 버벅였음 → 최근 N개만 먼저 그리고, 나머지는 "더 보기" 버튼으로 지연 로드.
       var HIST_INITIAL_LIMIT=30;
       if(sorted.length>HIST_INITIAL_LIMIT){
         var initialBatch=sorted.slice(sorted.length-HIST_INITIAL_LIMIT); // 최신 N개(오래된→최신 순)
         var olderRest=sorted.slice(0,sorted.length-HIST_INITIAL_LIMIT); // 그보다 오래된 나머지
-        initialBatch.forEach(function(item){ addHistEl(item,false,hs); });
+        initialBatch.forEach(function(item){ _safeAddHistEl(item,false,hs); });
         var moreWrap=dv('');moreWrap.style.cssText='display:flex;justify-content:center;padding:14px 0';
         var moreBtn=mk('button','');
         moreBtn.textContent='이전 항목 '+olderRest.length+'개 더 보기';
@@ -8706,14 +8733,14 @@ function renderMain(callWf, preserveScroll){
           moreBtn.disabled=true;moreBtn.textContent='불러오는 중...';
           // 다음 프레임으로 미뤄서 버튼 텍스트가 먼저 화면에 반영되게 함
           setTimeout(function(){
-            olderRest.slice().reverse().forEach(function(item){ addHistEl(item,false,hs,true); });
+            olderRest.slice().reverse().forEach(function(item){ _safeAddHistEl(item,false,hs,true); });
             moreWrap.remove();
           },20);
         };
         moreWrap.appendChild(moreBtn);
         hs.appendChild(moreWrap);
       } else {
-        sorted.forEach(function(item){ addHistEl(item,false,hs); });
+        sorted.forEach(function(item){ _safeAddHistEl(item,false,hs); });
       }
       hs.scrollTop = preserveScroll ? _prevScrollTop : 0;
     } else {
@@ -19222,9 +19249,16 @@ function mkAutoRoomCamera(p){
     var b=mk('button','');b.type='button';
     // ⚠️ 버그 수정: multiRoom 쪽(_quickToggleBtn)과 동일한 이유로 2열 그리드에 맞춰 폭을 100%로.
     b.style.cssText='padding:8px 10px;border-radius:7px;cursor:pointer;font-family:inherit;text-align:left;width:100%;box-sizing:border-box';
+    // ⚠️ 요청 반영("문구 버튼들 부연설명 때문에 세로로 너무 길다, 핵심만 보이고 나머지는 더보기로
+    // 만들어달라" — multiRoom 쪽(_quickToggleBtn)에 먼저 적용했던 것과 똑같이 컨셉확장(AR) 쪽에도
+    // 적용): 설명은 기본으로 접어두고, 라벨 옆의 작은 "설명 ▾"를 눌러야만 그 버튼의 설명만 펼쳐짐.
+    var bRow=dv('');bRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:6px';
     var bLbl=dv('');bLbl.style.cssText='font-size:11.5px;font-weight:600';
-    var bDesc=dv('');bDesc.style.cssText='font-size:9.5px;margin-top:2px;line-height:1.3;font-weight:400';
-    b.appendChild(bLbl); if(desc){ bDesc.textContent=desc; b.appendChild(bDesc); }
+    var bInfo=dv('');bInfo.style.cssText='font-size:9px;font-weight:700;flex-shrink:0;white-space:nowrap;text-decoration:underline;opacity:.8';
+    bRow.appendChild(bLbl);
+    var bDesc=dv('');bDesc.style.cssText='font-size:9.5px;margin-top:2px;line-height:1.3;font-weight:400;display:none';
+    if(desc){ bInfo.textContent='설명 ▾'; bRow.appendChild(bInfo); bDesc.textContent=desc; }
+    b.appendChild(bRow); if(desc) b.appendChild(bDesc);
     function sync(){
       var on=(spTab.autoRoomPrompt||'').indexOf(phrase)!==-1;
       bLbl.textContent=(on?'✓ ':'')+label;
@@ -19232,6 +19266,17 @@ function mkAutoRoomCamera(p){
       b.style.background=on?'var(--acg)':'var(--c2)';
       bLbl.style.color=on?'var(--ac)':'var(--t2)';
       bDesc.style.color=on?'var(--ac)':'var(--m2)';
+      bInfo.style.color=on?'var(--ac)':'var(--m2)';
+    }
+    var _lastInfoFire=0;
+    if(desc){
+      bInfo.onclick=function(e){
+        e.stopPropagation(); if(e.preventDefault)e.preventDefault();
+        var now=Date.now(); if(now-_lastInfoFire<400) return; _lastInfoFire=now;
+        var open=bDesc.style.display!=='none';
+        bDesc.style.display=open?'none':'block';
+        bInfo.textContent=open?'설명 ▾':'설명 ▴';
+      };
     }
     // ⚠️ 요청 반영("모바일에서 문구 클릭했는데도 안 켜지고, 또 클릭하면 켜진다"): multiRoom
     // 버전(_quickToggleBtn)과 같은 이유로 같은 가드 적용 — 400ms 안의 중복 호출 무시.
@@ -44484,6 +44529,13 @@ function onSupaLogout(){
   localStorage.removeItem('clover_last_uid');
   try{localStorage.removeItem('clover_shorts_gallery');}catch(e){}
   G.HIST = {space:[], render:[], edit:[], video:[], upscale:[], shorts:[]};
+  // ⚠️ 버그 수정(치명적, 계정 간 데이터 유출: "관리자 계정으로 포토샵 작업했었는데 다른 계정으로
+  // 같은 컴퓨터에서 포토샵 들어가보니까 관리자 계정에서 했던 내용이 있다"): 자동저장 자체는
+  // 이제 계정별로 분리된 키(_psSaveKey)를 쓰도록 고쳤지만, 로그아웃만 하고 새로고침 없이 바로
+  // 다른 계정으로 로그인하면 방금 작업하던 문서가 메모리(PSE.doc)에 그대로 남아있어서, 그
+  // 상태에서 포토샵 편집 탭에 들어가면 "이미 문서가 있다"고 보고 새 계정의 자동저장본을 복원하는
+  // 대신 이전 계정 문서를 계속 보여줬음 — 로그아웃 시점에 메모리에 남은 문서도 확실히 비움.
+  try{ if(typeof PSE!=='undefined'){ PSE.doc=null; PSE.hist=[]; PSE.histIdx=-1; PSE._restoreTried=false; } }catch(e){}
   if(typeof renderMain==='function' && G.wf) renderMain(G.wf);
 }
 
