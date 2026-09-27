@@ -8076,12 +8076,21 @@ function _toggleHomeMore(){
 // ⚠️ 요청 반영("쇼츠·제안서·AI견적 접근할 방법이 하단 탭바에 안 보인다") — 홈으로 이동한 뒤
 // 홈 카드의 "더보기"를 자동으로 펼쳐서, 하단 탭바에 없는 나머지 기능들로 바로 이어지게 함.
 function _mobGoMore(){
+  var hg=gE('hgrid');
+  var homeEl=gE('home-s');
+  var alreadyHomeAndOpen = hg && hg.classList.contains('show-more') && homeEl && homeEl.style.display!=='none';
+  if(alreadyHomeAndOpen){
+    // ⚠️ 요청 반영("더보기 한번 더 누르면 펼쳐진 게 다시 닫혀야지"): 이미 홈 화면에서 더보기가
+    // 펼쳐진 상태로 다시 누르면, 다시 펼치는 게 아니라 접히게 함(토글).
+    _toggleHomeMore();
+    return;
+  }
   goHome();
   document.querySelectorAll('.mob-tab').forEach(function(t){t.classList.remove('on');});
   var bt=gE('mobt-more'); if(bt) bt.classList.add('on');
   setTimeout(function(){
-    var hg=gE('hgrid');
-    if(hg && !hg.classList.contains('show-more')) _toggleHomeMore();
+    var hg2=gE('hgrid');
+    if(hg2 && !hg2.classList.contains('show-more')) _toggleHomeMore();
     var btn=gE('hgrid-more-btn');
     if(btn) btn.scrollIntoView({behavior:'smooth', block:'center'});
   }, 60);
@@ -8120,7 +8129,12 @@ function goHome(){
   // 있었음 — querySelectorAll로 전부 찾아서 같이 처리하도록 고침.
   var homeEls=document.querySelectorAll('#home-s');
   homeEls.forEach(function(el){ el.style.display='flex'; el.scrollTop=0; }); // ⚠️ 버그 수정("메인화면이 커뮤니티가 된 것 같다, 스크롤도 안 된다"): .home-s에 스크롤 자체가 안 되던 CSS 버그를 고치면서(위 .home-s 참고), 홈으로 돌아올 때 예전에 내려가 있던 스크롤 위치가 그대로 남아있으면 계속 커뮤니티 부분부터 보이니 홈으로 갈 때마다 맨 위로 되돌림 — 모바일에서만 하던 걸 데스크톱에서도 하도록 확장.
-  try{ localStorage.removeItem('clover_last_wf'); }catch(e){}
+  // ⚠️ 버그 수정("모바일에서 메인화면 보다가 새로고침하면 현장사진 탭으로 가버린다"): 예전엔
+  // 여기서 키를 아예 지웠는데, 그러면 "홈에 있다가 새로고침"과 "한 번도 방문 안 한 첫 방문"을
+  // 구분할 수가 없어서 모바일 초기화 코드가 둘 다 "저장된 값 없음"으로 보고 기본값(현장사진)으로
+  // 보내버렸음 — 이제 명시적으로 'home' 마커를 남겨서, 새로고침 시 홈에 있었다는 걸 구분해
+  // 홈에 그대로 머물게 함(아래 모바일 초기 탭 설정 코드 참고).
+  try{ localStorage.setItem('clover_last_wf','home'); }catch(e){}
   var sbtm=document.querySelector('.sb-btm');
   if(sbtm)sbtm.style.display='none';
   window.scrollTo({top:0,behavior:(window.innerWidth<=768?'smooth':'auto')});
@@ -43945,13 +43959,18 @@ document.addEventListener('click',function(e){
 // (예전엔 무조건 'space'로 강제 이동시켜서, 위쪽 DOMContentLoaded의 "마지막 탭 복원" 로직이 있어도
 //  0.3초 뒤에 이 코드가 다시 덮어써서 항상 현장사진 탭으로 돌아가버리는 버그가 있었음)
   if(window.innerWidth<=768){
-    var _mobInitWf='space';
-    try{
-      var _savedWf=localStorage.getItem('clover_last_wf');
-      if(_savedWf && WF_INFO[_savedWf]) _mobInitWf=_savedWf;
-    }catch(e){}
-    var bt0=gE('mobt-'+_mobInitWf)||gE('mobt-space');if(bt0)bt0.classList.add('on');
-    setTimeout(function(){ mobTab(_mobInitWf); }, 300);
+    var _savedWf0=null;
+    try{ _savedWf0=localStorage.getItem('clover_last_wf'); }catch(e){}
+    if(_savedWf0==='home'){
+      // ⚠️ 버그 수정("메인화면에서 새로고침하면 현장사진 탭으로 감"): 새로고침 전에 홈 화면에
+      // 있었다면 그대로 홈에 머무름 — 아무 탭으로도 강제 이동하지 않음.
+      var btH=gE('mobt-home'); if(btH) btH.classList.add('on');
+    } else {
+      var _mobInitWf='space';
+      if(_savedWf0 && WF_INFO[_savedWf0]) _mobInitWf=_savedWf0;
+      var bt0=gE('mobt-'+_mobInitWf)||gE('mobt-space');if(bt0)bt0.classList.add('on');
+      setTimeout(function(){ mobTab(_mobInitWf); }, 300);
+    }
   }
 </script>
 <script>
