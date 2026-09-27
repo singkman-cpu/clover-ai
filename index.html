@@ -21016,7 +21016,7 @@ function sbRender(p){
   kmBtn.onclick=function(){ _openKakaoMapModal(); };
   p.appendChild(kmBtn);
   var kmHint=dv('');kmHint.style.cssText='font-size:10px;color:var(--m2);margin:-4px 0 10px;line-height:1.5';
-  kmHint.innerHTML='주소 검색 → 위성/하이브리드 지도로 주변 건물 배치를 확인하고, 탭을 눌러 로드뷰로 바로 둘러볼 수 있어요(이 화면 자체는 참고 이미지로 저장되지 않아요 — 카카오 약관상 캡처·재저장은 지원하지 않습니다).';
+  kmHint.innerHTML='주소 검색 후, 지도를 클릭하거나 핀을 마우스로 드래그해서 정확한 위치로 옮길 수 있어요 — 위성/하이브리드 지도로 주변 건물 배치를 확인하고, 탭을 눌러 로드뷰로 바로 둘러볼 수 있어요(이 화면 자체는 참고 이미지로 저장되지 않아요 — 카카오 약관상 캡처·재저장은 지원하지 않습니다).';
   p.appendChild(kmHint);
   // ⚠️ 요청 반영("렌더링 완성본 고품질화 눌렀는데 화질이 더 안 좋아지고 팔걸이 마감재가 바뀐다"):
   // ① 참고 이미지는 이 3개 프리셋(실사화/고급 실사화/렌더링 완성본 고품질화)엔 이제 아예 반영이
@@ -21714,17 +21714,30 @@ function _openKakaoMapModal(){
     var startPos=new kakao.maps.LatLng(curLat, curLng);
     map=new kakao.maps.Map(mapDiv, {center:startPos, level:3});
     _kakaoMapInstance=map;
-    var marker=new kakao.maps.Marker({position:startPos, map:map});
+    // ⚠️ 요청 반영("지도 로드뷰 위치 마우스로 잡고 옮겨지지않나?"): 지금까지는 주소 검색으로만
+    // 위치를 옮길 수 있었음 — 핀을 마우스로 드래그하거나 지도를 클릭해서 바로 옮길 수 있게 함.
+    var marker=new kakao.maps.Marker({position:startPos, map:map, draggable:true});
     var geocoder=new kakao.maps.services.Geocoder();
     var places=new kakao.maps.services.Places();
 
-    function moveTo(lat, lng){
+    function moveTo(lat, lng, keepLevel){
       var pos=new kakao.maps.LatLng(lat, lng);
       map.setCenter(pos);
-      map.setLevel(3);
+      if(!keepLevel) map.setLevel(3);
       marker.setPosition(pos);
       curLat=lat; curLng=lng;
     }
+    // 핀을 직접 드래그해서 옮기기 — 놓는 순간 그 좌표로 확정.
+    kakao.maps.event.addListener(marker, 'dragend', function(){
+      var pos=marker.getPosition();
+      curLat=pos.getLat(); curLng=pos.getLng();
+    });
+    // 지도 아무 곳이나 클릭해도 핀이 그 자리로 바로 이동 — 정확한 지번을 몰라도 눈으로 보고 짚을 수 있음.
+    kakao.maps.event.addListener(map, 'click', function(e){
+      var pos=e.latLng;
+      marker.setPosition(pos);
+      curLat=pos.getLat(); curLng=pos.getLng();
+    });
 
     panel.querySelector('#km-search').onclick=function(){
       var addr=panel.querySelector('#km-addr').value.trim();
@@ -30533,9 +30546,14 @@ function _mkMaskExecuteInner(){
     getTab(G.wf)._markedRefIsPositionOnly = false;
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
-    var _dcv0=gE('draw-canvas'); if(_dcv0){ try{ _dcv0.getContext('2d').clearRect(0,0,_dcv0.width,_dcv0.height); }catch(e){} }
     G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
-    togDraw(false);if(canRun())runTool();
+    // ⚠️ 요청 반영("선택툴 선택하고 렌더링 누르면 선택된 부분이 안보이거든 렌더링 끝날 때까지
+    // 보이게해줘"): 예전엔 여기서 곧바로 togDraw(false)+캔버스 지우기를 해서, 결과가 하나도
+    // 안 나온 시점에 칠한 표시가 화면에서 바로 사라져버렸음(내가 칠한 게 맞게 잡혔는지 확인할
+    // 새도 없었음). 실제 지우기·모드 종료는 결과가 실제로 돌아온 뒤(executeSingleRender 완료
+    // 시점)로 미루고, 지금은 렌더링 중 실수로 더 못 그리게 포인터 이벤트만 꺼둠.
+    _mkLockMaskViewDuringRender();
+    if(canRun())runTool();
     return;
   }
   _mkBuildMarkedReferenceImage(function(_markedImg){
@@ -30548,10 +30566,26 @@ function _mkMaskExecuteInner(){
     if(refImgs.length){ getTab(G.wf).refs=refImgs; }
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
-    var _dcv2=gE('draw-canvas'); if(_dcv2){ try{ _dcv2.getContext('2d').clearRect(0,0,_dcv2.width,_dcv2.height); }catch(e){} }
     G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
-    togDraw(false);if(canRun())runTool();
+    _mkLockMaskViewDuringRender();
+    if(canRun())runTool();
   });
+}
+// ⚠️ 요청 반영(위와 동일): 결과가 돌아올 때까지는 칠한 표시를 화면에 그대로 두되, 렌더링 도중
+// 실수로 더 그리는 것만 막음(포인터 이벤트 차단). 실제 지우기는 _mkFinalizeMaskAfterRender에서.
+function _mkLockMaskViewDuringRender(){
+  var cv=gE('draw-canvas'); if(cv) cv.style.pointerEvents='none';
+  var po=gE('poly-overlay'); if(po) po.style.pointerEvents='none';
+  var ao=gE('arrow-overlay'); if(ao) ao.style.pointerEvents='none';
+  var bh=gE('brush-hint'); if(bh) bh.style.display='none';
+}
+// 렌더링이 실제로 끝난 뒤(성공/실패 상관없이) 그제서야 마스크 표시를 지우고 편집 모드를 끔.
+function _mkFinalizeMaskAfterRender(){
+  try{ if(typeof togDraw==='function') togDraw(false); }catch(e){}
+  try{
+    var dcv=gE('draw-canvas');
+    if(dcv) dcv.getContext('2d').clearRect(0,0,dcv.width,dcv.height);
+  }catch(e){}
 }
 
 // 브러시 색칠 + 화살표 + 다각형 표시를 원본 이미지 위에 실제로 합성해서, AI가 텍스트 설명이
@@ -35804,6 +35838,9 @@ function executeSingleRender(task){
     G.activeRenders=Math.max(0,G.activeRenders-1);
     task.status='done';
     setTabStatus(task.wf,'done');
+    // ⚠️ 요청 반영("렌더링 끝날 때까지 [칠한 표시가] 보이게해줘"): 결과가 실제로 돌아온 지금
+    // 시점에 그제서야 마스크 표시를 지우고 편집 모드를 끔(요청 직후가 아니라).
+    if(task.wf==='edit') _mkFinalizeMaskAfterRender();
     var ldov=gE('ldov');if(ldov)ldov.style.display='none';
     if(loadingCard&&loadingCard.parentNode){
       if(loadingCard._clearTimer)loadingCard._clearTimer();
@@ -36055,6 +36092,7 @@ function executeSingleRender(task){
     G.activeRenders=Math.max(0,G.activeRenders-1);
     task.status='error';
     setTabStatus(task.wf,'error');
+    if(task.wf==='edit') _mkFinalizeMaskAfterRender();
     if(loadingCard&&loadingCard.parentNode){
       if(loadingCard._clearTimer)loadingCard._clearTimer();
       loadingCard.parentNode.removeChild(loadingCard);
@@ -36966,32 +37004,24 @@ function procImg(onDone, onErr) {
           }
         }
         if(hasMask2){
-          // 나노바나나로 갈 경우, 진짜 픽셀 마스크를 못 읽으니 "어디를 칠했는지" 눈으로 보여주기
-          // 위해 원본 사진 위에 칠한 색(+다각형·사각형·화살표 범위)을 반투명하게 합성한 이미지도
-          // 같이 만들어둠 — editMask2 자체(흑백)를 겹쳐서, 어떤 도구로 지정했든 항상 시각화됨.
-          try{
-            var baseCv2 = gE('canvas');
-            if(baseCv2 && baseCv2.width>0){
-              var annCv=document.createElement('canvas');
-              annCv.width=baseCv2.width; annCv.height=baseCv2.height;
-              var annCtx=annCv.getContext('2d');
-              annCtx.drawImage(baseCv2,0,0,annCv.width,annCv.height);
-              annCtx.globalAlpha=0.55;
-              annCtx.drawImage(drawCv2,0,0,annCv.width,annCv.height);
-              annCtx.globalAlpha=1;
-              window._maskAnnotatedRef = annCv.toDataURL('image/jpeg',0.9);
-            }
-          }catch(e){ console.warn('[mask annotate]',e); window._maskAnnotatedRef=null; }
+          // ⚠️ 버그 수정(치명적, 근본 원인 추가 발견 — 이번 삭제 오작동의 진짜 마지막 퍼즐 조각):
+          // 여기서 "원본 사진"을 다시 그리려고 쓰던 gE('canvas')는 실제로는 <canvas>가 아니라
+          // 빈 껍데기 <div id="canvas">라서 .width가 항상 undefined였음 — 그래서 이 블록은
+          // if(baseCv2.width>0) 조건에 걸려 매번 조용히 아무 일도 안 하고 있었고,
+          // window._maskAnnotatedRef는 실제로는 절대 갱신되지 않은 채 "이전 세션에 우연히
+          // 남아있던 값"에 의존하는 극도로 불안정한 상태였음 — 이게 "어떨 땐 마스크 밖이
+          // 보호되고 어떨 땐 안 된다"의 진짜 원인이었음(아래 isMaskedNB2가 이 값에 의존해서
+          // 안전장치 적용 여부를 결정했었음). 원본 사진을 다시 합성하려 시도하지 않고, 이미
+          // 동기적으로 확보된 흑백 마스크(editMask2)를 그대로 "위치 확인용 참고 이미지"로
+          // 사용함 — 항상 안정적으로 만들어지고, 흰 부분=수정할 위치라고 프롬프트에서
+          // 설명하면 나노바나나가 참고하기에 충분함.
+          window._maskAnnotatedRef = editMask2;
         }
       }catch(e){ console.warn('[mask extract]',e); }
     } else if(hasMask2){
       // draw-canvas 엘리먼트가 이 시점에 없어도(다른 워크플로우 탭으로 이미 넘어간 경우 등)
-      // task.maskData만으로 "범위 밖 원본 강제 유지" 안전장치는 그대로 동작해야 하므로,
-      // 시각 확인용 annotated ref만 원본 이미지로 대체해서 isMaskedNB2 조건을 만족시켜둠.
-      try{
-        var baseCv2b = gE('canvas');
-        if(baseCv2b && baseCv2b.width>0) window._maskAnnotatedRef = baseCv2b.toDataURL('image/jpeg',0.9);
-      }catch(e){ console.warn('[mask annotate fallback]',e); }
+      // task.maskData만으로 마스크는 이미 확보돼 있으니, 참고 이미지도 그 마스크 자체로 채움.
+      window._maskAnnotatedRef = editMask2;
     }
 
     // ── 분기 실행 ──────────────────────────────────
@@ -37067,18 +37097,21 @@ function procImg(onDone, onErr) {
     }
 
     function runNB2(imgUrl){
-      var isMaskedNB2 = hasMask2 && editMask2 && window._maskAnnotatedRef;
+      // ⚠️ 버그 수정(치명적): 예전엔 window._maskAnnotatedRef(항상 undefined였던 죽은 코드의
+      // 결과물)에 의존해서 "마스크 밖은 원본 그대로 강제"하는 안전장치가 사실상 거의 항상
+      // 꺼져 있었음 — 이제 실제로 확보된 흑백 마스크(hasMask2/editMask2)만으로 판단함.
+      var isMaskedNB2 = !!(hasMask2 && editMask2);
       var nb2ap = basePrompt + ' Only modify as described. Keep all other areas exactly unchanged. Preserve the exact same camera angle, framing and composition as the original — do not zoom, crop, or reposition.';
       if(isMaskedNB2){
-        nb2ap += ' The additional reference image shows this same room with colored marker overlays (mint/red/blue) indicating exactly which areas to change — apply the described change ONLY to the marked areas, and completely remove the colored marker overlay itself from the final output (it is guidance only, not part of the design). \u26a0\u26a0\u26a0 CRITICAL — do NOT apply this change to every object of the same type/category in the photo, only to the specific one under the colored marker: if the instruction mentions an object type (e.g. "remove the AC unit", "change the chair") and there happen to be other objects of that exact same type elsewhere in the photo that are NOT covered by the colored marker, those other ones must be left completely untouched, exactly as in the original photo — only the single instance actually under the marker should be affected. Marking one object of a type does not mean "all objects of that type"; it means "this specific one, right here." \u26a0\u26a0\u26a0 CRITICAL — IF THE INSTRUCTION GIVES A SPECIFIC NUMERIC SCALE/SIZE MULTIPLIER FOR A PATTERN OR TEXTURE, FOLLOW IT LITERALLY AND PRECISELY: when the instruction specifies a repeat-pattern or texture scale using a number (e.g. wallpaper/fabric/tile pattern "2\uc744\uc740, 2\ubc30\ub85c, \ub450 \ubc30 \ud06c\uac8c" meaning make the individual repeating motif twice as large, or "\uc808\ubc18\uc73c\ub85c, 0.5\ubc30" meaning half the current size), treat that as an exact, literal scale factor on the repeating unit\'s physical size — do not just make it "somewhat bigger/smaller" or apply a vague, timid adjustment. A "2\ubc30" request should produce a pattern whose individual repeat unit is clearly, unambiguously about double the linear size of the original (twice as tall and twice as wide), not a subtle 10-20% increase. A "\uc808\ubc18" request should produce a repeat unit clearly about half the original linear size, not a slight reduction. Keep the pattern\'s own design/motif/color identical — only its physical repeat scale changes according to the given multiplier. If no specific number is given, use your best judgment for a moderate, clearly noticeable change.';
+        nb2ap += ' The additional reference image is a black-and-white mask of this exact same photo: WHITE areas mark exactly which parts to change, BLACK areas must stay completely untouched. Apply the described change ONLY within the white-marked areas, and never render the black/white mask shapes themselves in the final output (it is guidance only, not part of the design). \u26a0\u26a0\u26a0 CRITICAL — do NOT apply this change to every object of the same type/category in the photo, only to the specific one inside the white-marked area: if the instruction mentions an object type (e.g. "remove the AC unit", "change the chair") and there happen to be other objects of that exact same type elsewhere in the photo that are outside the white area, those other ones must be left completely untouched, exactly as in the original photo — only the instance actually inside the white area should be affected. Marking one object of a type does not mean "all objects of that type"; it means "this specific one, right here." \u26a0\u26a0\u26a0 CRITICAL — IF THE INSTRUCTION GIVES A SPECIFIC NUMERIC SCALE/SIZE MULTIPLIER FOR A PATTERN OR TEXTURE, FOLLOW IT LITERALLY AND PRECISELY: when the instruction specifies a repeat-pattern or texture scale using a number (e.g. wallpaper/fabric/tile pattern "2\uc744\uc740, 2\ubc30\ub85c, \ub450 \ubc30 \ud06c\uac8c" meaning make the individual repeating motif twice as large, or "\uc808\ubc18\uc73c\ub85c, 0.5\ubc30" meaning half the current size), treat that as an exact, literal scale factor on the repeating unit\'s physical size — do not just make it "somewhat bigger/smaller" or apply a vague, timid adjustment. A "2\ubc30" request should produce a pattern whose individual repeat unit is clearly, unambiguously about double the linear size of the original (twice as tall and twice as wide), not a subtle 10-20% increase. A "\uc808\ubc18" request should produce a repeat unit clearly about half the original linear size, not a slight reduction. Keep the pattern\'s own design/motif/color identical — only its physical repeat scale changes according to the given multiplier. If no specific number is given, use your best judgment for a moderate, clearly noticeable change.';
       }
       var slug2 = (eng.k==='nano_pro') ? 'fal-ai/nano-banana-pro/edit' : 'fal-ai/nano-banana-2/edit';
       // 레퍼런스 이미지(마스크 색깔별로 업로드한 "이 사진처럼 바꿔줘" 이미지 포함)를 실제로 API에
       // 같이 보냄 — 예전엔 이 탭만 레퍼런스를 저장은 해두고 실제 호출에는 안 넣고 있었음.
       var refImgs2 = (getTab(G.wf) && getTab(G.wf).refs || []).filter(Boolean).slice(0, getMaxRefs());
-      // 마스크로 칠한 상태에서 나노바나나로 갈 땐, 어디를 칠했는지 눈으로 보여주는 합성 이미지도
-      // 레퍼런스에 추가함 — 진짜 픽셀 마스크는 못 읽지만, 색칠된 사진을 보여주면 위치를 훨씬 정확히 짚음.
-      if(isMaskedNB2) refImgs2 = [window._maskAnnotatedRef].concat(refImgs2);
+      // 마스크로 칠한 상태에서 나노바나나로 갈 땐, 어디를 칠했는지 보여주는 흑백 마스크 이미지도
+      // 레퍼런스에 추가함 — 진짜 픽셀 마스크는 못 읽지만, 이 이미지를 보여주면 위치를 훨씬 정확히 짚음.
+      if(isMaskedNB2 && window._maskAnnotatedRef) refImgs2 = [window._maskAnnotatedRef].concat(refImgs2);
       console.log('[API 호출]', slug2, '| 프롬프트:', nb2ap.slice(0,60)+'...', '| 레퍼런스:', refImgs2.length+'개');
       function doRun(allUrls){
         _withExplicitAspect(_inputImg, function(_asp){
