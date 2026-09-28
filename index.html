@@ -8156,6 +8156,7 @@ function goHome(){
   // 보내버렸음 — 이제 명시적으로 'home' 마커를 남겨서, 새로고침 시 홈에 있었다는 걸 구분해
   // 홈에 그대로 머물게 함(아래 모바일 초기 탭 설정 코드 참고).
   try{ localStorage.setItem('clover_last_wf','home'); }catch(e){}
+  _clearMaskEditOverlay(); // ⚠️ 버그 수정: 홈으로 나갈 때도 AI편집 브러시 오버레이가 화면에 남지 않게 정리
   var sbtm=document.querySelector('.sb-btm');
   if(sbtm)sbtm.style.display='none';
   window.scrollTo({top:0,behavior:(window.innerWidth<=768?'smooth':'auto')});
@@ -25292,6 +25293,28 @@ function sbShorts(p){
     }).catch(function(){});
   }
   bgmWrap.appendChild(bgmCurWrap);
+  // ⚠️ 요청 반영("쇼츠제작에 음악 올라가는거 음량조절할 수 있는 기능 넣어줘"): 지금까지는
+  // 배경음악 음량이 BGM_VOL=0.8로 코드에 고정돼있어서 사용자가 조절할 방법이 없었음 —
+  // opts.bgmVolume(0~1, 기본 0.8)을 새로 두고, 실제 렌더링 시 이 값을 읽어서 적용하도록
+  // 뒤쪽(_shortsRenderVideo 등)의 BGM_VOL 계산도 같이 연결함.
+  if(opts.bgmVolume==null) opts.bgmVolume=0.8;
+  var bgmVolWrap=dv('');bgmVolWrap.style.cssText='margin-top:10px';
+  var bgmVolLbl=dv('');bgmVolLbl.style.cssText='display:flex;justify-content:space-between;font-size:11px;color:var(--t2);margin-bottom:5px';
+  var bgmVolLblTxt=document.createElement('span');bgmVolLblTxt.textContent='🔊 배경음악 음량';
+  var bgmVolLblVal=document.createElement('span');bgmVolLblVal.style.cssText='color:var(--ac,#00e5cc);font-weight:700';
+  bgmVolLblVal.textContent=Math.round(opts.bgmVolume*100)+'%';
+  bgmVolLbl.appendChild(bgmVolLblTxt);bgmVolLbl.appendChild(bgmVolLblVal);
+  bgmVolWrap.appendChild(bgmVolLbl);
+  var bgmVolSlider=document.createElement('input');bgmVolSlider.type='range';
+  bgmVolSlider.min='0';bgmVolSlider.max='100';bgmVolSlider.step='5';
+  bgmVolSlider.value=String(Math.round(opts.bgmVolume*100));
+  bgmVolSlider.style.cssText='width:100%;accent-color:var(--ac,#00e5cc);cursor:pointer';
+  bgmVolSlider.oninput=function(){
+    opts.bgmVolume = (+bgmVolSlider.value)/100;
+    bgmVolLblVal.textContent=bgmVolSlider.value+'%';
+  };
+  bgmVolWrap.appendChild(bgmVolSlider);
+  bgmWrap.appendChild(bgmVolWrap);
   var bgmNote=dv('');
   bgmNote.style.cssText='font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.5';
   bgmNote.innerHTML='음악은 영상 길이에 맞춰 자동으로 잘리고, 끝나기 2초 전부터 서서히 페이드아웃돼요.';
@@ -28540,7 +28563,9 @@ function _shortsGenerate(){
       }catch(e){ console.warn('[Shorts] 무음 오실레이터 연결 실패(자동 suspend 방지책 무효화될 수 있음):', e.message); }
       var audioEl=null;
       var bgmGainNode=null; // 실제 렌더 진행률에 맞춰 매 프레임 갱신할 볼륨 노드
-      var BGM_VOL=0.8, FADE_SECONDS=2;
+      // ⚠️ 요청 반영("음악 올라가는거 음량조절할 수 있는 기능 넣어줘"): 예전엔 0.8로 고정돼
+      // 있었는데, 사이드바에서 설정한 opts.bgmVolume(0~1, 슬라이더로 0~100% 조절)을 그대로 씀.
+      var BGM_VOL=(opts.bgmVolume!=null?opts.bgmVolume:0.8), FADE_SECONDS=2;
       // 영상 클립 자체의 오디오도(있으면) 같은 dest로 합쳐서 최종 녹화에 포함시킴
       Object.keys(videoCache).forEach(function(vu){
         try{
@@ -31141,6 +31166,22 @@ function _resetPolyAreasByMode(mode){
   _saveMaskAnnotations();
   renderSB();
 }
+// ⚠️ 버그 수정(치명적, "다른탭에가도 브러시 흔적이 남아있어 / 갤러리탭 눌렀는데 브러시가
+// 살아있으면 안되지" — 두 번째 신고): selectWF()로 워크플로우 탭을 바꿀 때는 브러시 캔버스를
+// 지우고 숨기는 로직이 있지만, goHome()·openPanel('gallery'/'favs')·openCommunityPanel()처럼
+// selectWF()를 안 거치고 화면을 바꾸는 다른 진입점들은 전부 이 정리를 안 하고 있었음 — 그래서
+// AI 편집에서 브러시를 칠해둔 채로 홈/갤러리/즐겨찾기/커뮤니티로 이동하면, 브러시 오버레이가
+// 그 화면 위에 그대로 남아서 클릭을 다 막아버리는(포인터 이벤트를 가로채는) 문제가 있었음.
+// 이 화면들에서 전부 공통으로 부를 수 있게 정리 로직을 함수 하나로 뽑아냄.
+function _clearMaskEditOverlay(){
+  try{ togDraw(false); }catch(e){ console.warn('[마스크 오버레이 정리]', e); }
+  var dc=gE('draw-canvas');
+  if(dc){
+    dc.style.display='none';
+    dc.classList.remove('active','brush-mode','eyedrop-mode','polygon-mode');
+    try{ dc.getContext('2d').clearRect(0,0,dc.width,dc.height); }catch(e){}
+  }
+}
 function togDraw(on, mode){
   var cv=gE('draw-canvas');if(!cv)return;
   if(on){
@@ -31189,6 +31230,16 @@ function togDraw(on, mode){
         if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
       if(mode==='rect'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initRectMode(cv);}
         else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';if(mode==='erase'||mode==='brush'){setTimeout(_updateEditBrushCursor,0);}}
+        // ⚠️ 버그 수정("브러시칠하고 다른 다각형이나 사각형 클릭하면 브러시한건 안보여야하는데
+        // 보이잖아"): 브러시로 칠한 픽셀은 이 캔버스(#draw-canvas) 자체에 그려져 있어서, 다각형/
+        // 사각형/화살표 도구로 바꿔도(전에는 CSS 클래스만 바뀌고 캔버스 내용은 그대로였음) 계속
+        // 화면에 보이고 있었음 — 실행 시엔 브러시+다각형+화살표가 전부 하나의 마스크로 합쳐지는
+        // 게 맞지만(마스크 데이터 자체는 안 지움), 지금 쓰고 있지 않은 도구의 흔적이 화면에 계속
+        // 떠 있으면 "내가 지금 뭘 칠했는지" 헷갈리므로, 화면에는 지금 실제로 쓰고 있는 도구
+        // (브러시/지우개)일 때만 캔버스를 보이게 하고, 다각형·사각형·화살표를 쓰는 동안은
+        // 투명하게(opacity 0) 감춤 — 픽셀 데이터 자체는 그대로 남아있어서 실행/미리보기 시
+        // 여전히 정확히 합쳐짐.
+        cv.style.opacity = (mode==='brush'||mode==='erase') ? '1' : '0';
         if(mode!=='arrow'){ var _aOv=gE('arrow-overlay'); if(_aOv) _aOv.style.display='none'; }
         // ⚠️ 버그 수정(핵심): 사각형(rect) 도구는 다각형(polygon) 도구와 같은 SVG 오버레이
         // (#poly-overlay)를 공유하는데, 예전엔 이 조건이 "polygon이 아니면 숨김"이라 rect 모드일
@@ -31210,12 +31261,14 @@ function togDraw(on, mode){
       if(mode==='polygon'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initPolygonMode(cv);}
       if(mode==='rect'){cv.classList.add('polygon-mode');cv.style.cursor='crosshair';initRectMode(cv);}
       else if(mode==='erase'||mode==='brush'||mode==='ellipse'||mode==='arrow'){cv.classList.add('brush-mode');cv.style.cursor='';if(mode==='erase'||mode==='brush'){setTimeout(_updateEditBrushCursor,0);}}
+      cv.style.opacity = (mode==='brush'||mode==='erase') ? '1' : '0'; // 위 이미지-있음 분기와 동일한 이유
       if(mode!=='arrow'){ var _aOv2=gE('arrow-overlay'); if(_aOv2) _aOv2.style.display='none'; }
       if(mode!=='polygon' && mode!=='rect'){ var _pOv2=gE('poly-overlay'); if(_pOv2){ _pOv2.style.display='none'; _pOv2.style.pointerEvents='none'; } }
     }
   }else{
     cv.classList.remove('active','brush-mode','eyedrop-mode','polygon-mode');
     cv.style.display='none';
+    cv.style.opacity='1';
     cv.style.left='';cv.style.top='';cv.style.width='';cv.style.height='';
     var polyOv=gE('poly-overlay');if(polyOv){polyOv.innerHTML='';polyOv.style.display='none';}
     var arrOv=gE('arrow-overlay');if(arrOv){arrOv.style.display='none';}
@@ -40253,6 +40306,7 @@ function bypassLogin(){
 }
 var _shortsVideosRestored=false;
 function openPanel(id){
+  _clearMaskEditOverlay(); // ⚠️ 버그 수정: 갤러리/즐겨찾기 열 때도 AI편집 브러시 오버레이가 화면에 남지 않게 정리
   G._curGalleryId = id; // renderGalleryGrid에서 즐겨찾기/삭제 후 재오픈 시 사용
   G._galleryPageSize = 40; // 패널을 새로 열 때마다 페이지네이션 처음부터
   // ⚠️ 성능 개선("갤러리 버벅임 — 자동저장 영상 용량 때문 아닌가?"): 예전엔 앱이 켜지자마자
@@ -41217,6 +41271,7 @@ function _communityPostForItem(item, btn){
 }
 
 function openCommunityPanel(){
+  _clearMaskEditOverlay(); // ⚠️ 버그 수정: 커뮤니티 탭 열 때도 AI편집 브러시 오버레이가 화면에 남지 않게 정리
   // ⚠️ 버그 수정("모바일에서 다른 탭에 있다가 하단 커뮤니티 버튼 누르면 작동 안 한다"): 모바일
   // 전용 갤러리 오버레이(#mob-gallery-panel, position:fixed, z-index:8000)나 슬라이드업
   // 패널이 화면에 이미 떠 있는 상태로 남아있으면, 그 뒤에서 커뮤니티 화면이 정상적으로
