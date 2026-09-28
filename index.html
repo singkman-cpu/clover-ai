@@ -36894,6 +36894,21 @@ function procImgWithTask(task, onDone, onErr){
       console.log('[edit] 사람 추가 프리셋 → Nano Banana Pro 자동 선택');
     }
 
+    // ⚠️ 버그 수정(치명적, "노후된건물들이 원본건물 층수를 그대로 따라간다" — _agedFloorPresets의
+    // 층수 지시가 무시되던 진짜 원인): 아래 else-if(userPrompt) 분기가 편집 탭의 "모든" 일반
+    // 프리셋에 공통으로 "CRITICAL: 벽을 추가·제거·이동하지 마라, 방의 구조적 형태·치수를 바꾸지
+    // 마라"는 문구를 강제로 붙이고 있었음 — 이건 원래 가구·인테리어 편집(예: "소파 색만 바꿔줘")
+    // 용으로 만들어진 문구인데, aged_redbrick/villa/house/commercial_ext처럼 "건물 자체의 층수·
+    // 매싱을 원본과 다르게 새로 설계하라"는 게 프리셋의 핵심 목적인 경우에도 그대로 붙어서, 프리셋
+    // 본문 및 _rbRecipe(층수 지시)와 정면으로 충돌하고 있었음. edit(이미지 조건부) 모델은 원래도
+    // 입력 사진의 구조를 강하게 보존하려는 경향이 있는데(공간 컨셉 디자인 자동생성 기능에서 이미
+    // 확인된 문제와 동일한 원인), 여기에 "CRITICAL: 구조를 바꾸지 마라"는 명시적 문구까지 겹치니
+    // 층수 지시가 사실상 묻혀버렸던 것 — 뷰 변경 프리셋(isCameraChangePreset)을 위에서 이미
+    // 예외 처리해준 것과 같은 이유로, 건물 매싱 자체를 새로 설계하는 프리셋도 같은 방식으로
+    // 예외 처리함.
+    var _buildingMassingRedesignPresets=['aged_redbrick','aged_villa','aged_house','aged_commercial_ext'];
+    var _isBuildingMassingRedesign = _buildingMassingRedesignPresets.indexOf(task.selK)!==-1;
+
     // 변환형 프리셋(뷰 변경/아이소 등)은 "unchanged" suffix 제거
     var editPrompt;
     if(userPrompt && isCameraChangePreset){
@@ -36901,6 +36916,13 @@ function procImgWithTask(task, onDone, onErr){
       // "새 방향의 안 보이던 부분을 드러내라"는 지시와 정면으로 충돌해서 모델이 거의 안 바뀐
       // 이미지를 내놓는 원인이 됐다 — 이 계열은 가벼운 스타일 통일 문구만 붙인다.
       editPrompt = userPrompt + ' Photorealistic architectural photography, consistent with the original photo\'s materials, color palette and lighting mood.';
+    } else if(userPrompt && _isBuildingMassingRedesign){
+      // 건물 매싱(층수·지붕형태 등) 자체를 새로 설계하는 노후·철거 프리셋 전용 — 벽/구조/치수를
+      // 바꾸지 말라는 문구 없이, 대신 "이 건물의 형태는 프리셋 지시에 따라 자유롭게 새로 설계하되,
+      // 카메라 밖 대지 경계·도로·이웃 배경·이 건물이 아닌 다른 요소는 그대로 유지하라"는, 프리셋
+      // 취지에 맞는 문구를 붙인다.
+      editPrompt = userPrompt + ' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL — THIS IS A DELIBERATE BUILDING REDESIGN, NOT A MINOR TOUCH-UP: the whole point of this request is to redesign the subject building itself (its floor count, massing, roofline, window layout, materials) into a different, older-looking building on the same site, exactly as instructed above — freely change the building\'s walls, floor count, window/door layout, and structural shape/dimensions to match the instructions above; do NOT preserve the original building\'s exact floor count, wall positions, or window layout just because they are common defaults to preserve in general photo edits. Everything the instructions above did not ask you to change — the road, sidewalk, sky, neighboring buildings/trees, and the camera framing — should stay as close to the original photo as the instructions above describe. Do NOT change the overall brightness, exposure, contrast, white balance, or color tone of the scene beyond what the instructions above call for.'
+        + (hasCameraInstruction ? '' : CAMERA_LOCK);
     } else if(userPrompt){
       editPrompt = userPrompt + ' Follow these instructions precisely. Photorealistic architectural photography. CRITICAL: Unless explicitly instructed otherwise, do NOT remove, add, or move any walls, do NOT create new openings, and do NOT change the room\'s structural shape or dimensions — only change what is explicitly described (furniture, materials, colors, placement of objects). CRITICAL — PRESERVE THE EXACT SHAPE/FORM OF EDITED FURNITURE: if the instruction asks to change the color or material of a specific furniture piece (e.g. \'change the sofa color\'), you must change ONLY its color/material and keep that exact same piece of furniture — same silhouette, same type, same size, same number of sections/segments, same arm/back/cushion shape, same overall form — completely unchanged. For example, if the original is an L-shaped sectional sofa with a chaise lounge, the result must still be the exact same L-shaped sectional with the same chaise — do NOT replace it with a single armchair, a different sofa shape, a smaller sofa, or any other different furniture model. Do NOT change the count of furniture pieces (e.g. do not turn one large sectional into a single chair, do not remove cushions or sections). Only the surface color/material changes; the object\'s physical form is a fixed constraint that must never change unless explicitly asked. CRITICAL — DO NOT ALTER ANYTHING NOT EXPLICITLY REQUESTED: do not turn any lights, lamps, or fixtures on or off unless explicitly asked — if a lamp was off in the original photo, it must remain off; if on, it must remain on, exactly as in the original. Do NOT change the overall brightness, exposure, contrast, white balance, or color tone of the image — the window light, sunlight intensity, lamp brightness, highlights, shadows, and overall scene exposure must look exactly as bright and clear as the original photo. Do NOT add a hazy/dull/desaturated filter over the whole image, do NOT dim the room. Only the specific element(s) described in the instructions above should change; every other pixel, object, light source and lighting condition in the photo must remain exactly as it was in the original. THIS RULE APPLIES EVEN WHEN THE EDITED OBJECT\'S OWN COLOR CHANGES SIGNIFICANTLY (e.g. a sofa changed from a light color to black, or any other large color swap): a large dark-colored or light-colored replacement object must NOT cause the renderer to auto-adjust overall scene exposure, white balance, or shadow density to compensate for it. Walls, floor, ceiling, plants, artwork, and every other untouched surface in the frame must keep their EXACT original brightness/luminance values, pixel-for-pixel — measure it like a fixed reference: if a wall looked light grey/white at a certain brightness in the original, it must be that identical brightness in the result, not darker just because a nearby object is now black. Only the replaced object itself should carry its new color/material — it must NOT cast extra ambient darkness onto the rest of the scene beyond its own normal, realistic, localized shadow.'
         + (hasCameraInstruction ? '' : CAMERA_LOCK);
