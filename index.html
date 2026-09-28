@@ -30925,17 +30925,65 @@ function _mkFinalizeMaskAfterRender(){
 // 코드로 강제함: 마스크(브러시로 칠했거나 다각형/사각형으로 채운 부분)로 표시된 영역"만" AI가
 // 리턴한 새 픽셀을 쓰고, 마스크 밖(칠하지 않은 나머지 전체)은 원본 이미지 픽셀을 그대로
 // 강제로 덮어써서, AI가 전체 화이트밸런스를 바꿔서 리턴해도 실제 화면엔 반영이 안 되게 함.
+// ⚠️ 버그 수정(치명적, "마스크가 확실히 적용되는지 확실히 해달라"는 요청으로 점검하다 발견):
+// 이 함수(마스크 밖은 원본 그대로 강제하는 최종 안전장치)가 실패하면(주로 CORS로 인한 캔버스
+// "오염(tainted)" 에러) 조용히 cb(null)만 호출했고, 호출부는 전부 "finalUrl || 원본 AI 결과"
+// 식으로 폴백해서 — 하필 이 안전장치가 필요한 순간(마스크 밖까지 AI가 건드린 경우)에 그 안전
+// 장치 자체가 CORS 문제로 조용히 빠져버리면, 마스크 보호가 전혀 없는 AI 결과가 그대로 나가면서도
+// 사용자는 "마스크가 적용된 줄" 알고 있는 상태가 될 수 있었음. urlToDataUrl()가 (CORS 실패
+// 위험 때문에) 실제로는 변환을 안 하고 원본 URL을 그대로 돌려주고 있어서, resultUrl은 거의 항상
+// fal.media의 실제 http(s) URL이고, <img crossOrigin="anonymous">만으로 로드하면 그 CDN이 응답에
+// CORS 허용 헤더를 안 주는 순간 100% 실패하는 구조였음. fetch()+blob URL 방식을 먼저 시도해서
+// (많은 CDN이 <img> 태그의 익명 크로스오리진 로드보다 fetch의 cors 모드 요청은 더 안정적으로
+// 허용함) 성공률을 높이고, 그래도 실패하면 기존 <img crossOrigin> 방식으로 한 번 더 시도한 뒤,
+// 그마저 실패하면 호출부가 "합성 실패해서 AI 원본을 그대로 씁니다"라는 걸 명확히 알 수 있도록
+// cb(null, true)로 실패 여부를 같이 알려줌(두 번째 인자 true = 마스크 강제 적용 실패).
+function _loadImageForComposite(url, cb){
+  if(!url){ cb(null); return; }
+  // data: URL은 원래 오염(tainted) 문제가 없으니 바로 로드
+  if(url.indexOf('data:')===0){
+    var dimg=new Image();
+    dimg.onload=function(){ cb(dimg); };
+    dimg.onerror=function(){ cb(null); };
+    dimg.src=url;
+    return;
+  }
+  // 1차 시도: fetch(cors) → blob → objectURL (많은 CDN에서 <img crossOrigin>보다 안정적)
+  try{
+    fetch(url, {mode:'cors'}).then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.blob();
+    }).then(function(blob){
+      var objUrl=URL.createObjectURL(blob);
+      var img=new Image();
+      img.onload=function(){ cb(img); };
+      img.onerror=function(){ _loadImageForCompositeFallback(url, cb); };
+      img.src=objUrl;
+    }).catch(function(){ _loadImageForCompositeFallback(url, cb); });
+  }catch(e){ _loadImageForCompositeFallback(url, cb); }
+}
+function _loadImageForCompositeFallback(url, cb){
+  // 2차 시도(fetch 실패 시): 기존 방식 — <img crossOrigin=anonymous>로 직접 로드
+  var img=new Image();
+  img.crossOrigin='anonymous';
+  img.onload=function(){ cb(img); };
+  img.onerror=function(){ console.warn('[마스크 합성] 이미지 로드 최종 실패:', url.slice(0,80)); cb(null); };
+  img.src=url;
+}
 function _compositeMaskedResult(origUrl, resultUrl, maskDataUrl, cb){
   try{
-    var origImg=new Image(), resImg=new Image(), maskImg=new Image();
-    origImg.crossOrigin='anonymous'; resImg.crossOrigin='anonymous'; maskImg.crossOrigin='anonymous';
-    var loaded=0;
+    var origImg=null, resImg=null, maskImg=null;
+    var loaded=0, failed=false;
     function ready(){
       loaded++;
       if(loaded<3) return;
+      if(!origImg || !resImg || !maskImg){
+        console.warn('[마스크 합성] 이미지 로드 실패 — 마스크 강제 적용 실패, AI 원본 결과를 그대로 사용합니다.');
+        cb(null, true); return;
+      }
       try{
         var W=origImg.naturalWidth||resImg.naturalWidth, H=origImg.naturalHeight||resImg.naturalHeight;
-        if(!W||!H){ cb(null); return; }
+        if(!W||!H){ cb(null, true); return; }
         // 1) 결과 이미지를 W×H 캔버스에 그림
         var resCv=document.createElement('canvas'); resCv.width=W; resCv.height=H;
         var rctx=resCv.getContext('2d');
@@ -30954,16 +31002,14 @@ function _compositeMaskedResult(origUrl, resultUrl, maskDataUrl, cb){
         octx.drawImage(origImg,0,0,W,H);
         octx.drawImage(resCv,0,0);
         cb(outCv.toDataURL('image/jpeg',0.95));
-      }catch(e){ console.warn('[마스크 합성 색감 보정] 실패, AI 결과 그대로 사용:', e); cb(null); }
+      }catch(e){ console.warn('[마스크 합성] 캔버스 합성 실패(마스크 강제 적용 실패), AI 원본 결과 그대로 사용:', e); cb(null, true); }
     }
-    origImg.onload=ready; resImg.onload=ready; maskImg.onload=ready;
-    origImg.onerror=function(){ console.warn('[마스크 합성] 원본 로드 실패'); cb(null); };
-    resImg.onerror=function(){ console.warn('[마스크 합성] 결과 로드 실패'); cb(null); };
-    maskImg.onerror=function(){ console.warn('[마스크 합성] 마스크 로드 실패'); cb(null); };
-    origImg.src=origUrl; resImg.src=resultUrl; maskImg.src=maskDataUrl;
+    _loadImageForComposite(origUrl, function(img){ origImg=img; ready(); });
+    _loadImageForComposite(resultUrl, function(img){ resImg=img; ready(); });
+    _loadImageForComposite(maskDataUrl, function(img){ maskImg=img; ready(); });
   }catch(e){
-    console.warn('[마스크 합성 색감 보정] 전체 실패:', e);
-    cb(null);
+    console.warn('[마스크 합성] 전체 실패(마스크 강제 적용 실패):', e);
+    cb(null, true);
   }
 }
 function _mkBuildMarkedReferenceImage(cb){
@@ -32570,6 +32616,15 @@ function addHistEl(item, scroll, targetHs, atBottom){
         if(item.savedRes)                tab.resolution=item.savedRes;
         if(item.savedEng)                G.eng=item.savedEng;
         tab.inputImg=null; tab.status='idle';
+        // ⚠️ 버그 수정("다른탭에가도 브러시 흔적이 남아있어"): 이 버튼이 selectWF()를 안 거치고
+        // G.wf를 직접 바꾼 뒤 renderMain()만 불러서, AI편집에서 켜둔 브러시 캔버스를 정리하는
+        // selectWF()의 로직(togDraw(false)+캔버스 clearRect)을 거치지 않고 있었음 — 그래서 AI편집
+        // 탭에서 브러시를 칠해둔 채로 이 버튼을 누르면, 브러시 오버레이가 화면에 계속 떠 있는
+        // 채로 다른 탭(공간 컨셉 디자인)으로 넘어가버렸음. selectWF()가 하는 것과 동일하게 여기서도
+        // 확실히 정리함.
+        togDraw(false);
+        var _dcClr1=gE('draw-canvas');
+        if(_dcClr1){ _dcClr1.style.display='none'; try{_dcClr1.getContext('2d').clearRect(0,0,_dcClr1.width,_dcClr1.height);}catch(e){} }
         G.wf='space';
         renderMain('space');
         setTimeout(function(){
@@ -32610,6 +32665,12 @@ function addHistEl(item, scroll, targetHs, atBottom){
           G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null;
         }
         G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.result, orig:item.orig||null, role:'auto', autoRole:null, source:item.wf});
+        // ⚠️ 버그 수정(위 "다른 방도 같은 스타일로" 버튼과 동일한 원인): 여기도 selectWF()를 안
+        // 거치고 G.wf를 직접 바꿔서, AI편집에서 켜둔 브러시 캔버스가 안 지워진 채로 쇼츠 탭으로
+        // 넘어가는 문제가 있었음 — 동일하게 정리함.
+        togDraw(false);
+        var _dcClr2=gE('draw-canvas');
+        if(_dcClr2){ _dcClr2.style.display='none'; try{_dcClr2.getContext('2d').clearRect(0,0,_dcClr2.width,_dcClr2.height);}catch(e){} }
         G.wf='shorts';
         renderMain('shorts');
         if(typeof renderSB==='function') renderSB();
