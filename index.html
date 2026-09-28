@@ -7845,8 +7845,8 @@ function _psOnKey(e){
 function _psRenderCanvas(ub){
   ub.classList.add('hide-zone');
   var zone=ub.querySelector('.cub-zone'); if(zone) zone.style.display='none';
-  var sBox=ub.querySelector('#shorts-canvas-ui'); if(sBox) sBox.style.display='none';
-  var pBox=ub.querySelector('#proposal-canvas-ui'); if(pBox) pBox.style.display='none';
+  var sBox=ub.querySelector('#shorts-canvas-ui'); if(sBox){ _stopMediaIn(sBox); sBox.style.display='none'; }
+  var pBox=ub.querySelector('#proposal-canvas-ui'); if(pBox){ _stopMediaIn(pBox); pBox.style.display='none'; }
   var box=ub.querySelector('#psedit-canvas-ui');
   if(!box || !PSE.ui || PSE.ui.box!==box){ if(box) box.remove(); box=_psBuildUI(); ub.appendChild(box); }
   box.style.display='flex';
@@ -8610,7 +8610,7 @@ function renderMain(callWf, preserveScroll){
   // 안에 편집기를 직접 그림(_psRenderCanvas). 다른 탭으로 갈 때는 편집기를 숨기기만 하고 문서·히스토리는
   // 전역 PSE 객체에 그대로 남아서, 다시 돌아오면 하던 작업이 그대로 이어짐.
   if(wf!=='psedit'){
-    ubAll.forEach(function(ub){ var psBox=ub.querySelector('#psedit-canvas-ui'); if(psBox) psBox.style.display='none'; });
+    ubAll.forEach(function(ub){ var psBox=ub.querySelector('#psedit-canvas-ui'); if(psBox){ _stopMediaIn(psBox); psBox.style.display='none'; } });
   } else {
     hsAll.forEach(function(hs, hsIdx){
       var ub=ubAll[hsIdx]||ubAll[0];
@@ -8651,9 +8651,9 @@ function renderMain(callWf, preserveScroll){
   ubAll.forEach(function(ub){
     ub.classList.remove('hide-zone');
     var sBox=ub.querySelector('#shorts-canvas-ui');
-    if(sBox)sBox.style.display='none';
+    if(sBox){ _stopMediaIn(sBox); sBox.style.display='none'; }
     var pBox=ub.querySelector('#proposal-canvas-ui');
-    if(pBox)pBox.style.display='none';
+    if(pBox){ _stopMediaIn(pBox); pBox.style.display='none'; }
     var zone=ub.querySelector('.cub-zone');
     if(zone)zone.style.display='';
   });
@@ -25815,7 +25815,7 @@ function _proposalRenderCanvas(ub){
   var zone=ub.querySelector('.cub-zone');
   if(zone)zone.style.display='none';
   var sBox=ub.querySelector('#shorts-canvas-ui');
-  if(sBox)sBox.style.display='none';
+  if(sBox){ _stopMediaIn(sBox); sBox.style.display='none'; }
   var box=ub.querySelector('#proposal-canvas-ui');
   if(!box){
     box=document.createElement('div');
@@ -25824,6 +25824,7 @@ function _proposalRenderCanvas(ub){
     ub.appendChild(box);
   }
   box.style.display='flex';
+  _stopMediaIn(box);
   box.innerHTML='';
   var hasContent = G_PROPOSAL.resultUrl || (G_PROPOSAL.scenes && G_PROPOSAL.scenes.length>0);
   box.style.justifyContent = hasContent ? 'flex-start' : 'center';
@@ -26810,7 +26811,7 @@ function _shortsRenderCanvas(ub){
   var zone=ub.querySelector('.cub-zone');
   if(zone)zone.style.display='none';
   var pBox=ub.querySelector('#proposal-canvas-ui');
-  if(pBox)pBox.style.display='none';
+  if(pBox){ _stopMediaIn(pBox); pBox.style.display='none'; }
   var box=ub.querySelector('#shorts-canvas-ui');
   if(!box){
     box=document.createElement('div');
@@ -26819,6 +26820,7 @@ function _shortsRenderCanvas(ub){
     ub.appendChild(box);
   }
   box.style.display='flex';
+  _stopMediaIn(box);
   box.innerHTML='';
 
   // 1) 영상이 이미 만들어졌으면 → 스크롤/사이드바 없이 메인 화면에서 바로 미리보기+다운로드
@@ -38410,7 +38412,24 @@ function openMd(id){
   // 모달 열릴 때 배경 스크롤 방지
   document.body.style.overflow='hidden';
 }
-function closeMd(id){var m=gE('m'+id);if(m)m.classList.remove('open');
+// ⚠️ 버그 수정("사용가이드 보다가 닫아도, 쇼츠 결과 영상 보다가 다른 탭으로 가도 노래가 계속
+// 나온다"): 모달을 닫거나(closeMd) 탭을 전환할 때(renderMain) 지금까지는 그 영역을 CSS
+// display:none으로 "안 보이게"만 했지, 그 안의 <video>나 유튜브 <iframe>은 계속 DOM에 남아
+// 재생 중인 상태 그대로였음 — 화면엔 안 보여도 소리는 계속 나옴. 이제 영역을 숨기기 직전에
+// 그 안의 모든 video/audio를 확실히 멈추고, 유튜브 iframe은 src를 자기 자신으로 다시 대입해서
+// (내부 상태를 초기화하는 흔한 방법) 재생을 강제로 끊음.
+function _stopMediaIn(el){
+  if(!el) return;
+  try{
+    el.querySelectorAll('video,audio').forEach(function(m){
+      try{ m.pause(); m.currentTime=0; }catch(e){}
+    });
+    el.querySelectorAll('iframe').forEach(function(f){
+      try{ if(f.src) f.src=f.src; }catch(e){}
+    });
+  }catch(e){}
+}
+function closeMd(id){var m=gE('m'+id);if(m){ _stopMediaIn(m); m.classList.remove('open'); }
   // 열린 모달이 없으면 스크롤 복원
   if(!document.querySelector('.mbg.open'))document.body.style.overflow='';
 }
