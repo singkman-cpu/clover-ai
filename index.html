@@ -30447,7 +30447,18 @@ function _getMaskDrawRect(cv){
     if(srcMatch) img=srcMatch;
     if(img && img.naturalWidth && img.getBoundingClientRect){
       var r=img.getBoundingClientRect();
-      if(r.width>0 && r.height>0) return r;
+      // ⚠️ 버그 수정(치명적, 지금까지의 모든 "브러시/다각형 위치가 이미지랑 안 맞는다" 신고의
+      // 진짜 근본 원인 — 실제로 헤드리스 브라우저로 재현해서 확인함): 이 <img>는 CSS로
+      // object-fit:contain이 걸려있는데, getBoundingClientRect()는 그 엘리먼트의 "박스" 크기를
+      // 돌려줄 뿐 실제로 사진이 렌더링된 영역(레터박스/필러박스 뺀 안쪽)이 아님 — 박스의 가로세로
+      // 비율이 사진의 실제 비율과 다르면(예: 박스는 넓고 낮은데 사진은 세로로 긴 경우), 실제
+      // 사진은 그 박스 한가운데 훨씬 좁게(세로로 얇게) 렌더링되고 나머지는 빈 여백인데, 지금까지는
+      // 그 빈 여백까지 포함한 박스 전체를 "사진 영역"으로 착각해서 좌표를 계산했음 — 그 결과
+      // 브러시·다각형으로 크게 그린 영역이 마스크에는 실제 사진 영역 대비 훨씬 좁은 "얇은 세로줄"
+      // 하나로 압축되어 들어갔던 것(사용자가 정확히 "세로로 얇게 브러시로 한번 그은 느낌"이라고
+      // 묘사한 증상과 정확히 일치, 헤드리스 브라우저 재현 테스트로 검증 완료). 박스 안에서 실제로
+      // 사진이 렌더링되는 안쪽 영역만 잘라내는 letterbox 보정을 항상 적용하도록 고침.
+      if(r.width>0 && r.height>0) return _getLetterboxCorrectedRect(r, img.naturalWidth, img.naturalHeight);
     }
   }catch(e){}
   // ⚠️ 버그 수정(추가 원인): 위의 마커([data-active-src-img="1"]) 탐색은 addHistEl()로 만들어지는
@@ -30474,7 +30485,8 @@ function _getMaskDrawRect(cv){
       }
       if(img2){
         var r2=img2.getBoundingClientRect();
-        if(r2.width>0 && r2.height>0) return r2;
+        // ⚠️ 위와 동일한 이유(object-fit:contain 박스 ≠ 실제 사진 렌더링 영역)로 여기도 letterbox 보정 적용.
+        if(r2.width>0 && r2.height>0) return _getLetterboxCorrectedRect(r2, img2.naturalWidth, img2.naturalHeight);
       }
     }
   }catch(e3){}
