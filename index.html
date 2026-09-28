@@ -30651,6 +30651,12 @@ function _mkFindVagueInstructions(){
 // 것과 완전히 동일한 흑백 마스크(흰색=수정할 곳, 검정=원본 그대로 유지)를 만들어 반환함.
 // _mkMaskExecuteInner(실제 실행)와 _mkPreviewMask(미리보기 버튼) 둘 다 이 함수 하나만 씀 —
 // 그래서 "미리보기로 본 마스크"와 "실제로 적용되는 마스크"가 절대 어긋나지 않음.
+function _hexToRgb(hex){
+  var h=(hex||'').replace('#','');
+  if(h.length===3) h=h.split('').map(function(c){return c+c;}).join('');
+  var n=parseInt(h,16);
+  return [(n>>16)&255, (n>>8)&255, n&255];
+}
 function _mkBuildCompositeMask(){
   var _maskCanvasForComposite = gE('draw-canvas');
   var _compositeMaskDataUrl = null;
@@ -30666,17 +30672,57 @@ function _mkBuildCompositeMask(){
       var _hasBrushPx=false;
       var _outImgData=_mctx.createImageData(_mcv.width,_mcv.height);
       var _outD=_outImgData.data;
+      // ⚠️ 요청 반영("브러시로 그려진 부분도 있고 다각형으로 그려진 부분도 있는 상태에서 다각형
+      // 쪽에만 수정 내용을 적으면, 브러시가 그려진 마스크에는 적용이 안 되는거야?"): 정확히
+      // 맞음 — 지금까지는 브러시로 칠하기만 하면 그 색에 아무 지시(텍스트/참고이미지)를 안 적어도
+      // "수정해도 되는 영역"으로 마스크에 무조건 포함되고 있었음(AI에게 뭘 하라고 지시는 안 갔는데
+      // "여긴 바꿔도 됨"이라고 허락만 해준 셈이라, 결과가 예측 불가능했음). 이제 브러시색·다각형·
+      // 화살표 각각 "그 자신의 지시(텍스트 또는 참고이미지)가 실제로 있는 경우"에만 마스크에
+      // 포함시키고, 지시가 없는 건 자동으로 원본 그대로 보호(제외)함 — "각자 따로 분류"해서
+      // 각자의 지시가 있는 부분에만 각자 적용되게 함.
+      var _mkDirectedColors={};
+      (MASK_COLORS||[]).forEach(function(c){
+        var hasTxt = G.maskColorPrompts && (G.maskColorPrompts[c[0]]||'').trim();
+        var hasImg = G.maskColorRefImg && G.maskColorRefImg[c[0]];
+        if(hasTxt || hasImg) _mkDirectedColors[c[0]] = _hexToRgb(c[0]);
+      });
+      var _mkDirectedColorList = Object.keys(_mkDirectedColors).map(function(k){return _mkDirectedColors[k];});
       for(var _bi=0; _bi<_brushData.length; _bi+=4){
-        var _painted = _brushData[_bi+3]>10;
+        var _alpha = _brushData[_bi+3];
+        var _painted = _alpha>10;
+        if(_painted && _mkDirectedColorList.length){
+          // 이 픽셀이 실제로 칠해진 색이 "지시가 있는 색" 중 하나와 가까운지 확인(anti-aliasing
+          // 경계는 약간의 오차를 허용). 어떤 지시 색과도 안 맞으면(예: 지시 없는 색으로 칠함)
+          // 이 픽셀은 보호(제외)함.
+          var _r8=_brushData[_bi], _g8=_brushData[_bi+1], _b8=_brushData[_bi+2];
+          var _matched=false;
+          for(var _dc=0; _dc<_mkDirectedColorList.length; _dc++){
+            var _dcRgb=_mkDirectedColorList[_dc];
+            if(Math.abs(_r8-_dcRgb[0])<40 && Math.abs(_g8-_dcRgb[1])<40 && Math.abs(_b8-_dcRgb[2])<40){ _matched=true; break; }
+          }
+          _painted = _matched;
+        } else if(_painted && !_mkDirectedColorList.length){
+          // 지시(텍스트/참고이미지)가 있는 브러시 색이 하나도 없으면 브러시 전체를 보호(제외) —
+          // "칠하기만 하고 지시는 안 적은" 상태로 실행 버튼을 누르면 애초에 "수정할 내용을
+          // 입력해주세요" 경고가 뜨지만(_mkMaskExecuteInner), 미리보기에서는 이 상태를 정확히
+          // 반영해서 "아직 아무것도 실제로 적용 안 됨"을 그대로 보여줌.
+          _painted = false;
+        }
         if(_painted) _hasBrushPx=true;
         var _v = _painted ? 255 : 0;
         _outD[_bi]=_v; _outD[_bi+1]=_v; _outD[_bi+2]=_v; _outD[_bi+3]=255;
       }
       _mctx.putImageData(_outImgData,0,0);
       // 다각형·사각형으로 지정한 범위도 채워서 흰색으로 추가(브러시와 같은 좌표계 — 원본 해상도 기준)
+      // — 단, 그 영역 자체에 적은 지시(라벨 텍스트 또는 참고이미지)가 있는 것만 포함함(위 브러시와
+      // 동일한 이유).
       _mctx.fillStyle='#fff';
+      var _hasDirectedPoly=false;
       (G.polyAreas||[]).forEach(function(a){
         if(!a.points || a.points.length<3) return;
+        var _directed = (a.label||'').trim() || a.refImg;
+        if(!_directed) return;
+        _hasDirectedPoly=true;
         _mctx.beginPath();
         _mctx.moveTo(a.points[0][0], a.points[0][1]);
         for(var _pi=1; _pi<a.points.length; _pi++){ _mctx.lineTo(a.points[_pi][0], a.points[_pi][1]); }
@@ -30688,15 +30734,19 @@ function _mkBuildCompositeMask(){
       // 딱 그 자리만 정확히 바뀌는 게 아니라 AI가 자기 판단으로 넓게 손대거나 엉뚱한 데를
       // 건드려도 다 그대로 반영됐던 것. 이제 화살표 끝점(가리키는 지점) 주변에 넉넉한 원형
       // 범위를 만들어서 마스크에 포함시킴 — 이러면 화살표도 "가리킨 자리 근처만" 확실하게
-      // 바뀌고, 엉뚱한 곳이 바뀌는 일이 원천 차단됨.
+      // 바뀌고, 엉뚱한 곳이 바뀌는 일이 원천 차단됨. (역시 지시가 있는 화살표만 포함)
+      var _hasDirectedArrow=false;
       (G.arrows||[]).forEach(function(a){
         if(typeof a.x2!=='number' || typeof a.y2!=='number') return;
+        var _directed = (a.label||'').trim() || a.refImg;
+        if(!_directed) return;
+        _hasDirectedArrow=true;
         var _r = Math.max(_mcv.width, _mcv.height) * 0.12; // 화살표가 가리키는 오브젝트가 대략 들어올 만한 넉넉한 반경
         _mctx.beginPath();
         _mctx.arc(a.x2, a.y2, _r, 0, Math.PI*2);
         _mctx.fill();
       });
-      var _hasAnyMask = _hasBrushPx || (G.polyAreas && G.polyAreas.length>0) || (G.arrows && G.arrows.length>0);
+      var _hasAnyMask = _hasBrushPx || _hasDirectedPoly || _hasDirectedArrow;
       if(_hasAnyMask){
         // ⚠️ 요청 반영: "브러시·화살표 수정이 위치를 명확하게 못 잡는다"(=칠한 모양 그대로 딱
         // 잘려서, 손으로 대충 칠한 경계가 그대로 결과물 경계가 되어 오브젝트 일부만 바뀌거나
@@ -30750,6 +30800,47 @@ function _mkPreviewMask(){
   ov = document.createElement('div');
   ov.id = 'mk-mask-preview-ov';
   ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:12px';
+
+  // ⚠️ 요청 반영("다각형 그리고 보니 브러시에서 그렸던 마스크 부분도 남아있던데 각자 따로
+  // 분류되어야 하는거 아니야?"): 브러시·다각형/사각형·화살표는 의도적으로 항상 하나의 마스크로
+  // 합쳐집니다(전에 "확실히 마스크가 칠해지는지 확실히해"라고 요청하신 부분) — 그래야 여러 도구를
+  // 섞어 써도 전부 반영되니까요. 다만 그동안은 "지금 이 마스크에 뭐가 섞여 들어가 있는지"가 전혀
+  // 안 보여서, 예전에 칠해두고 잊어버린 브러시가 몰래 같이 들어가도 알 방법이 없었음 — 이제
+  // 미리보기 맨 위에 지금 포함된 항목을 종류별로 보여주고, 원치 않는 종류는 바로 그 자리에서
+  // 지울 수 있는 버튼을 붙임(닫고 사이드바 가서 초기화 버튼 찾을 필요 없음).
+  var _mkBrushCv = gE('draw-canvas');
+  var _mkHasBrush = false;
+  try{
+    if(_mkBrushCv && _mkBrushCv.width>0){
+      var _bd=_mkBrushCv.getContext('2d',{willReadFrequently:true}).getImageData(0,0,_mkBrushCv.width,_mkBrushCv.height).data;
+      for(var _bi2=3; _bi2<_bd.length; _bi2+=4){ if(_bd[_bi2]>10){ _mkHasBrush=true; break; } }
+    }
+  }catch(e){}
+  var _mkPolyCount=(G.polyAreas||[]).length, _mkArrowCount=(G.arrows||[]).length;
+  var summaryWrap = document.createElement('div');
+  summaryWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-width:600px';
+  function _mkSummaryChip(label, count, onClear){
+    if(!count) return;
+    var chip=document.createElement('div');
+    chip.style.cssText='display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);border-radius:20px;padding:5px 6px 5px 12px;font-size:11.5px;color:#fff';
+    var txt=document.createElement('span'); txt.textContent=label+(count===true?'':' '+count+'개');
+    chip.appendChild(txt);
+    var clr=document.createElement('button'); clr.type='button'; clr.textContent='지우기';
+    clr.style.cssText='padding:3px 9px;border-radius:14px;border:none;background:#f87171;color:#fff;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+    clr.onclick=function(){ onClear(); ov.remove(); _mkPreviewMask(); };
+    chip.appendChild(clr);
+    summaryWrap.appendChild(chip);
+  }
+  if(_mkHasBrush || _mkPolyCount || _mkArrowCount){
+    var summaryTitle=document.createElement('div');
+    summaryTitle.style.cssText='color:#9ca3af;font-size:11px;text-align:center';
+    summaryTitle.textContent='⬇️ 지금 이 마스크에 포함된 항목 (원치 않는 게 있으면 바로 지우세요)';
+    ov.appendChild(summaryTitle);
+    _mkSummaryChip('✏️ 브러시로 칠한 부분', _mkHasBrush, function(){ _resetBrushOnly(); });
+    _mkSummaryChip('⬠ 다각형·사각형', _mkPolyCount, function(){ _resetPolyAreasByMode('polygon'); _resetPolyAreasByMode('rect'); });
+    _mkSummaryChip('➡️ 화살표', _mkArrowCount, function(){ _resetArrowOnly(); });
+    ov.appendChild(summaryWrap);
+  }
 
   var canvasWrap = document.createElement('div');
   canvasWrap.style.cssText = 'position:relative;max-width:92vw;max-height:72vh;border-radius:10px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;background:#111';
