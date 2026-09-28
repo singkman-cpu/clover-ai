@@ -29924,6 +29924,22 @@ function _mkTotalActiveRegions(){
 function _mkAnyCategoryOverLimit(){
   return _mkBrushActiveCount()>MAX_BRUSH_REGIONS || _mkPolyActiveCount()>MAX_MASK_REGIONS || _mkArrowActiveCount()>MAX_ARROW_REGIONS;
 }
+// ⚠️ 버그 수정("다각형 클릭해서 마스크 적용된 거 볼려고 했는데 브러시탭으로 가서 거기서
+// 확인하는 거야? 상식적으로?"): 마스크 미리보기 버튼을 브러시 도구일 때·아닐 때 두 군데서
+// 똑같이 붙여야 해서(mkMask 내부, isBrushTool/!isBrushTool 두 분기) 코드를 하나로 뺌 — 도구가
+// 뭐든(브러시/다각형/사각형/화살표) 항상 같은 버튼, 같은 위치에서 미리보기를 볼 수 있음.
+function _mkAppendPreviewBtn(s){
+  var mpvWrap=dv('');mpvWrap.style.cssText='margin-top:10px';
+  var mpvHint=dv('');mpvHint.style.cssText='font-size:10px;color:var(--m2);margin-bottom:5px';
+  mpvHint.textContent='실행(크레딧 소모) 전에, 지정한 영역이 정확한지 먼저 확인해보세요 👇';
+  mpvWrap.appendChild(mpvHint);
+  var mpv=mk('button','');mpv.type='button';
+  mpv.style.cssText='width:100%;padding:10px;border-radius:9px;background:var(--acg);border:1.5px solid var(--acb);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
+  mpv.textContent='🔍 지정한 영역 미리보기 (마스크 확인)';
+  mpv.onclick=function(){ _mkPreviewMask(); };
+  mpvWrap.appendChild(mpv);
+  s.appendChild(mpvWrap);
+}
 function mkMask(p){
   // ⚠️ 버그 수정: "다른 이미지 불러와서 수정하려니 이전 이미지에 칠했던 영역이 그대로 남아있다"
   // — G.arrows/G.polyAreas/브러시 캔버스 등은 이미지가 아니라 전역 상태(G)와 localStorage/IndexedDB에
@@ -29947,17 +29963,14 @@ function mkMask(p){
 
   var s=dv('ss');
   s.innerHTML='<div class="lbl" style="color:var(--ac)">AI 마스크 편집 <span class="lbl-en" style="color:var(--ac2)">Mask Edit</span></div>';
-  var info=dv('note');
-  info.innerHTML='도구를 고르면 그 도구에 맞는 입력창만 아래에 나와요 — 브러시는 색상 팔레트, 화살표·영역선택은 각각의 목록이요.<br>'
-    +'<span style="color:var(--ac);font-size:10px">AI가 오브젝트를 자동으로 인식합니다 · Ctrl+Z: 실행취소</span>';
-  s.appendChild(info);
-  // ⚠️ 요청 반영: "편집 팁이 어디 적혀있는지 안 보인다" — 예전엔 색상별 입력창 3개를 다 지나야
-  // 나오는 아래쪽에, 작은 글씨로만 있어서 스크롤 안 하면 아예 안 보였음. 도구를 열자마자 바로
-  // 보이도록 맨 위(도구 선택 버튼보다도 위)로 옮기고, 눈에 확실히 띄게 배경색 있는 박스로
-  // 키움 — 이제 이 탭을 열면 무조건 제일 먼저 이 팁부터 보게 됨.
+  // ⚠️ 요청 반영("좌측 글을 졸라게 많네, 설명을 이렇게나 정신사납게 해놓고"): 예전엔 안내 문구
+  // 2개(info+tipBox)가 도구 버튼보다 먼저 항상 펼쳐진 채로 자리를 크게 차지했음 — 핵심 한 줄만
+  // 남기고, 나머지 설명은 클릭해야 펼쳐지는 <details>로 접어서 평소엔 한 줄로만 보이게 줄임.
   var tipBox=dv('');
-  tipBox.style.cssText='background:var(--acg,rgba(0,229,204,.12));border:1px solid var(--acb,rgba(0,229,204,.4));border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;line-height:1.6;color:var(--t,#fff)';
-  tipBox.innerHTML='✅ <b style="color:var(--ac,#00e5cc)">정확도 팁</b> — 영역을 잡았으면(브러시로 칠하거나, 화살표·다각형으로 지정) 수정 내용을 <b>구체적으로</b> 적어주세요. 그냥 "삭제해줘"보다 <b>"자동차 삭제해줘"</b>처럼 <u>오브젝트 이름을 같이</u> 써주면 훨씬 정확하게 수정됩니다 — 칠한 위치가 살짝 어긋나도 이름을 보고 AI가 스스로 보정할 수 있어요.';
+  tipBox.style.cssText='background:var(--acg,rgba(0,229,204,.12));border:1px solid var(--acb,rgba(0,229,204,.4));border-radius:9px;padding:8px 10px;margin-bottom:10px;font-size:11.5px;line-height:1.5;color:var(--t,#fff)';
+  tipBox.innerHTML='✅ <b style="color:var(--ac,#00e5cc)">정확도 팁</b>: "삭제해줘"보다 <b>"자동차 삭제해줘"</b>처럼 오브젝트 이름을 같이 적어주세요.'
+    +'<details style="margin-top:4px"><summary style="cursor:pointer;color:var(--m2);font-size:10.5px">더 보기</summary>'
+    +'<div style="margin-top:5px;color:var(--m2);font-size:10.5px;line-height:1.6">도구를 고르면 그 도구에 맞는 입력창만 아래에 나와요. AI가 오브젝트를 자동으로 인식합니다 · Ctrl+Z: 실행취소</div></details>';
   s.appendChild(tipBox);
   // ⚠️ 버그 수정: "여기는 왜 1K/2K/4K 선택하는 게 없냐" — 마스크 모드는 mkMask(p) 안에서 자체
   // 완결형으로 끝나고 일반 흐름(mkResolution 포함)으로 안 내려가는 구조라, 해상도 선택 UI 자체가
@@ -30100,8 +30113,8 @@ function mkMask(p){
   if(isPolyTool){
     var polyHint=dv('note');polyHint.style.cssText='font-size:10.5px;margin-bottom:8px';
     polyHint.innerHTML = (G.dm==='rect')
-      ? '💡 시작점에서 끝점까지 <b style="color:var(--t2)">드래그</b>하면 사각형 영역이 바로 만들어져요. 몇 개든 계속 그릴 수 있고, 그릴 때마다 아래 목록에 번호가 추가돼요.'
-      : '💡 점을 찍어 다각형을 그리세요. <b style="color:var(--t2)">닫기:</b> 시작점을 다시 클릭하거나 더블클릭 · <b style="color:var(--t2)">되돌리기:</b> 백스페이스로 마지막 점만 취소. 몇 개든 계속 그릴 수 있고, 확정할 때마다 아래 목록에 번호가 추가돼요.';
+      ? '💡 드래그로 사각형 영역 생성 · 여러 개 가능'
+      : '💡 점 클릭으로 다각형 · 닫기: 시작점 재클릭/더블클릭 · 백스페이스: 마지막 점 취소';
     s.appendChild(polyHint);
   }
   var polyAreaListWrap=dv('');polyAreaListWrap.id='poly-area-list-wrap';
@@ -30109,6 +30122,12 @@ function mkMask(p){
   if(isPolyTool){ s.appendChild(polyAreaListWrap); renderPolyAreaList(polyAreaListWrap); }
 
   if(!isBrushTool){
+    // ⚠️ 버그 수정(반복 신고 — "다각형 클릭해서 마스크 적용된 거 볼려고 했는데 브러시탭으로
+    // 가서 거기서 확인하는 거야? 상식적으로?"): 미리보기 버튼(_mkPreviewMask)이 지금까지
+    // isBrushTool 분기 안에서만 만들어져서, 다각형·사각형·화살표 도구를 쓰는 동안엔 이
+    // 브랜치(!isBrushTool)가 먼저 return 해버려 버튼 자체가 화면에 아예 안 나왔음 — 도구와
+    // 상관없이 항상 보이도록 여기서도 같은 버튼을 만들어 붙임.
+    _mkAppendPreviewBtn(s);
     // 브러시 팔레트/텍스트칸은 브러시·지우개 도구일 때만 보이게 아래에서 건너뜀
     var mbrSkip=dv('');mbrSkip.style.cssText='display:flex;gap:6px;margin-top:6px';
     var mapBtnSkip=mk('button','actbtn ok');mapBtnSkip.style.cssText='flex:1;font-size:12px;padding:9px';mapBtnSkip.innerHTML='선택 영역 수정 <span class="accr" style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+' cr</span>';
@@ -30186,14 +30205,10 @@ function mkMask(p){
   // 못해서, 칠한 영역 바깥에 있는 비슷한 물체까지 같이 바뀔 수 있음. 이걸 미리 알 수 있게 경고
   // 문구를 명확히 추가함.
   var meWarn=dv('');meWarn.style.cssText='font-size:10px;color:#fbbf24;margin-top:6px;line-height:1.5;padding:7px 9px;background:rgba(251,191,36,.08);border-radius:6px;border:1px solid rgba(251,191,36,.25)';
-  meWarn.innerHTML='⚠️ 다각형·사각형·화살표로 영역을 정확히 잡아서 "그 안의 것만" 바꾸거나 지우고 싶다면 반드시 <b>flux 인페인팅</b>을 선택하세요 — 나노바나나는 칠한 영역을 "대략적인 힌트"로만 참고해서, 화면에 비슷한 물체(예: 같은 종류의 가구·조명·가전)가 또 있으면 그것까지 같이 바뀔 수 있어요.';
+  meWarn.innerHTML='⚠️ "그 안의 것만" 정확히 바꾸려면 <b>flux 인페인팅</b> 선택 — 나노바나나는 대략적 힌트만 참고해서 비슷한 물체도 같이 바뀔 수 있어요.'
+    +'<details style="margin-top:3px"><summary style="cursor:pointer;color:var(--m2);font-size:9.5px">자동 전환 안내</summary>'
+    +'<div style="margin-top:4px;color:var(--m2);font-size:9.5px;line-height:1.5">위에서 고른 엔진 그대로 실행돼요(자동 전환 없음). 단, 색상별 레퍼런스 이미지를 첨부하면 flux는 이미지를 못 받아서 그 실행 한 번만 나노바나나로 자동 전환돼요.</div></details>';
   meWrap.appendChild(meWarn);
-  // ⚠️ 요청 반영("브러시·다각형·사각형·화살표 쓰면 자동으로 flux로 바뀌는 거야?"): 도구 종류와
-  // 상관없이 항상 위에서 직접 고른 엔진 그대로 실행된다는 걸 명확히 알려줌 — 유일한 예외(색상별
-  // 레퍼런스 이미지 첨부 시 flux를 못 써서 나노바나나로 자동 전환)도 같이 안내함.
-  var meAuto=dv('');meAuto.style.cssText='font-size:9.5px;color:var(--m2);margin-top:5px;line-height:1.5';
-  meAuto.innerHTML='ℹ️ 브러시·다각형·사각형·화살표 중 어떤 도구를 쓰든 상관없이, 항상 위에서 고른 엔진 그대로 실행돼요(자동으로 안 바뀝니다). 단, 아래에서 색상별로 "이 사진처럼 바꿔줘" 레퍼런스 이미지를 첨부하면 flux는 이미지를 못 받는 엔진이라 그 실행 한 번만 나노바나나로 자동 전환돼요.';
-  meWrap.appendChild(meAuto);
   s.appendChild(meWrap);
 
   // 색깔별 수정 내용 — 각 색으로 칠한 영역에 어떤 수정을 적용할지 따로 입력
@@ -30250,23 +30265,16 @@ function mkMask(p){
   });
   s.appendChild(promptsWrap);
   var noteMulti=dv('note');noteMulti.style.cssText='font-size:10px;margin-bottom:6px';
-  noteMulti.innerHTML='💡 색 하나만 써도 되고, 여러 색으로 오브젝트를 구분해서 칠한 뒤 각각 다른 내용/이미지를 넣어도 돼요. 🖼️ 아이콘을 눌러 "이 사진처럼 바꿔줘" 이미지를 넣을 수 있어요.';
+  noteMulti.innerHTML='💡 색상별로 다른 오브젝트를 칠하고 각각 다른 내용을 적을 수 있어요 · 🖼️ 아이콘 = 참고이미지';
   s.appendChild(noteMulti);
 
   // ⚠️ 요청 반영("미리보기 버튼 어디있는지 안 보이네, 잘 보이게 해줘 — 회원들도 알아야지"):
   // 실행 버튼 옆에 작은 텍스트 버튼으로 끼워넣었더니 좁은 사이드바에서 3개 버튼이 한 줄에
   // 몰려 눈에 잘 안 띄었음 — 자체 줄로 분리해서 강조 색 테두리를 준 큼직한 전체 너비 버튼으로
   // 바꾸고, "실행 전에 꼭 확인하라"는 안내 문구까지 바로 위에 붙여서 절대 놓칠 수 없게 함.
-  var mpvWrap=dv('');mpvWrap.style.cssText='margin-top:10px';
-  var mpvHint=dv('');mpvHint.style.cssText='font-size:10px;color:var(--m2);margin-bottom:5px';
-  mpvHint.textContent='실행(크레딧 소모) 전에, 지정한 영역이 정확한지 먼저 확인해보세요 👇';
-  mpvWrap.appendChild(mpvHint);
-  var mpv=mk('button','');mpv.type='button';
-  mpv.style.cssText='width:100%;padding:10px;border-radius:9px;background:var(--acg);border:1.5px solid var(--acb);color:var(--ac);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit';
-  mpv.textContent='🔍 지정한 영역 미리보기 (마스크 확인)';
-  mpv.onclick=function(){ _mkPreviewMask(); };
-  mpvWrap.appendChild(mpv);
-  s.appendChild(mpvWrap);
+  // (브러시가 아닌 다각형·사각형·화살표 도구일 때도 똑같이 보이도록 !isBrushTool 분기와 공유하는
+  // 헬퍼로 뺐음 — _mkAppendPreviewBtn 참고)
+  _mkAppendPreviewBtn(s);
 
   var mbr=dv('');mbr.style.cssText='display:flex;gap:6px;margin-top:8px';
   var mapBtn=mk('button','actbtn ok');mapBtn.style.cssText='flex:1;font-size:12px;padding:9px';mapBtn.innerHTML='선택 영역 수정 <span class="accr" style="font-size:10px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 6px;margin-left:4px">'+getCost()+' cr</span>';
@@ -30705,6 +30713,19 @@ function _mkBuildCompositeMask(){
 // 지정한 범위가 실제로 AI에게 "여기만 수정, 나머지는 원본 유지"로 어떻게 전달되는지 눈으로
 // 직접 확인할 수 있게, 원본 사진 위에 흰 마스크 영역을 반투명 하이라이트로 겹쳐 보여주는
 // 미리보기를 만듦(실행 버튼을 누르지 않고도 확인 가능, 크레딧 소모 없음).
+// ⚠️ 버그 수정(치명적, 반복 신고 — "화이트/블랙으로 보여달랬더니 왜 청록색이냐", "브러시 위치랑
+// 이미지 위치가 안 맞는다"): 예전 방식은 사진 <img>와 마스크 <img> 두 장을 CSS로 겹쳐놓고
+// mix-blend-mode/hue-rotate 필터로 청록색처럼 "보이게만" 만든 것이었음 — (1) 색 자체가 사용자가
+// 명시적으로 원치 않는다고 한 청록색이었고, (2) 두 개의 서로 다른 <img> 엘리먼트를 브라우저
+// 레이아웃(퍼센트 크기·object-fit)에 맡겨 겹치는 방식이라, 폰트 로딩·리플로우 타이밍에 따라
+// 실제 픽셀 단위로 미세하게 어긋날 여지가 있었음. 이제 원본 사진과 마스크를 "하나의 <canvas>"에
+// 정확히 같은 좌표(원본 이미지 픽셀 좌표계)로 직접 그려서 완전히 하나의 비트맵으로 합쳐버림 —
+// 레이아웃 어긋남이 원천적으로 불가능해짐(같은 캔버스 위의 같은 좌표는 항상 같은 자리). 그리고
+// 보기 방식도 청록색 틴트 대신 요청대로 "흰색/검정" 그대로 확인할 수 있는 탭을 추가함:
+// · 겹쳐보기(기본): 원본 사진 위에서, 수정될 영역(흰색)만 반투명 흰색으로 밝게 뜨고 그 외
+//   (검정)는 사진이 원래 색 그대로 보임 — 청록색 없음.
+// · 마스크만(흑백): 사진 없이 순수 흑백 마스크 그 자체(흰색=수정될 곳, 검정=원본 유지)만 표시 —
+//   가장 정확하게 흰색/검정을 눈으로 확인하고 싶을 때.
 function _mkPreviewMask(){
   var _mask = _mkBuildCompositeMask();
   if(!_mask){
@@ -30716,26 +30737,91 @@ function _mkPreviewMask(){
   if(ov) ov.remove();
   ov = document.createElement('div');
   ov.id = 'mk-mask-preview-ov';
-  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:14px';
-  var wrap = document.createElement('div');
-  wrap.style.cssText = 'position:relative;max-width:92vw;max-height:78vh;border-radius:10px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.15)';
-  var baseImg = document.createElement('img');
-  baseImg.src = origSrc || _mask;
-  baseImg.style.cssText = 'display:block;max-width:92vw;max-height:78vh;width:auto;height:auto';
-  var maskImgEl = document.createElement('img');
-  maskImgEl.src = _mask;
-  // 흰색(수정할 곳)만 청록색 반투명으로 보이고, 검정(원본 유지)은 완전 투명하게 — CSS
-  // mix-blend-mode 'screen'은 검정을 투명한 것처럼 보이게 하는 효과를 냄(합성 없이 즉시 표시).
-  maskImgEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;mix-blend-mode:screen;opacity:.55;filter:sepia(1) saturate(6) hue-rotate(130deg)';
-  wrap.appendChild(baseImg); wrap.appendChild(maskImgEl);
+  ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:12px';
+
+  var canvasWrap = document.createElement('div');
+  canvasWrap.style.cssText = 'position:relative;max-width:92vw;max-height:72vh;border-radius:10px;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;background:#111';
+  var previewCv = document.createElement('canvas');
+  previewCv.style.cssText = 'display:block;max-width:92vw;max-height:72vh;width:auto;height:auto';
+  canvasWrap.appendChild(previewCv);
+
+  var loadingNote = document.createElement('div');
+  loadingNote.style.cssText = 'color:#9ca3af;font-size:12px';
+  loadingNote.textContent = '불러오는 중...';
+  canvasWrap.appendChild(loadingNote);
+
+  // 보기 방식 전환 탭 — "겹쳐보기" / "마스크만(흑백)"
+  var tabWrap = document.createElement('div');
+  tabWrap.style.cssText = 'display:flex;gap:6px;background:rgba(255,255,255,.08);border-radius:9px;padding:4px';
+  var viewMode = 'overlay'; // 'overlay' | 'maskonly'
+  var tabOverlay = document.createElement('button');
+  var tabMaskOnly = document.createElement('button');
+  [tabOverlay, tabMaskOnly].forEach(function(b){
+    b.type='button';
+    b.style.cssText='padding:7px 14px;border-radius:7px;border:none;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+  });
+  tabOverlay.textContent='🖼️ 사진 위에 겹쳐보기';
+  tabMaskOnly.textContent='⬛️⬜️ 마스크만 (흑백)';
+
   var cap = document.createElement('div');
   cap.style.cssText = 'color:#fff;font-size:12.5px;text-align:center;line-height:1.6;max-width:600px';
-  cap.innerHTML = '🟢 <b>청록색으로 빛나는 부분</b> = AI가 실제로 수정할 영역(마스크 흰색)<br>그 외 어두운 부분 = 원본 그대로 100% 유지되는 영역(마스크 검정)<br><span style="color:#9ca3af">의도한 곳과 다르면 닫고 브러시/도형을 다시 조정하세요.</span>';
+
+  function paintTabs(){
+    tabOverlay.style.background = viewMode==='overlay' ? 'var(--ac,#00e5cc)' : 'transparent';
+    tabOverlay.style.color = viewMode==='overlay' ? '#000' : '#fff';
+    tabMaskOnly.style.background = viewMode==='maskonly' ? 'var(--ac,#00e5cc)' : 'transparent';
+    tabMaskOnly.style.color = viewMode==='maskonly' ? '#000' : '#fff';
+  }
+  paintTabs();
+
+  var origImgEl=null, maskImgEl=null, ready=0;
+  function draw(){
+    if(ready<2) return;
+    loadingNote.style.display='none';
+    var W = origImgEl.naturalWidth || maskImgEl.naturalWidth;
+    var H = origImgEl.naturalHeight || maskImgEl.naturalHeight;
+    previewCv.width = W; previewCv.height = H;
+    var ctx = previewCv.getContext('2d');
+    if(viewMode==='maskonly'){
+      // 순수 흑백 마스크 그대로: 흰색=수정될 곳, 검정=원본 유지. 색 보정 없음.
+      ctx.drawImage(maskImgEl, 0, 0, W, H);
+      cap.innerHTML = '⬜️ <b>흰색</b> = AI가 실제로 수정할 영역 (마스크 흰색)<br>⬛️ <b>검정</b> = 원본 그대로 100% 유지되는 영역 (마스크 검정)';
+    } else {
+      // 겹쳐보기: 같은 캔버스, 같은 좌표에 사진 → 그 위에 흰색 마스크를 반투명 화이트로만 겹침
+      // (청록/색조 필터 전혀 없음 — 순수 흰색 반투명이라 "흰색 부분이 밝아짐"으로 보임).
+      ctx.drawImage(origImgEl, 0, 0, W, H);
+      var mCv=document.createElement('canvas'); mCv.width=W; mCv.height=H;
+      var mCtx=mCv.getContext('2d');
+      mCtx.drawImage(maskImgEl, 0, 0, W, H);
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.globalCompositeOperation = 'lighten';
+      ctx.drawImage(mCv, 0, 0, W, H);
+      ctx.restore();
+      cap.innerHTML = '⬜️ <b>밝게 겹쳐 보이는 흰색 부분</b> = AI가 실제로 수정할 영역(마스크 흰색)<br>그 외 원본 사진 그대로 보이는 부분 = 100% 유지되는 영역(마스크 검정)<br><span style="color:#9ca3af">의도한 곳과 다르면 닫고 브러시/도형을 다시 조정하세요.</span>';
+    }
+  }
+  tabOverlay.onclick=function(){ viewMode='overlay'; paintTabs(); draw(); };
+  tabMaskOnly.onclick=function(){ viewMode='maskonly'; paintTabs(); draw(); };
+  tabWrap.appendChild(tabOverlay); tabWrap.appendChild(tabMaskOnly);
+
+  // ⚠️ crossOrigin='anonymous'을 일부러 안 씀 — 여긴 화면에 그리기만 하고 픽셀을 다시 읽지는
+  // 않아서(toDataURL 등 없음) CORS 헤더 여부와 상관없이 항상 표시는 되어야 하는데, crossOrigin을
+  // 지정하면 서버가 CORS 헤더를 안 주는 경우 아예 로드 자체가 실패(onerror)해버리는 문제가 있음.
+  origImgEl=new Image();
+  origImgEl.onload=function(){ ready++; draw(); };
+  origImgEl.onerror=function(){ ready++; draw(); };
+  origImgEl.src = origSrc || _mask;
+  maskImgEl=new Image();
+  maskImgEl.onload=function(){ ready++; draw(); };
+  maskImgEl.onerror=function(){ ready++; draw(); };
+  maskImgEl.src = _mask;
+
   var closeBtn = document.createElement('button');
   closeBtn.type='button'; closeBtn.textContent='닫기';
   closeBtn.style.cssText = 'padding:10px 22px;border-radius:8px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:700;font-size:13px;cursor:pointer;font-family:inherit';
   closeBtn.onclick = function(){ ov.remove(); };
-  ov.appendChild(wrap); ov.appendChild(cap); ov.appendChild(closeBtn);
+  ov.appendChild(tabWrap); ov.appendChild(canvasWrap); ov.appendChild(cap); ov.appendChild(closeBtn);
   ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
   document.body.appendChild(ov);
 }
@@ -31205,11 +31291,24 @@ function togDraw(on, mode){
     if(origImg){
       var tmpI=new Image();
       tmpI.onload=function(){
-        cv.width=tmpI.naturalWidth;
-        cv.height=tmpI.naturalHeight;
+        // ⚠️ 버그 수정(치명적, "브러시로 그린게 이미지랑 안 맞는다/사라진다" 반복 신고의 진짜 원인):
+        // <canvas>는 .width/.height에 "같은 값"을 다시 대입해도 무조건 비트맵 내용을 통째로
+        // 지워버림(HTML5 캔버스 스펙 동작) — 그런데 이 함수는 브러시↔다각형↔사각형↔화살표처럼
+        // 도구를 바꿀 때마다(같은 사진을 계속 편집 중인데도) 매번 호출되면서 매번 무조건
+        // cv.width=...; cv.height=...; 를 실행하고 있었음. 즉 브러시로 열심히 칠한 뒤 다각형
+        // 도구로 한 번만 바꿔도, 다시 브러시로 돌아왔을 때 방금 칠한 픽셀이 소리소문없이
+        // 전부 지워져 있었음 — 사용자가 "브러시 위치랑 이미지 위치가 다르다/칠한 게 안 맞는다"고
+        // 느낀 현상의 실제 원인 중 하나. 이제 캔버스 크기가 지금과 "정말로 달라질 때"(다른
+        // 사진으로 바뀌었을 때)만 리셋하고, 같은 사진 위에서 도구만 바꾸는 경우엔 크기를 건드리지
+        // 않아서 이미 칠해둔 픽셀이 그대로 보존됨.
+        var _sizeChanged = (cv.width!==tmpI.naturalWidth || cv.height!==tmpI.naturalHeight);
+        if(_sizeChanged){
+          cv.width=tmpI.naturalWidth;
+          cv.height=tmpI.naturalHeight;
+        }
         // ⚠️ 요청 반영: 브러시로 칠한 내용이 새로고침하면 사라지던 문제 — IndexedDB에 저장해둔
         // 이전 캔버스 내용이 있으면 여기서 복원함(캔버스가 새로 만들어지는 이 시점에만 필요).
-        if(G._pendingMaskCanvasRestore){
+        if(_sizeChanged && G._pendingMaskCanvasRestore){
           var _restoreImg=new Image();
           _restoreImg.onload=function(){
             try{ cv.getContext('2d').drawImage(_restoreImg,0,0,cv.width,cv.height); }catch(e){}
