@@ -13006,7 +13006,16 @@ function mkResolution(p){
     var crForThis = getCost(G.wf);
     getTab(G.wf).resolution = savedRes;
     b.innerHTML=ro.label+'<br><span style="font-size:9px;color:'+(getTab(G.wf).resolution===ro.k?'var(--ac)':'var(--m2)')+'">'+crForThis+'cr</span>';
-    b.onclick=function(){
+    // ⚠️ 버그 수정("2K에서 1K로 바꿀 때 마우스 튕기네, 다시 클릭해야 하네"): 일반 click 이벤트는
+    // "mousedown과 mouseup이 같은 엘리먼트에서 일어나야만" 발생함 — 그런데 이 사이드바 어딘가에서
+    // (예: 다른 입력창의 blur 처리, 실시간 크레딧/잔액 갱신 등) mousedown과 mouseup 사이에 레이아웃이
+    // 살짝 흔들리면, 화면상 커서 위치는 그대로인데 그 아래 있는 실제 엘리먼트가 바뀌어버려서 click
+    // 자체가 아예 발생하지 않음(그래서 사용자 눈에는 "누른 게 안 먹히고 화면만 밀린" 것처럼 보임 —
+    // 다시 누르면 그땐 흔들림이 끝난 뒤라 정상 작동). pointerdown은 누르는 "그 순간" 바로 발생해서
+    // 이후 레이아웃이 흔들려도 영향을 안 받으므로, 버튼 로직을 pointerdown에서 즉시 실행하도록
+    // 옮김(click은 혹시 모를 구형 환경 대비로 그대로 남겨둠 — 로직 자체가 멱등이라 두 번 실행돼도
+    // 문제없음).
+    function _applyRes(){
       getTab(G.wf).resolution=ro.k;
       // 버튼 스타일 + cr 표시 업데이트
       g.querySelectorAll('button').forEach(function(x,i){
@@ -13022,7 +13031,9 @@ function mkResolution(p){
       });
       _refreshResInfo();
       updBtn();
-    };
+    }
+    b.onpointerdown=function(e){ e.preventDefault(); _applyRes(); };
+    b.onclick=_applyRes;
     g.appendChild(b);
   });
   w.appendChild(g);
@@ -31022,6 +31033,14 @@ function _mkMaskExecuteInner(){
   if(/삭제|제거|지워|없애/.test(combined)){
     combined += ' ⚠️⚠️ "삭제/제거/지워줘"라고 지시한 부분에 대해(매우 중요, 반드시 지킬 것): 그 물건을 흐릿하게 지우거나 반투명하게 만드는 게 아니라, 마치 그 물건이 애초에 거기 없었던 것처럼 — 그 자리 뒤에 있던 표면(조리대·바닥·벽 등)이 끊김 없이 자연스럽게 이어지는 사진을 다시 찍었다고 생각하고 그리세요. 그 물건의 형태·그림자·윤곽의 흔적이 조금이라도 남아있으면 명백한 실패입니다 — 그 자리는 완전히 빈 표면이어야 합니다. ⚠️⚠️ 어떤 표면으로 채워야 하는지 반드시 먼저 판단하세요(매우 중요, 반복 실패 사례): 지운 물건 바로 뒤에 있던 표면이 정확히 무엇인지(천장인지, 벽인지, 바닥인지, 그 마감재의 종류·색상·패턴이 무엇인지) 주변을 보고 정확히 식별한 다음, 오직 그 표면만 끊김 없이 이어서 채우세요 — 예를 들어 천장에 붙어있던 물건을 지웠다면 그 자리는 반드시 천장과 같은 재질·색상으로 채워야 하며, 옆에 있는 벽의 나무 마감재 같은 엉뚱한 다른 재질이 그 자리를 침범하면 명백한 실패입니다. ⚠️⚠️ 그 자리에 어떤 새로운 사물도 만들어 넣지 마세요(매우 중요, 반복 실패 사례): 선반, 박스, 패널, 액자, 장식품 등 원래 없었던 그 어떤 새 오브젝트도 지운 자리에 생겨나면 안 됩니다 — 결과는 반드시 아무것도 없는 평범하고 매끈한 표면이어야 합니다. 만약 지정한 영역이 유리창·통유리처럼 반사가 있는 표면이거나 그 표면에 비친 반사상(멀리 있는 건물의 간판·글자가 유리에 비쳐 보이는 경우)이라면: 유리 자체를 없애거나 불투명하게 만들지 말고, 유리는 투명하게 그대로 둔 채 그 위에 비친 반사(간판 글자 등)만 지우세요 — 유리 뒤로 실제 보이는 배경과 다른 반사는 그대로 유지하세요.';
   }
+  // ⚠️ 버그 수정(신고: "다각형으로 자동차 선택하고 흰색차로 교체해달라고 했는데, 원래 차는 그대로
+  // 있고 그 앞에 흰색 차가 새로 하나 더 생겼다 — 마스크는 분명히 정확했는데도"): "교체/바꿔줘"는
+  // AI 입장에서 "이 영역 안에 새 오브젝트를 하나 추가하라"로도 해석될 여지가 있어서, 원래
+  // 있던 물체를 지우지 않고 그 옆/앞에 새 물체만 덧그리는 실패가 반복됨 — "삭제"와 똑같이
+  // "교체"도 명시적으로 "원래 물체를 완전히 없애고 그 자리에 새 물체를 놓으라"고 강하게 못박음.
+  if(/교체|바꿔|바꾸/.test(combined)){
+    combined += ' ⚠️⚠️ "교체/바꿔줘"라고 지시한 부분에 대해(매우 중요, 반복 실패 사례 — 원래 있던 물체는 그대로 남아있고 그 옆이나 앞에 새 물체가 하나 더 생기는 경우): 이건 "새 물체를 추가로 그려 넣으라"는 뜻이 아니라 "원래 있던 그 물체를 완전히 없애고 정확히 같은 자리에 새 물체를 대신 놓으라"는 뜻입니다. 먼저 지정된 영역 안의 원래 물체를 마치 처음부터 없었던 것처럼 완전히 지우고(형태·그림자·윤곽이 조금도 남지 않게), 그런 다음 그 자리에 새 물체(지시한 색상·종류·디자인)를 원래 물체와 똑같은 위치·크기·각도·원근으로 놓아서 사진 전체의 구도가 자연스럽게 유지되도록 하세요. 원래 물체와 새 물체가 동시에 같이 보이거나, 새 물체가 원래 물체 앞·뒤·옆에 별도로 추가된 것처럼 보이면 명백한 실패입니다 — 그 자리에는 새 물체 딱 하나만 있어야 합니다.';
+  }
   if(G.arrows && G.arrows.length){
     var arrCv=gE('draw-canvas');
     var arrParts=G.arrows.filter(function(a){return (a.label||'').trim() || a.refImg;}).map(function(a,i){
@@ -31805,7 +31824,15 @@ function initRectMode(cv){
     // 무시되곤 했음. 바로 위에서 이미 polyOv.ondblclick=null로 더블클릭 핸들러 자체를 꺼뒀으니
     // (다각형 모드의 "더블클릭으로 확정" 기능과 안 겹침), 이 detail 체크는 더 이상 필요 없어서 제거함.
     dragging=true;
+    // ⚠️ 버그 수정(신고: "사각형을 하나 그렸더니 사진 범위를 훌쩍 벗어나는 엉뚱한 크기·위치로
+    // 잡혔다"): mousedown~mousemove~mouseup 세 시점마다 매번 새로 polyOv.getBoundingClientRect()를
+    // 호출했는데, 그 사이에(예: 해상도 버튼 클릭 직후 이미지가 다시 로드되며 레이아웃이 미세하게
+    // 바뀌는 등) 화면 레이아웃이 살짝이라도 바뀌면 시작점과 끝점이 서로 다른 좌표 기준으로
+    // 계산되어 폭/높이가 실제 드래그와 전혀 다르게(때로는 사진 밖으로 튀어나가게 거대하게) 계산됨.
+    // → 드래그가 시작될 때 딱 한 번만 기준 좌표를 재서 드래그가 끝날 때까지(mousemove/mouseup은
+    // 물론 finishPolygon의 최종 변환까지) 계속 같은 기준을 쓰도록 고정함.
     var r=polyOv.getBoundingClientRect();
+    G._drawOvRect=r;
     startX=e.clientX-r.left; startY=e.clientY-r.top;
     rectEl.style.display='block';
     rectEl.setAttribute('x',startX); rectEl.setAttribute('y',startY);
@@ -31813,7 +31840,7 @@ function initRectMode(cv){
   };
   polyOv.onmousemove=function(e){
     if(!dragging) return;
-    var r=polyOv.getBoundingClientRect();
+    var r=G._drawOvRect||polyOv.getBoundingClientRect();
     var curX=e.clientX-r.left, curY=e.clientY-r.top;
     var x=Math.min(startX,curX), y=Math.min(startY,curY);
     var w=Math.abs(curX-startX), h=Math.abs(curY-startY);
@@ -31823,16 +31850,17 @@ function initRectMode(cv){
   polyOv.onmouseup=function(e){
     if(!dragging) return;
     dragging=false;
-    var r=polyOv.getBoundingClientRect();
+    var r=G._drawOvRect||polyOv.getBoundingClientRect();
     var curX=e.clientX-r.left, curY=e.clientY-r.top;
     var x1=Math.min(startX,curX), y1=Math.min(startY,curY);
     var x2=Math.max(startX,curX), y2=Math.max(startY,curY);
     rectEl.style.display='none';
-    if(Math.abs(x2-x1)<8 || Math.abs(y2-y1)<8) return; // 너무 작은 드래그(실수 클릭)는 무시
+    if(Math.abs(x2-x1)<8 || Math.abs(y2-y1)<8){ G._drawOvRect=null; return; } // 너무 작은 드래그(실수 클릭)는 무시
     // 사각형 4개 모서리를 다각형 점으로 등록하고, 기존 finishPolygon과 동일한 letterbox 보정
     // 방식으로 원본 해상도 좌표로 변환해서 저장 — 다각형과 완전히 같은 데이터 형태로 취급됨.
     G.polyPts=[[x1,y1],[x2,y1],[x2,y2],[x1,y2]];
     finishPolygon(cv,polyOv);
+    G._drawOvRect=null;
   };
 }
 function initPolygonMode(cv){
@@ -31886,7 +31914,12 @@ function initPolygonMode(cv){
       document.activeElement.blur();
     }
     if(e.detail===2){finishPolygon(cv,polyOv);return;}
-    var rect=polyOv.getBoundingClientRect();
+    // ⚠️ 버그 수정(사각형과 동일한 원인): 다각형도 점을 찍을 때마다 매번 새로 rect를 재서 쓰면,
+    // 점을 찍는 도중 레이아웃이 살짝 바뀔 경우 점들끼리 서로 다른 좌표 기준을 갖게 되어 최종
+    // 영역이 일그러지거나 엉뚱한 위치/크기로 잡힘 — 새 다각형을 시작하는 첫 점에서만 기준
+    // 좌표를 재고, 그 다각형을 확정할 때까지(finishPolygon 포함) 계속 같은 기준을 씀.
+    if(G.polyPts.length===0) G._drawOvRect=polyOv.getBoundingClientRect();
+    var rect=G._drawOvRect||polyOv.getBoundingClientRect();
     var px=e.clientX-rect.left, py=e.clientY-rect.top;
     // 점이 3개 이상 찍힌 상태에서 시작점 근처를 다시 클릭하면, 더블클릭과 똑같이 영역을 닫음
     // (대부분의 그림판/디자인 툴에서 익숙한 방식 — 더블클릭 몰라도 자연스럽게 닫을 수 있게 함)
@@ -31905,7 +31938,7 @@ function initPolygonMode(cv){
   };
   polyOv.onmousemove=function(e){
     if(!G.polyPts.length)return;
-    var rect=polyOv.getBoundingClientRect();
+    var rect=G._drawOvRect||polyOv.getBoundingClientRect();
     var last=G.polyPts[G.polyPts.length-1];
     previewLine.setAttribute('x1',last[0]);previewLine.setAttribute('y1',last[1]);
     previewLine.setAttribute('x2',e.clientX-rect.left);previewLine.setAttribute('y2',e.clientY-rect.top);
@@ -31955,7 +31988,11 @@ function finishPolygon(cv,polyOv){
     alert('다각형·사각형은 합쳐서 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
     return;
   }
-  var rect=polyOv.getBoundingClientRect();
+  // ⚠️ 버그 수정: 점을 찍는 동안 썼던 것과 반드시 같은 기준 좌표(G._drawOvRect)를 여기서도
+  // 그대로 써야 함 — 여기서 새로 polyOv.getBoundingClientRect()를 다시 재면, 그 사이 레이아웃이
+  // 조금이라도 바뀌었을 때 점 찍을 때 기준과 지금 기준이 달라져서 최종 영역이 엉뚱하게 계산됨.
+  var rect=G._drawOvRect||polyOv.getBoundingClientRect();
+  G._drawOvRect=null;
   // ⚠️ 버그 수정(근본 원인 해결): "추정 계산" 대신 실제 이미지 엘리먼트의 진짜 위치를 직접
   // 측정해서 사용(_getMaskDrawRect) — 어떤 이미지 비율·레이아웃이든 항상 정확함.
   var letterboxRect = _getMaskDrawRect(cv);
