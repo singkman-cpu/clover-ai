@@ -30657,7 +30657,16 @@ function _hexToRgb(hex){
   var n=parseInt(h,16);
   return [(n>>16)&255, (n>>8)&255, n&255];
 }
-function _mkBuildCompositeMask(){
+// ⚠️ 버그 수정(치명적, "삭제하기 전에 마스크가 잘 들어갔는지 확인이 돼야지" — 정확한 지적):
+// 바로 이전 수정에서 "지시(텍스트/참고이미지) 없는 영역은 마스크에서 제외"하도록 바꿨는데, 이걸
+// 미리보기에도 그대로 적용해버려서 — 정작 "영역 위치가 맞는지부터 먼저 확인하고, 그 다음에
+// 뭐라고 지시할지 적겠다"는 지극히 정상적인 순서를 막아버렸음(도형만 그리고 텍스트는 아직 없는
+// 상태에서 미리보기를 누르면 "영역이 없다"고 나옴). 위치 확인(미리보기)과 실제 실행(execute)은
+// 서로 다른 목적이므로 분리함: requireDirected=false(미리보기)면 지시 유무와 상관없이 지금까지
+// 그린 모든 영역을 있는 그대로 보여주고(위치·크기 확인용), requireDirected=true(실제 실행, 기본값)
+// 일 때만 지시 없는 영역을 마스크에서 제외해서 실수로 안 바뀌게 보호함.
+function _mkBuildCompositeMask(requireDirected){
+  if(requireDirected===undefined) requireDirected=true;
   var _maskCanvasForComposite = gE('draw-canvas');
   var _compositeMaskDataUrl = null;
   if(_maskCanvasForComposite && _maskCanvasForComposite.width>0){
@@ -30690,24 +30699,27 @@ function _mkBuildCompositeMask(){
       for(var _bi=0; _bi<_brushData.length; _bi+=4){
         var _alpha = _brushData[_bi+3];
         var _painted = _alpha>10;
-        if(_painted && _mkDirectedColorList.length){
-          // 이 픽셀이 실제로 칠해진 색이 "지시가 있는 색" 중 하나와 가까운지 확인(anti-aliasing
-          // 경계는 약간의 오차를 허용). 어떤 지시 색과도 안 맞으면(예: 지시 없는 색으로 칠함)
-          // 이 픽셀은 보호(제외)함.
-          var _r8=_brushData[_bi], _g8=_brushData[_bi+1], _b8=_brushData[_bi+2];
-          var _matched=false;
-          for(var _dc=0; _dc<_mkDirectedColorList.length; _dc++){
-            var _dcRgb=_mkDirectedColorList[_dc];
-            if(Math.abs(_r8-_dcRgb[0])<40 && Math.abs(_g8-_dcRgb[1])<40 && Math.abs(_b8-_dcRgb[2])<40){ _matched=true; break; }
+        if(requireDirected){
+          if(_painted && _mkDirectedColorList.length){
+            // 이 픽셀이 실제로 칠해진 색이 "지시가 있는 색" 중 하나와 가까운지 확인(anti-aliasing
+            // 경계는 약간의 오차를 허용). 어떤 지시 색과도 안 맞으면(예: 지시 없는 색으로 칠함)
+            // 이 픽셀은 보호(제외)함.
+            var _r8=_brushData[_bi], _g8=_brushData[_bi+1], _b8=_brushData[_bi+2];
+            var _matched=false;
+            for(var _dc=0; _dc<_mkDirectedColorList.length; _dc++){
+              var _dcRgb=_mkDirectedColorList[_dc];
+              if(Math.abs(_r8-_dcRgb[0])<40 && Math.abs(_g8-_dcRgb[1])<40 && Math.abs(_b8-_dcRgb[2])<40){ _matched=true; break; }
+            }
+            _painted = _matched;
+          } else if(_painted && !_mkDirectedColorList.length){
+            // 지시(텍스트/참고이미지)가 있는 브러시 색이 하나도 없으면 브러시 전체를 보호(제외) —
+            // "칠하기만 하고 지시는 안 적은" 상태로 실행 버튼을 누르면 애초에 "수정할 내용을
+            // 입력해주세요" 경고가 뜨지만(_mkMaskExecuteInner), 미리보기에서는 이 상태를 정확히
+            // 반영해서 "아직 아무것도 실제로 적용 안 됨"을 그대로 보여줌.
+            _painted = false;
           }
-          _painted = _matched;
-        } else if(_painted && !_mkDirectedColorList.length){
-          // 지시(텍스트/참고이미지)가 있는 브러시 색이 하나도 없으면 브러시 전체를 보호(제외) —
-          // "칠하기만 하고 지시는 안 적은" 상태로 실행 버튼을 누르면 애초에 "수정할 내용을
-          // 입력해주세요" 경고가 뜨지만(_mkMaskExecuteInner), 미리보기에서는 이 상태를 정확히
-          // 반영해서 "아직 아무것도 실제로 적용 안 됨"을 그대로 보여줌.
-          _painted = false;
         }
+        // requireDirected===false(위치 확인용 미리보기)면 지시 유무와 상관없이 칠한 픽셀은 전부 포함.
         if(_painted) _hasBrushPx=true;
         var _v = _painted ? 255 : 0;
         _outD[_bi]=_v; _outD[_bi+1]=_v; _outD[_bi+2]=_v; _outD[_bi+3]=255;
@@ -30721,7 +30733,7 @@ function _mkBuildCompositeMask(){
       (G.polyAreas||[]).forEach(function(a){
         if(!a.points || a.points.length<3) return;
         var _directed = (a.label||'').trim() || a.refImg;
-        if(!_directed) return;
+        if(requireDirected && !_directed) return;
         _hasDirectedPoly=true;
         _mctx.beginPath();
         _mctx.moveTo(a.points[0][0], a.points[0][1]);
@@ -30739,7 +30751,7 @@ function _mkBuildCompositeMask(){
       (G.arrows||[]).forEach(function(a){
         if(typeof a.x2!=='number' || typeof a.y2!=='number') return;
         var _directed = (a.label||'').trim() || a.refImg;
-        if(!_directed) return;
+        if(requireDirected && !_directed) return;
         _hasDirectedArrow=true;
         var _r = Math.max(_mcv.width, _mcv.height) * 0.12; // 화살표가 가리키는 오브젝트가 대략 들어올 만한 넉넉한 반경
         _mctx.beginPath();
@@ -30789,11 +30801,20 @@ function _mkBuildCompositeMask(){
 // · 마스크만(흑백): 사진 없이 순수 흑백 마스크 그 자체(흰색=수정될 곳, 검정=원본 유지)만 표시 —
 //   가장 정확하게 흰색/검정을 눈으로 확인하고 싶을 때.
 function _mkPreviewMask(){
-  var _mask = _mkBuildCompositeMask();
+  // ⚠️ 버그 수정(정확한 지적 — "삭제하기 전에 마스크가 잘 들어갔는지 확인이 돼야지, 삭제 지시를
+  // 먼저 해야 하는 게 맞는 거 아니야?"): 미리보기는 "영역 위치·크기가 맞는지"를 확인하는 용도라,
+  // 아직 뭐라고 수정할지 텍스트를 안 적은 상태에서도 당연히 보여야 함 — requireDirected=false로
+  // 호출해서 지시 유무와 상관없이 지금까지 그린 모든 영역을 그대로 보여줌(실제 실행 시에만 지시
+  // 없는 영역이 제외됨 — _mkMaskExecuteInner 참고).
+  var _mask = _mkBuildCompositeMask(false);
   if(!_mask){
     alert('아직 브러시·다각형·사각형·화살표로 지정한 영역이 없어요. 먼저 영역을 지정한 뒤 다시 눌러주세요.');
     return;
   }
+  // 지시(텍스트/참고이미지)가 없어서 "실제 실행 시에는 제외될" 영역이 하나라도 있으면, 위치 확인
+  // 화면에서도 그 사실을 놓치지 않도록 살짝 알려줌(마스크 자체는 그래도 전부 다 보여줌).
+  var _mkExecMask = _mkBuildCompositeMask(true);
+  var _mkSomeUndirected = !_mkExecMask;
   var origSrc = getTab(G.wf).inputImg;
   var ov = gE('mk-mask-preview-ov');
   if(ov) ov.remove();
@@ -30888,7 +30909,8 @@ function _mkPreviewMask(){
     if(viewMode==='maskonly'){
       // 순수 흑백 마스크 그대로: 흰색=수정될 곳, 검정=원본 유지. 색 보정 없음.
       ctx.drawImage(maskImgEl, 0, 0, W, H);
-      cap.innerHTML = '⬜️ <b>흰색</b> = AI가 실제로 수정할 영역 (마스크 흰색)<br>⬛️ <b>검정</b> = 원본 그대로 100% 유지되는 영역 (마스크 검정)';
+      cap.innerHTML = '⬜️ <b>흰색</b> = AI가 실제로 수정할 영역 (마스크 흰색)<br>⬛️ <b>검정</b> = 원본 그대로 100% 유지되는 영역 (마스크 검정)'
+        + (_mkSomeUndirected ? '<br><span style="color:#fbbf24">⚠️ 지금은 위치 확인용이에요 — 아직 어떻게 수정할지 내용을 안 적어서, 실행 버튼을 누르면 이 중 일부가 마스크에서 빠질 수 있어요.</span>' : '');
     } else {
       // 겹쳐보기: 같은 캔버스, 같은 좌표에 사진 → 그 위에 흰색 마스크를 반투명 화이트로만 겹침
       // (청록/색조 필터 전혀 없음 — 순수 흰색 반투명이라 "흰색 부분이 밝아짐"으로 보임).
@@ -30901,7 +30923,8 @@ function _mkPreviewMask(){
       ctx.globalCompositeOperation = 'lighten';
       ctx.drawImage(mCv, 0, 0, W, H);
       ctx.restore();
-      cap.innerHTML = '⬜️ <b>밝게 겹쳐 보이는 흰색 부분</b> = AI가 실제로 수정할 영역(마스크 흰색)<br>그 외 원본 사진 그대로 보이는 부분 = 100% 유지되는 영역(마스크 검정)<br><span style="color:#9ca3af">의도한 곳과 다르면 닫고 브러시/도형을 다시 조정하세요.</span>';
+      cap.innerHTML = '⬜️ <b>밝게 겹쳐 보이는 흰색 부분</b> = AI가 실제로 수정할 영역(마스크 흰색)<br>그 외 원본 사진 그대로 보이는 부분 = 100% 유지되는 영역(마스크 검정)<br><span style="color:#9ca3af">의도한 곳과 다르면 닫고 브러시/도형을 다시 조정하세요.</span>'
+        + (_mkSomeUndirected ? '<br><span style="color:#fbbf24">⚠️ 지금은 위치 확인용이에요 — 아직 어떻게 수정할지 내용을 안 적어서, 실행 버튼을 누르면 이 중 일부가 마스크에서 빠질 수 있어요.</span>' : '');
     }
   }
   tabOverlay.onclick=function(){ viewMode='overlay'; paintTabs(); draw(); };
