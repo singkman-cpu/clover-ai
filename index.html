@@ -30115,8 +30115,7 @@ function mkMask(p){
   var _cursorPointerSvg='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-3px"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>';
   [['none',_cursorPointerSvg,'선택 해제 (슬라이더 조작)'],['brush','✏️','브러시 (오브젝트 위에 칠하기)'],['polygon','⬠','다각형 (점 찍어서 정확한 범위 지정)'],['rect','▭','사각형 (드래그로 빠르게 범위 지정)'],['arrow','➡️','화살표로 오브젝트 지목']].forEach(function(a){
     var bt=mk('button','');
-    var cvForOn=gE('draw-canvas');
-    var isOn = a[0]==='none' ? !(cvForOn && cvForOn.classList.contains('active')) : (G.dm===a[0] && cvForOn && cvForOn.classList.contains('active'));
+    var isOn = a[0]==='none' ? !G._dmOn : (G.dm===a[0] && G._dmOn);
     bt.style.cssText='flex:1;height:38px;border-radius:7px;background:'+(isOn?'var(--acg)':'var(--card)')+';border:1px solid '+(isOn?'var(--acb)':'var(--bd2)')+';color:'+(isOn?'var(--ac)':'var(--t2)')+';cursor:pointer;font-size:14px;font-family:inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px';
     bt.innerHTML=a[1]+'<span style="font-size:9px;letter-spacing:0">'+a[2].split(' ')[0]+'</span>';
     bt.title=a[2];
@@ -30128,8 +30127,7 @@ function mkMask(p){
         renderSB();
         return;
       }
-      var cv=gE('draw-canvas');
-      var alreadyOn = (G.dm===a[0]) && cv && cv.classList.contains('active');
+      var alreadyOn = (G.dm===a[0]) && G._dmOn;
       if(alreadyOn){
         // ⚠️ 요청 반영: 이미 켜져있는 도구를 한 번 더 누르면 선택 해제 — 오버레이(브러시 캔버스·
         // 화살표·영역선택)가 화면을 덮고 있어서 Before/After 슬라이더 조작이 안 막히게, 도구를
@@ -31838,6 +31836,15 @@ function _clearMaskEditOverlay(){
 }
 function togDraw(on, mode){
   var cv=gE('draw-canvas');if(!cv)return;
+  // ⚠️ 버그 수정("도구 버튼 테두리 표시가 뜰 때도 있고 안 뜰 때도 있다"): 도구 버튼의 "선택됨"
+  // 표시(테두리)가 지금까지 cv.classList.contains('active')를 기준으로 판단했는데, 이 클래스는
+  // 사진을 담은 Image가 실제로 로드된 뒤(비동기 onload 콜백 안)에야 추가됨 — 그런데 버튼을 누르면
+  // togDraw(true,...) 호출 직후 곧바로(같은 실행 흐름 안에서) renderSB()가 동기적으로 다시 그려져서
+  // 버튼 테두리를 계산하는데, 그 시점엔 아직 onload가 안 끝나 'active' 클래스가 안 붙어있는
+  // 경우가 있어(특히 이미지가 캐시돼 있어도 onload는 항상 비동기) 테두리가 안 뜨는 것처럼 보였음.
+  // → 이미지 로딩과 무관하게 "지금 도구가 켜져있는지"를 동기적으로 바로 알 수 있는 별도 플래그를
+  // 여기(togDraw 진입 시점)에서 즉시 세팅해서, 버튼 표시는 이 플래그만 보고 판단하게 함.
+  G._dmOn = !!on;
   if(on){
     // ⚠️ 버그 수정(핵심 원인): Z키+마우스휠 확대 기능은 #hist-s(사진이 들어있는 요소)에만
     // CSS transform:scale()을 걸고, 브러시·다각형·사각형·화살표가 그려지는 오버레이
@@ -44911,13 +44918,14 @@ document.addEventListener('DOMContentLoaded',function(){try{
   var cnvEl=gE('canvas');
   if(cnvEl){
     cnvEl.addEventListener('wheel',function(e){
-      if(!G.zKeyDown)return;
-      // ⚠️ 버그 수정: 브러시·다각형·사각형·화살표 같은 편집 도구가 켜져 있는 동안(#draw-canvas가
-      // .active 상태) 확대를 걸면, 그 확대는 #hist-s(사진)에만 적용되고 오버레이는 그대로라서
-      // 클릭 좌표가 다시 어긋나게 됨 — 편집 도구가 켜져 있을 땐 아예 확대를 막아서 이 문제가
-      // 재발하지 않게 함.
+      // ⚠️ 버그 수정("브러시나 영역 그리다가 마우스휠 스크롤하면 화면이 움직인다"): 브러시·
+      // 다각형·사각형·화살표 같은 편집 도구가 켜져 있는 동안(#draw-canvas가 .active 상태)엔
+      // Z+휠 확대뿐 아니라 그냥 스크롤도 화면(사진 위치)을 밀어버리면 안 됨 — 그리는 중에 화면이
+      // 움직이면 좌표가 어긋나 보이고 작업 흐름이 끊기므로, 도구가 켜진 동안은 휠 이벤트 자체를
+      // (스크롤이든 Z+확대든) 완전히 무시함.
       var _cvZoomCheck=gE('draw-canvas');
-      if(_cvZoomCheck && _cvZoomCheck.classList.contains('active')) return;
+      if(_cvZoomCheck && _cvZoomCheck.classList.contains('active')){ e.preventDefault(); return; }
+      if(!G.zKeyDown)return;
       e.preventDefault();
       var hs3=gE('hist-s');if(!hs3)return;
 
