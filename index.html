@@ -9701,6 +9701,7 @@ function _openGalleryInNewWindow(id){
     (G.HIST[wf]||[]).forEach(function(item){
       if(G._curGalleryId==='favs'&&!item.fav)return;
       if(!item.result&&!item.orig)return;
+      if(item.preview && !item.result) return; // ⚠️ 위 openPanel 갤러리 집계와 동일한 이유로 제외
       var isW3D=item.wf==='world3d';
       var src=isW3D ? (item.orig||item.origThumb) : (item.result||item.orig||item.origThumb);
       if(!src)return;
@@ -31156,7 +31157,17 @@ function _mkMaskExecuteInner(){
   // 아니다, 지시사항을 실행하는 게 핵심"으로 균형을 맞춰서 재발을 막음. 순수 브러시만(다각형·
   // 사각형·화살표 없이) 색칠했을 땐 이미 훨씬 정확한 실제 픽셀 마스크(task.maskData)가 있어서
   // 표시용 사진이 여전히 필요 없음 — 그 경우만 계속 생략함.
-  var _needsMarkedRef = ((G.arrows && G.arrows.length)>0) || ((G.polyAreas && G.polyAreas.length)>0);
+  // ⚠️ 버그 수정(핵심 원인, "자동차 삭제 + 간판 삭제처럼 서로 다른 색으로 두 오브젝트를 동시에
+  // 지정했는데 하나만 처리되고 하나는 그대로 남는다"): 브러시 색이 2개 이상(오브젝트 2개 이상)
+  // 쓰였을 때도 지금까지는 "순수 브러시"로 분류되어 표시용 사진(색이 보이는 합성 사진) 없이,
+  // 색 구분이 전혀 없는 흑백 마스크(_compositeMaskDataUrl, 칠한 곳은 전부 무조건 흰색)만
+  // 참고 이미지로 전달되고 있었음 — 프롬프트에는 "민트색 영역은 자동차 삭제, 빨간색 영역은
+  // 간판 삭제"라고 색으로 구분해서 지시하면서, 정작 AI가 보는 사진에는 그 색 구분이 전혀 없어서
+  // (분리된 흰 덩어리 2개만 보임) 어떤 덩어리가 어떤 지시에 해당하는지 AI가 알 방법이 없었음 —
+  // 그 결과 하나만 대충 처리하거나 아예 둘 다 잘못 처리하는 현상이 반복됨. 브러시 색이 2개
+  // 이상 쓰였을 때는 화살표·다각형과 마찬가지로 "실제 칠한 색이 그대로 보이는" 표시용 사진을
+  // 만들어서 함께 보내, AI가 색으로 어느 지시가 어느 위치인지 정확히 구분할 수 있게 함.
+  var _needsMarkedRef = ((G.arrows && G.arrows.length)>0) || ((G.polyAreas && G.polyAreas.length)>0) || (usedColors.length>1);
   if(!_needsMarkedRef){
     // ⚠️ 버그 수정(치명적, 반복 신고 — "브러시로 나무 삭제·자동차 교체 지정했는데 실행해도
     // 아무 변화가 없거나 엉뚱한 결과가 나온다", 마스크 미리보기로는 위치가 정확히 잡혀있는 게
@@ -40683,6 +40694,13 @@ function openPanel(id){
     (G.HIST[wf]||[]).forEach(function(item){
       if(id==='favs'&&!item.fav)return;
       if(!item.result&&!item.orig)return;
+      // ⚠️ 버그 수정("1,2,4번째 이미지가 왜 자꾸 가장 상위에 있냐"): item.preview===true &&
+      // result가 없는 항목은 실제 생성 결과가 아니라 "지금 이 탭에 올려놓기만 한, 아직 렌더링
+      // 안 한 원본 사진" 자리표시자임(업로드 시/새로고침 후 탭 복원 시마다 매번 새 Date.now()
+      // id로 다시 만들어짐 — _restoreMainTabImagesDraft 등). 실제 결과물이 아닌데도 매번 가장
+      // 최신 id를 받아서 갤러리 정렬 1순위로 튀어오르고, 태그도 없어서 다른 카드들과 달리
+      // 엔진/해상도 뱃지가 안 보였던 것 — 갤러리에는 애초에 노출 대상이 아니므로 제외한다.
+      if(item.preview && !item.result) return;
       all.push(item);
     });
   });
