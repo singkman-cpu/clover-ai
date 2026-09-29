@@ -29988,7 +29988,10 @@ var MASK_COLORS=[['#00e5cc','기본(민트)']];
 // 독립된 지시문 하나"라서 다각형·사각형과 똑같은 성격임(브러시처럼 여러 개를 한 지시문으로
 // 묶는 게 아니라, 화살표마다 서로 다른 지시문을 가짐) — 도구 자체(정밀하게 그릴 필요 없이
 // 점 하나만 찍는 빠른 방식)는 남기되 한도는 다각형·사각형과 동일하게 1개로 낮춤.
-var MAX_MASK_REGIONS = 1; // 다각형+사각형(영역 선택) 묶음의 한도 — VizMaker처럼 1개=1지시문
+var MAX_MASK_REGIONS = 1; // ⚠️ 요청 반영(다각형·사각형을 더 이상 합치지 않고 완전히 독립시킴):
+// 이 상수는 다각형 1개, 사각형 1개 각각에 독립적으로 적용되는 한도임(합쳐서 1개가 아니라
+// 다각형도 최대 1개 + 사각형도 최대 1개, 동시에 사용 가능) — 브러시·화살표처럼 도구별로 따로 셈.
+var MAX_RECT_REGIONS = MAX_MASK_REGIONS; // 사각형 전용 한도(다각형과 별개)
 var MAX_ARROW_REGIONS = 1; // 화살표 전용 한도 — 화살표도 1개=1지시문이라 다각형·사각형과 동일하게 1개
 var MAX_BRUSH_REGIONS = 1; // 브러시 전용 한도 — 색상 1개만 쓰되, 그 색으로 여러 영역을 칠해 한 번에 실행
 function _mkBrushActiveCount(){
@@ -30000,6 +30003,9 @@ function _mkBrushActiveCount(){
   }
   return brushCount;
 }
+// 다각형/사각형은 이제 완전히 독립된 도구라 각각 따로 셈(.mode 태그로 구분).
+function _mkPolyOnlyActiveCount(){ return (G.polyAreas ? G.polyAreas.filter(function(a){return (a.mode||'polygon')==='polygon';}).length : 0); }
+function _mkRectOnlyActiveCount(){ return (G.polyAreas ? G.polyAreas.filter(function(a){return a.mode==='rect';}).length : 0); }
 function _mkPolyActiveCount(){ return (G.polyAreas ? G.polyAreas.length : 0); }
 function _mkArrowActiveCount(){ return (G.arrows ? G.arrows.length : 0); }
 // ⚠️ 하위 호환: 실행 직전 마지막 확인(_mkMaskExecute)에서는 "이 중 하나라도 자기 한도를
@@ -30009,7 +30015,7 @@ function _mkTotalActiveRegions(){
   return _mkBrushActiveCount() + _mkPolyActiveCount() + _mkArrowActiveCount();
 }
 function _mkAnyCategoryOverLimit(){
-  return _mkBrushActiveCount()>MAX_BRUSH_REGIONS || _mkPolyActiveCount()>MAX_MASK_REGIONS || _mkArrowActiveCount()>MAX_ARROW_REGIONS;
+  return _mkBrushActiveCount()>MAX_BRUSH_REGIONS || _mkPolyOnlyActiveCount()>MAX_MASK_REGIONS || _mkRectOnlyActiveCount()>MAX_RECT_REGIONS || _mkArrowActiveCount()>MAX_ARROW_REGIONS;
 }
 // ⚠️ 버그 수정("다각형 클릭해서 마스크 적용된 거 볼려고 했는데 브러시탭으로 가서 거기서
 // 확인하는 거야? 상식적으로?"): 마스크 미리보기 버튼을 브러시 도구일 때·아닐 때 두 군데서
@@ -30670,10 +30676,11 @@ function _mkMaskExecute(){
   // 누르는 시점에 마지막으로 한 번 더 확인함 — 이제 도구를 합쳐서 세지 않고, 브러시는 브러시끼리
   // (최대 2), 다각형+사각형은 그 둘끼리(최대 2), 화살표는 화살표끼리(최대 2) 각자 따로 확인함.
   if(_mkAnyCategoryOverLimit()){
-    var _bC=_mkBrushActiveCount(), _pC=_mkPolyActiveCount(), _aC=_mkArrowActiveCount();
+    var _bC=_mkBrushActiveCount(), _pC=_mkPolyOnlyActiveCount(), _rC=_mkRectOnlyActiveCount(), _aC=_mkArrowActiveCount();
     var _overMsgs=[];
     if(_bC>MAX_BRUSH_REGIONS) _overMsgs.push('브러시 '+_bC+'개(최대 '+MAX_BRUSH_REGIONS+'개)');
-    if(_pC>MAX_MASK_REGIONS) _overMsgs.push('다각형·사각형 합쳐서 '+_pC+'개(최대 '+MAX_MASK_REGIONS+'개)');
+    if(_pC>MAX_MASK_REGIONS) _overMsgs.push('다각형 '+_pC+'개(최대 '+MAX_MASK_REGIONS+'개)');
+    if(_rC>MAX_RECT_REGIONS) _overMsgs.push('사각형 '+_rC+'개(최대 '+MAX_RECT_REGIONS+'개)');
     if(_aC>MAX_ARROW_REGIONS) _overMsgs.push('화살표 '+_aC+'개(최대 '+MAX_ARROW_REGIONS+'개)');
     alert(_overMsgs.join(', ')+' 지정되어 있어요 — 한도를 넘은 도구만 일부 지우고 다시 실행해주세요.');
     return;
@@ -32286,6 +32293,10 @@ function initRectMode(cv){
     finishPolygon(cv,polyOv);
     G._drawOvRect=null;
   };
+  var _rectHint=gE('stl'); if(_rectHint) _rectHint.textContent='드래그로 사각형 영역 생성 (최대 '+MAX_RECT_REGIONS+'개)';
+  // 이미 사각형 한도를 다 썼으면, 이 도구로 다시 돌아왔을 때 처음부터 드래그가 안 먹히게 막고
+  // 프롬프트 작성으로 안내함.
+  _mkLockPolyOverlayIfLimitReached(polyOv, '사각형 지정 완료 — 아래에서 프롬프트를 적어주세요.');
 }
 function initPolygonMode(cv){
   G.polyPts=G.polyPts||[];
@@ -32368,7 +32379,10 @@ function initPolygonMode(cv){
     previewLine.setAttribute('x2',e.clientX-rect.left);previewLine.setAttribute('y2',e.clientY-rect.top);
   };
   polyOv.ondblclick=function(e){finishPolygon(cv,polyOv);};
-  var hint=gE('stl');if(hint)hint.textContent='영역 선택: 클릭으로 점 추가 | 더블클릭으로 확정 | 몇 개든 계속 그릴 수 있어요';
+  var hint=gE('stl');if(hint)hint.textContent='다각형 선택: 클릭으로 점 추가 | 더블클릭으로 확정 (최대 '+MAX_MASK_REGIONS+'개)';
+  // 이미 다각형 한도를 다 썼으면(예: 다른 이미지에서 그려두고 다시 들어온 경우), 이 도구로
+  // 다시 돌아왔을 때 처음부터 클릭이 안 먹히게 막고 프롬프트 작성으로 안내함.
+  _mkLockPolyOverlayIfLimitReached(polyOv, '다각형 지정 완료 — 아래에서 프롬프트를 적어주세요.');
 }
 
 function updatePolyline(el,pts){
@@ -32395,13 +32409,26 @@ function _polyUndoLastPoint(){
 // 아래 텍스트칸에 따로 적음).
 var POLY_AREA_COLORS=['#00e5cc','#ff5757','#fbbf24','#a78bfa','#4ade80','#f472b6','#38bdf8'];
 
+// 지금 도구가 다각형인지 사각형인지에 따라, 각자의 독립된 한도를 넘었는지 확인.
+function _mkCurrentPolyModeOverLimit(){
+  var _mode=(G.dm==='rect'?'rect':'polygon');
+  return _mode==='rect' ? (_mkRectOnlyActiveCount()>=MAX_RECT_REGIONS) : (_mkPolyOnlyActiveCount()>=MAX_MASK_REGIONS);
+}
+// 한도에 도달한 도구는 더 이상 클릭/드래그로 점을 추가할 수 없게 막고, 대신 프롬프트를
+// 적으라고 안내함 — 팝업(alert)으로 흐름을 끊지 않고 조용히 멈추는 방식.
+function _mkLockPolyOverlayIfLimitReached(polyOv, hintMsg){
+  if(!_mkCurrentPolyModeOverLimit()) return false;
+  if(polyOv){ polyOv.onclick=null; polyOv.ondblclick=null; polyOv.onmousemove=null; polyOv.onmousedown=null; polyOv.onmouseup=null; }
+  var hint=gE('stl'); if(hint) hint.textContent=hintMsg;
+  return true;
+}
 function finishPolygon(cv,polyOv){
   if(!G.polyPts||G.polyPts.length<3){alert('3개 이상의 점을 선택하세요.');return;}
-  // ⚠️ 요청 반영(도구별 독립 한도로 되돌림): 다각형+사각형은 "영역 선택"이라는 같은 개념이라
-  // 계속 하나로 묶어서 세지만, 브러시·화살표와는 더 이상 합치지 않음(그쪽 도구를 몇 개 썼든
-  // 다각형·사각형 한도와는 무관함).
-  var _totalRegions1 = _mkPolyActiveCount();
-  if(_totalRegions1 >= MAX_MASK_REGIONS){
+  // ⚠️ 요청 반영("다각형이랑 사각형이랑 같이 묶지말고 따로하자"): 다각형·사각형을 더 이상
+  // 하나로 묶어서 세지 않고, 브러시·화살표처럼 서로 완전히 독립된 도구로 취급함 — 다각형 1개 +
+  // 사각형 1개를 동시에 쓸 수 있음. 또한 한도 초과 시 alert로 끊지 않고, 그냥 조용히 더 이상
+  // 그려지지 않게만 막음(아래 _mkLockPolyOverlayIfLimitReached).
+  if(_mkCurrentPolyModeOverLimit()){
     G.polyPts=[];
     var _draftGroup1=polyOv.querySelector('#poly-draft-group');
     if(_draftGroup1){
@@ -32409,7 +32436,7 @@ function finishPolygon(cv,polyOv){
       var _dl1=_draftGroup1.querySelector('line'); if(_dl1){ ['x1','y1','x2','y2'].forEach(function(k){_dl1.removeAttribute(k);}); }
       var _dd1=_draftGroup1.querySelector('g'); if(_dd1) _dd1.innerHTML='';
     }
-    alert('다각형·사각형은 합쳐서 한 번에 최대 '+MAX_MASK_REGIONS+'개까지만 지정할 수 있어요 — 한 번에 너무 많이 지정하면 AI가 일부를 놓치는 경우가 많아서, 확실하게 되는 만큼만 제한해뒀어요. 지금 지정한 것부터 먼저 실행하고, 결과가 나오면 이어서 나머지를 지정해주세요.');
+    _mkLockPolyOverlayIfLimitReached(polyOv, (G.dm==='rect'?'사각형':'다각형')+' 지정이 끝났어요 — 아래에서 프롬프트를 적어주세요.');
     return;
   }
   // ⚠️ 버그 수정: 점을 찍는 동안 썼던 것과 반드시 같은 기준 좌표(G._drawOvRect)를 여기서도
@@ -32446,7 +32473,12 @@ function finishPolygon(cv,polyOv){
     var draftPreview=draftGroup.querySelector('line'); if(draftPreview){ ['x1','y1','x2','y2'].forEach(function(k){draftPreview.removeAttribute(k);}); }
     var draftDots=draftGroup.querySelector('g'); if(draftDots) draftDots.innerHTML='';
   }
-  var hint=gE('stl');if(hint)hint.textContent='영역 '+G.polyAreas.length+'개 지정됨 — 아래에서 각 영역에 뭘 할지 적어주세요. 계속 그릴 수 있어요.';
+  // 이번에 그린 것까지 포함해서 지금 도구(다각형/사각형)가 자기 한도에 도달했으면, 곧바로
+  // 더 이상 못 그리게 잠그고 프롬프트 작성으로 안내함(alert 없이 조용히).
+  var _lockedNow = _mkLockPolyOverlayIfLimitReached(polyOv, (G.dm==='rect'?'사각형':'다각형')+' 지정 완료 — 아래에서 프롬프트를 적어주세요.');
+  if(!_lockedNow){
+    var hint=gE('stl');if(hint)hint.textContent='영역 '+G.polyAreas.length+'개 지정됨 — 아래에서 각 영역에 뭘 할지 적어주세요.';
+  }
 }
 // 확정된 모든 영역을 오버레이에 다시 그림 — 번호+반투명 채우기로, 화살표처럼 항상 화면에 남아있음
 function _redrawPolyAreas(polyOv){
@@ -32483,11 +32515,16 @@ function _redrawPolyAreas(polyOv){
 // 영역별 목록 — 화살표 목록(renderArrowList)과 똑같은 형식: 번호, 텍스트칸, 참고이미지, 삭제버튼
 function renderPolyAreaList(wrap){
   wrap.innerHTML='';
-  if(!G.polyAreas || !G.polyAreas.length) return;
+  // ⚠️ 요청 반영("다각형이랑 사각형이랑 같이 묶지말고 따로하자"): 브러시·화살표처럼 완전히
+  // 독립된 도구로 취급하므로, 지금 고른 도구(다각형/사각형)에 해당하는 영역만 걸러서 보여줌
+  // — 예를 들어 사각형 도구를 쓰는 중엔 다각형으로 그려둔 영역이 섞여 보이지 않음.
+  var _curMode=(G.dm==='rect'?'rect':'polygon');
+  var _areas=(G.polyAreas||[]).filter(function(a){return (a.mode||'polygon')===_curMode;});
+  if(!_areas.length) return;
   var title=dv('');title.style.cssText='font-size:11px;font-weight:700;color:var(--t2);margin-bottom:6px';
-  title.textContent='⬠ 지정한 영역 ('+G.polyAreas.length+'개) — 각각 어떻게 바꿀지 적어주세요';
+  title.textContent='⬠ 지정한 '+(_curMode==='rect'?'사각형':'다각형')+' ('+_areas.length+'개) — 어떻게 바꿀지 적어주세요';
   wrap.appendChild(title);
-  G.polyAreas.forEach(function(area,idx){
+  _areas.forEach(function(area,idx){
     var row=dv('');row.style.cssText='display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;background:var(--c2);border-radius:8px;padding:8px';
     // ⚠️ 요청 반영("사각형 다각형 화살표로 그렸을 때 숫자 1 이거 이제 있으면 안 되자나"): 영역이
     // 1개로 제한된 뒤로는 번호 배지가 항상 "1"만 나와서 의미가 없어짐 — 뺌.
