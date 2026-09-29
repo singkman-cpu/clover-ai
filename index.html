@@ -30669,10 +30669,10 @@ function _getBrushColorBBox(cv, hexColor){
 
 function _mkMaskExecute(){
   console.log('[AI편집] 실행 버튼 클릭 → _mkMaskExecute 시작');
-  // ⚠️ 요청 반영(도구별 독립 한도로 되돌림): 브러시는 색상 팔레트가 항상 다 보이는 입력창이라
-  // "추가할 때" 막을 방법이 없어서(다각형·화살표처럼 "그리는 순간" 막을 수가 없음), 실행 버튼을
-  // 누르는 시점에 마지막으로 한 번 더 확인함 — 이제 도구를 합쳐서 세지 않고, 브러시는 브러시끼리
-  // (최대 2), 다각형+사각형은 그 둘끼리(최대 2), 화살표는 화살표끼리(최대 2) 각자 따로 확인함.
+  // ⚠️ 요청 반영(도구별 완전 독립 한도): 브러시는 색상 팔레트가 항상 다 보이는 입력창이라
+  // "추가할 때" 막을 방법이 없어서(다각형·사각형·화살표처럼 "그리는 순간" 막을 수가 없음), 실행
+  // 버튼을 누르는 시점에 마지막으로 한 번 더 확인함 — 브러시·다각형·사각형·화살표 넷 다 서로
+  // 합쳐서 세지 않고 각자 자기 한도(전부 최대 1개)만 따로 확인함.
   if(_mkAnyCategoryOverLimit()){
     var _bC=_mkBrushActiveCount(), _pC=_mkPolyOnlyActiveCount(), _rC=_mkRectOnlyActiveCount(), _aC=_mkArrowActiveCount();
     var _overMsgs=[];
@@ -30882,7 +30882,14 @@ function _mkBuildCompositeMask(requireDirected){
         // "확실하게 넓어진 뒤 경계가 하드"한 진짜 팽창 효과를 얻을 수 있음.
         if(_mkWantsDilate){
           try{
-            var _dilatePx = Math.max(20, Math.round(Math.min(_mcv.width,_mcv.height)*0.03));
+            // ⚠️ 버그 수정("SAM으로 사람 하나 잡았는데 그 주변 빈 땅까지 커다랗게 통째로
+            // 마스크에 잡혔다 — 말이 안 된다"): 블러 반경(_dilatePx) 자체는 적당했는데, 재이진화
+            // 임계값이 12(255 중 4.7%)로 너무 낮아서 블러가 흐릿하게 퍼진 가장자리 훨씬 바깥까지
+            // "조금이라도 번진 곳"으로 잡혀버림 — 특히 사람처럼 가늘고 작은 물체는 블러 반경
+            // 대비 실제 팽창 폭이 몇 배로 부풀어서 원래 물체보다 훨씬 큰 얼룩이 됨. 임계값을
+            // 훨씬 높여서(255 중 약 27%) 블러의 진한 중심부만 포함시키고, 아주 옅게 번진 꼬리
+            // 부분은 제외해서 실제 팽창 폭이 _dilatePx 값에 훨씬 가깝게 나오도록 함.
+            var _dilatePx = Math.max(16, Math.round(Math.min(_mcv.width,_mcv.height)*0.02));
             var _dilCv=document.createElement('canvas');
             _dilCv.width=_mcv.width; _dilCv.height=_mcv.height;
             var _dilCtx=_dilCv.getContext('2d');
@@ -30891,7 +30898,7 @@ function _mkBuildCompositeMask(requireDirected){
             var _dilData=_dilCtx.getImageData(0,0,_dilCv.width,_dilCv.height);
             var _dD=_dilData.data;
             for(var _di=0; _di<_dD.length; _di+=4){
-              var _dv = _dD[_di]>12 ? 255 : 0; // 조금이라도 번진 곳까지 전부 포함시켜 팽창 효과를 냄
+              var _dv = _dD[_di]>70 ? 255 : 0; // 블러의 진한 중심부만 포함(옅은 꼬리는 제외)해서 과도한 팽창 방지
               _dD[_di]=_dv; _dD[_di+1]=_dv; _dD[_di+2]=_dv; _dD[_di+3]=255;
             }
             _dilCtx.putImageData(_dilData,0,0);
@@ -31184,7 +31191,11 @@ function _mkSamRefineMask(origImgSrc, rawMaskDataUrl, wantsDilate, cb){
                   // 강제 복원되어 "삭제가 하나도 안 된 것처럼" 보임).
                   if(wantsDilate){
                     try{
-                      var _dilatePx2=Math.max(20, Math.round(Math.min(outCv.width,outCv.height)*0.03));
+                      // ⚠️ 버그 수정("SAM으로 사람 하나 잡았는데 주변 빈 땅까지 커다랗게 통째로
+                      // 마스크에 잡혔다"): 재이진화 임계값이 12로 너무 낮아서 블러의 옅은 꼬리까지
+                      // 전부 마스크에 포함되어, 특히 사람처럼 가늘고 작은 물체는 원래 크기보다
+                      // 몇 배 큰 얼룩으로 부풀었음 — 임계값을 높여서 블러의 진한 중심부만 포함시킴.
+                      var _dilatePx2=Math.max(16, Math.round(Math.min(outCv.width,outCv.height)*0.02));
                       var _dilCv2=document.createElement('canvas'); _dilCv2.width=outCv.width; _dilCv2.height=outCv.height;
                       var _dilCtx2=_dilCv2.getContext('2d');
                       _dilCtx2.filter='blur('+_dilatePx2+'px)';
@@ -31192,7 +31203,7 @@ function _mkSamRefineMask(origImgSrc, rawMaskDataUrl, wantsDilate, cb){
                       var _dilData2=_dilCtx2.getImageData(0,0,_dilCv2.width,_dilCv2.height);
                       var _dD2=_dilData2.data;
                       for(var _di2=0; _di2<_dD2.length; _di2+=4){
-                        var _dv2 = _dD2[_di2]>12 ? 255 : 0;
+                        var _dv2 = _dD2[_di2]>70 ? 255 : 0;
                         _dD2[_di2]=_dv2; _dD2[_di2+1]=_dv2; _dD2[_di2+2]=_dv2; _dD2[_di2+3]=255;
                       }
                       _dilCtx2.putImageData(_dilData2,0,0);
@@ -31783,6 +31794,7 @@ function _mkMaskClearAll(){
   var polyOv=gE('poly-overlay');if(polyOv)polyOv.innerHTML='';
   var arrOv=gE('arrow-overlay');if(arrOv)arrOv.innerHTML=arrOv.querySelector('defs')?arrOv.querySelector('defs').outerHTML:'';
   renderSB();
+  _mkReattachPolyToolHandlers();
 }
 // ⚠️ 요청 반영: "각 탭(브러시·다각형·사각형·화살표)마다 그 탭에서 선택한 것만 지우는 리셋
 // 버튼을 만들어달라" — 예전엔 "선택 지우기"가 _mkMaskClearAll() 하나뿐이라 브러시든 화살표든
@@ -31817,6 +31829,7 @@ function _resetPolyAreasByMode(mode){
   if(wrap) renderPolyAreaList(wrap);
   _saveMaskAnnotations();
   renderSB();
+  _mkReattachPolyToolHandlers();
 }
 // ⚠️ 버그 수정(치명적, "다른탭에가도 브러시 흔적이 남아있어 / 갤러리탭 눌렀는데 브러시가
 // 살아있으면 안되지" — 두 번째 신고): selectWF()로 워크플로우 탭을 바꿀 때는 브러시 캔버스를
@@ -32010,16 +32023,12 @@ function initArrowMode(cv){
     var endPt=[e.clientX-rect.left, e.clientY-rect.top];
     var dist=Math.hypot(endPt[0]-startPt[0],endPt[1]-startPt[1]);
     if(dist<20){ previewLine.remove(); return; } // 너무 짧으면(실수 클릭) 무시
-    // ⚠️ 요청 반영: "영역 3~4개 지정해도 실제로는 한두 개만 반영된다, 몇 개까지 되는 게 확실하면
+    // ⚠️ 요청 반영: "영역 여러 개 지정해도 실제로는 일부만 반영된다, 몇 개까지 되는 게 확실하면
     // 딱 그만큼만 그리게 해달라" — AI가 한 번에 여러 군데를 동시에 정확히 구분해서 처리하는
     // 능력에는 현실적인 한계가 있어서(모델 자체의 한계, 코드로 100% 해결이 안 되는 부분), 아예
-    // 처음부터 한 번에 도구별로 최대 2개까지만(화살표는 화살표끼리, 다각형·사각형은 합쳐서) 지정할 수
-    // 있게 막아둠 — 안내 없이 4개째부터 조용히 무시되는 것보다, 딱 이만큼만 확실하게 되도록
-    // 제한하는 게 낫다고 판단함. 더 많이 고치고 싶으면 한 번에 2개까지 실행하고, 결과를 다시
-    // 불러와서 남은 부분을 이어서 지정하면 됨.
-    // ⚠️ 요청 반영(도구별 독립 한도로 되돌림): "다각형 그려놓고 화살표 쓰려니 화살표가 아예
-    // 안 된다"는 지적 — 도구를 다 합쳐서 세지 않고, 화살표는 화살표 개수만 따로 셈(다각형·
-    // 사각형·브러시를 이미 몇 개 썼든 화살표 한도와는 무관함).
+    // 처음부터 한 번에 도구별로 최대 1개까지만 지정할 수 있게 막아둠(브러시·다각형·사각형·화살표
+    // 전부 각자 독립된 한도 — 합쳐서 세지 않음). 더 많이 고치고 싶으면 지금 것부터 실행하고,
+    // 결과를 다시 불러와서 남은 부분을 이어서 지정하면 됨.
     var _arrowRegions0 = _mkArrowActiveCount();
     if(_arrowRegions0 >= MAX_ARROW_REGIONS){
       previewLine.remove();
@@ -32416,6 +32425,18 @@ function _polyUndoLastPoint(){
 // 아래 텍스트칸에 따로 적음).
 var POLY_AREA_COLORS=['#00e5cc','#ff5757','#fbbf24','#a78bfa','#4ade80','#f472b6','#38bdf8'];
 
+// ⚠️ 버그 수정("영역 삭제/Ctrl+Z/초기화 후 다시 그림이 안 그려진다"): 한도에 도달하면
+// _mkLockPolyOverlayIfLimitReached가 오버레이의 클릭/드래그 핸들러를 꺼버리는데, 그 뒤 항목을
+// 지우거나(✕) Ctrl+Z로 되돌리거나 "OO 초기화"를 눌러서 다시 한도 밑으로 내려와도, 도구 버튼을
+// 껐다 켜기 전까진 핸들러가 계속 안 붙어있어서 먹통이었음 — 다각형·사각형 데이터가 바뀔 때마다
+// (지금 도구가 다각형/사각형이고 실제로 켜져 있을 때만) 이 함수로 다시 초기화해서, 최신 개수
+// 기준으로 다시 잠그거나(여전히 한도 초과) 풀리게(다시 그릴 수 있게) 함.
+function _mkReattachPolyToolHandlers(){
+  if(G.dm!=='polygon' && G.dm!=='rect') return;
+  var cv=gE('draw-canvas');
+  if(!cv || !cv.classList.contains('active')) return;
+  if(G.dm==='rect') initRectMode(cv); else initPolygonMode(cv);
+}
 // 지금 도구가 다각형인지 사각형인지에 따라, 각자의 독립된 한도를 넘었는지 확인.
 function _mkCurrentPolyModeOverLimit(){
   var _mode=(G.dm==='rect'?'rect':'polygon');
@@ -32582,6 +32603,7 @@ function renderPolyAreaList(wrap){
       _saveMaskAnnotations();
       renderPolyAreaList(wrap);
       var polyOv=gE('poly-overlay'); if(polyOv) _redrawPolyAreas(polyOv);
+      _mkReattachPolyToolHandlers();
     };
     row.appendChild(ta);row.appendChild(ralBtn);row.appendChild(imgSlot);row.appendChild(fiArea);row.appendChild(delBtn);
     wrap.appendChild(row);
@@ -37745,6 +37767,56 @@ function procImgWithTask(task, onDone, onErr){
   // ══ EDIT 탭 — 원본 해상도 유지 ═══════════════════════════════════
   if(wf==='edit'){
     var userPrompt = prompt || '';
+
+    // ⚠️ 버그 수정(치명적, "flux 인페인팅을 선택해도 실제로는 항상 나노바나나로 실행된다"):
+    // "마스크 편집 엔진"에서 flux를 선택할 수 있는 버튼이 있었는데, 실제로 매번 실행되는 이
+    // 함수(procImgWithTask)는 G.maskEngine을 전혀 읽지 않고 있었음 — flux 분기 자체는 코드에
+    // 있었지만 그건 호출되지 않는 별도의 죽은 함수(procImg) 안에만 있어서, 버튼을 "flux
+    // 인페인팅"으로 바꿔도 실제로는 항상 나노바나나로 실행되고 있었음(선택이 완전히 무시됨).
+    // 나노바나나는 "참고용 흑백 마스크 이미지 + 텍스트 지시"를 보고 스스로 판단해서 수정하는
+    // 방식이라 사람·차량처럼 복잡한 배경 재구성이 필요한 "삭제" 지시를 가끔 못 따르는 경우가
+    // 있는데, flux-lora/inpainting은 진짜 픽셀 마스크 기반 인페인팅 모델이라 이런 경우에 훨씬
+    // 안정적임 — task.maskData(브러시+다각형+사각형+화살표 통합 흑백 마스크)가 있고 사용자가
+    // flux를 선택했을 때는 실제로 이 모델로 실행되게 연결함.
+    // ⚠️ 요청 반영("삭제해줘 다른 단어 삭제 등등 그런건 자동으로 flux로 렌더링해주며안돼나"):
+    // 매번 "flux 인페인팅"을 수동으로 선택해야만 이 경로를 타던 걸, "삭제/제거/지워/없애/교체/
+    // 바꿔" 같은 제거·교체 계열 지시가 들어있으면(마스크가 있을 때) 사용자가 엔진을 수동으로
+    // 안 바꿔도 자동으로 이 실제 픽셀 마스크 기반 flux-lora/inpainting으로 실행되게 함 — 위
+    // 주석에 적은 대로 이런 "삭제" 계열 지시는 나노바나나(참고용 마스크+텍스트만 보고 스스로
+    // 판단)가 가끔 못 따르는 반면, flux는 진짜 마스크 기반이라 훨씬 안정적이기 때문. "flux
+    // 인페인팅"을 수동으로 선택한 경우는 어떤 지시든 그대로 존중(기존 동작 유지), 수동 선택이
+    // 나노바나나 계열(nb2 등)이어도 지시 문구 자체가 삭제/교체 계열이면 자동으로 flux를 타게 함.
+    var _autoFluxDeleteRe = /삭제|제거|지워|없애|교체|바꿔|바꾸/;
+    var _shouldUseFlux = task.maskData && (G.maskEngine==='flux' || _autoFluxDeleteRe.test(userPrompt));
+    if(_shouldUseFlux){
+      var _fluxEditPrompt = (userPrompt||'Remove the masked object and fill the area naturally, matching the surrounding scene.') +
+        ' Only modify the white masked area. Keep everything outside the mask exactly as in the original image, pixel for pixel — same camera angle, same framing, same zoom level, same crop.';
+      console.log(G.maskEngine==='flux' ? '[edit] flux 인페인팅 엔진 선택됨 → fal-ai/flux-lora/inpainting로 실행' : '[edit] 삭제/교체 계열 지시 자동 감지 → flux-lora/inpainting로 자동 전환해서 실행');
+      _doUpload(img, function(_fxImgUrl){
+        _doUpload(task.maskData, function(_fxMaskUrl){
+          falRun('fal-ai/flux-lora/inpainting', {
+            prompt: _fluxEditPrompt,
+            image_url: _fxImgUrl,
+            mask_url: _fxMaskUrl,
+            num_inference_steps: 28,
+            guidance_scale: 30,
+            strength: 1.0,
+            num_images: 1,
+            output_format: 'jpeg'
+          }, function(d){
+            var _fxUrl=falExtractImageUrl(d);
+            if(!_fxUrl){ onErr('flux-lora/inpainting URL 없음'); return; }
+            // 나노바나나 경로와 동일하게, API가 뭘 리턴하든 마스크 밖은 100% 원본 그대로 강제 합성
+            urlToDataUrl(_fxUrl, function(_fxData){
+              _compositeMaskedResult(img, _fxData||_fxUrl, task.maskData, function(finalUrl){
+                onDone(finalUrl || _fxData || _fxUrl);
+              });
+            });
+          }, onErr, _bill);
+        }, onErr);
+      }, onErr);
+      return;
+    }
 
     // ── 사람 추가 프리셋 → Nano Banana Pro 자동 전환 ───────────────
     var peoplePresets=['person_add','person_blur','people_walk','korean_person'];
@@ -44238,26 +44310,59 @@ document.addEventListener('DOMContentLoaded',function(){try{
         ]);
         var _rbRecipe = '이번 생성에서 실제로 적용할 층수 지시(무작위로 미리 정해짐, 프리셋 본문의 "층수가 달라도 된다"는 말은 이 구체적 지시로 대체됨 — 절대 무시하지 말고 그대로 따르세요, 예외 없음): '+_rbFloorDelta+' ⚠️⚠️⚠️ 최종 확인(매우 중요, 반복 실패 사례 — "노후된 건물이 원본과 거의 같은 층수로 나왔다"): 결과 이미지를 만들기 전에 스스로 "이 건물이 정말 입력 사진보다 층수가 적은가?"를 다시 확인하세요. 같거나 더 높으면 그 자체로 완전한 실패입니다.';
         if(tab.selK==='aged_redbrick'){
+          // ⚠️ 요청 반영("뒤에 배경으로 나오는 빨간벽돌 건물들은 실제 사진(로드뷰 등)을 그대로
+          // 옮겨서 저렇게 자연스럽고 매번 다른데, 메인 건물도 저렇게 실제 사진처럼 완전히
+          // 자유롭게 매번 다르게 만들어달라"): 예전엔 카테고리 5개×각 2~6개 선택지라 조합 수가
+          // 제한적이어서(수백 개 수준) 여러 번 돌리면 겹치는 느낌이 남았음 — 카테고리를 크게
+          // 늘리고(벽돌·옥상·지붕·대문·발코니·창문 배열·저층부 용도·마감 얼룩 패턴·계단/진입로 총
+          // 9개, 각 4~6개 선택지) 서로 독립적으로 조합해서 실질 조합 수를 수십만 단위로 늘림 —
+          // 실제 거리에 있는 건물들처럼 "이 중 어떤 2개를 나란히 놔도 같은 건물처럼 안 보이는"
+          // 수준의 다양성을 목표로 함.
           var _rbBrick=['진한 적갈색 벽돌','밝은 주황빛 벽돌','탁한 갈색 벽돌','벽돌+회색 스터코 하단부 조합','살짝 바랜 분홍빛이 도는 연한 벽돌','짙은 고동색에 가까운 벽돌'];
-          var _rbRoof=['평평한 옥상에 낮은 난간만 있음','작은 옥탑방이 있음','낡은 물탱크가 올라가 있음','옥상에 텃밭·잡동사니가 널려있음'];
+          var _rbRoof=['평평한 옥상에 낮은 난간만 있음','작은 옥탑방이 있음','낡은 물탱크가 올라가 있음','옥상에 텃밭·잡동사니가 널려있음','옥상에 빨래 건조대와 화분들이 놓여있음','옥상 난간에 낡은 전선·안테나선이 어지럽게 걸려있음'];
           var _rbRoofDetail=['완전 평지붕 파라펫','최상층 한쪽에 작은 경사 기와지붕 포인트'];
-          var _rbGate=['철제 대문','벽돌 기둥+철제 대문','낮은 담장+대문'];
+          var _rbGate=['철제 대문','벽돌 기둥+철제 대문','낮은 담장+대문','알루미늄 새시 유리문+철제 프레임','콘크리트 담장+낮은 철문'];
           var _rbBalcony=['철제 난간 발코니가 있음','발코니 없이 평평한 파사드'];
-          _rbRecipe += ' 그 외 조합 — 벽돌은 '+_pickRand(_rbBrick)+', 옥상은 '+_pickRand(_rbRoof)+', 지붕은 '+_pickRand(_rbRoofDetail)+', 대문은 '+_pickRand(_rbGate)+', '+_pickRand(_rbBalcony)+'.';
+          var _rbWindow=['층마다 창문 크기가 조금씩 다르고 좌우 비대칭 배열','한쪽에 세로로 긴 계단실 창문이 하나 더 있음','일부 창문에만 에어컨 실외기 자리(빈 받침대)가 튀어나와 있음','창문 개수가 층마다 불규칙(어떤 층은 2개, 어떤 층은 3개)'];
+          var _rbGround=['1층에 작은 상가(철물점·세탁소·부동산 등 간판)가 있음','1층이 필로티 주차장으로 뚫려있음','1층도 그냥 주택 현관이고 상가 없음','1층에 낡은 셔터 내려간 빈 상가 자리가 있음'];
+          var _rbStain=['빗물 자국이 창문 아래로 세로줄무늬로 흘러내림','벽면 한쪽 모서리에만 이끼·곰팡이 얼룩','전체적으로 고르게 살짝 바랜 정도(얼룩은 적음)','에어컨 실외기 배수관 자국이 벽에 남아있음'];
+          var _rbEntry=['좁은 시멘트 계단 몇 단','완만한 경사 진입로(자전거 끌기용)','타일 마감된 낮은 계단','계단 없이 도로와 바로 이어짐'];
+          _rbRecipe += ' 그 외 조합 — 벽돌은 '+_pickRand(_rbBrick)+', 옥상은 '+_pickRand(_rbRoof)+', 지붕은 '+_pickRand(_rbRoofDetail)+', 대문은 '+_pickRand(_rbGate)+', '+_pickRand(_rbBalcony)+', 창문은 '+_pickRand(_rbWindow)+', 1층은 '+_pickRand(_rbGround)+', 얼룩은 '+_pickRand(_rbStain)+', 입구는 '+_pickRand(_rbEntry)+'. 이 9가지는 서로 완전히 독립적으로 고른 것이니, 그 외의 디테일(벽돌 줄눈 상태·화분 위치·배관 배치 등)도 이 조합에 맞춰 하나의 구체적이고 개성 있는 실제 건물처럼 자연스럽게 채워 넣으세요 — 마치 실제 거리 사진(로드뷰)에서 우연히 찍힌 특정 건물 하나처럼, 전형적이지 않고 살짝 개성 있는 디테일이 있어야 합니다.';
         } else if(tab.selK==='aged_villa'){
-          var _vColor=['다소 바랜 베이지','칙칙한 분홍빛 베이지','민트색','더러운 화이트','옅은 그레이 스터코'];
-          var _vRoof=['옥상에 물탱크와 위성안테나가 있음','작은 옥탑방이 있음','옥상이 그냥 비어있고 난간만 있음'];
-          var _vGate=['철제 공동현관문+작은 캐노피','유리+철제 프레임 공동현관문'];
-          _rbRecipe += ' 그 외 조합 — 외벽 색상은 '+_pickRand(_vColor)+' 계열, 옥상은 '+_pickRand(_vRoof)+', 공동현관은 '+_pickRand(_vGate)+'.';
+          // ⚠️ 요청 반영("빨간벽돌뿐 아니라 빌라·주택·상가도 쇼츠 10개 만들면 다 겹친다 — 스타일당
+          // 최소 20~30개는 나오게 카테고리를 늘려달라"): aged_redbrick과 동일하게 9개 독립 카테고리로 확장.
+          var _vColor=['다소 바랜 베이지','칙칙한 분홍빛 베이지','민트색','더러운 화이트','옅은 그레이 스터코','옅은 하늘색이 바랜 톤'];
+          var _vRoof=['옥상에 물탱크와 위성안테나가 있음','작은 옥탑방이 있음','옥상이 그냥 비어있고 난간만 있음','옥상에 빨래 건조대가 놓여있음','옥상 난간에 낡은 전선이 어지럽게 걸려있음'];
+          var _vGate=['철제 공동현관문+작은 캐노피','유리+철제 프레임 공동현관문','철제 공동현관문(캐노피 없음)'];
+          var _vWindow=['층마다 창문 크기가 조금씩 다름','창문 프레임이 갈색 알루미늄 섀시','창문 프레임이 은색 알루미늄 섀시','일부 창문에 방범창(방범틀)이 있음'];
+          var _vBalcony=['작은 철제 난간 발코니가 층마다 있음','발코니 없이 평평한 파사드','에어컨 실외기 놓는 자리만 벽면에 돌출돼있음'];
+          var _vGround=['1층이 필로티 주차장으로 뚫려있음','1층에 작은 상가(부동산·편의점 등)가 있음','1층도 그냥 주택 현관이고 상가 없음'];
+          var _vStain=['빗물 자국이 창문 아래로 세로줄무늬','벽면 모서리에 국지적인 이끼 얼룩','전체적으로 고르게 살짝 바랜 정도'];
+          var _vEntry=['좁은 시멘트 계단 몇 단','타일 마감된 낮은 계단','계단 없이 도로와 바로 이어짐'];
+          var _vMeter=['가스·전기 계량기함이 1층 외벽에 나란히 붙어있음','계량기함이 대문 옆 담장에 몰려있음','계량기함이 거의 안 보이게 깔끔히 정리돼있음'];
+          _rbRecipe += ' 그 외 조합 — 외벽 색상은 '+_pickRand(_vColor)+' 계열, 옥상은 '+_pickRand(_vRoof)+', 공동현관은 '+_pickRand(_vGate)+', 창문은 '+_pickRand(_vWindow)+', 발코니는 '+_pickRand(_vBalcony)+', 1층은 '+_pickRand(_vGround)+', 얼룩은 '+_pickRand(_vStain)+', 입구는 '+_pickRand(_vEntry)+', 계량기는 '+_pickRand(_vMeter)+'. 이 9가지는 서로 독립적으로 고른 것이니, 그 외 디테일도 이에 맞춰 실제 거리에서 우연히 찍힌 특정 건물처럼 개성 있게 채우세요.';
         } else if(tab.selK==='aged_commercial_ext'){
-          var _cTile=['베이지 스크래치 타일','더스티 핑크 모자이크 타일','옅은 노란색 타일','오프화이트 도장 마감'];
-          var _cShutter=['일부는 내려져있고 일부는 열려있음','대부분 열려서 영업 중','일부 셔터에 녹 자국이 두드러짐'];
-          _rbRecipe += ' 그 외 조합 — 외장 마감은 '+_pickRand(_cTile)+', 셔터 상태는 '+_pickRand(_cShutter)+'.';
+          var _cTile=['베이지 스크래치 타일','더스티 핑크 모자이크 타일','옅은 노란색 타일','오프화이트 도장 마감','짙은 회색 타일'];
+          var _cShutter=['일부는 내려져있고 일부는 열려있음','대부분 열려서 영업 중','일부 셔터에 녹 자국이 두드러짐','전부 내려가 있고 셔터에 낙서/전단 붙어있음'];
+          var _cSign=['가게마다 제각각인 돌출 간판이 뒤섞여있음','한 줄로 통일된 가로형 간판들','낡은 페인트 손글씨 간판이 섞여있음','일부 간판은 불이 나가서 글씨가 바랜 채로 남아있음'];
+          var _cShop=['편의점+미용실+부동산 조합','식당+철물점+세탁소 조합','옷가게+분식집+휴대폰가게 조합','문구점+약국+미용실 조합'];
+          var _cWindow=['2층부터는 낡은 알루미늄 새시 창문','2층 창문에 빛바랜 블라인드가 걸려있음','일부 창문에 에어컨 실외기가 튀어나와있음'];
+          var _cTop=['옥상에 낡은 광고판 구조물이 있음','옥상이 비어있고 난간만 있음','옥상에 물탱크가 있음'];
+          var _cWire=['전선·간판 케이블이 파사드에 어지럽게 노출돼있음','전선이 비교적 정리돼서 눈에 덜 띔'];
+          var _cEntry=['출입구마다 낮은 시멘트 턱','경사 진입로(리어카·유모차용)','턱 없이 도로와 바로 이어짐'];
+          var _cStain=['타일 줄눈에 때가 낀 자국','간판 아래로 빗물 자국','전체적으로 고르게 바랜 정도'];
+          _rbRecipe += ' 그 외 조합 — 외장 마감은 '+_pickRand(_cTile)+', 셔터 상태는 '+_pickRand(_cShutter)+', 간판 스타일은 '+_pickRand(_cSign)+', 1층 업종 조합은 '+_pickRand(_cShop)+', 창문은 '+_pickRand(_cWindow)+', 옥상은 '+_pickRand(_cTop)+', 전선은 '+_pickRand(_cWire)+', 입구는 '+_pickRand(_cEntry)+', 얼룩은 '+_pickRand(_cStain)+'. 이 9가지는 서로 독립적으로 고른 것이니, 그 외 디테일도 이에 맞춰 실제 거리에서 우연히 찍힌 특정 상가 건물처럼 개성 있게 채우세요.';
         } else if(tab.selK==='aged_house'){
-          var _hRoof=['기와지붕','슬레이트 지붕'];
-          var _hWall=['다소 바랜 페인트 마감','스크래치 스터코 마감'];
-          var _hGate=['철제 대문+낮은 담장','벽돌 기둥+철제 대문'];
-          _rbRecipe += ' 그 외 조합 — 지붕은 '+_pickRand(_hRoof)+', 외벽은 '+_pickRand(_hWall)+', 대문은 '+_pickRand(_hGate)+'.';
+          var _hRoof=['기와지붕','슬레이트 지붕','평지붕(옥상 있음)'];
+          var _hWall=['다소 바랜 페인트 마감','스크래치 스터코 마감','벽돌+시멘트 혼합 마감'];
+          var _hGate=['철제 대문+낮은 담장','벽돌 기둥+철제 대문','낮은 나무 대문'];
+          var _hWindow=['나무 창틀 창문','갈색 알루미늄 새시 창문','일부 창문에 방범창'];
+          var _hYard=['작은 마당에 장독대가 있음','좁은 시멘트 마당에 화분 몇 개','마당에 낡은 평상이 있음','마당이 거의 없고 바로 현관'];
+          var _hPorch=['작은 처마형 포치가 현관 위에 있음','포치 없이 문만 있음','계단 몇 단 위에 현관문'];
+          var _hStain=['지붕 아래로 빗물 자국','담장에 이끼 얼룩','전체적으로 고르게 바랜 정도'];
+          var _hUtil=['보일러실/창고가 마당 한쪽에 딸려있음','가스통이 마당 구석에 놓여있음','특별한 부속 구조물 없음'];
+          var _hChimney=['작은 굴뚝이 지붕에 있음','굴뚝 없음'];
+          _rbRecipe += ' 그 외 조합 — 지붕은 '+_pickRand(_hRoof)+', 외벽은 '+_pickRand(_hWall)+', 대문은 '+_pickRand(_hGate)+', 창문은 '+_pickRand(_hWindow)+', 마당은 '+_pickRand(_hYard)+', 현관은 '+_pickRand(_hPorch)+', 얼룩은 '+_pickRand(_hStain)+', 부속시설은 '+_pickRand(_hUtil)+', 굴뚝은 '+_pickRand(_hChimney)+'. 이 9가지는 서로 독립적으로 고른 것이니, 그 외 디테일도 이에 맞춰 실제 거리에서 우연히 찍힌 특정 단독주택처럼 개성 있게 채우세요.';
         }
         _finalPrompt = _finalPrompt + ' \u26a0\u26a0\u26a0 ' + _rbRecipe;
       }
@@ -44874,6 +44979,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
         var polyOv=gE('poly-overlay');
         if(polyOv) _redrawPolyAreas(polyOv);
         var pwrap=gE('poly-area-list-wrap'); if(pwrap) renderPolyAreaList(pwrap);
+        _mkReattachPolyToolHandlers();
         e.preventDefault();
       } else if(_drawActive && G.drawHist && G.drawHist.length>0){
         var cv=gE('draw-canvas');var prev=G.drawHist.pop();var img3=new Image();img3.onload=function(){var ctx3=cv.getContext('2d');ctx3.clearRect(0,0,cv.width,cv.height);ctx3.drawImage(img3,0,0);};img3.src=prev;e.preventDefault();
@@ -44923,8 +45029,11 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // Z+휠 확대뿐 아니라 그냥 스크롤도 화면(사진 위치)을 밀어버리면 안 됨 — 그리는 중에 화면이
       // 움직이면 좌표가 어긋나 보이고 작업 흐름이 끊기므로, 도구가 켜진 동안은 휠 이벤트 자체를
       // (스크롤이든 Z+확대든) 완전히 무시함.
-      var _cvZoomCheck=gE('draw-canvas');
-      if(_cvZoomCheck && _cvZoomCheck.classList.contains('active')){ e.preventDefault(); return; }
+      // ⚠️ 버그 수정: cv.classList.contains('active')는 사진 Image가 실제로 로드된 뒤(비동기
+      // onload 콜백 안)에야 붙는 클래스라서, 도구를 켜자마자(로딩이 채 안 끝난 그 찰나에) 휠을
+      // 굴리면 이 체크가 아직 false라 위 스크롤 차단이 씹힐 수 있었음(버튼 표시 버그와 똑같은
+      // 원인) — togDraw() 진입 시 동기적으로 세팅되는 G._dmOn 플래그로 판단해서 이 레이스를 없앰.
+      if(G._dmOn){ e.preventDefault(); return; }
       if(!G.zKeyDown)return;
       e.preventDefault();
       var hs3=gE('hist-s');if(!hs3)return;
