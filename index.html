@@ -9001,6 +9001,18 @@ function rUB(b,key){
       e.preventDefault();th.style.outline='';
       var imgSrc=e.dataTransfer.getData('clover/imgSrc');
       if(imgSrc&&key==='main'){
+        // ⚠️ 버그 수정("다른 편집할 이미지에 전에 작업했던 선택영역이 그대로 남아있네"): 갤러리
+        // 이미지를 여기로 드래그해서 바로 교체할 때는 sendEdit()/sendToWf()와 달리 브러시색·
+        // 다각형·사각형·화살표 데이터를 안 지우고 있었음 — 동일하게 초기화함.
+        if(G.wf==='edit'){
+          G.maskColorPrompts={}; G.maskColorRefImg={};
+          G.arrows=[]; G.arrowsHist=[]; G.polyAreas=[]; G.polyAreasHist=[];
+          G.drawHist=[]; G.polyPts=[]; G.strokePoints=[];
+          G._pendingMaskCanvasRestore=null;
+          idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
+          _saveMaskAnnotations();
+          G._maskAnnotImgKey=imgSrc;
+        }
         getTab(G.wf).inputImg=imgSrc;
         getTab(G.wf).status='idle';
         if(!G.HIST[G.wf])G.HIST[G.wf]=[];
@@ -9028,6 +9040,17 @@ function rUB(b,key){
       // 갤러리 드래그 이미지
       var imgSrc=e.dataTransfer.getData('clover/imgSrc');
       if(imgSrc&&key==='main'){
+        // ⚠️ 버그 수정("다른 편집할 이미지에 전에 작업했던 선택영역이 그대로 남아있네"): 위
+        // th.ondrop과 동일한 이유로 여기도 AI편집 탭이면 이전 이미지의 마스크 상태를 지움.
+        if(G.wf==='edit'){
+          G.maskColorPrompts={}; G.maskColorRefImg={};
+          G.arrows=[]; G.arrowsHist=[]; G.polyAreas=[]; G.polyAreasHist=[];
+          G.drawHist=[]; G.polyPts=[]; G.strokePoints=[];
+          G._pendingMaskCanvasRestore=null;
+          idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
+          _saveMaskAnnotations();
+          G._maskAnnotImgKey=imgSrc;
+        }
         getTab(G.wf).inputImg=imgSrc;
         getTab(G.wf).status='idle';
         if(!G.HIST[G.wf])G.HIST[G.wf]=[];
@@ -33728,6 +33751,26 @@ function addHistEl(item, scroll, targetHs, atBottom){
       // (다른 탭처럼 원본으로 되돌리면 체이닝이 끊겨서 의도와 반대로 동작함)
       var src=item.result||item.orig;
       if(!src) return;
+      // ⚠️ 버그 수정("다른 편집할 이미지에 전에 작업했던 선택영역이 그대로 남아있네"): 이 클릭
+      // 핸들러는 tab.inputImg만 새 이미지로 바꾸고 브러시색·다각형·사각형·화살표(G.arrows/
+      // G.polyAreas/G.maskColorPrompts 등)는 전혀 건드리지 않아서, 히스토리 피드에서 완전히 다른
+      // 사진의 카드를 클릭하면 예전 사진에 그려뒀던 선택 영역이 새 사진 위에 그대로 남아있었음
+      // (sendEdit()/sendToWf()/_loadFApply() 등 다른 모든 "새 이미지로 바꾸는" 경로는 이미 이걸
+      // 처리하고 있었는데 이 경로만 빠져있었음) — 실제로 "다른" 이미지로 바뀌는 경우에만(같은
+      // 이미지를 다시 클릭했을 땐 굳이 지울 필요 없으므로) 나머지 경로와 동일하게 초기화함.
+      if(tab.inputImg!==src){
+        G.maskColorPrompts={}; G.maskColorRefImg={};
+        G.arrows=[]; G.arrowsHist=[]; G.polyAreas=[]; G.polyAreasHist=[];
+        G.drawHist=[]; G.polyPts=[]; G.strokePoints=[];
+        G._pendingMaskCanvasRestore=null;
+        idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
+        _saveMaskAnnotations();
+        G._maskAnnotImgKey=src;
+        var _dcvChain=gE('draw-canvas');
+        if(_dcvChain){ try{ _dcvChain.getContext('2d').clearRect(0,0,_dcvChain.width,_dcvChain.height); }catch(e){} }
+        var _polyOvChain=gE('poly-overlay'); if(_polyOvChain) _polyOvChain.innerHTML='';
+        var _arrOvChain=gE('arrow-overlay'); if(_arrOvChain) _arrOvChain.innerHTML=_arrOvChain.querySelector('defs')?_arrOvChain.querySelector('defs').outerHTML:'';
+      }
       tab.inputImg=src;
       tab.inputImgName='';
       tab.selK=null;
