@@ -32480,13 +32480,18 @@ function finishPolygon(cv,polyOv){
     var hint=gE('stl');if(hint)hint.textContent='영역 '+G.polyAreas.length+'개 지정됨 — 아래에서 각 영역에 뭘 할지 적어주세요.';
   }
 }
-// 확정된 모든 영역을 오버레이에 다시 그림 — 번호+반투명 채우기로, 화살표처럼 항상 화면에 남아있음
+// 확정된 영역을 오버레이에 다시 그림 — 브러시↔화살표가 도구를 바꾸면 서로 안 보이는 것과
+// 똑같이, 다각형↔사각형도 지금 고른 도구에 해당하는 것만 화면에 보이게 함(⚠️ 요청 반영:
+// "사각형에서 다각형으로 탭을 누르면 사각형은 없어져야지 브러시나 화살표처럼" — 데이터 자체는
+// G.polyAreas에 계속 남아있고 실행 시엔 둘 다 포함되지만, 화면 표시만 지금 도구 것으로 거름).
 function _redrawPolyAreas(polyOv){
   if(!polyOv) return;
   var old=polyOv.querySelector('#poly-areas-group'); if(old) old.remove();
   var g=document.createElementNS('http://www.w3.org/2000/svg','g'); g.id='poly-areas-group';
   polyOv.insertBefore(g, polyOv.firstChild);
-  if(!G.polyAreas || !G.polyAreas.length) return;
+  var _curMode=(G.dm==='rect'?'rect':'polygon');
+  var _visibleAreas=(G.polyAreas||[]).filter(function(a){return (a.mode||'polygon')===_curMode;});
+  if(!_visibleAreas.length) return;
   var cv=gE('draw-canvas'); if(!cv) return;
   // ⚠️ 버그 수정(진짜 근본 원인 — 다시 어긋난 이유): 화살표와 똑같은 문제 — 여기서 cv(브러시
   // 캔버스)의 위치를 기준으로 계산하고 있었는데, 사각형/다각형이 실제로 그려지는 곳은 cv가
@@ -32499,7 +32504,7 @@ function _redrawPolyAreas(polyOv){
   var offXinContainer = letterboxRect.left - rect.left;
   var offYinContainer = letterboxRect.top - rect.top;
   var sx=letterboxRect.width/cv.width, sy=letterboxRect.height/cv.height; // 캔버스 내부좌표 → 화면표시좌표
-  G.polyAreas.forEach(function(area,i){
+  _visibleAreas.forEach(function(area,i){
     var color=POLY_AREA_COLORS[i%POLY_AREA_COLORS.length];
     var dispPts=area.points.map(function(pt){ return [pt[0]*sx+offXinContainer, pt[1]*sy+offYinContainer]; });
     var poly=document.createElementNS('http://www.w3.org/2000/svg','polygon');
