@@ -30605,111 +30605,6 @@ function _getBrushColorBBox(cv, hexColor){
   }catch(e){ console.warn('[브러시 색상 범위 스캔 실패]',e); return null; }
 }
 
-// ── 순차 단일 오브젝트 실행 (요청 반영, 2026-09) ──────────────────────────────
-// "브러시 여러 색 + 다각형 + 화살표를 합쳐서 한 번에 실행하니 정확도가 떨어진다(색 하나를
-// 빼먹거나, 화살표 위치가 부정확하거나, 여러 물체 중 일부만 처리됨) — 크레딧이 더 들어도
-// 좋으니 오브젝트를 1개씩 완전히 분리해서 순서대로(각각 독립된 AI 호출로) 처리해달라"는
-// 명시적 요청. 지금까지 "오브젝트가 정확히 1개일 때"의 프롬프트·마스크 조립 로직
-// (_mkMaskExecuteInner)은 이미 가장 정확하게 동작하는 것으로 확인돼 있으므로, 새로운 프롬프트
-// 조립 로직을 따로 만들지 않고 그 로직을 오브젝트 개수만큼 그대로 반복 호출하는 방식을 씀 —
-// 매 단계마다 G(전역 상태)를 "이번 단계의 오브젝트 1개만 남기고 나머지는 비운" 상태로 잠깐
-// 바꿔서 기존 단일 오브젝트 경로를 그대로 태움. 각 단계는 완전히 독립된 AI 호출이라 서버가
-// 각각 정상적으로 과금하므로(billingCtx가 procImgWithTask 안에서 매 호출마다 새로 계산됨),
-// 별도로 크레딧을 더 차감하는 코드를 추가할 필요가 없음 — 오히려 추가하면 이중 차감이 됨.
-function _mkCollectDirectedUnits(){
-  var units=[];
-  (MASK_COLORS||[]).forEach(function(c){
-    var hasTxt=!!(G.maskColorPrompts && (G.maskColorPrompts[c[0]]||'').trim());
-    var hasRef=!!(G.maskColorRefImg && G.maskColorRefImg[c[0]]);
-    if(hasTxt||hasRef) units.push({kind:'brush', color:c[0]});
-  });
-  (G.arrows||[]).forEach(function(a,i){
-    if((a.label||'').trim() || a.refImg) units.push({kind:'arrow', idx:i});
-  });
-  (G.polyAreas||[]).forEach(function(a,i){
-    if((a.label||'').trim() || a.refImg) units.push({kind:'poly', idx:i});
-  });
-  return units;
-}
-// 오브젝트가 2개 이상이면 순차 실행으로 처리하고 true 반환(호출부는 이 경우 기존 방식을 건너뜀).
-// 1개 이하면 아무것도 안 하고 false 반환(호출부가 기존 _mkMaskExecuteInner()를 그대로 실행).
-function _mkMaskExecuteSequentialIfNeeded(){
-  // 기존 _mkMaskExecuteInner() 맨 앞과 동일한 이유로, 판단 전에 화면에 보이는 입력창 값을 먼저
-  // 한번 더 확실히 동기화해둠(그래야 "몇 개인지" 판단 자체가 화면과 어긋나지 않음).
-  if(!G.maskColorPrompts) G.maskColorPrompts={};
-  document.querySelectorAll('textarea[data-mask-color-ta]').forEach(function(el){
-    G.maskColorPrompts[el.getAttribute('data-mask-color-ta')] = el.value;
-  });
-  document.querySelectorAll('textarea[data-arrow-label-ta]').forEach(function(el){
-    var idx=+el.getAttribute('data-arrow-label-ta');
-    if(G.arrows && G.arrows[idx]) G.arrows[idx].label = el.value;
-  });
-  document.querySelectorAll('textarea[data-polyarea-label-ta]').forEach(function(el){
-    var idx=+el.getAttribute('data-polyarea-label-ta');
-    if(G.polyAreas && G.polyAreas[idx]) G.polyAreas[idx].label = el.value;
-  });
-  var units=_mkCollectDirectedUnits();
-  if(units.length<=1) return false; // 오브젝트가 1개 이하면 순차 실행할 이유가 없음 — 기존 경로로
-
-  // 실행 도중 원본 상태가 바뀌지 않도록 깊은 복사로 스냅샷
-  var _snapColorPrompts=Object.assign({}, G.maskColorPrompts||{});
-  var _snapColorRef=Object.assign({}, G.maskColorRefImg||{});
-  var _snapArrows=(G.arrows||[]).map(function(a){return Object.assign({},a);});
-  var _snapPolys=(G.polyAreas||[]).map(function(a){return Object.assign({},a);});
-  var _total=units.length;
-  var _stlSeq=gE('stl');
-
-  if(!confirm('오브젝트가 '+_total+'개 지정되어 있어요.\n\n정확도를 최대한 높이기 위해 1개씩 완전히 분리해서 순서대로 처리합니다 — 이 경우 AI 호출도 '+_total+'번 실행되어 크레딧이 약 '+_total+'배 소모됩니다.\n\n계속 진행할까요?')){
-    return true; // 사용자가 취소함 — 아무 것도 실행하지 않되, 호출부가 기존 방식으로 대체 실행하지 않도록 true 반환
-  }
-
-  G._mkSeqActive=true; // _mkMaskExecuteInner의 DOM 재동기화를 이번 시퀀스 동안 막음
-
-  function abortSeq(msg){
-    G._mkSeqActive=false;
-    if(_stlSeq) _stlSeq.textContent=msg;
-  }
-
-  function runStep(idx){
-    if(idx>=_total){
-      G._mkSeqActive=false;
-      if(_stlSeq) _stlSeq.textContent='✓ 총 '+_total+'개 오브젝트 순차 편집이 모두 완료됐어요';
-      return;
-    }
-    var u=units[idx];
-    // 이번 단계의 오브젝트 1개만 남기고 나머지는 전부 비움(기존 "오브젝트 1개" 경로를 그대로 태우기 위함)
-    G.maskColorPrompts={}; G.maskColorRefImg={};
-    if(u.kind==='brush'){
-      G.maskColorPrompts[u.color]=_snapColorPrompts[u.color]||'';
-      if(_snapColorRef[u.color]) G.maskColorRefImg[u.color]=_snapColorRef[u.color];
-      G.arrows=[]; G.polyAreas=[];
-    } else if(u.kind==='arrow'){
-      G.arrows=[_snapArrows[u.idx]];
-      G.polyAreas=[];
-    } else {
-      G.polyAreas=[_snapPolys[u.idx]];
-      G.arrows=[];
-    }
-    if(_stlSeq) _stlSeq.textContent='('+(idx+1)+'/'+_total+') 오브젝트 순차 편집 중...';
-    G._mkPendingSeqCb=function(ri, err){
-      if(!ri){
-        abortSeq('('+(idx+1)+'/'+_total+') 처리 실패로 중단됨 — 이전 단계까지는 결과가 반영돼 있어요. 실패한 오브젝트는 다시 지정해서 실행해주세요: '+String(err||'').slice(0,60));
-        return;
-      }
-      runStep(idx+1);
-    };
-    try{
-      _mkMaskExecuteInner();
-    }catch(e){
-      console.error('[순차편집] 단계 실행 중 오류:', e);
-      G._mkPendingSeqCb=null;
-      abortSeq('('+(idx+1)+'/'+_total+') 처리 중 오류로 중단됨');
-    }
-  }
-  runStep(0);
-  return true;
-}
-
 function _mkMaskExecute(){
   console.log('[AI편집] 실행 버튼 클릭 → _mkMaskExecute 시작');
   // ⚠️ 요청 반영(도구별 독립 한도로 되돌림): 브러시는 색상 팔레트가 항상 다 보이는 입력창이라
@@ -30739,10 +30634,7 @@ function _mkMaskExecute(){
     if(!_proceed) return;
   }
   try{
-    // ⚠️ 요청 반영: 오브젝트가 2개 이상이면(브러시 색상+다각형+화살표 합쳐서) 하나로 합친 프롬프트
-    // 대신 1개씩 순서대로 완전히 독립적으로 실행함(정확도 우선, 크레딧은 개수만큼 더 듦) —
-    // 오브젝트가 1개 이하일 때는 이 함수가 false를 반환하고 기존 방식을 그대로 씀.
-    if(!_mkMaskExecuteSequentialIfNeeded()) _mkMaskExecuteInner();
+    _mkMaskExecuteInner();
   }catch(e){
     // ⚠️ 요청 반영: "버튼 눌러도 아무 반응이 없다" — 지금까지는 이 함수 안에서 뭔가 예상 못한
     // 오류가 나면 그냥 조용히 멈춰버려서, 사용자 입장에선 "아무 일도 안 일어나는" 것처럼
@@ -31127,7 +31019,9 @@ function _mkPreviewMask(){
     samBtn.disabled=true;
     var _origTxt=samBtn.textContent;
     samBtn.textContent='인식 중...';
-    _mkSamRefineMask(origSrc, _mask, function(refinedMaskUrl){
+    // ⚠️ 그려진 영역이 여러 개(예: 쿠션 1개 + 거울)면 실제 실행 때처럼 영역 하나당 SAM 호출을
+    // 따로 보냄(한 번에 다 합쳐서 보내면 SAM이 여러 물체를 한 덩어리로 잡아버리는 문제가 있었음).
+    _mkSamRefineAllRegionsForPreview(origSrc, function(refinedMaskUrl){
       samBtn.disabled=false;
       if(!refinedMaskUrl){
         samBtn.textContent='인식 실패 — 기존 마스크 그대로';
@@ -31174,7 +31068,7 @@ function _mkPreviewMask(){
 // billingCtx 인식 목록에 아직 없는 새 호출 유형이라, 실제 서버가 이를 얼마로 과금하는지는
 // fal-proxy Edge Function(이 index.html 밖의 별도 서버 코드) 쪽 확인이 필요함 — 혹시 예상치
 // 못한 기본 요금이 붙고 있다면 그 서버 함수에 이 호출 유형을 "거의 무료" 항목으로 등록해줘야 함.
-function _mkSamRefineMask(origImgSrc, rawMaskDataUrl, cb){
+function _mkSamRefineMask(origImgSrc, rawMaskDataUrl, wantsDilate, cb){
   if(!rawMaskDataUrl || !origImgSrc){ cb(null); return; }
   try{
     var bImg=new Image();
@@ -31219,12 +31113,35 @@ function _mkSamRefineMask(origImgSrc, rawMaskDataUrl, cb){
                     od[i]=bin; od[i+1]=bin; od[i+2]=bin; od[i+3]=255;
                   }
                   outCtx.putImageData(outData,0,0);
+                  var _samResultCv = outCv;
+                  // ⚠️ 버그 수정(실사용 확인, "SAM 적용된 나무는 삭제가 하나도 안 됐다"): 삭제/교체
+                  // 지시일 때는 기존 방식(대충 칠한 마스크)과 마찬가지로 SAM 마스크도 넉넉하게
+                  // 팽창시켜서, SAM이 나뭇가지·잎처럼 복잡한 형태를 실제보다 살짝 타이트하게 잡아도
+                  // AI가 물체 전체를 확실히 지울 여유를 줌(안 하면 SAM 마스크 바깥은 무조건 원본으로
+                  // 강제 복원되어 "삭제가 하나도 안 된 것처럼" 보임).
+                  if(wantsDilate){
+                    try{
+                      var _dilatePx2=Math.max(20, Math.round(Math.min(outCv.width,outCv.height)*0.03));
+                      var _dilCv2=document.createElement('canvas'); _dilCv2.width=outCv.width; _dilCv2.height=outCv.height;
+                      var _dilCtx2=_dilCv2.getContext('2d');
+                      _dilCtx2.filter='blur('+_dilatePx2+'px)';
+                      _dilCtx2.drawImage(outCv,0,0);
+                      var _dilData2=_dilCtx2.getImageData(0,0,_dilCv2.width,_dilCv2.height);
+                      var _dD2=_dilData2.data;
+                      for(var _di2=0; _di2<_dD2.length; _di2+=4){
+                        var _dv2 = _dD2[_di2]>12 ? 255 : 0;
+                        _dD2[_di2]=_dv2; _dD2[_di2+1]=_dv2; _dD2[_di2+2]=_dv2; _dD2[_di2+3]=255;
+                      }
+                      _dilCtx2.putImageData(_dilData2,0,0);
+                      _samResultCv = _dilCv2;
+                    }catch(e){ console.warn('[SAM 마스크 팽창 실패, 팽창 없이 진행]', e); }
+                  }
                   // 기존 마스크와 동일하게 경계만 살짝 부드럽게
-                  var featherPx=Math.max(6, Math.round(Math.min(outCv.width,outCv.height)*0.01));
-                  var blurCv=document.createElement('canvas'); blurCv.width=outCv.width; blurCv.height=outCv.height;
+                  var featherPx=Math.max(6, Math.round(Math.min(_samResultCv.width,_samResultCv.height)*0.01));
+                  var blurCv=document.createElement('canvas'); blurCv.width=_samResultCv.width; blurCv.height=_samResultCv.height;
                   var blurCtx=blurCv.getContext('2d');
                   blurCtx.filter='blur('+featherPx+'px)';
-                  blurCtx.drawImage(outCv,0,0);
+                  blurCtx.drawImage(_samResultCv,0,0);
                   cb(blurCv.toDataURL('image/png'));
                 }catch(e){ console.warn('[SAM 마스크 합성 실패]', e); cb(null); }
               };
@@ -31244,6 +31161,94 @@ function _mkSamRefineMask(origImgSrc, rawMaskDataUrl, cb){
   }catch(e){ console.warn('[SAM 마스크 정밀화 전체 실패]', e); cb(null); }
 }
 
+// ⚠️ 버그 수정(실사용 확인, "쿠션 1개만 표시했는데 미리보기에서 3개 다 잡힌 것 같다"): 미리보기는
+// 지금까지 그려진 모든 영역(예: 쿠션 1개 + 거울)을 하나로 합친 통짜 마스크를 SAM에 통째로 넘기고
+// 있었음 — 그러면 SAM에 넘어가는 박스 좌표가 "쿠션부터 거울까지"를 전부 감싸는 거대한 하나의
+// 박스가 되어버려서, SAM이 그 큰 박스 안에서 눈에 띄는 걸 잡다 보니 의도한 쿠션 1개가 아니라
+// 그 옆에 나란히 있는 쿠션들까지 한 덩어리로 잡히는 문제가 생김. 실제 실행 때는(오브젝트 1개씩
+// 순차 실행) 이런 문제가 없는데, 미리보기만 "합쳐서 한번에" 보여주다 보니 실제 실행과 다르게
+// 부정확한 인식 결과를 보여주고 있었던 것 — 미리보기도 실제 실행과 똑같이 "그려진 영역 하나당
+// SAM 호출 1번"으로 따로따로 보낸 뒤, 그 결과들을 합쳐서 화면에 보여주도록 고침.
+function _mkSamRefineAllRegionsForPreview(origImgSrc, cb){
+  var _snapColorPrompts=Object.assign({}, G.maskColorPrompts||{});
+  var _snapColorRef=Object.assign({}, G.maskColorRefImg||{});
+  var _snapArrows=(G.arrows||[]).map(function(a){return Object.assign({},a);});
+  var _snapPolys=(G.polyAreas||[]).map(function(a){return Object.assign({},a);});
+
+  var units=[];
+  var _pcv=gE('draw-canvas');
+  try{
+    if(_pcv && _pcv.width>0){
+      var _pd=_pcv.getContext('2d',{willReadFrequently:true}).getImageData(0,0,_pcv.width,_pcv.height).data;
+      (MASK_COLORS||[]).forEach(function(c){
+        var _rgb=_hexToRgb(c[0]);
+        for(var _pi=0; _pi<_pd.length; _pi+=4){
+          if(_pd[_pi+3]>10 && Math.abs(_pd[_pi]-_rgb[0])<40 && Math.abs(_pd[_pi+1]-_rgb[1])<40 && Math.abs(_pd[_pi+2]-_rgb[2])<40){
+            units.push({kind:'brush', color:c[0]}); break;
+          }
+        }
+      });
+    }
+  }catch(e){}
+  (G.arrows||[]).forEach(function(a,i){ if(typeof a.x2==='number' && typeof a.y2==='number') units.push({kind:'arrow', idx:i}); });
+  (G.polyAreas||[]).forEach(function(a,i){ if(a.points && a.points.length>=3) units.push({kind:'poly', idx:i}); });
+
+  if(!units.length){ cb(null); return; }
+
+  var _mkDeleteReForPreview=/삭제|제거|지워|없애|교체|바꿔|바꾸/;
+  var mergedCv=null;
+  var idx=0;
+  function restoreG(){
+    G.maskColorPrompts=_snapColorPrompts; G.maskColorRefImg=_snapColorRef;
+    G.arrows=_snapArrows; G.polyAreas=_snapPolys;
+  }
+  function next(){
+    if(idx>=units.length){
+      restoreG();
+      cb(mergedCv ? mergedCv.toDataURL('image/png') : null);
+      return;
+    }
+    var u=units[idx];
+    G.maskColorPrompts={}; G.maskColorRefImg={};
+    var _labelTxt='';
+    if(u.kind==='brush'){
+      G.maskColorPrompts[u.color]=_snapColorPrompts[u.color]||'';
+      if(_snapColorRef[u.color]) G.maskColorRefImg[u.color]=_snapColorRef[u.color];
+      G.arrows=[]; G.polyAreas=[];
+      _labelTxt=_snapColorPrompts[u.color]||'';
+    } else if(u.kind==='arrow'){
+      G.arrows=[_snapArrows[u.idx]]; G.polyAreas=[];
+      _labelTxt=_snapArrows[u.idx].label||'';
+    } else {
+      G.polyAreas=[_snapPolys[u.idx]]; G.arrows=[];
+      _labelTxt=_snapPolys[u.idx].label||'';
+    }
+    var _rawMask=_mkBuildCompositeMask(false);
+    if(!_rawMask){ idx++; next(); return; }
+    var _wantsDilate=_mkDeleteReForPreview.test(_labelTxt);
+    _mkSamRefineMask(origImgSrc, _rawMask, _wantsDilate, function(refined){
+      var _useMask = refined || _rawMask;
+      var mImg=new Image();
+      mImg.onload=function(){
+        try{
+          if(!mergedCv){
+            mergedCv=document.createElement('canvas'); mergedCv.width=mImg.naturalWidth; mergedCv.height=mImg.naturalHeight;
+            var _initCtx=mergedCv.getContext('2d'); _initCtx.fillStyle='#000'; _initCtx.fillRect(0,0,mergedCv.width,mergedCv.height);
+          }
+          var mctx=mergedCv.getContext('2d');
+          mctx.globalCompositeOperation='lighten';
+          mctx.drawImage(mImg,0,0,mergedCv.width,mergedCv.height);
+          mctx.globalCompositeOperation='source-over';
+        }catch(e){ console.warn('[미리보기 마스크 합치기 실패]', e); }
+        idx++; next();
+      };
+      mImg.onerror=function(){ idx++; next(); };
+      mImg.src=_useMask;
+    });
+  }
+  next();
+}
+
 function _mkMaskExecuteInner(){
   // ⚠️ 버그 수정(치명적, "분명히 텍스트 적었는데 '수정할 내용을 입력해주세요'가 뜬다"): 화면엔
   // 분명히 글자가 보이는데 실행 시점엔 내용이 비어있던 것으로 재현됨 — 어떤 경로로 상태(G.
@@ -31252,23 +31257,17 @@ function _mkMaskExecuteInner(){
   // 화면에 실제로 렌더링되어 있는 입력창들의 값을 다시 한번 직접 읽어서 상태에 덮어씀 — 이러면
   // 중간에 상태가 어떻게 어긋났든 상관없이, "사용자 눈에 지금 보이는 그대로"가 항상 실행됨.
   if(!G.maskColorPrompts) G.maskColorPrompts={};
-  // ⚠️ 순차 단일 오브젝트 실행(_mkMaskExecuteSequentialIfNeeded) 중에는 이 DOM 재동기화를 건너뜀 —
-  // 화면 입력창에는 여전히 "전체" 오브젝트들의 텍스트가 다 보이는 상태라서, 여기서 그대로
-  // 다시 읽어버리면 이번 단계용으로 일부러 1개만 남겨둔 G 상태(아래 runStep 참고)가 곧바로
-  // 원래의 "전체 오브젝트" 상태로 덮어써져 버려서 순차 실행이 전혀 의미가 없어짐.
-  if(!G._mkSeqActive){
-    document.querySelectorAll('textarea[data-mask-color-ta]').forEach(function(el){
-      G.maskColorPrompts[el.getAttribute('data-mask-color-ta')] = el.value;
-    });
-    document.querySelectorAll('textarea[data-arrow-label-ta]').forEach(function(el){
-      var idx=+el.getAttribute('data-arrow-label-ta');
-      if(G.arrows && G.arrows[idx]) G.arrows[idx].label = el.value;
-    });
-    document.querySelectorAll('textarea[data-polyarea-label-ta]').forEach(function(el){
-      var idx=+el.getAttribute('data-polyarea-label-ta');
-      if(G.polyAreas && G.polyAreas[idx]) G.polyAreas[idx].label = el.value;
-    });
-  }
+  document.querySelectorAll('textarea[data-mask-color-ta]').forEach(function(el){
+    G.maskColorPrompts[el.getAttribute('data-mask-color-ta')] = el.value;
+  });
+  document.querySelectorAll('textarea[data-arrow-label-ta]').forEach(function(el){
+    var idx=+el.getAttribute('data-arrow-label-ta');
+    if(G.arrows && G.arrows[idx]) G.arrows[idx].label = el.value;
+  });
+  document.querySelectorAll('textarea[data-polyarea-label-ta]').forEach(function(el){
+    var idx=+el.getAttribute('data-polyarea-label-ta');
+    if(G.polyAreas && G.polyAreas[idx]) G.polyAreas[idx].label = el.value;
+  });
   // ⚠️ 요청 반영: "네가 알아서 하지 말고 VizMaker가 실제로 어떻게 하는지 공부해서 그대로 반영해"
   // — VizMaker 공식 사용 가이드를 실제로 찾아서 확인함(7. DRAWING AND REMOVING/ADDING OBJECTS
   // 항목). 거기 적힌 방식은 제가 지난번에 추측했던 "영역별로 하나씩 잘라서 순서대로 처리"가
@@ -31402,7 +31401,15 @@ function _mkMaskExecuteInner(){
   // fal.ai의 SAM(Segment Anything, 물체 인식 모델)에 "대충 칠한 범위의 바운딩 박스"를 먼저
   // 보내서 그 안에 있는 실제 물체의 정확한 픽셀 마스크를 받아온 다음, 그걸로 대체함 — 실패하면
   // (네트워크 오류, 물체 인식 실패 등) 안전하게 기존의 "대충 칠한" 마스크로 자동 폴백함.
-  _mkSamRefineMask(getTab(G.wf).inputImg, _compositeMaskDataUrlRough, function(_samMaskUrl){
+  // ⚠️ 버그 수정(실사용 테스트에서 확인됨, "SAM 적용된 나무는 삭제가 하나도 안 됐다"): SAM이
+  // 돌려주는 마스크는 물체의 "정확한" 윤곽이지만, 나뭇가지·잎처럼 복잡한 형태는 SAM도 실제
+  // 물체보다 약간 작게/빡빡하게 잡는 경우가 있음 — 그런데 "삭제/교체" 지시는 원래 일부러 마스크를
+  // 넉넉하게 팽창(dilate)시켜서 AI가 물체 전체를 확실히 지울 여유를 주고 있었음(이 session 앞부분
+  // 작업). SAM 마스크로 바꾸면서 이 팽창 단계가 통째로 빠져버려서, SAM이 살짝이라도 타이트하게
+  // 잡으면 그 바깥쪽은 그대로 원본으로 강제 복원되어 "삭제가 하나도 안 된 것처럼" 보이는 것.
+  // SAM 성공 여부와 무관하게, "삭제/교체" 지시일 때는 SAM 마스크에도 동일하게 팽창을 적용함.
+  var _mkWantsDilateForSam = /삭제|제거|지워|없애|교체|바꿔|바꾸/.test(combined);
+  _mkSamRefineMask(getTab(G.wf).inputImg, _compositeMaskDataUrlRough, _mkWantsDilateForSam, function(_samMaskUrl){
     var _compositeMaskDataUrl = _samMaskUrl || _compositeMaskDataUrlRough;
     if(_samMaskUrl) console.log('[AI편집] SAM 물체 인식 마스크로 교체 완료');
     else if(_compositeMaskDataUrlRough) console.log('[AI편집] SAM 인식 실패/생략 — 기존 방식(대충 칠한 마스크)으로 진행');
@@ -36734,20 +36741,10 @@ function _runToolWithPromptActual(translatedPrompt){
   var _isCommercialForSnap = !_isExtForSnap && !_isResidentialForSnap;
   var _budgetSnap = _captureBudgetSnapshot(tab, _isExtForSnap, _isCommercialForSnap);
 
-  // ⚠️ 요청 반영("오브젝트 여러 개를 한 번에 합쳐서 시키니 정확도가 떨어진다 — 1개씩 순서대로
-  // 실행해서 정확도를 올리자"): 순차 단일 오브젝트 실행(_mkMaskExecuteSequentialIfNeeded)이
-  // "이번 단계가 끝나면 다음 단계를 이어서 실행"해야 하므로, 이 단계의 task가 실제로 완료(성공/
-  // 실패)되는 시점을 알아야 함 — G._mkPendingSeqCb에 그 콜백을 미리 걸어두면 여기서 task에 실어
-  // executeSingleRender 쪽에서 완료 시 호출해줌. 한 번 쓰고 나면 바로 비워서 다음(일반) 실행에
-  // 잘못 남지 않게 함. edit 탭이 아닐 때는 애초에 이 기능을 쓰지 않으므로 항상 null.
-  var _seqCbForThisTask = (G.wf==='edit') ? (G._mkPendingSeqCb||null) : null;
-  G._mkPendingSeqCb = null;
-
   var task={
     id:        Date.now(),
     img:       tab.inputImg,
     rimg:      G.wf==='edit'?tab.inputImg:null,
-    seqCb:     _seqCbForThisTask,
     wf:        _realWf(G.wf),
     prompt:    translatedPrompt,
     selK:      tab.selK||null,
@@ -37207,8 +37204,6 @@ function executeSingleRender(task){
     G.renderQueue=G.renderQueue.filter(function(t){return t.id!==task.id;});
     updateQueueUI();
     processRenderQueue();
-    // ⚠️ 순차 단일 오브젝트 실행용 훅: 이 task가 성공적으로 끝났음을 다음 단계에 알려줌(있을 때만)
-    if(typeof task.seqCb==='function'){ try{ task.seqCb(ri||null); }catch(e){console.warn('[순차편집] 콜백 오류',e);} }
   }, function(err){
     _stopTimer();
     G.activeRenders=Math.max(0,G.activeRenders-1);
@@ -37229,9 +37224,6 @@ function executeSingleRender(task){
     G._queueCompletedCount=(G._queueCompletedCount||0)+1; // 정확한 완료 개수 추적(알림 배치용)
     G.renderQueue=G.renderQueue.filter(function(t){return t.id!==task.id;});
     updateQueueUI();
-    // ⚠️ 순차 단일 오브젝트 실행용 훅: 이 task가 실패했음을 다음 단계에 알려줌(있을 때만) — 콜백이
-    // null과 에러를 받으면 순차 실행 쪽에서 남은 단계를 중단함(이미 끝난 단계까지는 결과가 남음)
-    if(typeof task.seqCb==='function'){ try{ task.seqCb(null, err); }catch(e){console.warn('[순차편집] 콜백 오류',e);} }
     processRenderQueue();
   });
 }
