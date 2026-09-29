@@ -31114,6 +31114,35 @@ function _mkPreviewMask(){
   tabMaskOnly.onclick=function(){ viewMode='maskonly'; paintTabs(); draw(); };
   tabWrap.appendChild(tabOverlay); tabWrap.appendChild(tabMaskOnly);
 
+  // ⚠️ 요청 반영("물체인식되서 마스크 흰색으로 적용되어있는 것도 미리보기로 볼 수 있게 해줘 —
+  // 얼마나 정확하게 되는지 보고 싶다"): 실제 실행(크레딧 소모) 없이도, 지금 지정한 범위로 SAM
+  // 물체 인식을 미리 한 번 돌려서 그 결과 마스크를 바로 이 미리보기 화면에서 확인할 수 있게 함.
+  // 이 버튼을 눌렀을 때만 SAM이 호출되므로(자동 실행 아님), 그냥 위치만 확인하고 싶을 땐 비용이
+  // 전혀 들지 않음.
+  var samBtn = document.createElement('button');
+  samBtn.type='button';
+  samBtn.textContent='🔍 물체 인식(SAM)으로 정밀하게 보기';
+  samBtn.style.cssText='padding:7px 14px;border-radius:7px;border:1px solid rgba(255,255,255,.25);background:transparent;color:#fff;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+  samBtn.onclick=function(){
+    samBtn.disabled=true;
+    var _origTxt=samBtn.textContent;
+    samBtn.textContent='인식 중...';
+    _mkSamRefineMask(origSrc, _mask, function(refinedMaskUrl){
+      samBtn.disabled=false;
+      if(!refinedMaskUrl){
+        samBtn.textContent='인식 실패 — 기존 마스크 그대로';
+        setTimeout(function(){ samBtn.textContent=_origTxt; },2000);
+        return;
+      }
+      samBtn.textContent='✓ 물체 인식 마스크 적용됨';
+      var refinedImg=new Image();
+      refinedImg.onload=function(){ maskImgEl=refinedImg; draw(); };
+      refinedImg.onerror=function(){ samBtn.textContent='인식 실패 — 기존 마스크 그대로'; setTimeout(function(){ samBtn.textContent=_origTxt; },2000); };
+      refinedImg.src=refinedMaskUrl;
+    });
+  };
+  tabWrap.appendChild(samBtn);
+
   // ⚠️ crossOrigin='anonymous'을 일부러 안 씀 — 여긴 화면에 그리기만 하고 픽셀을 다시 읽지는
   // 않아서(toDataURL 등 없음) CORS 헤더 여부와 상관없이 항상 표시는 되어야 하는데, crossOrigin을
   // 지정하면 서버가 CORS 헤더를 안 주는 경우 아예 로드 자체가 실패(onerror)해버리는 문제가 있음.
@@ -31134,6 +31163,87 @@ function _mkPreviewMask(){
   ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
   document.body.appendChild(ov);
 }
+// ── SAM(Segment Anything) 물체 인식으로 마스크 정밀화 ────────────────────────
+// 사용자가 브러시로 대충 칠하거나 화살표·다각형으로 대략 지정한 범위의 "바운딩 박스"만 SAM에
+// 넘겨서, 그 안에 있는 실제 물체의 정확한 픽셀 단위 마스크를 돌려받는다(포토샵의 "피사체 선택/
+// 개체 인식"과 같은 원리). 실패(네트워크 오류·인식 실패·흰 영역 없음)하면 반드시 cb(null)을
+// 호출해서, 호출부가 기존의 "대충 칠한" 마스크로 안전하게 폴백할 수 있게 한다 — 이 함수 자체가
+// 실행을 막는 일은 절대 없어야 함.
+// ⚠️ 비용 참고: fal.ai SAM 3 요청당 $0.005(≈7~8원, 1크레딧 미만) — 편집 1건당 20cr 기준으로
+// 사실상 무시할 수준이라 별도로 크레딧을 더 청구하지 않음. 단, 이 호출은 서버 프록시(fal-proxy)의
+// billingCtx 인식 목록에 아직 없는 새 호출 유형이라, 실제 서버가 이를 얼마로 과금하는지는
+// fal-proxy Edge Function(이 index.html 밖의 별도 서버 코드) 쪽 확인이 필요함 — 혹시 예상치
+// 못한 기본 요금이 붙고 있다면 그 서버 함수에 이 호출 유형을 "거의 무료" 항목으로 등록해줘야 함.
+function _mkSamRefineMask(origImgSrc, rawMaskDataUrl, cb){
+  if(!rawMaskDataUrl || !origImgSrc){ cb(null); return; }
+  try{
+    var bImg=new Image();
+    bImg.onload=function(){
+      try{
+        var bcv=document.createElement('canvas'); bcv.width=bImg.naturalWidth; bcv.height=bImg.naturalHeight;
+        if(!bcv.width || !bcv.height){ cb(null); return; }
+        var bctx=bcv.getContext('2d',{willReadFrequently:true});
+        bctx.drawImage(bImg,0,0);
+        var bd=bctx.getImageData(0,0,bcv.width,bcv.height).data;
+        var minX=1e9,minY=1e9,maxX=-1,maxY=-1;
+        var _step=Math.max(1, Math.round(Math.min(bcv.width,bcv.height)/600)); // 큰 이미지는 듬성듬성 스캔(속도)
+        for(var y=0;y<bcv.height;y+=_step){
+          for(var x=0;x<bcv.width;x+=_step){
+            var idx=(y*bcv.width+x)*4;
+            if(bd[idx]>127){ if(x<minX)minX=x; if(x>maxX)maxX=x; if(y<minY)minY=y; if(y>maxY)maxY=y; }
+          }
+        }
+        if(maxX<0){ cb(null); return; } // 흰 영역(지정된 범위) 자체가 없음
+        _doUpload(origImgSrc, function(imgUrl){
+          falRun('fal-ai/sam-3/image', {
+            image_url: imgUrl,
+            box_prompts: [{x_min:minX, y_min:minY, x_max:maxX, y_max:maxY, object_id:0}],
+            output_format:'png'
+          }, function(d){
+            try{
+              var _m = d && d.masks && d.masks[0];
+              var samMaskUrl = _m ? (typeof _m==='string' ? _m : (_m.url||null)) : null;
+              if(!samMaskUrl){ cb(null); return; }
+              var sImg=new Image();
+              sImg.crossOrigin='anonymous';
+              sImg.onload=function(){
+                try{
+                  var outCv=document.createElement('canvas'); outCv.width=bcv.width; outCv.height=bcv.height;
+                  var outCtx=outCv.getContext('2d');
+                  outCtx.drawImage(sImg,0,0,outCv.width,outCv.height);
+                  var outData=outCtx.getImageData(0,0,outCv.width,outCv.height);
+                  var od=outData.data;
+                  for(var i=0;i<od.length;i+=4){
+                    // SAM 마스크는 알파 또는 밝기로 전경을 표시하는 경우가 섞여 있어서 둘 다 확인
+                    var bin = (od[i]>80 || od[i+3]>80) ? 255 : 0;
+                    od[i]=bin; od[i+1]=bin; od[i+2]=bin; od[i+3]=255;
+                  }
+                  outCtx.putImageData(outData,0,0);
+                  // 기존 마스크와 동일하게 경계만 살짝 부드럽게
+                  var featherPx=Math.max(6, Math.round(Math.min(outCv.width,outCv.height)*0.01));
+                  var blurCv=document.createElement('canvas'); blurCv.width=outCv.width; blurCv.height=outCv.height;
+                  var blurCtx=blurCv.getContext('2d');
+                  blurCtx.filter='blur('+featherPx+'px)';
+                  blurCtx.drawImage(outCv,0,0);
+                  cb(blurCv.toDataURL('image/png'));
+                }catch(e){ console.warn('[SAM 마스크 합성 실패]', e); cb(null); }
+              };
+              sImg.onerror=function(){ console.warn('[SAM 마스크 이미지 로드 실패]'); cb(null); };
+              sImg.src=samMaskUrl;
+            }catch(e){ console.warn('[SAM 응답 처리 실패]', e); cb(null); }
+          // ⚠️ 중요(과금): billingCtx로 wf:'sam_segment'를 명시적으로 넘김 — 안 넘기면 서버
+          // (fal-proxy)의 computeCost()가 이 wf를 못 알아보고 "space/render 등 나머지" 기본값
+          // (20cr)으로 잘못 청구함. 서버 쪽에도 이 wf를 "사실상 무료"로 처리하도록 맞춰둬야 함
+          // (fal-proxy index.ts의 computeCost 참고 — 별도로 반영 필요).
+          }, function(err){ console.warn('[SAM 호출 실패, 기존 마스크로 폴백]', err); cb(null); }, {wf:'sam_segment'});
+        }, function(){ console.warn('[SAM용 이미지 업로드 실패, 기존 마스크로 폴백]'); cb(null); });
+      }catch(e){ console.warn('[SAM용 박스 추출 실패]', e); cb(null); }
+    };
+    bImg.onerror=function(){ cb(null); };
+    bImg.src=rawMaskDataUrl;
+  }catch(e){ console.warn('[SAM 마스크 정밀화 전체 실패]', e); cb(null); }
+}
+
 function _mkMaskExecuteInner(){
   // ⚠️ 버그 수정(치명적, "분명히 텍스트 적었는데 '수정할 내용을 입력해주세요'가 뜬다"): 화면엔
   // 분명히 글자가 보이는데 실행 시점엔 내용이 비어있던 것으로 재현됨 — 어떤 경로로 상태(G.
@@ -31285,7 +31395,24 @@ function _mkMaskExecuteInner(){
   // 브러시·다각형·사각형 범위를 흑백 마스크로 지금(캔버스가 지워지기 전에) 미리 만들어서
   // task에 실어 보내고, 실제 API 호출 결과를 받는 진짜 코드 경로에서 이 마스크로 "칠한 데만 AI
   // 결과, 나머지는 원본 그대로 강제 합성"하도록 연결함 — 이러면 색 번짐이 구조적으로 불가능해짐.
-  var _compositeMaskDataUrl = _mkBuildCompositeMask();
+  var _compositeMaskDataUrlRough = _mkBuildCompositeMask();
+  // ⚠️ 요청 반영(2026-09, "포토샵 마스크처럼 물체 경계를 정확히 인식해줘"): 지금까지 마스크는
+  // 사용자가 브러시로 "대충 칠한 범위"(+삭제/교체용 팽창)일 뿐, 실제 물체의 진짜 픽셀 경계는
+  // 전혀 몰랐음 — 그래서 아무리 프롬프트 문구를 강하게 써도 AI의 "추측"에 의존할 수밖에 없었음.
+  // fal.ai의 SAM(Segment Anything, 물체 인식 모델)에 "대충 칠한 범위의 바운딩 박스"를 먼저
+  // 보내서 그 안에 있는 실제 물체의 정확한 픽셀 마스크를 받아온 다음, 그걸로 대체함 — 실패하면
+  // (네트워크 오류, 물체 인식 실패 등) 안전하게 기존의 "대충 칠한" 마스크로 자동 폴백함.
+  _mkSamRefineMask(getTab(G.wf).inputImg, _compositeMaskDataUrlRough, function(_samMaskUrl){
+    var _compositeMaskDataUrl = _samMaskUrl || _compositeMaskDataUrlRough;
+    if(_samMaskUrl) console.log('[AI편집] SAM 물체 인식 마스크로 교체 완료');
+    else if(_compositeMaskDataUrlRough) console.log('[AI편집] SAM 인식 실패/생략 — 기존 방식(대충 칠한 마스크)으로 진행');
+    _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedColors);
+  });
+}
+// _mkMaskExecuteInner의 나머지 절반 — SAM 마스크 인식이 끝난(또는 실패해서 폴백한) 뒤에 이어서
+// 실행됨. 원래 하나의 함수였던 걸 SAM 비동기 호출 때문에 콜백 이후로 분리한 것뿐, 로직 자체는
+// 동일함.
+function _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedColors){
   getTab(G.wf)._pendingCompositeMask = _compositeMaskDataUrl; // procImgWithTask 쪽에서 1회성으로 읽어감
   // ⚠️ 요청 반영(긴급 되돌림): VizMaker 가이드대로 Nanobanana Pro로 강제 전환했더니 실제
   // 테스트에서 "렌더링이 안 된다"(에러/실패)는 게 확인됐고, 화면에 표시되는 엔진 배지는 여전히
