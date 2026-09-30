@@ -19705,40 +19705,17 @@ function mkAutoRoomCamera(p){
           renderSB();
         }; }(result.url, typeName);
         rRow.appendChild(useAsRefBtn);
-        // ⚠️ 요청 반영("쇼퍼블 가구 카탈로그 같은 거 만들어줘"): 실제 상품 DB 연동은 없어서 정확한
-        // 제품 매칭은 아니지만, AI가 사진 속 주요 가구의 특징을 짚어서 쇼핑몰(오늘의집·29CM·쿠팡 등)
-        // 검색어로 바로 써먹을 수 있게 뽑아줌 — 크레딧 안 드는 무료 텍스트 분석이라 부담 없이 눌러볼 수 있음.
-        var furnBtn=mk('button','');furnBtn.type='button';furnBtn.textContent='🛋️ 가구 정보 보기';
-        furnBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.08);color:#4ade80;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
-        (function(resUrl, btn, row){
-          var box=null;
-          btn.onclick=function(){
-            if(box){ box.remove(); box=null; btn.textContent='🛋️ 가구 정보 보기'; return; }
-            btn.textContent='분석 중...'; btn.disabled=true;
-            _extractFurnitureKeywords(resUrl, function(txt){
-              btn.disabled=false; btn.textContent='🛋️ 가구 정보 보기(닫기)';
-              box=dv('');
-              box.style.cssText='margin-top:5px;padding:8px;border-radius:6px;background:var(--c2);border:1px solid var(--bd2);font-size:10px;color:var(--t2);line-height:1.7';
-              if(!txt){
-                box.textContent='가구 정보를 추출하지 못했어요 — 다시 시도해주세요.';
-              } else {
-                var lines=txt.split('\n').map(function(l){return l.trim();}).filter(function(l){return l;});
-                var html='<div style="font-size:9.5px;color:var(--m2);margin-bottom:6px">💡 실제 판매 상품과 100% 일치하진 않아요 — 아래 검색어를 쇼핑몰에 그대로 검색해서 비슷한 제품을 찾아보세요.</div>';
-                lines.forEach(function(l){
-                  var parts=l.split('|').map(function(p){return p.trim();});
-                  if(parts.length>=3){
-                    html+='<div style="margin-bottom:6px"><b style="color:var(--t1)">'+parts[0]+'</b><br>'+parts[1]+'<br><span style="color:#4ade80">🔍 '+parts[2]+'</span></div>';
-                  } else if(parts.length){
-                    html+='<div style="margin-bottom:6px">'+l+'</div>';
-                  }
-                });
-                box.innerHTML=html;
-              }
-              row.appendChild(box);
-            });
-          };
-        })(result.url, furnBtn, rRow);
-        rRow.appendChild(furnBtn);
+        // ⚠️ 요청 반영("쇼퍼블 가구 카탈로그 같은 거 만들어줘"): 처음엔 별도의 텍스트-키워드 전용
+        // 기능(_extractFurnitureKeywords)을 새로 만들었었는데, 이미 있던 "쇼핑" 탭 기능
+        // (_openShoppingPanel — 쿠팡파트너스 실제 상품 검색/이미지/가격/구매링크 연동, 현재는
+        // 단일 이미지 결과 카드에만 붙어있었음)과 중복이라는 지적을 받아 제거하고, 대신 기존
+        // 쇼핑 패널을 이 멀티룸 결과 카드에도 그대로 연결함(중복 기능 대신 기존 걸 재사용).
+        var shopItem={result:result.url};
+        var shopBtn=mk('button','');shopBtn.type='button';shopBtn.textContent='🛍 쇼핑 — 가구·소품 찾기';
+        shopBtn.style.cssText='width:100%;margin-top:5px;padding:6px;border-radius:6px;border:1px solid rgba(236,72,153,.4);background:rgba(236,72,153,.08);color:#f9a8d4;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit';
+        shopBtn.addEventListener('click',function(e){e.stopPropagation();_openShoppingPanel(shopBtn, shopItem);},false);
+        shopBtn.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+        rRow.appendChild(shopBtn);
       } else if(result && result.error){
         var rErr=dv('');rErr.style.cssText='font-size:10.5px;color:#f87171';rErr.textContent='⚠️ 실패: '+result.error;
         rRow.appendChild(rErr);
@@ -19841,30 +19818,11 @@ function mkAutoRoomCamera(p){
 // 마감재·색상, 전체 스타일 장르"를 명확한 문장으로 뽑아냄 → ② 그 분석 텍스트를 실제 생성
 // 프롬프트에 "이미 확정된 사실"로 박아넣음. AI가 이미지에서 스타일을 그때그때 "추측"하는 대신,
 // 이미 뽑아낸 명확한 설명을 "따라가기만" 하면 되므로 훨씬 안정적일 것으로 기대함.
-// ⚠️ 요청 반영("구매 가능한 가구 추천/쇼퍼블 카탈로그 같은 기능 만들어줘"): 해외 경쟁 서비스들
-// (MyRoomDesigner AI, Paintit AI 등)의 "렌더 속 가구와 비슷한 실제 제품 추천" 기능을 참고해서
-// 만듦. 다만 우리는 실제 가구 쇼핑몰 상품 DB나 이미지 검색 API(예: 오늘의집·쿠팡 제휴 API)에
-// 연결되어 있지 않으므로, "정확히 이 제품"을 찾아주는 진짜 상품 매칭은 아니고 — 이미 있는
-// _analyzeSpaceStyle과 동일한 방식(무료 llm 비전 분석, 이미지 생성이 아니라 텍스트 분석이라
-// 크레딧 안 듦)으로 결과 사진 속 주요 가구·소품을 사람이 직접 보고 특징을 짚어주듯 뽑아내고,
-// 그 특징을 "오늘의집/29CM/쿠팡 등에서 바로 검색해볼 수 있는 한국어 검색어" 형태로 만들어줌 —
-// 사용자가 그 검색어를 그대로 복사해서 쇼핑몰에 검색하면 비슷한 실제 제품을 찾을 수 있게
-// 돕는 "검색 키워드 추출" 기능. 진짜 상품 매칭 API가 필요하면 나중에 별도 제휴 연동이 필요함.
-function _extractFurnitureKeywords(imgUrl, cb){
-  try{
-    _falProxyCall('llm', {
-      input: {
-        model:'google/gemini-flash-1.5-8b',
-        prompt:'이 인테리어 사진 속에서 눈에 띄는 주요 가구·조명·패브릭(소파, 의자, 테이블, 조명, 러그, 커튼 등) 3~6개를 골라서, 각각 아래 형식으로 한국어로 답해줘. 다른 설명 없이 이 형식만 정확히 지켜줘 — 각 줄은 "품목 | 특징(형태·소재·색상) | 쇼핑몰 검색어" 형식이고, 검색어는 오늘의집·29CM·쿠팡 같은 곳에 그대로 검색해볼 수 있는 짧고 구체적인 한국어 문구로 만들어줘. 예:\n3인용 소파 | 팔걸이 둥근 부클 원단 아이보리 소파 | 부클 소파 아이보리 3인용\n펜던트 조명 | 라탄 갓 펜던트 조명 | 라탄 펜던트 조명',
-        image_url:imgUrl
-      }
-    }, function(d){
-      var txt = (d && (d.output||d.text||d.response||d.message)) || '';
-      if(typeof txt!=='string' || !txt.trim()){ console.warn('[가구 정보 추출] 응답 형식이 예상과 다름:', d); cb(null); return; }
-      cb(txt.trim());
-    }, function(err){ console.warn('[가구 정보 추출 실패]', err); cb(null); });
-  }catch(e){ console.warn('[가구 정보 추출 호출 실패]', e); cb(null); }
-}
+// ⚠️ 요청 반영("구매 가능한 가구 추천/쇼퍼블 카탈로그 같은 기능 만들어줘") 후 수정: 처음엔 이
+// 자리에 별도의 텍스트-키워드 전용 함수(_extractFurnitureKeywords)를 새로 만들었었는데, 이미
+// 있던 "쇼핑" 탭 기능(_openShoppingPanel — 쿠팡파트너스 실제 상품 검색/이미지/가격/구매링크
+// 연동, 26400번대 줄)과 완전히 중복된다는 지적을 받아 제거함. 멀티룸 결과에서도 그 기존 쇼핑
+// 패널을 그대로 재사용하도록 바꿈(위쪽 렌더링 코드 참고).
 function _analyzeSpaceStyle(imgUrl, cb){
   // ⚠️ 버그 수정: 서버 fal-proxy 코드를 실제로 확인함 — action:'llm'이 이미 서버에 있고,
   // fal-ai/any-llm을 정확히 이 방식(model+prompt+추가 필드를 그대로 fal.ai에 전달)으로 호출하고
@@ -21893,7 +21851,7 @@ function _openKakaoMapModal(){
   function hideRoadMsg(){ roadMsg.style.display='none'; }
   mapDiv.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--m2);font-size:12px">카카오맵 불러오는 중...</div>';
 
-  var mode='map', map=null, roadview=null, roadviewClient=null, geocoder=null;
+  var mode='map', map=null, roadview=null, roadviewClient=null, geocoder=null, marker=null;
   var curLat=(_kmLastLat!=null)?_kmLastLat:37.5665, curLng=(_kmLastLng!=null)?_kmLastLng:126.9780;
 
   // ⚠️ 요청 반영("주소를 바로 확인할수 있는방법이없나? 로드뷰 포인트를 딱 위치시켜서 로드뷰 보고
@@ -22127,7 +22085,17 @@ function _openKakaoMapModal(){
       kakao.maps.event.addListener(roadview, 'position_changed', function(){
         try{
           var pos=roadview.getPosition();
-          if(pos){ curLat=pos.getLat(); curLng=pos.getLng(); if(typeof _kmUpdateAddr==='function') _kmUpdateAddr(curLat,curLng); }
+          if(pos){
+            curLat=pos.getLat(); curLng=pos.getLng();
+            if(typeof _kmUpdateAddr==='function') _kmUpdateAddr(curLat,curLng);
+            // ⚠️ 버그 수정("로드뷰에서 돌아다니고 지도 누르면 핀 위치가 로드뷰에서 본 위치로
+            // 안 바뀌어있다"): 로드뷰 안에서 화살표로 이동할 때마다 curLat/curLng는 여기서
+            // 계속 갱신되고 있었지만, 정작 지도 위 핀(marker)은 이 이벤트에서 전혀 움직이지
+            // 않아서 — 지도 탭으로 돌아가면 지도 중심은 새 위치로 옮겨가는데 핀만 예전(로드뷰
+            // 진입 전) 자리에 그대로 남아있었음. 여기서 핀도 같이 옮겨서 항상 "지금 로드뷰가
+            // 보여주는 위치"와 핀 위치가 일치하게 함.
+            if(marker) marker.setPosition(pos);
+          }
         }catch(e){}
       });
       _kmRoadviewPosListenerAdded=true;
@@ -22149,7 +22117,7 @@ function _openKakaoMapModal(){
     if(m==='map'){
       mapDiv.style.display=''; roadDiv.style.display='none';
       panel.querySelector('#km-maptools').style.display='flex';
-      if(map){ setTimeout(function(){ map.relayout(); map.setCenter(new kakao.maps.LatLng(curLat,curLng)); }, 0); }
+      if(map){ setTimeout(function(){ map.relayout(); var _c=new kakao.maps.LatLng(curLat,curLng); map.setCenter(_c); if(marker) marker.setPosition(_c); }, 0); }
     } else {
       mapDiv.style.display='none'; roadDiv.style.display='';
       panel.querySelector('#km-maptools').style.display='none';
@@ -22169,7 +22137,7 @@ function _openKakaoMapModal(){
     _kakaoMapInstance=map;
     // ⚠️ 요청 반영("지도 로드뷰 위치 마우스로 잡고 옮겨지지않나?"): 지금까지는 주소 검색으로만
     // 위치를 옮길 수 있었음 — 핀을 마우스로 드래그하거나 지도를 클릭해서 바로 옮길 수 있게 함.
-    var marker=new kakao.maps.Marker({position:startPos, map:map, draggable:true});
+    marker=new kakao.maps.Marker({position:startPos, map:map, draggable:true});
     geocoder=new kakao.maps.services.Geocoder();
     var places=new kakao.maps.services.Places();
 
