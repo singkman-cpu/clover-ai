@@ -31472,6 +31472,21 @@ function _mkMaskExecuteInner(){
   });
   var refImgs=[];
   var combined='';
+  // ⚠️ 버그 수정(치명적, "문 삭제해달라고 했는데 결과가 그대로다" — flux 자동 전환 이후 재현):
+  // 아래에서 combined에 계속 이어붙는 "⚠️⚠️ 색칠된 영역과 그 영역이 가리키는 오브젝트만..."
+  // 류의 문구들은 전부 나노바나나(이미지에 색이 칠해진 채로 통째로 보여주고 "이 색 부분만
+  // 고쳐라"고 알려줘야 하는 방식) 전용 설명임 — flux-lora/inpainting은 그런 설명이 전혀
+  // 필요없는, 진짜 픽셀 마스크(별도 흑백 이미지)만 보고 그 안을 채우는 모델이라, 이 메타
+  // 설명("색칠된 영역", "다른 색으로 칠한 영역은 서로 다른 오브젝트" 등)을 그대로 프롬프트로
+  // 던지면 모델이 뭘 그려야 할지 전혀 이해 못 하고 "최대한 원본과 비슷하게" 유지해버려서
+  // 결과가 거의 안 바뀌는 것으로 보임(실사용 재현: 문을 지워달라고 칠했는데 그대로 남음).
+  // flux 경로에서는 이 메타 설명이 전부 빠진, 사용자가 실제로 타이핑한 순수 지시문만 따로
+  // 모아서 procImgWithTask 쪽으로 넘김(아래 _rawFluxInstrParts, task.rawInstrForFlux로 전달).
+  var _rawFluxInstrParts=[];
+  usedColors.forEach(function(c){
+    var t=(G.maskColorPrompts[c[0]]||'').trim();
+    if(t) _rawFluxInstrParts.push(t);
+  });
   if(usedColors.length===1){
     var c0=usedColors[0];
     combined = (G.maskColorPrompts[c0[0]]||'').trim();
@@ -31515,6 +31530,8 @@ function _mkMaskExecuteInner(){
   if(/교체|바꿔|바꾸/.test(combined)){
     combined += ' ⚠️⚠️ "교체/바꿔줘"라고 지시한 부분에 대해(매우 중요, 반복 실패 사례 — 원래 있던 물체는 그대로 남아있고 그 옆이나 앞에 새 물체가 하나 더 생기는 경우): 이건 "새 물체를 추가로 그려 넣으라"는 뜻이 아니라 "원래 있던 그 물체를 완전히 없애고 정확히 같은 자리에 새 물체를 대신 놓으라"는 뜻입니다. 먼저 지정된 영역 안의 원래 물체를 마치 처음부터 없었던 것처럼 완전히 지우고(형태·그림자·윤곽이 조금도 남지 않게), 그런 다음 그 자리에 새 물체(지시한 색상·종류·디자인)를 원래 물체와 똑같은 위치·크기·각도·원근으로 놓아서 사진 전체의 구도가 자연스럽게 유지되도록 하세요. 원래 물체와 새 물체가 동시에 같이 보이거나, 새 물체가 원래 물체 앞·뒤·옆에 별도로 추가된 것처럼 보이면 명백한 실패입니다 — 그 자리에는 새 물체 딱 하나만 있어야 합니다.';
   }
+  (G.arrows||[]).forEach(function(a){ var t=(a.label||'').trim(); if(t) _rawFluxInstrParts.push(t); });
+  (G.polyAreas||[]).forEach(function(a){ var t=(a.label||'').trim(); if(t) _rawFluxInstrParts.push(t); });
   if(G.arrows && G.arrows.length){
     var arrCv=gE('draw-canvas');
     var arrParts=G.arrows.filter(function(a){return (a.label||'').trim() || a.refImg;}).map(function(a,i){
@@ -31600,14 +31617,17 @@ function _mkMaskExecuteInner(){
     var _compositeMaskDataUrl = _samMaskUrl || _compositeMaskDataUrlRough;
     if(_samMaskUrl) console.log('[AI편집] SAM 물체 인식 마스크로 교체 완료');
     else if(_compositeMaskDataUrlRough) console.log('[AI편집] SAM 인식 실패/생략 — 기존 방식(대충 칠한 마스크)으로 진행');
-    _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedColors);
+    _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedColors, _rawFluxInstrParts.join('. '));
   });
 }
 // _mkMaskExecuteInner의 나머지 절반 — SAM 마스크 인식이 끝난(또는 실패해서 폴백한) 뒤에 이어서
 // 실행됨. 원래 하나의 함수였던 걸 SAM 비동기 호출 때문에 콜백 이후로 분리한 것뿐, 로직 자체는
 // 동일함.
-function _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedColors){
+function _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedColors, _rawInstrForFlux){
   getTab(G.wf)._pendingCompositeMask = _compositeMaskDataUrl; // procImgWithTask 쪽에서 1회성으로 읽어감
+  // ⚠️ flux-lora/inpainting용 "순수 사용자 지시문"(나노바나나 전용 메타 설명 없이)도 같이 실어서
+  // 보냄 — procImgWithTask에서 flux 경로를 탈 때만 combined 대신 이걸 사용함.
+  getTab(G.wf)._pendingRawInstrForFlux = _rawInstrForFlux || null;
   // ⚠️ 요청 반영(긴급 되돌림): VizMaker 가이드대로 Nanobanana Pro로 강제 전환했더니 실제
   // 테스트에서 "렌더링이 안 된다"(에러/실패)는 게 확인됐고, 화면에 표시되는 엔진 배지는 여전히
   // "나노바나나2"인데 뒤에서만 몰래 Pro로 바뀌는 것도 "그럼 크레딧을 더 받아야 하는 거 아니냐"는
@@ -37011,11 +37031,13 @@ function _runToolWithPromptActual(translatedPrompt){
     // "마스크 밖은 원본 픽셀 그대로 강제, 마스크 안만 AI 결과" 합성을 할 수 있게 함 — 한 번
     // 쓰고 나면 바로 비워서 다음 실행에 잘못 남지 않게 함.
     maskData:  (G.wf==='edit' ? getTab('edit')._pendingCompositeMask : null) || null,
+    rawInstrForFlux: (G.wf==='edit' ? getTab('edit')._pendingRawInstrForFlux : null) || null,
     status:    'queued',
     priority:  (G.plan==='agency' || G.plan==='admin'), // Business 플랜 전용 우선순위 처리 혜택
     budgetSnapshot: _budgetSnap
   };
   if(G.wf==='edit') getTab('edit')._pendingCompositeMask = null;
+  if(G.wf==='edit') getTab('edit')._pendingRawInstrForFlux = null;
   setTabStatus(G.wf,'queued');
   // ⚠️ 요청 반영("투시도 한 번에 여러 후보 뽑고 싶다"): candidateCount(1~3)가 1보다 크면, 완전히
   // 같은 설정으로 task를 그 개수만큼 복제해서 큐에 나란히 넣음 — 각자 독립적으로 생성되니 결과가
@@ -37902,9 +37924,21 @@ function procImgWithTask(task, onDone, onErr){
     var _autoFluxDeleteRe = /삭제|제거|지워|없애|교체|바꿔|바꾸/;
     var _shouldUseFlux = task.maskData && (G.maskEngine==='flux' || _autoFluxDeleteRe.test(userPrompt));
     if(_shouldUseFlux){
-      var _fluxEditPrompt = (userPrompt||'Remove the masked object and fill the area naturally, matching the surrounding scene.') +
-        ' Only modify the white masked area. Keep everything outside the mask exactly as in the original image, pixel for pixel — same camera angle, same framing, same zoom level, same crop.';
-      console.log(G.maskEngine==='flux' ? '[edit] flux 인페인팅 엔진 선택됨 → fal-ai/flux-lora/inpainting로 실행' : '[edit] 삭제/교체 계열 지시 자동 감지 → flux-lora/inpainting로 자동 전환해서 실행');
+      // ⚠️ 버그 수정(치명적, "문 삭제해달라고 했는데 결과가 그대로다"): userPrompt(=combined)는
+      // 나노바나나 전용으로 만들어진 텍스트라 "색칠된 영역", "다른 색으로 칠한 영역은 서로 다른
+      // 오브젝트" 같은 메타 설명이 잔뜩 섞여있음 — flux-lora/inpainting은 이미지에 색이 칠해져
+      // 있는 게 아니라 진짜 흑백 마스크(별도 이미지)만 보고 그 안을 채우는 모델이라, 이런 메타
+      // 설명을 그대로 주면 "색칠된 영역"이 뭘 말하는지 이해 못 하고 그냥 원본과 비슷하게
+      // 유지해버려서 지운 게 하나도 반영 안 되는 현상이 재현됨. task.rawInstrForFlux(나노바나나
+      // 메타 설명 없이 사용자가 실제로 타이핑한 지시문만 모은 것, _mkMaskExecuteInner에서 준비)가
+      // 있으면 그걸 우선 쓰고, 없으면(옛날 방식으로 실행된 경우 등) userPrompt로 폴백함.
+      var _fluxRawInstr = (task.rawInstrForFlux || userPrompt || '').trim();
+      var _fluxIsDelete = _autoFluxDeleteRe.test(_fluxRawInstr) || (!_fluxRawInstr);
+      var _fluxEditPrompt = _fluxIsDelete
+        ? ('Completely remove the object(s) described by this instruction from the masked (white) area, and fill that area with a seamless, natural continuation of the surrounding material/surface — as if the object was never there: '+(_fluxRawInstr||'remove the object in the masked area')+'. The masked area must end up as a plain, uninterrupted continuation of whatever material surrounds it (wall, floor, facade, etc.) — no leftover shape, outline, or shadow of the removed object, and do not add any new object in its place.')
+        : ('Apply this exact change only inside the masked (white) area, replacing what is currently there: '+_fluxRawInstr+'.');
+      _fluxEditPrompt += ' Only modify the white masked area. Keep everything outside the mask exactly as in the original image, pixel for pixel — same camera angle, same framing, same zoom level, same crop.';
+      console.log(G.maskEngine==='flux' ? '[edit] flux 인페인팅 엔진 선택됨 → fal-ai/flux-lora/inpainting로 실행' : '[edit] 삭제/교체 계열 지시 자동 감지 → flux-lora/inpainting로 자동 전환해서 실행', '| 순수 지시문:', _fluxRawInstr);
       _doUpload(img, function(_fxImgUrl){
         _doUpload(task.maskData, function(_fxMaskUrl){
           falRun('fal-ai/flux-lora/inpainting', {
