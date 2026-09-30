@@ -45881,7 +45881,17 @@ function onSupaLogin(user){
         console.log('[클라우드 갤러리] 이미 이 세션에서 로드됨 — 재요청 생략');
       }
       // 사이드바 재렌더링 (레퍼런스 슬롯 반영)
-      if(G.wf) renderSB();
+      // ⚠️ 버그 수정("대화형 AI편집 중에 화면이 계속 깜빡깜빡한다, 렌더링 끝날 때까지 계속 그런다"):
+      // Supabase 인증 이벤트(SIGNED_IN·INITIAL_SESSION 등)가 세션 하나에서 여러 번 발생할 수
+      // 있는데(위 클라우드 갤러리 가드 주석 참고), 그때마다 여기서 무조건 renderSB()를 다시
+      // 불러서 사이드바 전체(대화형 수정 중이던 채팅 로그·썸네일·스크롤 포함)를 통째로 다시
+      // 그리고 있었음 — AI 렌더링을 기다리는 10~30초 동안 그 사이에 인증 이벤트가 여러 번
+      // 발생하면 그때마다 화면이 깜빡였던 것. 지금 대화형 수정이 한창 진행 중일 때는 이
+      // 반복적인 사이드바 재렌더링을 건너뛰어서 깜빡임을 막음(진행이 끝나면 _chatEditSend
+      // 자신의 완료 콜백이 알아서 정확히 한 번 다시 그려줌).
+      var _curTabForAuthRerender = G.wf ? getTab(G.wf) : null;
+      var _busyNowForAuthRerender = _curTabForAuthRerender && _curTabForAuthRerender.chatRunning;
+      if(G.wf && !_busyNowForAuthRerender) renderSB();
     }
   });
   // 계정 버튼 업데이트
