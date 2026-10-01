@@ -40425,6 +40425,44 @@ function admBeforeAfter(c){
   gE('ba-add-btn').onclick = admBeforeAfterAdd;
   admBeforeAfterLoadList();
 }
+// ⚠️ 버그 수정("비회원 300명 넘게 들어왔는데 가입이 거의 없다 — 틱톡/릴스 보고 궁금해서 들어왔다가
+// 그냥 나가는 듯"): 원인 추적 중 발견 — 신규가입 웰컴 모달(_buildBeforeAfterSlider)에 쓰이는
+// before/after 사진이 압축 없이 원본 그대로(휴대폰 카메라 원본이면 장당 5~15MB) 업로드되고
+// 있었음. 모달 하나에 이런 사진이 6장(현장사진·공간컨셉·3D렌더 각각 before+after)까지 들어갈 수
+// 있어서, 모바일 데이터로 들어온 방문자는 사진이 다 뜨기도 전에(수 초 소요) 그냥 나가버렸을
+// 가능성이 큼 — 일반 작업용 업로드(loadF)는 이미 _downscaleForMemorySafety로 자동 축소되는데
+// 이 관리자 업로드 경로만 그 처리가 빠져 있었음. 웰컴 화면 전시용으로는 고해상도 원본이 필요
+// 없으므로(최대 표시 폭이 모달 박스의 절반 수준), 캔버스로 긴 변 1600px 이하로 줄이고 JPEG
+// 85% 품질로 압축한 뒤 업로드하도록 수정 — 화질 차이는 거의 안 보이면서 용량은 수 MB에서
+// 수백 KB 수준으로 줄어듦.
+function _compressImageFileForUpload(file, maxDim, quality, cb){
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    var img = new Image();
+    img.onload = function(){
+      var w = img.naturalWidth, h = img.naturalHeight;
+      var scale = (!w || !h) ? 1 : Math.min(1, maxDim / Math.max(w, h));
+      var nw = Math.max(1, Math.round((w||maxDim) * scale));
+      var nh = Math.max(1, Math.round((h||maxDim) * scale));
+      try{
+        var cv = document.createElement('canvas');
+        cv.width = nw; cv.height = nh;
+        var ctx = cv.getContext('2d');
+        ctx.drawImage(img, 0, 0, nw, nh);
+        cv.toBlob(function(blob){
+          cb(blob || file, blob ? 'image/jpeg' : (file.type||'image/jpeg'));
+        }, 'image/jpeg', quality);
+      }catch(e){
+        console.warn('[비포애프터 압축 실패, 원본 그대로 업로드]', e);
+        cb(file, file.type||'image/jpeg');
+      }
+    };
+    img.onerror = function(){ cb(file, file.type||'image/jpeg'); };
+    img.src = ev.target.result;
+  };
+  reader.onerror = function(){ cb(file, file.type||'image/jpeg'); };
+  reader.readAsDataURL(file);
+}
 function admBeforeAfterAdd(){
   var res=gE('ba-add-res');
   var bf=gE('ba-before-file').files[0], af=gE('ba-after-file').files[0];
@@ -40432,19 +40470,26 @@ function admBeforeAfterAdd(){
   var category=gE('ba-category').value; // 'site' 또는 'render'
   if(!bf||!af){ if(res){res.style.color='#fca5a5';res.textContent='before/after 사진을 둘 다 선택하세요.';} return; }
   if(!_supa){ if(res){res.style.color='#fca5a5';res.textContent='Supabase 미연결';} return; }
-  if(res){res.style.color='var(--m2)';res.textContent='업로드 중...';}
+  if(res){res.style.color='var(--m2)';res.textContent='이미지 압축 중...';}
   var ts=Date.now();
-  var bfExt=(bf.name.split('.').pop()||'jpg').toLowerCase();
-  var afExt=(af.name.split('.').pop()||'jpg').toLowerCase();
   // gallery 버킷의 스토리지 RLS는 경로 맨 앞이 업로드한 사람의 user id로 시작해야 통과됨
   // (다른 업로드들도 전부 이 패턴을 씀 — 예: _w3dEnsurePublicUrl의 '{user id}/world3d/...').
   // 예전엔 'before-after/...'로 시작해서 이 규칙에 안 맞아 400 에러가 났었음.
   var _uid = _supaUser ? _supaUser.id : 'admin';
-  var bfPath=_uid+'/before-after/'+ts+'-before.'+bfExt;
-  var afPath=_uid+'/before-after/'+ts+'-after.'+afExt;
+  var bfPath=_uid+'/before-after/'+ts+'-before.jpg';
+  var afPath=_uid+'/before-after/'+ts+'-after.jpg';
+  // 웰컴 모달 전시용이라 고해상도 원본이 필요 없음 — 긴 변 1600px, JPEG 85%로 압축 후 업로드
+  new Promise(function(resolve){
+    _compressImageFileForUpload(bf, 1600, 0.85, function(blob, ct){ resolve({blob:blob, ct:ct}); });
+  }).then(function(bfC){
+    if(res){res.style.color='var(--m2)';res.textContent='업로드 중...';}
+    return new Promise(function(resolve){
+      _compressImageFileForUpload(af, 1600, 0.85, function(blob, ct){ resolve({bf:bfC, af:{blob:blob, ct:ct}}); });
+    });
+  }).then(function(pair){
   Promise.all([
-    _supa.storage.from('gallery').upload(bfPath, bf, {contentType:bf.type||'image/jpeg', upsert:true}),
-    _supa.storage.from('gallery').upload(afPath, af, {contentType:af.type||'image/jpeg', upsert:true})
+    _supa.storage.from('gallery').upload(bfPath, pair.bf.blob, {contentType:pair.bf.ct||'image/jpeg', upsert:true}),
+    _supa.storage.from('gallery').upload(afPath, pair.af.blob, {contentType:pair.af.ct||'image/jpeg', upsert:true})
   ]).then(function(uploadResults){
     if(uploadResults[0].error||uploadResults[1].error){ throw new Error((uploadResults[0].error||uploadResults[1].error).message); }
     var bfUrl=_supa.storage.from('gallery').getPublicUrl(bfPath).data.publicUrl;
@@ -40458,6 +40503,9 @@ function admBeforeAfterAdd(){
     admBeforeAfterLoadList();
   }).catch(function(err){
     if(res){res.style.color='#fca5a5';res.textContent='오류: '+(err.message||err)+' (home_before_after 테이블에 category 컬럼이 없으면 먼저 추가해야 해요)';}
+  });
+  }).catch(function(err){
+    if(res){res.style.color='#fca5a5';res.textContent='이미지 압축 중 오류: '+(err.message||err);}
   });
 }
 function admBeforeAfterLoadList(){
