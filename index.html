@@ -32111,6 +32111,42 @@ function _agedEnvPromptHead(env){
 function _agedEnvPromptTail(){
   return ' ⚠️⚠️⚠️ FINAL SCALE CHECK (magenta guide box — most important): the new building must fit entirely inside the magenta rectangle, with its highest point at or below the rectangle\'s top edge (preferably clearly lower). Then delete the magenta rectangle lines from the output image.';
 }
+// ⚠️ 요청 반영("이렇게까지 원본건물 영역지정까지 해야해?"): 사용자가 박스를 직접 그리지 않아도
+// 되도록, 생성 직전에 비전 모델(기존 AC/TV 검수와 같은 무료 llm 액션)에게 원본 사진 속 메인 건물의
+// 위치를 물어봐서 박스를 자동으로 잡음. 직접 그린 박스가 있으면 그게 우선이고, 자동 감지가 실패하거나
+// 결과가 이상하면(너무 작거나 화면 대부분) 박스 없이 예전 방식 그대로 진행 — 생성 자체는 절대 안 막음.
+function _agedEnvAutoDetect(imgUrl, cb){
+  var done=false;
+  function finish(v){ if(done) return; done=true; cb(v); }
+  setTimeout(function(){ if(!done){ console.warn('[스케일 가이드] 자동 감지 시간초과 — 박스 없이 진행'); finish(null); } }, 25000);
+  var prompt='Look at this photo. Find the single MAIN subject building (the house/building in the foreground center that the photo is about — NOT the background or side neighbouring houses). '+
+    'Return ONLY a JSON object, nothing else: {"box_2d":[ymin,xmin,ymax,xmax]} with integers 0-1000 normalized to the image size. '+
+    'ymin = the very highest point of its roof. ymax = the bottom of its front yard / front boundary wall where it meets the street or sidewalk. '+
+    'xmin/xmax = the left/right edges of its lot (its own yard included, neighbours excluded).';
+  function parse(d){
+    var txt=(d && (d.output||d.text||d.response||d.message)) || '';
+    if(typeof txt!=='string') txt=JSON.stringify(txt);
+    var m=txt.match(/\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]/);
+    if(!m) return null;
+    var y0=+m[1]/1000, x0=+m[2]/1000, y1=+m[3]/1000, x1=+m[4]/1000;
+    if(!(y1>y0 && x1>x0)) return null;
+    var bw=x1-x0, bh=y1-y0;
+    if(bw*bh<0.04 || bw*bh>0.85) return null; // 너무 작거나 화면 전체면 잘못 찾은 것
+    // 여유: 지붕 위 살짝(박스 높이 4%), 좌우 3%, 아래 4%
+    var r={ x0:Math.max(0,x0-bw*0.03), x1:Math.min(1,x1+bw*0.03), y0:Math.max(0,y0-bh*0.04), y1:Math.min(1,y1+bh*0.04) };
+    return r;
+  }
+  function ask(model, next){
+    try{
+      _falProxyCall('llm', { input:{ model:model, prompt:prompt, image_url:imgUrl } }, function(d){
+        var r=parse(d);
+        if(r){ console.log('[스케일 가이드] 자동 감지 성공('+model+')', r); finish(r); }
+        else { console.warn('[스케일 가이드] 자동 감지 응답 해석 실패('+model+'):', d); next(); }
+      }, function(err){ console.warn('[스케일 가이드] 자동 감지 실패('+model+'):', err); next(); });
+    }catch(e){ next(); }
+  }
+  ask('google/gemini-2.5-flash', function(){ ask('google/gemini-flash-1.5-8b', function(){ finish(null); }); });
+}
 // 입력 사진에 마젠타 박스를 그린 사본 생성(AI 전송용 — 원본은 그대로 둠)
 function _agedEnvAnnotate(src, env, cb){
   _loadImageForComposite(src, function(im){
@@ -32391,11 +32427,11 @@ function _mkAgedEnvelopePanel(p){
   var env=_getAgedEnvelope(tab);
   var w=dv('ss');
   w.style.cssText='margin:0 0 12px;padding:11px 12px;border-radius:10px;border:1px solid '+(env?'rgba(240,171,252,.45)':'rgba(245,158,11,.45)')+';background:'+(env?'rgba(240,171,252,.07)':'rgba(245,158,11,.08)');
-  var html='<div style="font-size:12.5px;font-weight:700;color:'+(env?'#f0abfc':'#fbbf24')+';margin-bottom:5px">📐 스케일 가이드 박스 '+(env?'— 적용 중 ✓':'— 지정 권장')+'</div>';
+  var html='<div style="font-size:12.5px;font-weight:700;color:'+(env?'#f0abfc':'#34d399')+';margin-bottom:5px">📐 건물 크기 고정 '+(env?'— 직접 지정한 영역 사용 중':'— 자동 ✓')+'</div>';
   if(env){
     html+='<div style="font-size:10.5px;line-height:1.55;color:var(--t2)">노후 건물은 이 박스 안에서만 생성되고, 박스 밖(이웃 건물·나무·도로)은 원본 그대로 유지돼요. 박스 윗선을 넘는 높이는 나올 수 없어요.</div>';
   } else {
-    html+='<div style="font-size:10.5px;line-height:1.55;color:var(--t2)">박스 없이 생성하면 노후 건물이 원본보다 <b>크게</b> 나오는 경우가 많아요. 원본 건물 영역(지붕 꼭대기~마당 앞)을 박스로 지정하면 크기가 그 안으로 고정됩니다.</div>';
+    html+='<div style="font-size:10.5px;line-height:1.55;color:var(--t2)">따로 할 건 없어요. AI가 원본 건물 위치를 자동으로 찾아서, 노후 건물이 원본보다 커지지 않게 막아줍니다. 결과가 계속 이상할 때만 아래 버튼으로 직접 지정하세요.</div>';
   }
   w.innerHTML=html;
   if(env && tab.inputImg){
@@ -32409,8 +32445,8 @@ function _mkAgedEnvelopePanel(p){
   }
   var br=document.createElement('div'); br.style.cssText='display:flex;gap:6px;margin-top:8px';
   var b1=mk('button',''); b1.type='button';
-  b1.textContent=env?'✏️ 박스 수정':'📐 원본 건물 영역 지정';
-  b1.style.cssText='flex:1;padding:8px 10px;border-radius:8px;border:none;background:'+(env?'var(--c2)':'#f59e0b')+';color:'+(env?'var(--t)':'#000')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit'+(env?';border:1px solid var(--bd2)':'');
+  b1.textContent=env?'✏️ 영역 수정':'(선택) 직접 영역 지정';
+  b1.style.cssText='flex:1;padding:7px 10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit';
   b1.onclick=function(){ _openAgedEnvelopeEditor(); };
   br.appendChild(b1);
   if(env){
@@ -38986,6 +39022,7 @@ function procImgWithTask(task, onDone, onErr){
     var nb2Slug = editSlug;
     // 📐 노후 외관 스케일 가이드 박스(있으면: 입력 사진에 박스 표시 → 결과는 박스 안쪽만 원본 위에 합성)
     var _agedEnv = (task.agedEnvelope && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData) ? task.agedEnvelope : null;
+    var _agedAuto = !_agedEnv && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData; // 직접 그린 박스 없으면 자동 감지
     // ⚠️ 되돌림(중요): 여기서 genSlug(끝에 /edit 안 붙은 순수 생성 모델)로 바꾸려고 시도했었는데,
     // 이 코드베이스 다른 곳(공간 컨셉 디자인 "순수 생성" 경로)에 이미 남겨진 주석에서 확인한 바로는
     // 'fal-ai/nano-banana-2'(non-edit)는 image_urls를 아예 안 보고 텍스트만으로 그리는 모델임 —
@@ -39141,6 +39178,17 @@ function procImgWithTask(task, onDone, onErr){
           if(!_annot){ console.warn('[스케일 가이드] 박스 표시 사진 생성 실패 — 가이드 없이 원본으로 진행'); _agedEnv=null; }
           _doUpload(_annot||img, function(imgUrl){ uploadedMain = imgUrl; checkAllDone(); }, handleError);
         });
+      } else if(_agedAuto){
+        _doUpload(img, function(origUrl){
+          _agedEnvAutoDetect(origUrl, function(box){
+            if(!box){ uploadedMain = origUrl; checkAllDone(); return; }
+            _agedEnvAnnotate(img, box, function(_annot2){
+              if(!_annot2){ uploadedMain = origUrl; checkAllDone(); return; }
+              _doUpload(_annot2, function(annUrl){ _agedEnv = box; uploadedMain = annUrl; checkAllDone(); },
+                function(){ uploadedMain = origUrl; checkAllDone(); });
+            });
+          });
+        }, handleError);
       } else {
         _doUpload(img, function(imgUrl){ uploadedMain = imgUrl; checkAllDone(); }, handleError);
       }
@@ -45606,7 +45654,8 @@ document.addEventListener('DOMContentLoaded',function(){try{
         // 바뀌지 않는 주변 사물(이웃 건물, 담장, 전봇대, 주차된 차, 도로 폭 등)의 실제 크기만
         // 보고 거기 맞춰서 새 건물 크기를 정하라"고 명시적으로 지시함 — "원본 메인 건물을 보지
         // 말라"는 사용자의 표현을 그대로 반영.
-        _finalPrompt += ' ⚠⚠⚠⚠⚠⚠ SCALE — 3RD AND FINAL REINFORCEMENT, READ THIS LAST (매우 중요, 1·2차 수정 이후에도 사용자가 재현 확인한 반복 버그 — "원본 메인건물을 보고 생성하지 말고 주변 건물이나 주변사물을 보고 같은 스케일로 만들어줘"): DO NOT use the original photo\'s main subject building itself as your size/scale reference at all — looking at how big the ORIGINAL main building looked is exactly what has been causing this building to come out too large, every time, across multiple rounds of testing. Instead, completely IGNORE the original main building\'s own apparent size and determine the new building\'s size using ONLY these fixed, unchanging real-world reference objects that must appear in the frame: the neighboring/background buildings (their actual number of floors and typical floor height — a normal floor is about 2.5–3m tall), the width of the public road or alley, utility poles, fences/walls, and any parked vehicles or bicycles (a normal car is about 1.5m tall, 4.5m long; a person is about 1.7m tall) — use THESE as your ruler, the same way a real architect would scale a building against a photo\'s known objects, not by eyeballing the old building\'s silhouette. Build the new aged building\'s footprint width, depth, and height so that, measured against those fixed neighboring objects, it looks like a real, ordinary 1-story (or at most 2-story) old Korean house of modest size — NOT a large, imposing building. Before finalizing, ask yourself: \'if I covered up the original main building and only looked at the neighboring buildings, road, and parked cars in this new image, would this new building\'s size look proportionally correct and modestly sized next to them, the way an architect scaling from those references would draw it?\' If the new building looks even slightly larger, taller, or more dominant than what those fixed reference objects alone would justify, that is a clear failure — shrink it down until it matches what those surrounding references dictate, completely independent of how large the original main building looked.';
+        // ⚠️ 8차 수정(사용자 기준으로 단순화 — "메인건물이랑 건물바닥 안에 있는 것들만 노후된 걸로 새로 만들고, 스케일은 작거나 크지 않게 옆 건물 층고 높이 보고 맞추면 된다. 건물이 없으면 다른 물체 보고 맞추고"): 예전 3차(주변 사물 기준)·4차(무조건 30% 축소) 보강문을 이 하나의 규칙으로 교체함 — 특히 30% 축소는 '작게도 크게도 아니게'라는 기준과 정면으로 충돌해서 삭제.
+        _finalPrompt += ' ⚠⚠⚠⚠⚠⚠ SCALE RULE — READ THIS LAST, IT OVERRIDES EVERY OTHER SIZE INSTRUCTION ABOVE (사용자 기준): (1) WHAT CHANGES: only the single main building and everything inside its own lot (its yard, wall, gate, pots, clutter) are rebuilt as the old version. Every neighbouring building, tree, the road and the sky stay exactly as in the photo. (2) HOW TO SIZE IT — MATCH THE NEIGHBOURS\' FLOOR HEIGHT: find the nearest neighbouring building in the photo, look at how tall ONE of its floors is in the image (one row of windows, about 2.7–3 m in real life). Every floor of the new old building must be drawn at that SAME floor height in the image (adjusted only for its distance from the camera) — not taller, not shorter. Its total height is simply its number of floors × that floor height, plus its roof. Its doors and windows must also match the size of the neighbours\' doors and windows. (3) IF NO NEIGHBOURING BUILDING IS VISIBLE, use other fixed objects in the photo as the ruler instead: a front door is about 2.1 m tall, a person about 1.7 m, a car about 1.5 m tall and 4.5 m long, a fence/wall about 1.5–2 m, a road lane about 3 m wide. (4) Do NOT apply any extra shrink or enlargement factor — the correct size is exactly what this measurement gives: neither bigger nor smaller. Final check: put the new building next to the neighbour in your mind — does one floor of each look the same height? If not, fix it.';
         // ⚠️ 5차 수정(사용자 직접 제안 — "항상 스케일이 크니까 항상 만들려고 하는 스케일보다 15%
         // 작게 만들어줘 이런거 안돼?"): 위의 1~3차 보강문은 모두 "올바른 크기가 무엇인지"를
         // 설명하는 방식이었는데, 사용자가 반복 테스트로 체감한 바로는 그렇게 설명해도 모델이 매번
@@ -45616,7 +45665,6 @@ document.addEventListener('DOMContentLoaded',function(){try{
         // 15% 축소 계수만 추가로 곱하도록 지시.
         // ⚠️ 6차 수정(사용자 피드백 — "15%줄였지 30%줄이면되겠다"): 15% 보정으로는 아직 부족하다고
         // 판단, 사용자 요청대로 축소 폭을 30%로 상향.
-        _finalPrompt += ' ⚠⚠⚠⚠⚠⚠⚠ SCALE — 4TH REINFORCEMENT, 30% CALIBRATION SHRINK (매우 중요, 사용자가 직접 제안한 보정 방식 — 반복 테스트 결과 모델이 항상 일정하게 더 크게 그리는 편향이 관찰됨): after you have decided on this building\'s footprint width, depth and overall height following every rule above, apply one final correction: deliberately make the building exactly 30% SMALLER in every dimension (width, depth, and height) than the size you would naturally/instinctively draw it at. This is a calibration correction for a known, repeated bias — across many prior generations, this model has consistently drawn this building noticeably larger than intended even when given detailed sizing rules, so intentionally undershooting by 30% compensates for that bias. Concretely: picture the building at the size you would normally generate, then shrink that mental image to about two-thirds of that size before drawing — the final building should look clearly, substantially more modest/compact in the frame than your first instinct, not just marginally smaller; if it still looks like a normal-sized building relative to your first instinct, you have not shrunk it enough. Keep all proportions (width:depth:height ratio) the same while shrinking — do not distort the shape, only scale it down uniformly. This 30% reduction applies on top of, not instead of, every other scale rule above (neighboring buildings/road as ruler, no new car, wide-not-narrow, etc.).';
       }
       // ⚠️ 요청 반영("바닥자체가 똑같이 이렇게 두면 재미없는데, 철근이 더 많던지 바닥에 널부러진
       // 것들이 원본(골조 단계)이랑 달랐으면 좋겠다"): 1단계(철근·거푸집)도 같은 방식으로 무작위
@@ -45988,13 +46036,6 @@ document.addEventListener('DOMContentLoaded',function(){try{
       var _unfinishedStageKeysForCommercial=['unfinished_stage1','unfinished_stage2','unfinished_stage3'];
       if(_isCommercialForStage && _unfinishedStageKeysForCommercial.indexOf(tab.selK)!==-1){
         _finalPrompt += ' ⚠️⚠️⚠️ 매우 중요(카페·상업공간 전용 — 단독주택과는 다르게 접근할 것): 이 건물은 완공되면 내부가 여러 개의 작은 방으로 나뉘는 주택이 아니라, 칸막이벽 없이 넓게 뻥 뚫린 하나의 메인 홀(카페·매장 등 상업 공간) 구조입니다. 골조·철근·거푸집 단계에서도 주택처럼 촘촘한 방 크기의 기둥 간격이나, 내부를 여러 방으로 쪼개는 듯한 칸막이벽·골조 흔적을 그리면 안 됩니다 — 기둥 간격(스팬)은 넓은 상업 공간에 맞게 훨씬 성기게 배치하고, 내부는 하나의 큰 개방 공간이 될 것임을 암시하는 골조(건물 외곽을 이루는 기둥·보·지붕 구조 위주)로만 구성하세요.';
-      }
-      // 📐 노후 외관 프리셋인데 스케일 가이드 박스가 없으면 한 번 확인(건물이 커지는 문제의 핵심 대책)
-      if(G.wf==='edit' && G.editMode!=='mask' && G.editMode!=='chat' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1 && !_getAgedEnvelope(tab)){
-        if(!confirm('📐 스케일 가이드 박스가 지정되지 않았어요.\n박스 없이 생성하면 노후 건물이 원본보다 크게 나올 수 있어요.\n\n[확인] 그대로 생성\n[취소] 원본 건물 영역부터 지정하기')){
-          _openAgedEnvelopeEditor();
-          return;
-        }
       }
       _runToolWithPrompt(_finalPrompt);
     }catch(e){ console.error('[actbtn]',e); alert('오류: '+e.message); }
