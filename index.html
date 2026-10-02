@@ -32083,6 +32083,51 @@ function _loadImageForCompositeFallback(url, cb){
 //  ④ 합성 전 박스 바깥 영역 기준으로 색·밝기를 원본에 맞춰서(채널별 게인 보정) 경계 이음새 방지
 //  ⑤ 박스 바로 위 띠 영역을 원본과 비교해서, AI가 박스를 넘겨 그렸으면(지붕이 잘려 보일 수 있음)
 //     자동 감지해서 알려줌 — 크레딧 정책상 자동 재생성은 하지 않음(기존 AC/TV 검수와 같은 원칙)
+// ════════════════════════════════════════════════════════════════════════════
+// ⚠️ 16차 — 방식 전환(사용자 지적: "미완성 공사 1~3단계는 원본 건물 기준이라 스케일이 엄청 잘 맞는다, 그거처럼 해라"):
+// 확인 결과 미완성 공사 프리셋은 ① "원본과 같은 건물 — 원본의 위치·폭·높이·지붕 모양을 그대로 따라라"는
+// 짧은 프롬프트(약 5천 자) ② 일반 편집 경로("구조·치수를 바꾸지 마라" + 카메라 고정)를 씀. 반대로 노후 외관은
+// ① "다른 건물로 자유롭게 재설계(층수·치수 변경)"하라는 지시 + 서로 충돌하는 크기 보강문이 쌓인 3만5천 자
+// ② "벽·층수·치수를 자유롭게 바꿔라" 전용 경로를 쓰고 있었음 — AI는 크기를 새로 정하는 건 못하고 사진 속
+// 건물을 따라 그리는 건 잘함. 그래서 노후 외관 4종도 미완성 공사와 같은 구조로 바꿈: 원본 건물의 위치·바닥선·
+// 폭·처마 높이를 "기준"으로 삼고, 그보다 낮고 작게만 그리게 함. 예전 방식으로 되돌리려면 false.
+var AGED_STAGE_METHOD=true;
+function _agedStagePrompt(k){
+  function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+  var TYPE={
+    aged_house:{
+      what:'an ordinary, lived-in old Korean SINGLE-STOREY detached house (단독주택)',
+      size:'Its walls must be only ONE storey tall: the old house\'s eaves sit at or below the current building\'s eave line (where the current roof starts), and its low old roof stays clearly BELOW the current building\'s roof ridge.',
+      look:'exterior '+pick(['faded cream painted stucco','scratch-textured beige cement render','old red brick with a cement-rendered upper band','grey cement render with a brick base'])+', roof '+pick(['low old clay roof tiles (기와)','low grey slate roof (슬레이트)','low cement-tile gable roof'])+', '+pick(['old wooden-frame windows','brown aluminium sash windows','sash windows with simple security bars'])+', '+pick(['a small concrete front step and a tiny entrance canopy','a few concrete steps up to a wooden front door','a plain steel front door with no canopy'])
+    },
+    aged_villa:{
+      what:'an ordinary, lived-in old Korean low-rise walk-up multi-unit building (빌라/다세대주택)',
+      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its rooftop parapet clearly BELOW the current building\'s roofline.',
+      look:'exterior '+pick(['faded beige paint','dusty pinkish-beige paint','off-white stucco','pale grey stucco','faded mint paint'])+', '+pick(['brown aluminium sash windows','silver aluminium sash windows','some windows with security bars'])+', '+pick(['a steel shared entrance door with a small canopy','a glass-and-steel shared entrance door','a plain steel shared entrance door'])+', '+pick(['a water tank on the roof','a plain rooftop with only a parapet','a laundry rack on the rooftop'])
+    },
+    aged_redbrick:{
+      what:'an ordinary, lived-in old Korean red-brick multi-unit building (다세대/연립주택)',
+      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its rooftop parapet clearly BELOW the current building\'s roofline.',
+      look:'brick '+pick(['dark reddish-brown','faded orange-red','dull brown','pale pinkish'])+' with uneven, slightly varied bricks, '+pick(['silver aluminium sash windows','brown aluminium sash windows','windows of slightly different sizes per floor'])+', '+pick(['a flat roof with a low parapet','a small rooftop room','an old water tank on the roof'])+', '+pick(['a steel gate between brick pillars','a low brick wall with a steel gate','a concrete wall with a low steel gate'])
+    },
+    aged_commercial_ext:{
+      what:'an ordinary old Korean neighbourhood commercial building (근린생활시설/상가건물) that is still in business',
+      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its roofline clearly BELOW the current building\'s roofline.',
+      look:'facade '+pick(['beige scratch tiles','dusty pink mosaic tiles','pale yellow tiles','off-white paint','dark grey tiles'])+', '+pick(['a mix of mismatched projecting signs','a row of plain horizontal signboards','some faded hand-painted signs'])+' with very short Korean shop names, '+pick(['some roller shutters half down','most shops open','a couple of shutters closed'])
+    }
+  };
+  var T=TYPE[k]||TYPE.aged_house;
+  return 'Transform ONLY the main building in this photo (and its own lot) into how this same lot looked many years earlier, before the current new building was built: '+T.what+'. '+
+  '⚠⚠⚠ CRITICAL — SIZE AND POSITION COME FROM THE CURRENT BUILDING (매우 중요, 이 프리셋이 실패하는 가장 흔한 이유는 건물이 커지는 것): before drawing, look carefully at the current building in the photo — its exact position on the lot, its width, the line where its walls meet the ground, and the height of its eaves. '+
+  'The old building stands on the SAME spot with the SAME ground line, is NO WIDER than the current building, and is never closer to the camera. '+T.size+' '+
+  'It must fit entirely INSIDE the current building\'s silhouette — smaller and lower, never taller or wider. Use the unchanged neighbouring houses, cars, doors and windows as the real-world ruler: one storey ≈ one window row of the neighbouring houses (about 2.7–3 m). '+
+  'Wherever the current building\'s larger volume used to be (above and beside the old building), show the background behind it naturally — the same trees, lawn and neighbouring houses that surround it. '+
+  'CRITICAL — OLD LOT, NOT THE CURRENT LANDSCAPING: within this building\'s own lot, the current lawn, landscaping, planted trees and shrubs, stone retaining walls (옹벽), deck and paving were all built together with the new building, so they did not exist yet — replace them with old-era equivalents: a plain cement-block or old brick boundary wall with a simple steel gate, a bare dirt or cracked cement yard, a few plastic pots, a bicycle or scooter. Keep only very large, clearly decades-old trees. Do not add a new car. '+
+  'Details for this one: '+T.look+'. STILL LIVED IN, NOT ABANDONED: intact glass with curtains behind some windows, modest realistic weathering (faded paint, rain streaks under sills, a little moss in shaded corners), a few exposed utility lines and meter boxes. No air-conditioner outdoor units. '+
+  '⚠⚠⚠ ONLY THE MAIN SUBJECT BUILDING AND ITS OWN LOT CHANGE — every neighbouring building, the forest, the public road, sidewalk and curb, street trees outside the lot and the sky must remain exactly as in the original photo. '+
+  'CRITICAL — PRESERVE EXACT CAMERA ANGLE AND COMPOSITION: the camera viewpoint, focal length, perspective angle, framing and composition must remain absolutely identical to the original photo — do NOT tilt, raise, lower, zoom in, zoom out, or shift the camera. The horizon line, vanishing points and the relative position and scale of every element in the frame must exactly match the original photo. '+
+  'PHOTOREALISM IS MANDATORY: it must look like an ordinary real daytime photo with the same grain, lighting and lens character as the original — not a render or illustration; natural, slightly muted colours; real materials with non-uniform texture.';
+}
 var AGED_EXT_ENVELOPE_PRESETS=['aged_redbrick','aged_villa','aged_house','aged_commercial_ext'];
 function _agedEnvImgKey(src){
   if(!src || typeof src!=='string') return '';
@@ -32222,17 +32267,22 @@ function _agedEnvAutoDetect(imgUrl, cb){
   var done=false;
   function finish(v){ if(done) return; done=true; cb(v); }
   setTimeout(function(){ if(!done){ console.warn('[스케일 가이드] 자동 감지 시간초과 — 박스 없이 진행'); finish(null); } }, 25000);
-  var prompt='Look at this photo. Find the single MAIN subject building (the house/building in the foreground center that the photo is about — NOT the background or side neighbouring houses). '+
+  var prompt='FIRST: if you cannot actually see an attached image, reply with exactly NO_IMAGE and nothing else — never guess coordinates. Otherwise: Look at this photo. Find the single MAIN subject building (the house/building in the foreground center that the photo is about — NOT the background or side neighbouring houses). '+
     'Return ONLY a JSON object, nothing else: {"building":[ymin,xmin,ymax,xmax],"lot":[ymin,xmin,ymax,xmax]} with integers 0-1000 normalized to the image size. '+
     '"building" = the building itself only: ymin = the very highest point of its roof, ymax = where its walls meet the ground. '+
     '"lot" = the building plus EVERYTHING on its own property: its yard, deck, paving, lawn, planted trees and shrubs, and its front/side retaining walls and stone walls. ymax = the very bottom of its front retaining wall / landscaping where it meets the public sidewalk or road (include the whole wall), xmin/xmax = the left/right edges of its property including side walls and planting beds (neighbouring houses excluded).';
   function parse(d){
     var txt=(d && (d.output||d.text||d.response||d.message)) || '';
     if(typeof txt!=='string') txt=JSON.stringify(txt);
+    if(/NO_IMAGE/.test(txt)){ console.warn('[스케일 가이드] 감지 모델이 사진을 못 봤다고 응답 — 서버 llm 액션이 이미지를 전달하지 않는 것으로 보임'); return null; }
     var re=/\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]/g, mm, arr=[];
     while((mm=re.exec(txt))){ arr.push([+mm[1]/1000, +mm[2]/1000, +mm[3]/1000, +mm[4]/1000]); }
     if(!arr.length) return null;
     var bld=arr[0], lot=arr[1]||arr[0];
+    // 15차: 말이 안 되는 박스(사진을 안 보고 짐작한 경우 흔함)는 거부 — 잘못된 큰 박스가 오히려 건물을 키웠음
+    var bW=bld[3]-bld[1], bH=bld[2]-bld[0];
+    if(arr.length<2 || bW>0.85 || bH>0.6 || bW*bH>0.4 || bW<0.08 || bH<0.05){ console.warn('[스케일 가이드] 감지된 건물 박스가 비정상이라 사용 안 함:', bld); return null; }
+    if(lot[1]<0.02 && lot[3]>0.98 && lot[2]>0.98){ console.warn('[스케일 가이드] 감지된 대지 박스가 사진 전체라 사용 안 함:', lot); return null; }
     var y0=Math.min(bld[0],lot[0]), x0=Math.min(bld[1],lot[1]), y1=Math.max(bld[2],lot[2]), x1=Math.max(bld[3],lot[3]);
     if(!(y1>y0 && x1>x0)) return null;
     var bw=x1-x0, bh=y1-y0;
@@ -32257,7 +32307,8 @@ function _agedEnvAutoDetect(imgUrl, cb){
   }
   function ask(model, next){
     try{
-      _falProxyCall('llm', { input:{ model:model, prompt:prompt, image_url:imgUrl } }, function(d){
+      // 15차: 사진을 실제로 보는 비전 엔드포인트로 요청(서버가 endpoint/image_urls를 지원하면 사용, 아니면 기존 그대로)
+      _falProxyCall('llm', { endpoint:'fal-ai/any-llm/vision', input:{ model:model, prompt:prompt, image_url:imgUrl, image_urls:[imgUrl] } }, function(d){
         var r=parse(d);
         if(r){ console.log('[스케일 가이드] 자동 감지 성공('+model+')', r); finish(r); }
         else { console.warn('[스케일 가이드] 자동 감지 응답 해석 실패('+model+'):', d); next(); }
@@ -32414,6 +32465,25 @@ function _agedEnvComposite(origSrc, resSrc, env, cb){
           }
         }
         console.log('[스케일 가이드] 남은 마젠타 상한선 정리 ('+magCnt+'열)');
+      })();
+      // 2.6) AI가 분홍 선을 다른 위치로 옮겨 그린 경우 — 색으로 찾아서(번짐 포함 넓게) 주변 픽셀로 메움
+      (function(){
+        var mm=new Uint8Array(W*H), n0=0;
+        for(var k=0;k<W*H;k++){ var i=k*4, R=p[i],G=p[i+1],B=p[i+2]; if(R>140 && B>140 && R-G>70 && B-G>70){ mm[k]=1; n0++; } }
+        if(n0<W*0.3) return; // 선이라 볼 만큼 많지 않으면 건너뜀(분홍 꽃 등 오인 방지)
+        var dil=Math.max(3, Math.round(_agedEnvLineWidth(W,H)*1.2)), m2=new Uint8Array(W*H);
+        for(var y=0;y<H;y++){ for(var x=0;x<W;x++){ if(!mm[y*W+x]) continue;
+          for(var dy=-dil;dy<=dil;dy++){ var yy=y+dy; if(yy<0||yy>=H) continue; for(var dx=-dil;dx<=dil;dx++){ var xx=x+dx; if(xx<0||xx>=W) continue; m2[yy*W+xx]=1; } } } }
+        var reach=dil*4+6;
+        for(var y2=0;y2<H;y2++){ for(var x2=0;x2<W;x2++){ var id=y2*W+x2; if(!m2[id]) continue;
+          var a=-1,b=-1,da=0,db=0;
+          for(var d=1;d<=reach;d++){ if(a<0&&y2-d>=0&&!m2[id-d*W]){a=id-d*W;da=d;} if(b<0&&y2+d<H&&!m2[id+d*W]){b=id+d*W;db=d;} if(a>=0&&b>=0)break; }
+          if(a<0||b<0){ a=-1;b=-1; for(var e=1;e<=reach;e++){ if(a<0&&x2-e>=0&&!m2[id-e]){a=id-e;da=e;} if(b<0&&x2+e<W&&!m2[id+e]){b=id+e;db=e;} if(a>=0&&b>=0)break; } }
+          if(a<0&&b<0) continue; if(a<0){a=b;da=db;} if(b<0){b=a;db=da;}
+          var wa=db/(da+db), wb=da/(da+db), o=id*4;
+          p[o]=p[a*4]*wa+p[b*4]*wb; p[o+1]=p[a*4+1]*wa+p[b*4+1]*wb; p[o+2]=p[a*4+2]*wa+p[b*4+2]*wb;
+        } }
+        console.log('[스케일 가이드] 위치가 옮겨진 분홍 선 색 기준 정리 ('+n0+'px)');
       })();
       if(gain[0]!==1 || gain[1]!==1 || gain[2]!==1){
         for(var j=0;j<p.length;j+=4){
@@ -39140,7 +39210,7 @@ function procImgWithTask(task, onDone, onErr){
     // 예외 처리해준 것과 같은 이유로, 건물 매싱 자체를 새로 설계하는 프리셋도 같은 방식으로
     // 예외 처리함.
     var _buildingMassingRedesignPresets=['aged_redbrick','aged_villa','aged_house','aged_commercial_ext'];
-    var _isBuildingMassingRedesign = _buildingMassingRedesignPresets.indexOf(task.selK)!==-1;
+    var _isBuildingMassingRedesign = _buildingMassingRedesignPresets.indexOf(task.selK)!==-1 && !AGED_STAGE_METHOD; // 16차: 미완성 공사와 같은 일반 경로 사용
 
     // 변환형 프리셋(뷰 변경/아이소 등)은 "unchanged" suffix 제거
     var editPrompt;
@@ -39188,7 +39258,7 @@ function procImgWithTask(task, onDone, onErr){
     var nb2Slug = editSlug;
     // 📐 노후 외관 스케일 가이드 박스(있으면: 입력 사진에 박스 표시 → 결과는 박스 안쪽만 원본 위에 합성)
     var _agedEnv = (task.agedEnvelope && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData) ? _agedEnvWithCap(task.agedEnvelope) : null;
-    var _agedAuto = !_agedEnv && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData; // 직접 그린 박스 없으면 자동 감지
+    var _agedAuto = !_agedEnv && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData && !AGED_STAGE_METHOD; // 16차: 자동 박스(감지 부정확) 끔 // 직접 그린 박스 없으면 자동 감지
     // ⚠️ 되돌림(중요): 여기서 genSlug(끝에 /edit 안 붙은 순수 생성 모델)로 바꾸려고 시도했었는데,
     // 이 코드베이스 다른 곳(공간 컨셉 디자인 "순수 생성" 경로)에 이미 남겨진 주석에서 확인한 바로는
     // 'fal-ai/nano-banana-2'(non-edit)는 image_urls를 아예 안 보고 텍스트만으로 그리는 모델임 —
@@ -45588,6 +45658,11 @@ document.addEventListener('DOMContentLoaded',function(){try{
       }
       // 일반 회원이 입력한 추가 요청사항을 프리셋 프롬프트 뒤에 결합 (프리셋 본문은 수정 불가, 추가만 허용)
       var _finalPrompt = tab.prompt||'';
+      // 16차: 노후 외관 4종은 미완성 공사 프리셋과 같은 구조의 짧은 "원본 건물 기준" 프롬프트로 교체
+      if(AGED_STAGE_METHOD && G.wf==='edit' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1){
+        _finalPrompt = _agedStagePrompt(tab.selK);
+        console.log('[노후 외관] 원본 건물 기준(미완성 공사와 같은) 방식으로 생성');
+      }
       // ⚠️ 버그 방어("프리셋만 골라서 바로 실행했는데 그 프리셋 지시가 아예 안 들어갔다"는 신고):
       // 정확한 발생 지점은 못 찾았지만, "프리셋은 선택되어 있는데(tab.selK 있음) 정작 프롬프트는
       // 비어있는" 비정상 상태가 실제로 재현된 걸 콘솔 로그로 확인함 — 이 경우 아래에서 안전장치
@@ -45693,7 +45768,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // 코드에서 매 생성마다 무작위로 골라 강제 주입함 — 실제로 옛날 건물은 지금 신축보다 낮게
       // 지어진 경우가 대부분이라는 사실을 반영해 "적게" 쪽에 확률을 크게 실어둠.
       var _agedFloorPresets=['aged_redbrick','aged_villa','aged_commercial_ext','aged_house'];
-      if(_agedFloorPresets.indexOf(tab.selK)!==-1){
+      if(_agedFloorPresets.indexOf(tab.selK)!==-1 && !AGED_STAGE_METHOD){
         function _pickRand(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
         // ⚠️ 버그 수정(반복 신고, "노후된 빌라 또 비슷한 층수로 만들었다 — 노후 건물은 항상 원본
         // 건물 층수보다 낮게 만들어달라"): 지금까지는 "이미 2층 이하로 낮으면 예외적으로 원본과
