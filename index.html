@@ -3564,6 +3564,27 @@ function _wireZoomPanControls(img, ov){
 // 것의 인덱스)를 선택적으로 받아서, 넘겨받으면 좌우 화살표 버튼 + ←/→ 키보드로 라이트박스를
 // 닫지 않고 바로 옆 이미지로 넘어갈 수 있게 함. 안 넘기면(기존 호출부들처럼 url 하나만 주면)
 // 예전처럼 화살표 없이 딱 그 이미지 하나만 보여줌 — 기존 동작 그대로 호환됨.
+// ⚠️ 버그 수정(치명적, "갤러리든 쇼츠 이미지 보던거든, 좌우 화살표 정확히 안 누르면 닫기가
+// 된다"): 지금까지 이전/다음 버튼은 "보이는 동그라미 크기(보통 56~64px)"와 "실제로 클릭/터치를
+// 받는 범위"가 완전히 똑같았음 — 그래서 버튼을 누르려다 손가락이나 마우스가 아주 조금만
+// 빗나가도 버튼이 아니라 그 뒤에 있는 검은 배경(오버레이)을 클릭한 걸로 처리돼서, 전체 화면이
+// 닫혀버렸음(오버레이는 배경 클릭 시 닫히게 돼있으므로). 보이는 동그란 아이콘 크기는 그대로
+// 두고, 실제 클릭을 받는 투명한 히트박스만 화면 가장자리에서 위아래로 꽉 채운 넓은 영역으로
+// 늘려서, 웬만큼 빗나가도 버튼으로 인식되게 함. 라이트박스·갤러리 확대보기·쇼츠 이미지 보기 등
+// 좌우 이동 버튼이 있는 모든 곳에서 공통으로 재사용.
+function _mkBigHitNavBtn(side, innerHTML, onClick, circleSize){
+  circleSize = circleSize || 60;
+  var hitW = Math.max(110, circleSize + 60);
+  var hit=document.createElement('button');
+  hit.type='button';
+  hit.style.cssText='position:absolute;'+side+':0;top:0;bottom:0;width:'+hitW+'px;background:transparent;border:none;cursor:pointer;display:flex;align-items:center;justify-content:'+(side==='left'?'flex-start':'flex-end')+';padding:0 8px;z-index:3;';
+  var circle=document.createElement('div');
+  circle.innerHTML=innerHTML;
+  circle.style.cssText='width:'+circleSize+'px;height:'+circleSize+'px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:'+Math.round(circleSize*0.3)+'px;display:flex;align-items:center;justify-content:center;pointer-events:none';
+  hit.appendChild(circle);
+  hit.onclick=function(e){ e.stopPropagation(); onClick(); };
+  return hit;
+}
 function _openImageLightbox(url, urls, idx){
   var old=document.getElementById('img-lightbox'); if(old) old.remove();
   var hasNav = Array.isArray(urls) && urls.length>1 && typeof idx==='number';
@@ -3632,12 +3653,8 @@ function _openImageLightbox(url, urls, idx){
   document.addEventListener('keydown', onKey);
   ov.appendChild(mediaWrap); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn); ov.appendChild(psEditBtn);
   if(hasNav){
-    var prevBtn=document.createElement('button'); prevBtn.type='button'; prevBtn.innerHTML='&#10094;';
-    prevBtn.style.cssText='position:absolute;left:14px;top:50%;transform:translateY(-50%);width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
-    prevBtn.onclick=function(e){ e.stopPropagation(); showAt(curIdx-1); };
-    var nextBtn=document.createElement('button'); nextBtn.type='button'; nextBtn.innerHTML='&#10095;';
-    nextBtn.style.cssText='position:absolute;right:14px;top:50%;transform:translateY(-50%);width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3';
-    nextBtn.onclick=function(e){ e.stopPropagation(); showAt(curIdx+1); };
+    var prevBtn=_mkBigHitNavBtn('left', '&#10094;', function(){ showAt(curIdx-1); }, 60);
+    var nextBtn=_mkBigHitNavBtn('right', '&#10095;', function(){ showAt(curIdx+1); }, 60);
     var counter=document.createElement('div');
     counter.textContent=(curIdx+1)+' / '+urls.length;
     counter.style.cssText='position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.55);color:#fff;font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;z-index:3;pointer-events:none';
@@ -42281,12 +42298,8 @@ function _simpleImageZoomShow(urlList, idx){
   }
   ov.appendChild(mediaWrap);
   if(urlList.length>1){
-    var prevBtn=document.createElement('button');prevBtn.type='button';prevBtn.textContent='‹';
-    prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
-    prevBtn.onclick=function(e){ e.stopPropagation(); _simpleImageZoomShow(urlList, idx-1<0?urlList.length-1:idx-1); };
-    var nextBtn=document.createElement('button');nextBtn.type='button';nextBtn.textContent='›';
-    nextBtn.style.cssText='position:absolute;top:50%;right:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
-    nextBtn.onclick=function(e){ e.stopPropagation(); _simpleImageZoomShow(urlList, (idx+1)%urlList.length); };
+    var prevBtn=_mkBigHitNavBtn('left', '&#8249;', function(){ _simpleImageZoomShow(urlList, idx-1<0?urlList.length-1:idx-1); }, 64);
+    var nextBtn=_mkBigHitNavBtn('right', '&#8250;', function(){ _simpleImageZoomShow(urlList, (idx+1)%urlList.length); }, 64);
     var counter=document.createElement('div');
     counter.textContent=(idx+1)+' / '+urlList.length;
     counter.style.cssText='position:absolute;top:16px;right:20px;color:#ccc;font-size:12.5px;background:rgba(0,0,0,.4);padding:4px 12px;border-radius:20px;z-index:2';
@@ -42354,12 +42367,8 @@ function _galleryZoomShow(list, idx){
     }
   }
   // 이전/다음 이동 버튼
-  var prevBtn=document.createElement('button');prevBtn.type='button';prevBtn.textContent='‹';
-  prevBtn.style.cssText='position:absolute;top:50%;left:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
-  prevBtn.onclick=function(e){ e.stopPropagation(); _galleryZoomShow(list, idx-1<0?list.length-1:idx-1); };
-  var nextBtn=document.createElement('button');nextBtn.type='button';nextBtn.textContent='›';
-  nextBtn.style.cssText='position:absolute;top:50%;right:12px;transform:translateY(-50%);width:64px;height:64px;border-radius:50%;border:none;background:rgba(255,255,255,.1);color:#fff;font-size:26px;cursor:pointer;z-index:2;display:flex;align-items:center;justify-content:center';
-  nextBtn.onclick=function(e){ e.stopPropagation(); _galleryZoomShow(list, (idx+1)%list.length); };
+  var prevBtn=_mkBigHitNavBtn('left', '&#8249;', function(){ _galleryZoomShow(list, idx-1<0?list.length-1:idx-1); }, 64);
+  var nextBtn=_mkBigHitNavBtn('right', '&#8250;', function(){ _galleryZoomShow(list, (idx+1)%list.length); }, 64);
   var counter=document.createElement('div');
   counter.textContent=(idx+1)+' / '+list.length;
   counter.style.cssText='position:absolute;top:16px;right:20px;color:#ccc;font-size:12.5px;background:rgba(0,0,0,.4);padding:4px 12px;border-radius:20px;z-index:2';
