@@ -32104,9 +32104,9 @@ function _agedEnvLineWidth(W,H){ return Math.max(3, Math.round(Math.min(W,H)*0.0
 // 더 작게/크게 하고 싶으면 이 숫자만 조절(0.35 → 원본 높이의 65%까지만 허용).
 // ⚠️ 11차(사용자 테스트 후 "여기서 20%는 더 줄여야겠다"): 0.35 → 0.48 (허용 높이 65% → 52%, 정확히 20% 더 낮춤)
 // 12차(사용자 요청 "높이 지금보다 35% 줄여줘"): 허용 높이 52% → 33.8%(=52%×0.65) → 0.48 → 0.662
-var AGED_ENV_HEIGHT_CUT=0.662;
+var AGED_ENV_HEIGHT_CUT=0.713; // 13차("지금보다 15% 더"): 허용 높이 33.8% → 28.7%
 // 목표 건물 폭(원본 건물 폭 대비). 0.8 = 원본보다 20% 좁게, 가운데 정렬
-var AGED_TARGET_WIDTH=0.80;
+var AGED_TARGET_WIDTH=0.68; // 13차: 0.80 → 0.68 (15% 더 좁게)
 function _agedEnvWithCap(env){
   if(!env) return env;
   var e={x0:env.x0,y0:env.y0,x1:env.x1,y1:env.y1,capY:env.capY,bld:env.bld,noCap:env.noCap,preShrunk:env.preShrunk,tgt:env.tgt};
@@ -32186,7 +32186,9 @@ function _agedEnvPromptHead(env){
       'It is NOT part of the scene — it is the EXACT size of the old building to draw: left wall ≈'+pc2(t.x0)+'% from the left of the image, right wall ≈'+pc2(t.x1)+'%, roof ridge (highest point) ≈'+pc2(t.y0)+'% from the top, ground line ≈'+pc2(t.y1)+'%. '+
       'RULES: (1) Completely remove the current building and draw the old single-storey house so that it FILLS this rectangle — its walls, roof and chimney all stay inside it, the roof ridge touches the top edge, the walls stand on the bottom edge. Do NOT draw it any bigger than the rectangle. '+
       '(2) This old house is smaller than the current building: wherever the current building stood outside the rectangle (above it and on its sides), there is now nothing — fill those areas naturally with the background behind (the same trees, lawn and neighbouring houses that surround it) and with this house\'s own plain yard. '+
-      '(3) Its own yard, wall and gate in front may be redrawn as old; neighbouring houses, trees, road and sky further away must stay exactly as in the photo. '+
+      '(3) THE WHOLE LOT MUST CHANGE, NOT JUST THE BUILDING (매우 중요): the current lawn, landscaping trees and shrubs, planting beds, stone/block retaining walls (옹벽), deck, paving and walkways were all built TOGETHER with the current new building — so in the old days none of them existed. '+
+      'Inside the lot area (everything between the neighbouring houses and the public sidewalk/road), replace ALL of them with old-era equivalents: a plain cement-block or old brick boundary wall with a simple metal gate instead of the stone retaining wall, a bare dirt or cracked cement yard instead of the lawn and planting beds, a few plastic pots instead of the landscaping. Keep only very large, clearly decades-old trees. Do not keep any of the current walls, lawn or landscaping as they are. '+
+      'Only the neighbouring houses, the public road, sidewalk and curb, the street trees outside the lot, and the sky must stay exactly as in the photo. '+
       '(4) Remove the magenta rectangle completely — no magenta or pink lines may remain anywhere. --- ';
   }
   if(env && env.preShrunk){
@@ -32208,7 +32210,7 @@ function _agedEnvPromptHead(env){
     '(5) Remove the magenta rectangle completely from the output — no magenta or pink lines may remain anywhere. --- ';
 }
 function _agedEnvPromptTail(env){
-  if(env && env.tgt) return ' ⚠️⚠️⚠️ FINAL SIZE CHECK (most important, overrides every other size rule above): the old house must fit exactly inside the magenta rectangle — ridge at its top edge, walls at its left/right edges — NOT bigger. The area where the larger current building used to be is now background. Remove the magenta lines.';
+  if(env && env.tgt) return ' ⚠️⚠️⚠️ FINAL CHECK (most important, overrides every other rule above): (1) SIZE — the old house must fit exactly inside the magenta rectangle — ridge at its top edge, walls at its left/right edges — NOT bigger; the area where the larger current building used to be is now background or plain yard. (2) LOT — none of the current retaining walls, lawn, landscaping trees/shrubs, deck or paving may remain: they must all be replaced with old-era plain walls and a bare/cement yard. If any current landscaping or stone wall is still there unchanged, that is a failure. Remove the magenta lines.';
   if(env && env.preShrunk) return ' ⚠️⚠️⚠️ FINAL SIZE CHECK (most important, overrides every other size rule above): the old building must be exactly the same size as the main building appears in the input photo — NOT bigger. Fill the blurred patch around it with natural background. Remove the magenta lines.';
   return ' ⚠️⚠️⚠️ FINAL SCALE CHECK (magenta guide box — most important): the old building must be clearly smaller and lower than the current one — entirely inside the magenta rectangle with its highest point BELOW the rectangle\'s top edge, and the space above that line filled with background. Then delete the magenta rectangle lines from the output image.';
 }
@@ -32223,7 +32225,7 @@ function _agedEnvAutoDetect(imgUrl, cb){
   var prompt='Look at this photo. Find the single MAIN subject building (the house/building in the foreground center that the photo is about — NOT the background or side neighbouring houses). '+
     'Return ONLY a JSON object, nothing else: {"building":[ymin,xmin,ymax,xmax],"lot":[ymin,xmin,ymax,xmax]} with integers 0-1000 normalized to the image size. '+
     '"building" = the building itself only: ymin = the very highest point of its roof, ymax = where its walls meet the ground. '+
-    '"lot" = the building plus its own yard: ymax = the front of its yard / front boundary wall where it meets the street or sidewalk, xmin/xmax = the left/right edges of its own lot (neighbours excluded).';
+    '"lot" = the building plus EVERYTHING on its own property: its yard, deck, paving, lawn, planted trees and shrubs, and its front/side retaining walls and stone walls. ymax = the very bottom of its front retaining wall / landscaping where it meets the public sidewalk or road (include the whole wall), xmin/xmax = the left/right edges of its property including side walls and planting beds (neighbouring houses excluded).';
   function parse(d){
     var txt=(d && (d.output||d.text||d.response||d.message)) || '';
     if(typeof txt!=='string') txt=JSON.stringify(txt);
@@ -32236,7 +32238,8 @@ function _agedEnvAutoDetect(imgUrl, cb){
     var bw=x1-x0, bh=y1-y0;
     if(bw*bh<0.04 || bw*bh>0.85) return null; // 너무 작거나 화면 전체면 잘못 찾은 것
     // 새로 그리는 영역: 원본 건물 전체 + 대지(지붕 위 여유 4%, 좌우 3%, 아래 4%)
-    var r={ x0:Math.max(0,x0-bw*0.03), x1:Math.min(1,x1+bw*0.03), y0:Math.max(0,y0-bh*0.04), y1:Math.min(1,y1+bh*0.04) };
+    // 13차: 대지 여유를 넓힘(좌우 5%, 아래 7%) — 앞쪽 옹벽·조경이 경계 밖으로 빠져서 원본 그대로 남던 문제
+    var r={ x0:Math.max(0,x0-bw*0.05), x1:Math.min(1,x1+bw*0.05), y0:Math.max(0,y0-bh*0.04), y1:Math.min(1,y1+bh*0.07) };
     // ⚠️ 10차 수정: 위쪽 경계는 "대지"가 아니라 "원본 건물 지붕 꼭대기" 기준 — 대지 박스 윗변이 뒤쪽까지 높게 잡히면
     // 그만큼 AI가 건물을 위로 키워도 다 통과됐음. 지붕 꼭대기 바로 위로 고정하면 원본보다 높게는 절대 못 나옴(추가 비용 없음).
     if(arr.length>=2 && bld[2]>bld[0]){ r.y0=Math.max(0, bld[0]-(bld[2]-bld[0])*0.03); }
