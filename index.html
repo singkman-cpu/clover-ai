@@ -39972,12 +39972,28 @@ function _buildBeforeAfterSlider(beforeUrl, afterUrl, label){
   // 조작(마우스/터치 다운)하면 힌트 애니메이션을 영구히 끄도록 플래그를 추가함.
   var userInteracted=false;
   wrap.addEventListener('mousedown', function(e){ if(e.button!==0) return; userInteracted=true; dragging=true; setPct(posFromEvent(e)); e.preventDefault(); }); // 휠(가운데) 버튼은 확대 중 팬 전용
-  window.addEventListener('mousemove', function(e){ if(dragging) setPct(posFromEvent(e)); });
+  // ⚠️ 버그 수정(치명적, "갤러리 비교하기 슬라이더로 보다보면 팅긴다"): 드래그하다가 브라우저
+  // 창 '밖'에서 마우스 버튼을 놓으면(빠르게 드래그하다 창 경계를 벗어나는 경우, 창 포커스가
+  // 바뀌는 경우 등) window의 mouseup 이벤트 자체가 발생하지 않아서 dragging이 계속 true로
+  // 남아있었음 — 그 뒤로는 사용자가 드래그를 전혀 안 하고 그냥 화면 위에서 마우스를 움직이기만
+  // 해도(심지어 비교 오버레이를 닫고 다른 작업을 해도) 이 listener가 계속 살아서 비교선을
+  // 마우스 위치로 계속 끌고 다녀서 "팅기는"/제멋대로 움직이는 것처럼 보였음. mousemove가 올 때
+  // 마다 실제로 왼쪽 버튼이 아직 눌려있는지(e.buttons)를 다시 확인해서, 이미 떼진 상태인데
+  // dragging만 true로 남아있으면 그 자리에서 즉시 복구함(버튼을 어디서 놓쳤든 다음 마우스
+  // 이동에서 바로 정상화됨).
+  window.addEventListener('mousemove', function(e){
+    if(dragging && e.buttons===0){ dragging=false; return; }
+    if(dragging) setPct(posFromEvent(e));
+  });
   window.addEventListener('mouseup', function(){ dragging=false; });
+  window.addEventListener('blur', function(){ dragging=false; }); // 창 포커스를 잃으면(알트탭 등) 무조건 드래그 종료
   // ⚠️ 손가락 1개일 때만 비교선 드래그로 취급 — 2개(핀치 확대/축소)는 _wireWheelZoomCore가 처리함.
   wrap.addEventListener('touchstart', function(e){ if(e.touches.length!==1) return; userInteracted=true; dragging=true; setPct(posFromEvent(e)); }, {passive:true});
   wrap.addEventListener('touchmove', function(e){ if(e.touches.length!==1){ dragging=false; return; } if(dragging) setPct(posFromEvent(e)); }, {passive:true});
   wrap.addEventListener('touchend', function(){ dragging=false; });
+  // ⚠️ 버그 수정: 전화 수신 등으로 터치가 중간에 강제로 취소되는 touchcancel에서도 dragging이
+  // 안 풀려서 같은 "팅김" 현상이 모바일에서도 날 수 있었음 — touchend와 동일하게 처리.
+  wrap.addEventListener('touchcancel', function(){ dragging=false; });
   // 처음 보여줄 때 살짝 좌우로 움직여서 "이거 드래그할 수 있다"는 걸 은근히 알려줌 (한 번만, 사용자가 아직 한 번도 직접 조작 안 했을 때만)
   setTimeout(function(){ if(!dragging && !userInteracted) setPct(28); }, 550);
   setTimeout(function(){ if(!dragging && !userInteracted) setPct(50); }, 1250);
