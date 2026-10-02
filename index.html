@@ -32097,19 +32097,35 @@ function _getAgedEnvelope(tab){
   return {x0:e.x0, y0:e.y0, x1:e.x1, y1:e.y1};
 }
 function _agedEnvLineWidth(W,H){ return Math.max(3, Math.round(Math.min(W,H)*0.006)); }
+// ⚠️ 요청 반영("지금 스케일보다 더 작아야돼"): 높이 상한선(capY)을 원본 지붕 꼭대기보다 확실히 아래로
+// 내림. 단, 원본 건물을 지워야 하므로 "새로 그리는 영역"(합성 마스크, y0)은 원본 건물 전체를 그대로
+// 덮고, AI에게 보여주는 마젠타 박스 윗선만 capY로 낮춤 — 원본 지붕은 지워지고, 새 건물은 그 선 아래로만.
+// AGED_ENV_HEIGHT_CUT: 원본 건물 높이(지붕 꼭대기~건물 바닥)에서 몇 %를 깎은 위치에 상한선을 둘지.
+// 더 작게/크게 하고 싶으면 이 숫자만 조절(0.35 → 원본 높이의 65%까지만 허용).
+var AGED_ENV_HEIGHT_CUT=0.35;
+function _agedEnvWithCap(env){
+  if(!env) return env;
+  var e={x0:env.x0,y0:env.y0,x1:env.x1,y1:env.y1,capY:env.capY};
+  if(!(e.capY>e.y0)){
+    // 직접 그린 박스(지붕 꼭대기~마당 앞)처럼 건물 바닥 위치를 모를 때: 박스 높이의 약 60%를 건물 높이로 보고 깎음
+    e.capY = e.y0 + (e.y1-e.y0)*0.6*AGED_ENV_HEIGHT_CUT;
+  }
+  return e;
+}
 function _agedEnvPromptHead(env){
   function pc(v){ return Math.round(v*100); }
+  var cap=(env.capY>env.y0)?env.capY:env.y0;
   return 'SCALE GUIDE BOX — READ THIS FIRST (가장 중요, 다른 모든 크기 관련 지시보다 우선): the input photo has a thin bright MAGENTA rectangle drawn on it. '+
-    'It is NOT part of the real scene — it is a size/position guide the user drew around the ORIGINAL building\'s lot: left edge ≈'+pc(env.x0)+'% from the left of the image, right edge ≈'+pc(env.x1)+'%, '+
-    'top edge ≈'+pc(env.y0)+'% from the top (= just above the highest point of the original building\'s roof), bottom edge ≈'+pc(env.y1)+'% (= the front of the lot). RULES: '+
-    '(1) The ENTIRE new old building — walls, roof, parapet, rooftop room, water tank, chimney, antenna, everything — must stay completely INSIDE this rectangle. Its highest point must be AT OR BELOW the rectangle\'s top edge, '+
-    'and for an old building it should normally be clearly LOWER than the top edge (older buildings on this lot were lower than the new one that replaced them). No part of the building may rise above the top edge or extend past the left/right edges. '+
-    '(2) Judge real-world size from the neighbouring buildings, trees, cars and road OUTSIDE the rectangle — they are unchanged and are the true scale reference; a storey is about 2.7–3 m, roughly the height of one window row of the neighbouring houses. '+
-    '(3) Everything outside the rectangle (neighbouring houses, trees, sky, road, sidewalk) must stay exactly as in the input photo. '+
-    '(4) Remove the magenta rectangle completely from the output — no magenta or pink lines may remain anywhere; restore whatever is behind the line. --- ';
+    'It is NOT part of the real scene — it is a size guide drawn around the main building\'s lot: left edge ≈'+pc(env.x0)+'% from the left of the image, right edge ≈'+pc(env.x1)+'%, bottom edge ≈'+pc(env.y1)+'% (= the front of the lot), '+
+    'and its TOP EDGE (≈'+pc(cap)+'% from the top) is the HEIGHT LIMIT — it is deliberately placed clearly BELOW the roof of the current building, because the old building that stood here was noticeably smaller and lower. RULES: '+
+    '(1) Completely remove the current (new) building and rebuild an old one. The ENTIRE old building — walls, roof ridge, chimney, water tank, antenna, everything — must stay INSIDE the rectangle, with its highest point BELOW the top edge. No part may rise above the top edge or extend past the left/right edges. '+
+    '(2) Wherever the current building\'s roof stood above the top edge, there is now nothing — fill that area naturally with the background that would be visible behind it (the same trees, lawn, and neighbouring houses that surround it). '+
+    '(3) Keep floor heights realistic against the unchanged neighbouring buildings (one storey ≈ one window row of the neighbours, about 2.7–3 m); because of the height limit the old building will usually be a modest single-storey house. Do not make it wider than needed — leave some yard space on its sides. '+
+    '(4) Everything outside the rectangle (neighbouring houses, trees, sky, road, sidewalk) must stay exactly as in the input photo. '+
+    '(5) Remove the magenta rectangle completely from the output — no magenta or pink lines may remain anywhere. --- ';
 }
 function _agedEnvPromptTail(){
-  return ' ⚠️⚠️⚠️ FINAL SCALE CHECK (magenta guide box — most important): the new building must fit entirely inside the magenta rectangle, with its highest point at or below the rectangle\'s top edge (preferably clearly lower). Then delete the magenta rectangle lines from the output image.';
+  return ' ⚠️⚠️⚠️ FINAL SCALE CHECK (magenta guide box — most important): the old building must be clearly smaller and lower than the current one — entirely inside the magenta rectangle with its highest point BELOW the rectangle\'s top edge, and the space above that line filled with background. Then delete the magenta rectangle lines from the output image.';
 }
 // ⚠️ 요청 반영("이렇게까지 원본건물 영역지정까지 해야해?"): 사용자가 박스를 직접 그리지 않아도
 // 되도록, 생성 직전에 비전 모델(기존 AC/TV 검수와 같은 무료 llm 액션)에게 원본 사진 속 메인 건물의
@@ -32120,20 +32136,25 @@ function _agedEnvAutoDetect(imgUrl, cb){
   function finish(v){ if(done) return; done=true; cb(v); }
   setTimeout(function(){ if(!done){ console.warn('[스케일 가이드] 자동 감지 시간초과 — 박스 없이 진행'); finish(null); } }, 25000);
   var prompt='Look at this photo. Find the single MAIN subject building (the house/building in the foreground center that the photo is about — NOT the background or side neighbouring houses). '+
-    'Return ONLY a JSON object, nothing else: {"box_2d":[ymin,xmin,ymax,xmax]} with integers 0-1000 normalized to the image size. '+
-    'ymin = the very highest point of its roof. ymax = the bottom of its front yard / front boundary wall where it meets the street or sidewalk. '+
-    'xmin/xmax = the left/right edges of its lot (its own yard included, neighbours excluded).';
+    'Return ONLY a JSON object, nothing else: {"building":[ymin,xmin,ymax,xmax],"lot":[ymin,xmin,ymax,xmax]} with integers 0-1000 normalized to the image size. '+
+    '"building" = the building itself only: ymin = the very highest point of its roof, ymax = where its walls meet the ground. '+
+    '"lot" = the building plus its own yard: ymax = the front of its yard / front boundary wall where it meets the street or sidewalk, xmin/xmax = the left/right edges of its own lot (neighbours excluded).';
   function parse(d){
     var txt=(d && (d.output||d.text||d.response||d.message)) || '';
     if(typeof txt!=='string') txt=JSON.stringify(txt);
-    var m=txt.match(/\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]/);
-    if(!m) return null;
-    var y0=+m[1]/1000, x0=+m[2]/1000, y1=+m[3]/1000, x1=+m[4]/1000;
+    var re=/\[\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]/g, mm, arr=[];
+    while((mm=re.exec(txt))){ arr.push([+mm[1]/1000, +mm[2]/1000, +mm[3]/1000, +mm[4]/1000]); }
+    if(!arr.length) return null;
+    var bld=arr[0], lot=arr[1]||arr[0];
+    var y0=Math.min(bld[0],lot[0]), x0=Math.min(bld[1],lot[1]), y1=Math.max(bld[2],lot[2]), x1=Math.max(bld[3],lot[3]);
     if(!(y1>y0 && x1>x0)) return null;
     var bw=x1-x0, bh=y1-y0;
     if(bw*bh<0.04 || bw*bh>0.85) return null; // 너무 작거나 화면 전체면 잘못 찾은 것
-    // 여유: 지붕 위 살짝(박스 높이 4%), 좌우 3%, 아래 4%
+    // 새로 그리는 영역: 원본 건물 전체 + 대지(지붕 위 여유 4%, 좌우 3%, 아래 4%)
     var r={ x0:Math.max(0,x0-bw*0.03), x1:Math.min(1,x1+bw*0.03), y0:Math.max(0,y0-bh*0.04), y1:Math.min(1,y1+bh*0.04) };
+    // 높이 상한선: 원본 건물 높이(지붕 꼭대기~건물 바닥)에서 AGED_ENV_HEIGHT_CUT만큼 깎은 위치
+    var bTop=bld[0], bBase=bld[2];
+    if(arr.length>=2 && bBase>bTop && bBase<=r.y1) r.capY = bTop + (bBase-bTop)*AGED_ENV_HEIGHT_CUT;
     return r;
   }
   function ask(model, next){
@@ -32158,7 +32179,8 @@ function _agedEnvAnnotate(src, env, cb){
       c.drawImage(im,0,0,W,H);
       c.strokeStyle='#FF00FF';
       c.lineWidth=_agedEnvLineWidth(W,H);
-      c.strokeRect(env.x0*W, env.y0*H, (env.x1-env.x0)*W, (env.y1-env.y0)*H);
+      var _ty=(env.capY>env.y0)?env.capY:env.y0; // 윗선 = 높이 상한선
+      c.strokeRect(env.x0*W, _ty*H, (env.x1-env.x0)*W, (env.y1-_ty)*H);
       cb(cv.toDataURL('image/jpeg',0.95));
     }catch(e){ console.warn('[스케일 가이드] 표시 이미지 생성 실패:', e); cb(null); }
   });
@@ -32242,13 +32264,35 @@ function _agedEnvComposite(origSrc, resSrc, env, cb){
       }
       // 박스 위쪽 띠(박스 가로 중앙 80%, 박스 위 0.6%~8% 높이) — 여기가 원본과 크게 다르면 AI가 박스를 넘겨 그린 것
       var bw=env.x1-env.x0;
-      var bandDiff = (env.y0>0.03) ? diffIn(function(nx,ny){
+      // 높이 상한선(capY)이 원본 지붕보다 아래면 그 위는 원래 다른 게 있던 자리라 이 비교가 안 맞음 → 생략
+      var bandDiff = (env.y0>0.03 && !(env.capY>env.y0)) ? diffIn(function(nx,ny){
         return nx>=env.x0+bw*0.1 && nx<=env.x1-bw*0.1 && ny<env.y0-0.006 && ny>=Math.max(0,env.y0-0.08);
       }) : null;
       var overflow = (bandDiff!==null && baseDiff!==null) ? (bandDiff>baseDiff+18 && bandDiff>baseDiff*2.2) : false;
 
       // 3) 결과 전체에 색·밝기 게인 보정 적용
       var rd=rx.getImageData(0,0,W,H), p=rd.data;
+      // 2.5) AI가 마젠타 높이 상한선을 못 지우고 남겼으면 그 자리를 위·아래 픽셀로 메움.
+      //      선 위치는 우리가 직접 그렸으니 정확히 앎(capY) — 색으로 찾으면 JPEG 번짐이 남아서, 위치 기준으로 처리.
+      //      (좌우·아래 선은 합성 마스크 바깥이라 어차피 원본 픽셀로 덮임)
+      (function(){
+        if(!(env.capY>env.y0)) return;
+        var lw2=_agedEnvLineWidth(W,H), half=Math.ceil(lw2/2)+3;
+        var cy=Math.round(env.capY*H), top=Math.max(0,cy-half), bot=Math.min(H-1,cy+half);
+        var xa=Math.max(0,Math.floor(env.x0*W)), xb=Math.min(W-1,Math.ceil(env.x1*W));
+        var magCnt=0;
+        for(var x=xa;x<=xb;x++){ for(var y=top;y<=bot;y++){ var i=(y*W+x)*4, R=p[i],G=p[i+1],B=p[i+2]; if(R-G>60 && B-G>60){ magCnt++; break; } } }
+        if(magCnt < (xb-xa+1)*0.05) return; // 선이 거의 안 남았으면 손대지 않음
+        var ya=Math.max(0,top-1), yb=Math.min(H-1,bot+1), span=yb-ya;
+        for(var x2=xa;x2<=xb;x2++){
+          var ia=(ya*W+x2)*4, ib=(yb*W+x2)*4;
+          for(var y2=top;y2<=bot;y2++){
+            var t=(y2-ya)/span, io=(y2*W+x2)*4;
+            p[io]=p[ia]*(1-t)+p[ib]*t; p[io+1]=p[ia+1]*(1-t)+p[ib+1]*t; p[io+2]=p[ia+2]*(1-t)+p[ib+2]*t;
+          }
+        }
+        console.log('[스케일 가이드] 남은 마젠타 상한선 정리 ('+magCnt+'열)');
+      })();
       if(gain[0]!==1 || gain[1]!==1 || gain[2]!==1){
         for(var j=0;j<p.length;j+=4){
           p[j]=Math.min(255,p[j]*gain[0]); p[j+1]=Math.min(255,p[j+1]*gain[1]); p[j+2]=Math.min(255,p[j+2]*gain[2]);
@@ -39021,7 +39065,7 @@ function procImgWithTask(task, onDone, onErr){
     }
     var nb2Slug = editSlug;
     // 📐 노후 외관 스케일 가이드 박스(있으면: 입력 사진에 박스 표시 → 결과는 박스 안쪽만 원본 위에 합성)
-    var _agedEnv = (task.agedEnvelope && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData) ? task.agedEnvelope : null;
+    var _agedEnv = (task.agedEnvelope && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData) ? _agedEnvWithCap(task.agedEnvelope) : null;
     var _agedAuto = !_agedEnv && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData; // 직접 그린 박스 없으면 자동 감지
     // ⚠️ 되돌림(중요): 여기서 genSlug(끝에 /edit 안 붙은 순수 생성 모델)로 바꾸려고 시도했었는데,
     // 이 코드베이스 다른 곳(공간 컨셉 디자인 "순수 생성" 경로)에 이미 남겨진 주석에서 확인한 바로는
@@ -39181,6 +39225,7 @@ function procImgWithTask(task, onDone, onErr){
       } else if(_agedAuto){
         _doUpload(img, function(origUrl){
           _agedEnvAutoDetect(origUrl, function(box){
+            box=_agedEnvWithCap(box);
             if(!box){ uploadedMain = origUrl; checkAllDone(); return; }
             _agedEnvAnnotate(img, box, function(_annot2){
               if(!_annot2){ uploadedMain = origUrl; checkAllDone(); return; }
