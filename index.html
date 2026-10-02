@@ -32197,7 +32197,12 @@ function _agedEnvWithCap(env){
 // 18차: 원본 건물 위치를 Claude 비전으로 정확히 찾을 수 있게 되어 다시 켬 — 원본 사진의 건물을 AGED_SHRINK 배율로
 // 미리 줄여서 보내면, "사진 속 건물 크기를 그대로 따라 그리는" AI가 작아진 크기대로 노후 건물을 그림(크레딧 1번).
 var AGED_PRESHRINK_ENABLED=true;
-var AGED_SHRINK=0.70; // 0.70 = 원본 건물 대비 30% 축소. 더 작게 하려면 숫자를 낮추면 됨(예: 0.6)
+var AGED_SHRINK=0.70; // (예전 값, 아래 두 개가 실제로 쓰임)
+// 19차: 높이·폭을 따로 조절. 1.0 = 원본 그대로, 0.7 = 30% 줄임
+//  · 건물 크기 전체 30% 축소: 높이 0.70, 폭 0.70
+//  · 높이만 30% 축소:          높이 0.70, 폭 1.00
+var AGED_SHRINK_H=0.70; // 건물 높이 배율
+var AGED_SHRINK_W=0.70; // 건물 폭 배율 // 0.70 = 원본 건물 대비 30% 축소. 더 작게 하려면 숫자를 낮추면 됨(예: 0.6)
 function _agedEnvPreShrink(src, env, cb){
   if(!env || !env.bld){ cb(null); return; }
   _loadImageForComposite(src, function(im){
@@ -32243,10 +32248,10 @@ function _agedEnvPreShrink(src, env, cb){
       c.drawImage(fc, X0, Y0);
       c.restore();
       // 2) 원본 건물을 AGED_SHRINK 배율로 줄여서 바닥선·가로 중심을 맞춰 다시 붙임
-      var nw=bw*AGED_SHRINK, nh=bh*AGED_SHRINK;
+      var nw=bw*AGED_SHRINK_W, nh=bh*AGED_SHRINK_H; // 바닥선·가로 중심은 그대로
       var nx=bx0+(bw-nw)/2, ny=by1-nh;
       c.drawImage(im, bx0, by0, bw, bh, nx, ny, nw, nh);
-      console.log('[스케일 가이드] 입력 사진 속 건물을 '+Math.round((1-AGED_SHRINK)*100)+'% 축소해서 전송');
+      console.log('[스케일 가이드] 입력 사진 속 건물 축소 전송 — 높이 '+Math.round((1-AGED_SHRINK_H)*100)+'% · 폭 '+Math.round((1-AGED_SHRINK_W)*100)+'% 줄임');
       cb(cv.toDataURL('image/jpeg',0.95));
     }catch(e){ console.warn('[스케일 가이드] 건물 미리 축소 실패:', e); cb(null); }
   });
@@ -39405,7 +39410,7 @@ function procImgWithTask(task, onDone, onErr){
         if(_agedShrunkOK){
           rp = 'NOTE ABOUT THIS INPUT PHOTO (read first): the main building in this photo has already been reduced to the correct smaller size, standing on its original ground line. The soft, blurry, featureless patch around it is NOT a real object — it is empty space where the larger building used to be: redraw that whole patch as sharp, natural background (the same trees, lawn, ground and neighbouring houses that continue from around it), with no blur left anywhere. --- '
             + rp + ' ⚠️ FINAL CHECK: no blurry patch may remain anywhere in the output — every area must be sharp and natural.';
-          console.log('[노후 외관] 원본 건물 '+Math.round((1-AGED_SHRINK)*100)+'% 축소본으로 생성');
+          console.log('[노후 외관] 원본 건물 축소본으로 생성 (높이 '+Math.round((1-AGED_SHRINK_H)*100)+'% · 폭 '+Math.round((1-AGED_SHRINK_W)*100)+'% 줄임)');
         }
         console.log('[API]',nb2Slug,'|',allUrls.length,'imgs | res:',editRes,'| orig:',origW+'x'+origH);
         _withExplicitAspect(img, function(_asp){
