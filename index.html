@@ -31022,6 +31022,17 @@ function _getBrushColorBBox(cv, hexColor){
 }
 
 function _mkMaskExecute(){
+  // ⚠️ 버그 수정(치명적, "버벅거려서 멈춘줄 알고 눌렀는데 똑같은 게 3번 렌더링됐다"): 이 함수는
+  // 두 군데서 직접 호출됨 — 사이드바의 "선택 영역 수정" 버튼(_doActbtn을 거치지 않고 바로 호출)과,
+  // 화면 맨 아래 공통 실행 버튼(_doActbtn 안에서 "AI편집 + 마스크 지정됨"이면 _actbtnBusy=true를
+  // 설정하기도 전에 곧바로 이 함수로 넘기고 return해버림) — 그래서 이 함수 자체에는 중복 클릭을
+  // 막는 장치가 전혀 없었음. 화면이 버벅여서(렌더링 전 SAM 인식 등으로 잠깐 멈춘 것처럼 보임)
+  // 사용자가 짧은 간격으로 여러 번 누르면, 그 클릭 전부가 이 함수에 그대로 들어와 각자 독립적인
+  // 렌더링 작업을 큐에 쌓아버렸음(크레딧도 그만큼 중복 차감). _doActbtn의 _actbtnBusy와 같은
+  // 원리로, 이 함수 자체에 전역 디바운스를 걸어서 어느 버튼으로 들어오든 중복 실행을 막음.
+  if(G._mkMaskExecBusy) return;
+  G._mkMaskExecBusy = true;
+  setTimeout(function(){ G._mkMaskExecBusy = false; }, 1500);
   console.log('[AI편집] 실행 버튼 클릭 → _mkMaskExecute 시작');
   // ⚠️ 요청 반영(도구별 완전 독립 한도): 브러시는 색상 팔레트가 항상 다 보이는 입력창이라
   // "추가할 때" 막을 방법이 없어서(다각형·사각형·화살표처럼 "그리는 순간" 막을 수가 없음), 실행
@@ -38427,7 +38438,13 @@ function procImgWithTask(task, onDone, onErr){
     // 인페인팅"을 수동으로 선택한 경우는 어떤 지시든 그대로 존중(기존 동작 유지), 수동 선택이
     // 나노바나나 계열(nb2 등)이어도 지시 문구 자체가 삭제/교체 계열이면 자동으로 flux를 타게 함.
     var _autoFluxDeleteRe = /삭제|제거|지워|없애|교체|바꿔|바꾸/;
-    var _shouldUseFlux = task.maskData && (G.maskEngine==='flux' || _autoFluxDeleteRe.test(userPrompt));
+    // ⚠️ 요청 반영("flux사용하지말고 나노바나나2로 써 그걸로도 잘되자나"): "삭제/제거/..." 같은
+    // 단어가 들어있으면 사용자가 flux를 고르지 않아도 자동으로 flux-lora/inpainting으로
+    // 전환하던 로직이었는데, flux 결과가 부자연스럽다는 피드백(가이던스 스케일 이슈 등)과 함께
+    // 사용자가 나노바나나2로도 충분히 잘 된다며 이 자동 전환 자체를 끄라고 명시적으로 요청함 —
+    // 이제 사용자가 "마스크 편집 엔진"에서 직접 flux를 선택했을 때만 flux를 쓰고, 그 외에는
+    // (삭제 계열 단어가 있어도) 항상 나노바나나2로 실행되게 자동 전환 조건을 제거함.
+    var _shouldUseFlux = task.maskData && G.maskEngine==='flux';
     if(_shouldUseFlux){
       // ⚠️ 버그 수정(치명적, "문 삭제해달라고 했는데 결과가 그대로다"): userPrompt(=combined)는
       // 나노바나나 전용으로 만들어진 텍스트라 "색칠된 영역", "다른 색으로 칠한 영역은 서로 다른
@@ -38443,7 +38460,7 @@ function procImgWithTask(task, onDone, onErr){
         ? ('Completely remove the object(s) described by this instruction from the masked (white) area, and fill that area with a seamless, natural continuation of the surrounding material/surface — as if the object was never there: '+(_fluxRawInstr||'remove the object in the masked area')+'. The masked area must end up as a plain, uninterrupted continuation of whatever material surrounds it (wall, floor, facade, etc.) — no leftover shape, outline, or shadow of the removed object, and do not add any new object in its place.')
         : ('Apply this exact change only inside the masked (white) area, replacing what is currently there: '+_fluxRawInstr+'.');
       _fluxEditPrompt += ' Only modify the white masked area. Keep everything outside the mask exactly as in the original image, pixel for pixel — same camera angle, same framing, same zoom level, same crop.';
-      console.log(G.maskEngine==='flux' ? '[edit] flux 인페인팅 엔진 선택됨 → fal-ai/flux-lora/inpainting로 실행' : '[edit] 삭제/교체 계열 지시 자동 감지 → flux-lora/inpainting로 자동 전환해서 실행', '| 순수 지시문:', _fluxRawInstr);
+      console.log('[edit] flux 인페인팅 엔진 선택됨(수동 선택시에만 진입) → fal-ai/flux-lora/inpainting로 실행', '| 순수 지시문:', _fluxRawInstr);
       _doUpload(img, function(_fxImgUrl){
         _doUpload(task.maskData, function(_fxMaskUrl){
           falRun('fal-ai/flux-lora/inpainting', {
@@ -38451,7 +38468,14 @@ function procImgWithTask(task, onDone, onErr){
             image_url: _fxImgUrl,
             mask_url: _fxMaskUrl,
             num_inference_steps: 28,
-            guidance_scale: 30,
+            // ⚠️ 버그 수정(치명적, "삭제했는데 메꾼 부분이 엄청 부자연스럽다"): guidance_scale은
+            // 이 모델(flux-lora, CFG 범위 0~35, 공식 기본값 3.5)에서 "텍스트 지시를 얼마나
+            // 강하게 따를지"를 뜻하는데, 기존 코드가 30(기본값의 거의 10배, 사실상 최댓값 근처)
+            // 으로 설정돼 있었음 — 이렇게 극단적으로 높은 CFG는 FLUX 계열 모델에서 색이 타버린
+            // 것처럼 과포화되고 질감이 뭉개지는 등 전형적인 "부자연스러운" 아티팩트를 유발함.
+            // 삭제·인페인팅처럼 "그 자리를 자연스럽게 채워라"가 목적인 작업은 지시를 억지로 세게
+            // 따르게 하는 것보다 자연스러운 질감이 훨씬 중요하므로, 기본값에 가까운 값으로 낮춤.
+            guidance_scale: 5,
             strength: 1.0,
             num_images: 1,
             output_format: 'jpeg'
@@ -39026,7 +39050,10 @@ function procImg(onDone, onErr) {
             image_url:           imgUrl2,
             mask_url:            maskUrl2,
             num_inference_steps: 28,
-            guidance_scale:      30,
+            // ⚠️ 버그 수정: 위 자동 삭제 감지 경로와 동일한 이유로 guidance_scale을 30(공식
+            // 기본값 3.5의 거의 10배, 과포화·질감 뭉개짐 등 부자연스러운 아티팩트 유발)에서
+            // 기본값에 가까운 값으로 낮춤 — "flux 인페인팅으로 했는데 결과가 부자연스럽다" 버그.
+            guidance_scale:      5,
             strength:            1.0,
             num_images:          1,
             output_format:       'jpeg'
@@ -45080,6 +45107,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
           _rbRecipe += ' 그 외 조합 — 지붕은 '+_pickRand(_hRoof)+', 외벽은 '+_pickRand(_hWall)+', 대문은 '+_pickRand(_hGate)+', 창문은 '+_pickRand(_hWindow)+', 마당은 '+_pickRand(_hYard)+', 현관은 '+_pickRand(_hPorch)+', 얼룩은 '+_pickRand(_hStain)+', 부속시설은 '+_pickRand(_hUtil)+', 굴뚝은 '+_pickRand(_hChimney)+'. 이 9가지는 서로 독립적으로 고른 것이니, 그 외 디테일도 이에 맞춰 실제 거리에서 우연히 찍힌 특정 단독주택처럼 개성 있게 채우세요.';
         }
         _finalPrompt = _finalPrompt + ' \u26a0\u26a0\u26a0 ' + _rbRecipe;
+        _finalPrompt += ' \u26a0\u26a0\u26a0\u26a0 CRITICAL \u2014 ONLY THE SINGLE MAIN SUBJECT BUILDING IN THIS PHOTO IS BEING REDESIGNED AS AGED/OLD (\ub9e4\uc6b0 \uc911\uc694, \ubc18\ubcf5 \uc2e0\uace0\ub41c \ubc84\uadf8 \u2014 "\uba54\uc778 \uac74\ubb3c\ub9cc \ubc14\ub00c\uc5b4\uc57c \ud558\ub294\ub370 \ub4a4\ucabd \uac74\ubb3c\ub4e4\uae4c\uc9c0 \ub2e4 \ubc14\ub010\ub2e4"): if this reference photo shows OTHER buildings in the background or to the sides besides the single main/subject building (e.g. neighboring houses, other structures visible behind or beside it), those OTHER background/neighboring buildings must be kept 100% pixel-faithful to the original reference photo \u2014 same age, same condition, same materials, same everything, completely unchanged and NOT aged, NOT redesigned, NOT altered in any way. Only the ONE main subject building (the clear focal building the photo is centered on/closest to the camera) should be transformed into the aged/old design described above. Before finalizing, check yourself: did you accidentally also age or redesign any other building visible in this photo? If so, that is a clear failure; revert every building except the single main subject building back to looking exactly like the original photo.';
       }
       // ⚠️ 요청 반영("바닥자체가 똑같이 이렇게 두면 재미없는데, 철근이 더 많던지 바닥에 널부러진
       // 것들이 원본(골조 단계)이랑 달랐으면 좋겠다"): 1단계(철근·거푸집)도 같은 방식으로 무작위
