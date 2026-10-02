@@ -8011,12 +8011,14 @@ function updBtn(){
   document.querySelectorAll('#actbtn').forEach(function(b){
     b.style.display=isShorts?'none':'';
   });
-  // ⚠️ 일괄(배치) 업로드 버튼: 업스케일·3D 렌더 리얼리즘 탭에서만 노출 (CG 작업자가 투시도·
-  // 조감도 여러 장을 한 번에 돌리고 싶어하는 수요 — 나머지 탭은 프리셋/프롬프트 조합이 매번
-  // 달라질 수 있어 "같은 설정으로 N장 반복"이 안 맞는 경우가 많아 일단 이 두 탭만 지원)
+  // ⚠️ 일괄(배치) 업로드 버튼: 업스케일·3D 렌더 리얼리즘·현장사진 디자인 탭에서 노출 (CG 작업자가
+  // 투시도·조감도·현장사진 여러 장을 같은 설정(프리셋/엔진/해상도)으로 한 번에 돌리고 싶어하는
+  // 수요 — 요청 반영("현장사진도 여러장 한번에 업로드해서 렌더링되나?"): 나머지 탭(AI편집 등)은
+  // 사진마다 마스크·프롬프트가 달라져야 해서 "같은 설정으로 N장 반복"이 안 맞는 경우가 많아
+  // 아직 지원 안 함)
   var _batchBtn=document.getElementById('batch-upload-btn');
   if(_batchBtn && !G._batchRunning){
-    _batchBtn.style.display=(G.wf==='upscale'||G.wf==='render')?'':'none';
+    _batchBtn.style.display=(G.wf==='upscale'||G.wf==='render'||G.wf==='space')?'':'none';
   }
   // ⚠️ 요청 반영: "AI 한계 안내를 다른 탭에도 다 넣어달라" — #actbtn을 공용으로 쓰는 탭들(현장사진
   // 디자인·3D 렌더·AI 편집·업스케일·영상 제작)에는 이 문구 하나만 넣으면 전부 자동 적용됨.
@@ -8958,9 +8960,12 @@ function mkUB(p,lbl,key){
   var b=dv('');b.id='ub-'+key;rUB(b,key);w.appendChild(b);
   // ⚠️ 요청 반영("위치가 하단에 생기면안되고 이미지업로드 하는곳에 바로밑에든 크게 잘보이게
   // 생겨야지"): 예전엔 일괄 업로드 버튼이 사이드바 맨 아래(.sb-btm, 실행 버튼 밑)에 고정돼
-  // 있어서 눈에 잘 안 띄었음 — 이제 업스케일·3D 렌더 리얼리즘 탭의 "이미지 업로드" 박스
-  // 바로 아래, 눈에 띄는 강조색(accent)으로 크게 보이게 함.
-  if(key==='main' && (G.wf==='upscale'||G.wf==='render')){
+  // 있어서 눈에 잘 안 띄었음 — 이제 업스케일·3D 렌더 리얼리즘·현장사진 디자인 탭의 "이미지
+  // 업로드" 박스 바로 아래, 눈에 띄는 강조색(accent)으로 크게 보이게 함.
+  // ⚠️ 요청 반영("현장사진도 여러장 있는거 한번에 업로드해서 렌더링되나?"): 현장사진 디자인
+  // (G.wf==='space') 탭도 추가함 — 같은 프리셋/엔진 설정으로 여러 현장사진을 한 번에 돌리는
+  // 수요가 업스케일·렌더 탭과 동일함.
+  if(key==='main' && (G.wf==='upscale'||G.wf==='render'||G.wf==='space')){
     var batchWrap=dv('');batchWrap.style.cssText='margin-top:10px';
     var batchBtn=mk('button','');batchBtn.type='button';batchBtn.id='batch-upload-btn';
     batchBtn.textContent='📦 일괄 업로드 (여러 장 한 번에)';
@@ -15913,23 +15918,51 @@ function sbSpace(p){
   }
   if(G.wf==='budget'){
     mkNote(p,'<strong style="color:var(--ac)">💰 AI 견적</strong><br>공간 사진을 업로드하면 AI가 사진을 보고 항목별로 자재·시공 견적을 뽑아드려요.<br><span style="font-size:10.5px;color:#f59e0b">⚠️ 실제 현장 실측·자재 단가와 다를 수 있는 참고용 개산견적이에요 — 정확한 견적은 시공업체 현장 실측을 꼭 받아보세요.</span>');
+    // ⚠️ 요청 반영("AI견적 회원들이 보기편하고 작업하기 쉽게 만들어주면 안되나 나도 어려워"):
+    // 이 탭은 사진 업로드 → 해상도/레퍼런스/비율 → 예산 모드 → 지역·공간설정 → 평수/층수 →
+    // 견적 버튼 순으로 화면이 길게 쌓여 있어서, 뭐부터 해야 할지 한눈에 안 들어온다는 피드백.
+    // 가장 큰 원인은 (1) 지금 몇 단계에 있는지 안내가 아예 없었다는 점, (2) 기본값 그대로 써도
+    // 되는 "이미지 생성 옵션"(해상도·레퍼런스·비율)이 꼭 필요한 입력과 똑같은 비중으로 항상
+    // 펼쳐져 있었다는 점 — 로직은 그대로 두고, 안내 배너를 추가하고 선택사항들을 접어서
+    // 꼭 필요한 입력(사진 → 평수/층수 → 견적 확인)까지의 체감 길이를 줄임.
+    var stepGuide=dv('');
+    stepGuide.style.cssText='background:var(--acg);border:1px solid var(--acb);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;color:var(--t);line-height:1.9';
+    stepGuide.innerHTML='<strong style="color:var(--ac)">📋 이용 순서</strong><br>① 아래 사진 업로드 → ② 평수(또는 층수) 입력 → ③ <strong>"AI 견적 확인하기"</strong> 버튼 클릭<br><span style="color:var(--m2)">※ 해상도·레퍼런스·비율은 기본값 그대로 써도 괜찮아요 (선택사항)</span>';
+    p.appendChild(stepGuide);
     mkUB(p,'견적 낼 공간 사진 업로드','main');
     // ⚠️ 요청 반영("AI 견적에는 해상도 선택하는 곳이 없네?"): 예전에 "예산 계산기만 보이게"
     // 정리하면서 해상도 선택 UI를 통째로 뺐었는데, 실제로 이 탭에서도 미리보기(AFTER 렌더링)
     // 이미지를 만들기 때문에 해상도·비용을 사용자가 직접 고를 수 있어야 함 — 다시 추가함.
-    mkResolution(p);
+    // ⚠️ 위 "보기편하게" 요청으로, 해상도·레퍼런스·비율은 매번 꼭 봐야 하는 입력이 아니라서
+    // 기본 접힘 상태의 "선택사항" 아코디언 안으로 옮김(함수 자체는 그대로, 담는 그릇만 바뀜).
+    var _advKey='clover_budget_advopts_expanded';
+    var _advExpanded=false; try{ _advExpanded = localStorage.getItem(_advKey)==='1'; }catch(e){}
+    var advHeader=dv(''); advHeader.style.cssText='display:flex;align-items:center;gap:7px;cursor:pointer;padding:9px 2px;user-select:none;margin-top:4px';
+    var advIcon=dv(''); advIcon.style.cssText='font-size:12px;color:var(--m2);transition:transform .2s ease;transform:rotate('+(_advExpanded?'90':'0')+'deg)'; advIcon.textContent='▶';
+    var advTitle=dv(''); advTitle.style.cssText='font-size:12px;font-weight:700;color:var(--t2)'; advTitle.textContent='⚙️ 이미지 생성 옵션 (해상도·레퍼런스·비율 — 선택사항)';
+    advHeader.appendChild(advIcon); advHeader.appendChild(advTitle);
+    p.appendChild(advHeader);
+    var advBody=dv(''); advBody.style.display=_advExpanded?'block':'none';
+    advHeader.onclick=function(){
+      var next = advBody.style.display==='none';
+      advBody.style.display = next?'block':'none';
+      advIcon.style.transform = 'rotate('+(next?'90':'0')+'deg)';
+      try{ localStorage.setItem(_advKey, next?'1':'0'); }catch(e){}
+    };
+    mkResolution(advBody);
     // ⚠️ 요청 반영: "우리집 사진 + 원하는 레퍼런스 사진을 같이 넣으면, AI가 레퍼런스 스타일을
     // 구현하는 데 실제로 얼마가 드는지까지 계산해서 예산 안에서 가능한지 판단해달라"는 요청 —
     // 확인해보니 백엔드(analyze-room-budget)는 이미 레퍼런스 이미지를 받아서 마감재 등급을
     // 판단하고, 예산이 부족하면 styleMismatch로 알려주는 로직까지 다 갖춰져 있었는데, 정작
         // 프론트엔드에 레퍼런스 이미지를 올릴 칸 자체가 없어서 이 기능이 죽어있었음 — 여기에
     // 추가해서 실제로 쓸 수 있게 함. "AI 견적 확인하기"를 누르면 이 레퍼런스도 같이 분석된다.
-    mkRef(p,3,'레퍼런스 이미지 <span style="font-size:10px;color:var(--m2)">(선택 — 원하는 스타일 사진을 넣으면 AI가 우리집 사진과 같이 보고 판단해요)</span>');
+    mkRef(advBody,3,'레퍼런스 이미지 <span style="font-size:10px;color:var(--m2)">(선택 — 원하는 스타일 사진을 넣으면 AI가 우리집 사진과 같이 보고 판단해요)</span>');
     // ⚠️ 요청 반영: "AI 견적은 왜 출력 비율 선택 버튼이 없냐" — 현장사진 디자인·공간 컨셉
     // 디자인 탭에는 있는데 AI 견적 탭에만 빠져있었음(단순 누락). 다른 탭과 동일하게 추가함 —
     // forcedAspect는 getTab(G.wf)(=지금 활성 탭)를 읽는 구조라, 렌더링 시점에도 G.wf가 여전히
     // 'budget'이므로 별도 연결 코드 없이 이 한 줄만으로 그대로 반영됨.
-    mkAspectRatio(p);
+    mkAspectRatio(advBody);
+    p.appendChild(advBody);
     mkBudgetTier(p);
     // ⚠️ 요청 반영: 스타일 프리셋을 사진 업로드 바로 아래(예산 입력·"AI 견적 확인하기" 버튼보다
     // 위)에 두니, 프리셋 목록이 워낙 길어서 정작 예산 입력하는 곳 자체가 안 보이는 문제가
@@ -15947,6 +15980,20 @@ function sbSpace(p){
     +'<details style="margin-top:5px"><summary style="cursor:pointer;color:var(--m2);font-size:10.5px">공간 컨셉 디자인과 뭐가 다른가요?</summary>'
     +'<div style="font-size:10.5px;color:var(--m2);line-height:1.5;margin-top:5px">📌 여기(현장사진 디자인)는 아래 <b style="color:var(--t2)">프리셋</b>(정해진 스타일)으로 사진 한 장을 빠르게 바꿀 때 쓰고, 여러 공간(거실·주방·방 등)을 <b style="color:var(--t2)">참고 이미지</b>로 한 번에 통일감 있게 만들려면 <b style="color:var(--t2)">공간 컨셉 디자인</b>을 써주세요.</div></details>');
   mkEng(p,false);mkUB(p,'현장사진 업로드','main');
+  // ⚠️ 요청 반영("현장사진디자인에서 레퍼런스 따로 하고싶으면 공간컨셉디자인으로 바로 이동되는
+  // 버튼을 만들어줘 거기 이미지업로드 주변에 알아듣기쉬운 내용문구로"): 이 탭(현장사진 디자인)은
+  // 레퍼런스 이미지가 모든 사진에 공통으로 적용되는 구조라서, "사진마다 다른 레퍼런스"를 쓰고
+  // 싶은 사용자가 여기서 막히는 경우가 있었음 — 사진 업로드 바로 아래에 안내와 함께 공간 컨셉
+  // 디자인으로 바로 넘어갈 수 있는 버튼을 추가함.
+  var refNudgeBox=dv('');
+  refNudgeBox.style.cssText='background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:11px;color:var(--t2);line-height:1.6';
+  refNudgeBox.innerHTML='💡 <strong style="color:var(--t)">사진마다 다른 참고 이미지</strong>를 쓰고 싶으신가요?<br>여기(현장사진 디자인)는 레퍼런스가 모든 사진에 똑같이 적용돼요. 방마다 레퍼런스를 따로 넣고 싶다면 <strong style="color:var(--ac)">공간 컨셉 디자인</strong>을 이용해주세요.';
+  var goSpacesetBtn=mk('button','');goSpacesetBtn.type='button';
+  goSpacesetBtn.textContent='🏢 공간 컨셉 디자인으로 이동';
+  goSpacesetBtn.style.cssText='width:100%;margin-top:8px;padding:9px;border-radius:8px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+  goSpacesetBtn.onclick=function(){ selectWF('spaceset'); };
+  refNudgeBox.appendChild(goSpacesetBtn);
+  p.appendChild(refNudgeBox);
   var photoTip=dv('');photoTip.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.5;padding:6px 2px 2px';
   photoTip.innerHTML='💡 마감재(타일·도배·바닥재)가 일부라도 남아있는 사진일수록 결과 정확도가 높습니다. 콘크리트 골조만 보이는 완전 철거 사진은 벽·창문 구조가 다르게 나올 수 있습니다.';
   p.appendChild(photoTip);
