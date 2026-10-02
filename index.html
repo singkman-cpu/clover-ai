@@ -32213,12 +32213,18 @@ function _agedEnvPreShrink(src, env, cb){
       var bx0=Math.max(0,(b.x0-0.01)*W), bx1=Math.min(W,(b.x1+0.01)*W), by0=Math.max(0,(b.y0-0.01)*H), by1=Math.min(H,b.y1*H);
       var bw=bx1-bx0, bh=by1-by0;
       if(bw<8 || bh<8){ cb(null); return; }
+      // 20차: 지우는 범위는 감지 박스보다 넉넉하게(좌우 12%, 위 15%, 아래 5%) — 감지 박스가 실제 건물보다 살짝
+      // 작게 잡히면 박스 밖으로 삐져나간 원래 지붕·벽 끝이 남아서, AI가 그걸 기존 건물로 그대로 살려냈음.
+      // 단, 대지(lot) 박스 밖(옆집 쪽)으로는 넘어가지 않음.
+      var lx0=(env.x0!=null?env.x0:0)*W, lx1=(env.x1!=null?env.x1:1)*W;
+      var ex0=Math.max(lx0, bx0-bw*0.12), ex1=Math.min(lx1, bx1+bw*0.12);
+      var ey0=Math.max(0, by0-bh*0.15), ey1=Math.min(H, by1+bh*0.05);
       var cv=document.createElement('canvas'); cv.width=W; cv.height=H;
       var c=cv.getContext('2d');
       c.drawImage(im,0,0,W,H);
       // 1) 원본 건물 자리를 "주변 네 변의 색을 부드럽게 이어 붙인 면"으로 채움(쿤스 패치 방식) — 위쪽 배경 띠를
       //    늘리면 뒤 건물까지 같이 번져서 지저분했음. 좌우(나무)·아래(마당)·위(배경) 경계 픽셀 색을 보간 + 흐림.
-      var X0=Math.floor(bx0), Y0=Math.floor(by0), X1=Math.min(W-1,Math.ceil(bx1)), Y1=Math.min(H-1,Math.ceil(by1));
+      var X0=Math.floor(ex0), Y0=Math.floor(ey0), X1=Math.min(W-1,Math.ceil(ex1)), Y1=Math.min(H-1,Math.ceil(ey1)); // 넉넉한 지우기 범위
       var rw=X1-X0+1, rh=Y1-Y0+1;
       var full=c.getImageData(0,0,W,H).data;
       function px(x,y){ x=Math.max(0,Math.min(W-1,x)); y=Math.max(0,Math.min(H-1,y)); var i=(y*W+x)*4; return [full[i],full[i+1],full[i+2]]; }
@@ -39408,8 +39414,9 @@ function procImgWithTask(task, onDone, onErr){
         _tabForMarkedFlag._markedRefIsPositionOnly = false; // 한 번 쓰고 나면 초기화(다음 실행에 잘못 남지 않도록)
         if(_agedEnv){ rp = _agedEnvPromptHead(_agedEnv) + rp + _agedEnvPromptTail(_agedEnv); console.log('[스케일 가이드] 박스 적용', _agedEnv); }
         if(_agedShrunkOK){
-          rp = 'NOTE ABOUT THIS INPUT PHOTO (read first): the main building in this photo has already been reduced to the correct smaller size, standing on its original ground line. The soft, blurry, featureless patch around it is NOT a real object — it is empty space where the larger building used to be: redraw that whole patch as sharp, natural background (the same trees, lawn, ground and neighbouring houses that continue from around it), with no blur left anywhere. --- '
-            + rp + ' ⚠️ FINAL CHECK: no blurry patch may remain anywhere in the output — every area must be sharp and natural.';
+          rp = 'NOTE ABOUT THIS INPUT PHOTO (read first): the main building in this photo has already been reduced to the correct smaller size, standing on its original ground line. The soft, blurry, featureless patch around it is NOT a real object — it is empty space where the larger previous building used to be, which has been completely DEMOLISHED: redraw that whole patch as sharp, natural background (the same trees and neighbouring houses that continue from around it) and, at ground level, as this lot\'s plain old yard surface (bare dirt or cracked cement), with no blur left anywhere. '+
+            'NOTHING of the previous larger building may remain or be redrawn — no leftover roof peaks, gables, roof edges, wall fragments, windows or foundations of it anywhere behind, beside or around the old house. The old house is the ONLY building on this lot. --- '
+            + rp + ' ⚠️ FINAL CHECK: (1) the old house is the only building on this lot — if any roof, gable or wall of the previous larger building is visible behind or beside it, that is a failure; that space is background or yard. (2) no blurry patch may remain anywhere — every area must be sharp and natural.';
           console.log('[노후 외관] 원본 건물 축소본으로 생성 (높이 '+Math.round((1-AGED_SHRINK_H)*100)+'% · 폭 '+Math.round((1-AGED_SHRINK_W)*100)+'% 줄임)');
         }
         console.log('[API]',nb2Slug,'|',allUrls.length,'imgs | res:',editRes,'| orig:',origW+'x'+origH);
