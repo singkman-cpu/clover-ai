@@ -24768,6 +24768,54 @@ function _shortsRenderLivePreview(container){
   // 확대/축소 가능한 라이트박스(_openImageLightbox)를 그대로 재사용.
   canvas.ondblclick=function(){ _openImageLightbox(canvas.toDataURL('image/jpeg', 0.92)); };
   var ctx=canvas.getContext('2d');
+  // ⚠️ 요청 반영("방향키 말고 미리보기 사진을 마우스로 눌러서 끌어 움직이게"): 꽉채우기(크롭) 모드의 사진 장면이면
+  // 미리보기 화면을 드래그해서 바로 위치를 옮길 수 있게 함. 움직이는 동안은 미리보기만 다시 그리고(가볍게),
+  // 손을 떼면 화면 전체를 갱신해서 다른 곳(방향키·저장)과 값을 맞춤. 더블클릭 확대 보기는 그대로 동작.
+  (function(){
+    if(firstSlide.type!=='slide') return;
+    var _imObj = G_SHORTS.images.find(function(im){ return im.img===firstSlide.img; });
+    if(!_imObj || _imObj.isVideo) return;
+    var _bothOff = !!firstSlide.skipTopText && !!firstSlide.skipBottomText;
+    var _fm = ((G_SHORTS.opts.fitMode||'cover')==='contain' && _bothOff) ? 'cover' : (G_SHORTS.opts.fitMode||'cover');
+    if(_fm==='contain') return;
+    canvas.style.cursor='grab';
+    canvas.style.touchAction='none'; // 휴대폰에서도 손가락으로 끌기 가능(화면 스크롤과 충돌 방지)
+    canvas.title='드래그해서 사진 위치 이동 · 더블클릭하면 크게 보기';
+    var drag=null, raf=0;
+    function maxOff(){
+      var im=window._shortsPreviewImg; if(!im) return null;
+      var iw=im.naturalWidth||im.width, ih=im.naturalHeight||im.height; if(!iw||!ih) return null;
+      var sc=Math.max(1080/iw,1920/ih)*(_imObj.coverZoom||1);
+      return {x:Math.abs(iw*sc-1080)/2, y:Math.abs(ih*sc-1920)/2};
+    }
+    canvas.addEventListener('pointerdown', function(e){
+      if(e.button!==0) return;
+      var m=maxOff(); if(!m) return;
+      drag={sx:e.clientX, sy:e.clientY, ox:_imObj.coverOffX||0, oy:_imObj.coverOffY||0, m:m, moved:false};
+      try{ canvas.setPointerCapture(e.pointerId); }catch(_e){}
+      canvas.style.cursor='grabbing';
+      e.preventDefault();
+    });
+    canvas.addEventListener('pointermove', function(e){
+      if(!drag) return;
+      var k=1080/canvas.clientWidth; // 화면 픽셀 → 실제 1080 해상도 픽셀
+      var dxp=(e.clientX-drag.sx)*k, dyp=(e.clientY-drag.sy)*k;
+      if(Math.abs(e.clientX-drag.sx)+Math.abs(e.clientY-drag.sy)>2) drag.moved=true;
+      _imObj.coverOffX = drag.m.x>0 ? Math.max(-1,Math.min(1, drag.ox + dxp/drag.m.x)) : 0;
+      _imObj.coverOffY = drag.m.y>0 ? Math.max(-1,Math.min(1, drag.oy + dyp/drag.m.y)) : 0;
+      firstSlide.offX=_imObj.coverOffX; firstSlide.offY=_imObj.coverOffY;
+      if(!raf) raf=requestAnimationFrame(function(){ raf=0; paint(); });
+    });
+    function endDrag(e){
+      if(!drag) return;
+      var moved=drag.moved; drag=null;
+      canvas.style.cursor='grab';
+      try{ canvas.releasePointerCapture(e.pointerId); }catch(_e){}
+      if(moved) renderMain('shorts');
+    }
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+  })();
   function paint(){
     // ⚠️ 요청 반영("문구 껐는데 검은 띠는 그대로 남아있다"): 이 미리보기 캔버스는 _shortsDrawSlide와
     // 별개로 여기서 직접 그리고 있어서, 그쪽에 넣은 "문구 둘 다 꺼지면 레터박스 대신 꽉채우기로
@@ -27525,7 +27573,7 @@ function _shortsRenderCanvas(ub){
         var zc=document.createElement('div');
         zc.style.cssText='display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:-4px';
         var zLbl=document.createElement('div');zLbl.style.cssText='font-size:10.5px;color:var(--m2)';
-        zLbl.textContent='🔍 이 사진 확대/이동 (잘리는 부분 조절)';
+        zLbl.textContent='🔍 이 사진 확대/이동 (미리보기를 마우스로 끌어서 옮겨도 돼요)';
         zc.appendChild(zLbl);
         var zRow=document.createElement('div');zRow.style.cssText='display:flex;align-items:center;gap:8px;width:203px';
         // ⚠️ 요청 반영("9:16보다 큰 이미지가 확대만 되고 축소가 안 된다"): min이 1(100%)로 고정돼있어서
@@ -29605,7 +29653,8 @@ function _shortsDrawCoverImage(ctx, W, H, img, extraZoom, offX, offY){
   var scale=Math.max(W/iw, H/ih) * (extraZoom||1); // 사용자가 직접 확대/축소할 수 있게
   var dw=iw*scale, dh=ih*scale;
   // offX/offY(-1~1)로 어느 부분을 보여줄지 이동 — 확대해서 남는 여유 공간 안에서만 움직이게 clamp함
-  var maxOffX=Math.max(0,(dw-W)/2), maxOffY=Math.max(0,(dh-H)/2);
+  // 2026-10-03: 사진이 프레임보다 작을 때(축소)도 위치를 옮길 수 있게 절댓값 사용 — off가 +면 항상 사진이 오른쪽/아래로 이동
+  var maxOffX=Math.abs(dw-W)/2, maxOffY=Math.abs(dh-H)/2;
   var dx=(W-dw)/2 + (offX||0)*maxOffX;
   var dy=(H-dh)/2 + (offY||0)*maxOffY;
   ctx.drawImage(img,dx,dy,dw,dh);
@@ -39508,8 +39557,10 @@ function procImgWithTask(task, onDone, onErr){
             '(1) ORIENTATION — rebuild the old building on exactly the same spot, facing exactly the same direction as the current building, seen from exactly the same camera angle and perspective as the photo. Do not rotate it, turn it towards the camera, or move it. '+
             '(2) HEIGHT — the old building is a low single-storey house. Use the CURRENT building\'s own ground floor as the ruler: the old house\'s eaves (where the roof starts) must be at about the height of the TOP of the current building\'s ground-floor doors and windows, and its whole roof must stay below where the current building\'s second floor or upper roof begins. If there are other references in the photo, they must agree: its ridge stays lower than any neighbouring two-storey house\'s second-floor windows, and its front door is only a little taller than a person and about as tall as a parked car is long divided by two. Its footprint may be the same as or a little smaller than the current building, never larger. '+
             '(3) NO INVENTED STRUCTURES — the old house is the only building on this lot; do not add any extra house, shed or annex, and do not add new large trees or a forest that were not in the photo. '+
-            '(4) SMALL OBJECTS — bicycles, doors, gates, pots and steps must use the same real-world scale as the cars in the photo (a bicycle is about half a car long; a door is about 2 m tall). --- '
-            + rp + ' ⚠️ FINAL CHECK: same position, same facing direction and same camera angle as the original building; single storey with eaves at the height of the current building\'s ground-floor door tops; no new buildings or new forest; bicycles clearly smaller than cars.';
+            '(4) SMALL OBJECTS — bicycles, doors, gates, pots and steps must use the same real-world scale as the cars in the photo (a bicycle is about half a car long; a door is about 2 m tall). '+
+            '(5) NO REMNANTS — because the old house is lower (and may be narrower) than the current building, every place where the current building used to be taller or wider must now show what is behind it (sky, trees, the neighbouring houses) — no leftover roof, gable, wall or metal edge of the current building may remain above, behind or beside the old roof. '+
+            '(6) CAMERA AND SURROUNDINGS LOCKED — keep exactly the same camera position, height, angle, lens and framing as the photo (do not lower, raise, rotate or zoom the view). Everything outside the lot — neighbouring houses, their walls and fences, parked cars, road, sidewalk, street trees — must stay exactly as in the photo; boundary walls must continue to their real ends, and parked cars must stay complete and in place. --- '
+            + rp + ' ⚠️ FINAL CHECK: same camera and framing as the photo; same position and facing direction; no leftover parts of the current building; neighbouring walls and parked cars unchanged and complete; single storey with eaves at the height of the current building\'s ground-floor door tops; no new buildings or new forest; bicycles clearly smaller than cars.';
           console.log('[노후 외관] 원본 그대로 + 글 크기 지시 + 대지 밖 원본 복원 방식');
         }
         if(_agedShrunkOK){
@@ -39618,19 +39669,14 @@ function procImgWithTask(task, onDone, onErr){
           });
         }, handleError);
       } else if(AGED_STAGE_METHOD && !AGED_PRESHRINK_ENABLED && AGED_TEXT_SCALE && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData && !task.agedOnEmptyLot){
-        // 2026-10-03: 원본 사진을 손대지 않고 보냄(건물 방향·원근이 그대로 유지됨). 대지 위치만 찾아서,
-        // 결과에서 대지 밖(옆집·숲·도로·주차된 차)은 원본 픽셀로 되돌림 → AI가 주변에 집·숲을 지어내도 지워짐.
+        // 2026-10-03: 원본 사진을 손대지 않고 보냄(건물 방향·원근이 그대로 유지됨).
+        // ⚠️ 대지 밖 원본 복원(합성)은 쓰지 않음 — 테스트 결과 ①합성 경계에서 담장·차가 잘린 듯 끊기고,
+        // ②새 건물이 더 낮아져 원래 지붕이 있던 자리가 비는데, 감지 박스 위쪽은 원본으로 되돌려져서 옛 건물
+        // 지붕 잔해가 다시 나타났음. AI 결과를 통째로 쓰고, 주변 보존은 프롬프트로 지시함.
         _doUpload(img, function(origUrl){
           uploadedMain = origUrl;
           _agedTextScaleOK = true;
-          _agedEnvAutoDetect(origUrl, function(box){
-            if(box && box.bld){
-              var _b3=box.bld, _bh3=_b3.y1-_b3.y0;
-              _agedCompEnv={x0:box.x0, x1:box.x1, y0:Math.max(0,Math.min(box.y0,_b3.y0-_bh3*0.15)), y1:box.y1, noCap:true};
-              _stageKeepOK = true; // 아래 합성(대지 밖 원본 복원) 경로를 그대로 재사용
-            }
-            checkAllDone();
-          });
+          checkAllDone();
         }, handleError);
       } else if(STAGE_SURROUND_KEEP && STAGE_SURROUND_KEYS.indexOf(task.selK)!==-1 && !task.maskData){
         // 22차: 미완성 공사 — 원본 그대로 보내되, 대지 위치를 찾아서 결과의 대지 옆·뒤를 원본 픽셀로 복원
