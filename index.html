@@ -23825,6 +23825,35 @@ function idbLoadVideo(key){
     });
   });
 }
+// ⚠️ 요청 반영("외부에서 불러온 영상 클립이 새로고침하면 없어진다"): 업로드한 영상 파일은 이 탭에서만 쓸 수 있는
+// 임시 주소(blob:)라 새로고침하면 사라졌음 → 올리는 순간 원본 파일을 브라우저 저장소(IndexedDB)에 같이 보관하고,
+// 새로고침 후 쇼츠 화면이 열릴 때 그 파일로 다시 연결함.
+function _shortsVideoKey(item){ return 'shorts_vid_'+_draftKeyUid()+'_'+String(item.id); }
+function _shortsPersistVideo(item, fileOrBlob){
+  if(!item || !fileOrBlob) return;
+  item.vidStored = true;
+  idbSaveVideo(_shortsVideoKey(item), fileOrBlob).catch(function(e){ item.vidStored=false; console.warn('[쇼츠] 영상 클립 보관 실패(용량 부족 가능):', e); });
+}
+var _shortsRehydratingMap = {}; // 이 세션에서 지금 불러오는 중인 영상(저장 데이터에 섞이지 않도록 별도 보관)
+function _shortsRehydrateVideos(){
+  if(!G_SHORTS || !G_SHORTS.images) return;
+  G_SHORTS.images.forEach(function(im){
+    var _rk=String(im.id);
+    if(!im.isVideo || !im.vidStored || _shortsRehydratingMap[_rk]) return;
+    if(im.videoUrl && !(im.videoUrl.indexOf('blob:')===0 && im._blobDead)) return; // 이미 쓸 수 있는 주소가 있으면 그대로
+    _shortsRehydratingMap[_rk] = true;
+    idbLoadVideo(_shortsVideoKey(im)).then(function(blob){
+      _shortsRehydratingMap[_rk] = false;
+      if(!blob) return;
+      im.videoUrl = URL.createObjectURL(blob);
+      im._blobDead = false;
+      if(G.wf==='shorts'){ renderSB(); renderMain('shorts'); }
+    }).catch(function(){ _shortsRehydratingMap[_rk] = false; });
+  });
+}
+function _shortsForgetStoredVideos(list){
+  (list||[]).forEach(function(im){ if(im && im.isVideo && im.vidStored) idbDeleteVideo(_shortsVideoKey(im)).catch(function(){}); });
+}
 function idbDeleteVideo(key){
   return _idbOpen().then(function(db){
     return new Promise(function(resolve){
@@ -24774,7 +24803,7 @@ function _shortsRenderLivePreview(container){
   (function(){
     if(firstSlide.type!=='slide') return;
     var _imObj = G_SHORTS.images.find(function(im){ return im.img===firstSlide.img; });
-    if(!_imObj || _imObj.isVideo) return;
+    if(!_imObj) return; // 2026-10-03: 영상 클립도 끌어서 위치 이동 가능(포스터 기준 미리보기, 실제 영상에도 같은 위치로 반영)
     var _bothOff = !!firstSlide.skipTopText && !!firstSlide.skipBottomText;
     var _fm = ((G_SHORTS.opts.fitMode||'cover')==='contain' && _bothOff) ? 'cover' : (G_SHORTS.opts.fitMode||'cover');
     if(_fm==='contain') return;
@@ -25126,6 +25155,7 @@ function sbShorts(p){
     resetAllBtn.style.cssText='flex-shrink:0;padding:5px 11px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
     resetAllBtn.onclick=function(){
       if(!confirm('쇼츠에 올린 이미지, 역할 지정, 배경음악, 영상 클립을 전부 지우고 처음부터 다시 시작할까요?')) return;
+      _shortsForgetStoredVideos(G_SHORTS.images);
       G_SHORTS.images=[];
       G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
       idbDeleteVideo('shorts_bgm').catch(function(){}); // 저장해둔 배경음악도 같이 삭제(안내 문구대로)
@@ -25890,8 +25920,9 @@ function sbShorts(p){
     files.forEach(function(f){
       _shortsVideoToPoster(f, function(poster, dur, bu){
         if(!poster){ alert('"'+f.name+'" 영상을 읽을 수 없어요.'); remain--; return; }
-        G_SHORTS.images.push({id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur,
-          role:'video_clip', autoRole:'video_clip', customLabel:'', source:'upload'});
+        var _nv={id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur,
+          role:'video_clip', autoRole:'video_clip', customLabel:'', source:'upload'};
+        G_SHORTS.images.push(_nv); _shortsPersistVideo(_nv, f);
         remain--;
         if(remain===0){ evInput.value=''; renderSB();renderMain('shorts'); }
       });
@@ -27525,6 +27556,7 @@ function _shortsRenderCanvas(ub){
     freshBtn.textContent='🆕 완전히 새로 시작 (이미지 교체)';
     freshBtn.onclick=function(){
       if(!confirm('지금 이미지·역할 지정·배경음악·결과 영상을 전부 지우고 완전히 새로 시작할까요?')) return;
+      _shortsForgetStoredVideos(G_SHORTS.images);
       G_SHORTS.images=[];
       G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
       idbDeleteVideo('shorts_bgm').catch(function(){});
@@ -27539,6 +27571,7 @@ function _shortsRenderCanvas(ub){
   }
 
   // 2) 이미지 목록 — 위에서부터 순서대로 그 순서 그대로 쇼츠가 구성된다
+  _shortsRehydrateVideos(); // 새로고침 후 보관해둔 영상 클립 다시 연결
   var images=G_SHORTS.images;
   var unresolvedCount=images.filter(function(im){return !_shortsResolvedRole(im) && !_shortsHasCustomLabel(im);}).length;
 
@@ -27569,7 +27602,7 @@ function _shortsRenderCanvas(ub){
     if(_effFitModeForZoom!=='contain'){
       var previewImgIdx = _previewIdxForZoom;
       var pim = _pimForZoom;
-      if(pim && !pim.isVideo){
+      if(pim){ // 2026-10-03: 영상 클립도 확대/이동 가능
         var zc=document.createElement('div');
         zc.style.cssText='display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:-4px';
         var zLbl=document.createElement('div');zLbl.style.cssText='font-size:10.5px;color:var(--m2)';
@@ -28127,8 +28160,9 @@ function _shortsAddImageFlow(){
     files.forEach(function(f){
       _shortsVideoToPoster(f, function(poster, dur, bu){
         if(poster){
-          G_SHORTS.images.push({id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur,
-            role:'video_clip', autoRole:'video_clip', customLabel:'', source:'upload'});
+          var _nv2={id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur,
+            role:'video_clip', autoRole:'video_clip', customLabel:'', source:'upload'};
+          G_SHORTS.images.push(_nv2); _shortsPersistVideo(_nv2, f);
           added++;
         }
         remain--;
@@ -29417,7 +29451,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
     // 통째로 사라졌음(사진 슬라이드에서만 보임). 이제 사진과 똑같이 전체 설정(fitMode)을 따라서
     // 레터박스면 검은 여백 안에 문구를 그대로 그려줌.
     var _effFitModeV = ((opts&&(opts.fitMode||'cover'))==='contain' && !!slide.skipTopText && !!slide.skipBottomText) ? 'cover' : (opts&&(opts.fitMode||'cover'));
-    if(_vSrc) _shortsDrawImage(ctx,W,H,_vSrc,_effFitModeV,1,0,0);
+    if(_vSrc) _shortsDrawImage(ctx,W,H,_vSrc,_effFitModeV,slide.zoom||1,slide.offX||0,slide.offY||0); // 2026-10-03: 영상도 사진처럼 확대·위치 이동 반영
     var _effTopV = slide.skipTopText ? '' : (opts&&opts.topText);
     var _effBottomV = slide.skipBottomText ? '' : (opts&&opts.bottomText);
     if(_effFitModeV==='contain' && (_effTopV||_effBottomV)){
@@ -44888,6 +44922,25 @@ function _openProjectPicker(itemId){
   ov.appendChild(box);
   document.body.appendChild(ov);
 }
+// ⚠️ 버그 수정("크레딧 썼는데 이번 달 사용량이 0cr로 나온다"): 이 숫자는 브라우저에 따로 적어둔 값이었는데,
+// 실제 차감은 서버(fal-proxy·spend_credits)가 하고 그때는 이 값을 안 늘리고 있어서 거의 항상 0이었음.
+// 이제 서버의 크레딧 기록(credit_logs)에서 이번 달(한국 시간 기준 1일 0시부터) 사용(차감)분을 직접 합산해서 보여줌.
+function _loadMonthlyCreditUsage(cb){
+  if(!(_supa && _supaUser)){ cb(null); return; }
+  var now=new Date(), kst=new Date(now.getTime()+9*3600*1000);
+  var startUtc=new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), 1) - 9*3600*1000).toISOString();
+  var total=0, PAGE=1000;
+  function page(from){
+    _supa.from('credit_logs').select('amount').eq('user_id',_supaUser.id).gte('created_at',startUtc).lt('amount',0)
+      .range(from, from+PAGE-1).then(function(r){
+        if(r.error){ console.warn('[이번 달 사용량] 조회 실패:', r.error.message); cb(null); return; }
+        var rows=r.data||[];
+        rows.forEach(function(x){ total+=Math.abs(Number(x.amount)||0); });
+        if(rows.length===PAGE && from<20000) page(from+PAGE); else cb(total);
+      }, function(){ cb(null); });
+  }
+  page(0);
+}
 function buildCredits(){
   var b=gE('cr-b');if(!b)return;
   var cr=G.cr||0;
@@ -44897,6 +44950,12 @@ function buildCredits(){
   // 현재 플랜 레퍼런스 수
   var refMap={free:1,basic:2,pro:3,studio:4,agency:6};
   var maxRef=refMap[G.plan||'free']||1;
+  setTimeout(function(){
+    _loadMonthlyCreditUsage(function(v){
+      var el=gE('cr-month-used'); if(!el) return;
+      el.textContent = (v==null ? used : v).toLocaleString()+' cr';
+    });
+  },0);
 
   b.innerHTML=
     // ── 보유 크레딧 ──
@@ -44907,7 +44966,7 @@ function buildCredits(){
       '</div>'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">'+
         '<span style="font-size:11px;color:var(--t2)">이번 달 사용량</span>'+
-        '<span style="font-size:13px;font-weight:600;color:var(--t)">'+used.toLocaleString()+' cr</span>'+
+        '<span id="cr-month-used" style="font-size:13px;font-weight:600;color:var(--t)">'+(_supa&&_supaUser?'계산 중…':used.toLocaleString()+' cr')+'</span>'+
       '</div>'+
       // 기능별 크레딧 (실제 단가 반영)
       '<div style="font-size:10px;color:var(--m2);border-top:1px solid rgba(0,229,204,.15);padding-top:8px;margin-top:8px">'+
