@@ -32226,7 +32226,11 @@ function _agedEnvWithCap(env){
 // 오히려 결과가 나빠짐 → 기본 비활성화(코드는 남겨둠). 켜려면 true.
 // 18차: 원본 건물 위치를 Claude 비전으로 정확히 찾을 수 있게 되어 다시 켬 — 원본 사진의 건물을 AGED_SHRINK 배율로
 // 미리 줄여서 보내면, "사진 속 건물 크기를 그대로 따라 그리는" AI가 작아진 크기대로 노후 건물을 그림(크레딧 1번).
-var AGED_PRESHRINK_ENABLED=true;
+// ⚠️ 2026-10-03 다시 끔("AI 편집 노후 외관 결과에 건물 주변이 네모나게 블러 처리돼 있다"): 원본 건물을 지운 자리를
+// 흐린 색면으로 채워 보내는데, AI가 그 흐린 면을 다시 그리지 않고 그대로 남겨서 결과에 네모난 블러 자국이 생김
+// (10차 때와 같은 문제 재발, 프롬프트로 다시 그리라고 해도 무시함). 결 입히기 등으로 채워봤지만 유령 건물·줄무늬가
+// 생겨서 더 나빴음 → 미리 줄이기 자체를 끔. 대신 건물 크기는 AI가 원본 크기를 따라 그리는 경향이 있음.
+var AGED_PRESHRINK_ENABLED=false;
 var AGED_SHRINK=0.70; // (예전 값, 아래 두 개가 실제로 쓰임)
 // 19차: 높이·폭을 따로 조절. 1.0 = 원본 그대로, 0.7 = 30% 줄임
 //  · 건물 크기 전체 30% 축소: 높이 0.70, 폭 0.70
@@ -32308,7 +32312,7 @@ function _agedEnvPromptHead(env){
     return 'SIZE IS ALREADY SET — READ THIS FIRST (가장 중요, 이 프롬프트의 다른 모든 크기·층수·스케일 지시보다 우선): '+
       'in this input photo the main building has ALREADY been scaled down to its correct final size and sits on its correct ground line. '+
       'Rebuild it as the old building at EXACTLY this same size and position — the old building\'s width and its height up to the roof ridge must match the building as it appears in this input photo, and must NOT be drawn any bigger. '+
-      'Do not use any other rule to resize it. The softly blurred patch around that building is empty background — redraw it naturally as the trees, lawn and ground that continue from the surroundings (no building there). '+
+      'Do not use any other rule to resize it. The area around that building where the larger original building used to stand is only a rough placeholder copied from the surroundings — repaint it completely as crisp, natural, sharp background (trees, yard, ground) that continues seamlessly from the surroundings, with the same sharpness and detail as the rest of the photo. Nothing in the output may look blurred, smeared or soft. '+
       'A thin MAGENTA rectangle marks the lot: everything outside it must stay exactly as in the photo, and the magenta lines must be removed from the output. --- ';
   }
   function pc(v){ return Math.round(v*100); }
@@ -32324,7 +32328,7 @@ function _agedEnvPromptHead(env){
 }
 function _agedEnvPromptTail(env){
   if(env && env.tgt) return ' ⚠️⚠️⚠️ FINAL CHECK (most important, overrides every other rule above): (1) SIZE — the old house must fit exactly inside the magenta rectangle — ridge at its top edge, walls at its left/right edges — NOT bigger; the area where the larger current building used to be is now background or plain yard. (2) LOT — none of the current retaining walls, lawn, landscaping trees/shrubs, deck or paving may remain: they must all be replaced with old-era plain walls and a bare/cement yard. If any current landscaping or stone wall is still there unchanged, that is a failure. Remove the magenta lines.';
-  if(env && env.preShrunk) return ' ⚠️⚠️⚠️ FINAL SIZE CHECK (most important, overrides every other size rule above): the old building must be exactly the same size as the main building appears in the input photo — NOT bigger. Fill the blurred patch around it with natural background. Remove the magenta lines.';
+  if(env && env.preShrunk) return ' ⚠️⚠️⚠️ FINAL SIZE CHECK (most important, overrides every other size rule above): the old building must be exactly the same size as the main building appears in the input photo — NOT bigger. Repaint the placeholder area around it as crisp, sharp natural background — no blurred or smeared patch may remain. Remove the magenta lines.';
   return ' ⚠️⚠️⚠️ FINAL SCALE CHECK (magenta guide box — most important): the old building must be clearly smaller and lower than the current one — entirely inside the magenta rectangle with its highest point BELOW the rectangle\'s top edge, and the space above that line filled with background. Then delete the magenta rectangle lines from the output image.';
 }
 // ⚠️ 요청 반영("이렇게까지 원본건물 영역지정까지 해야해?"): 사용자가 박스를 직접 그리지 않아도
