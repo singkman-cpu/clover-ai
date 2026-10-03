@@ -8367,6 +8367,7 @@ function selectWF(wf){
         _shortsCloudLoadDraft(function(cloudDraft){
           if(!cloudDraft || !cloudDraft.data || !cloudDraft.data.images || !cloudDraft.data.images.length){ _shortsCheckSettled(); return; }
           if(G_SHORTS.images.length){ _shortsCheckSettled(); return; } // 그 사이에 이미 새로 작업 시작했으면 덮어쓰지 않음
+          if(G._shortsDraftDeclined){ _shortsCheckSettled(); return; } // 방금 다른 확인창("더 최신 임시저장")에서 취소했으면 또 묻지 않음
           if(confirm('다른 브라우저/기기에서 작업하던 쇼츠 내용이 있어요 (사진 '+cloudDraft.data.images.length+'장). 불러올까요?')){
             G_SHORTS.images=cloudDraft.data.images;
             Object.assign(G_SHORTS.opts, cloudDraft.data.opts||{});
@@ -8570,9 +8571,15 @@ var WF_INFO={
 // 그대로인 채 카메라 거리만으로 층수 증가를 해결하도록 함. (예전엔 여기서 무조건 '9:16'으로
 // 강제해서, 원본이 3:4처럼 그다지 세로로 길지 않은 사진이어도 결과물이 9:16으로 확 달라져
 // 보이는 문제가 있었음 — 이제 아래 일반 측정 로직을 그대로 타서 원본과 가장 가까운 비율을 씀.)
-function _withExplicitAspect(imgSrc, cb){
-  var _fTab = getTab(G.wf);
-  if(_fTab && _fTab.forcedAspect && _fTab.forcedAspect!=='auto'){ cb(_fTab.forcedAspect); return; }
+function _withExplicitAspect(imgSrc, cb, forcedOverride){
+  // ⚠️ 버그 수정: 대기열 작업은 "지금 보고 있는 탭"이 아니라 "작업을 넣은 탭"의 출력 비율을 써야 함 —
+  // forcedOverride(작업 생성 시점에 저장한 값)가 넘어오면 그걸 우선함.
+  if(typeof forcedOverride==='string'){
+    if(forcedOverride && forcedOverride!=='auto'){ cb(forcedOverride); return; }
+  } else {
+    var _fTab = getTab(G.wf);
+    if(_fTab && _fTab.forcedAspect && _fTab.forcedAspect!=='auto'){ cb(_fTab.forcedAspect); return; }
+  }
   if(!imgSrc){ cb('auto'); return; }
   loadImgSafe(imgSrc, function(pi){
     cb(_nearestAspectRatioStr(pi.naturalWidth, pi.naturalHeight));
@@ -34744,7 +34751,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
       sshl.style.cssText='background:rgba(0,229,204,.1);border-color:rgba(0,229,204,.35);color:var(--ac);padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
       sshl.addEventListener('click',function(e){
         e.stopPropagation();
-        var titleForShare = (WF_SOURCE_LABELS[item.wf]||'Clover AI')+' 디자인 결과';
+        var titleForShare = (({space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',agent:'AI 에이전트',spaceset:'공간 컨셉 디자인',budget:'AI 견적'})[item.wf]||'Clover AI') /* ⚠️ 버그 수정: WF_SOURCE_LABELS는 다른 함수 안의 지역변수라 여기선 ReferenceError가 나서 '링크 공유' 버튼이 작동 안 했음 */+' 디자인 결과';
         cloverShareImage(item.result, item.orig||null, titleForShare);
       },false);
       sshl.addEventListener('mousedown',function(e){e.stopPropagation();},false);
@@ -36434,9 +36441,10 @@ function _w3dRoomStart(){
       if(d.error){ throw new Error((d.error&&d.error.message)?d.error.message:String(d.error)); }
       try{
         localStorage.setItem('clover_w3d_pending', JSON.stringify({
-          operationId: d.operation_id, loadingId: loadingId, srcImg: rooms[0].url, startTime: Date.now(), multiRoom:true
+          operationId: d.operation_id, loadingId: loadingId, srcImg: rooms[0].url, startTime: Date.now(), multiRoom:true, cost:0
         }));
       }catch(e){}
+      _w3dCostByOp[d.operation_id] = 0; // 멀티룸은 아래에서 시작 시점에 이미 차감함 — 완료 시 중복 차감 금지
       if(statusEl) statusEl.textContent='생성 중입니다 (보통 1~3분, 더 걸릴 수 있어요)...';
       _w3dTabPoll(d.operation_id, loadingId, rooms[0].url, 0, Date.now());
       if(G.supaRole!=='admin') deductCredits(W3D_MULTIROOM_COST);
@@ -36485,9 +36493,10 @@ function _w3dTabStartText(){
     if(d.error){ throw new Error((d.error&&d.error.message)?d.error.message:String(d.error)); }
     try{
       localStorage.setItem('clover_w3d_pending', JSON.stringify({
-        operationId: d.operation_id, loadingId: loadingId, srcImg: null, startTime: Date.now()
+        operationId: d.operation_id, loadingId: loadingId, srcImg: null, startTime: Date.now(), cost:_thisCost
       }));
     }catch(e){}
+    _w3dCostByOp[d.operation_id] = _thisCost;
     if(statusEl) statusEl.textContent='생성 중입니다 (보통 5~10분, 서버 상황에 따라 더 걸릴 수 있어요)...';
     _w3dTabPoll(d.operation_id, loadingId, null, 0, Date.now());
   }).catch(function(e){
@@ -36613,9 +36622,10 @@ function _w3dTabStart(){
     // 다만 생성이 오래 걸릴 수 있어서(1~15분+), 새로고침해도 이어서 확인할 수 있도록 진행 상태는 남겨둔다.
     try{
       localStorage.setItem('clover_w3d_pending', JSON.stringify({
-        operationId: d.operation_id, loadingId: loadingId, srcImg: srcImg, startTime: Date.now()
+        operationId: d.operation_id, loadingId: loadingId, srcImg: srcImg, startTime: Date.now(), cost:_thisCost
       }));
     }catch(e){}
+    _w3dCostByOp[d.operation_id] = _thisCost;
     if(statusEl) statusEl.textContent='생성 중입니다 (보통 1~3분, 서버 상황에 따라 더 걸릴 수 있어요)...';
     _w3dTabPoll(d.operation_id, loadingId, srcImg, 0, Date.now());
   }).catch(function(e){
@@ -36627,6 +36637,23 @@ function _w3dTabStart(){
   });
 }
 
+// ⚠️ 버그 수정(치명적, "VR 투어가 다 만들어졌는데 결과가 안 뜨고 실패로 끝난다"): 완료 시점의 크레딧
+// 차감 코드가 _thisCost라는 변수를 쓰는데, 이 변수는 생성을 "시작"하는 함수 안에만 있고 이 확인
+// 함수에는 없어서, 관리자가 아닌 회원은 완료되는 순간 매번 ReferenceError가 났음 → catch로 넘어가
+// 5번 재시도 후 "실패"로 끝나고 결과도 저장 안 됨(관리자는 차감을 건너뛰어서 정상으로 보였음).
+// 시작할 때 비용을 작업 ID별로 기억해두고(새로고침 대비 localStorage에도 같이 저장) 여기서 꺼내 씀.
+var _w3dCostByOp = {};
+function _w3dCostFor(operationId){
+  if(Object.prototype.hasOwnProperty.call(_w3dCostByOp, operationId)) return _w3dCostByOp[operationId];
+  try{
+    var pd = JSON.parse(localStorage.getItem('clover_w3d_pending')||'null');
+    if(pd && pd.operationId===operationId){
+      if(typeof pd.cost==='number') return pd.cost;
+      if(pd.multiRoom) return 0;
+    }
+  }catch(e){}
+  return _w3dTotalCost();
+}
 function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
   retryCount = retryCount || 0;
   startTime = startTime || Date.now();
@@ -36676,7 +36703,9 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       }
       G.HIST.world3d=G.HIST.world3d.filter(function(x){return x.id!==loadingId;});
       // 결과를 실제로 손에 쥔 시점(url/spzUrl 둘 다 확인된 뒤)에만 크레딧 차감 — 가격은 항상 고정
-      if(G.supaRole!=='admin') deductCredits(_thisCost);
+      var _doneCost = _w3dCostFor(operationId);
+      delete _w3dCostByOp[operationId];
+      if(G.supaRole!=='admin' && _doneCost>0) deductCredits(_doneCost);
       var newItem={id:Date.now(),orig:thumbUrl||srcImg,result:url,spzUrl:spzUrl,metricScale:metricScale,origThumb:null,tags:['VR 투어'],ai:'',cx:50,fav:false,wf:'world3d'};
       G.HIST.world3d.unshift(newItem);
       saveHistToStorage();
@@ -38027,6 +38056,7 @@ function _runToolWithPromptActual(translatedPrompt){
     upscaleEng:G_UPSCALE_ENG||'topaz',
     scale:     tab.scale||G.tabs.upscale.scale||'2x',
     resolution:tab.resolution||'1K',
+    forcedAspect: tab.forcedAspect||'auto', // 작업을 넣은 시점의 출력 비율(대기 중 탭을 옮겨도 유지)
     c0:G.c0,h0:G.h0,r0:G.r0,f0:G.f0,
     optimFor:  G.optimFor,
     vidMode:   tab.vidMode||G.tabs.video.vidMode||'image',
@@ -38988,6 +39018,11 @@ function procImgWithTask(task, onDone, onErr){
   var apiRes  = ({'1K':'1K','2K':'2K','4K':'4K'})[resolution] || '1K';
 
   if(!img){ onErr('이미지가 없습니다.'); return; }
+  // ⚠️ 버그 수정("렌더링 걸어두고 다른 탭으로 가면 비율이 이상하게 나온다"): 이 함수 안의 비율 지정이
+  // 전부 getTab(G.wf)(=지금 화면에 보이는 탭)를 읽고 있어서, 대기열 작업이 실행되는 동안 사용자가
+  // 다른 탭으로 이동하면 그 탭의 출력 비율이 대신 적용됐음. 작업에 저장된 비율이 있으면 그걸 씀.
+  var _taskForcedAspect = (typeof task.forcedAspect==='string') ? task.forcedAspect : undefined;
+  var _withExplicitAspect = function(src, cb){ return window._withExplicitAspect(src, cb, _taskForcedAspect); };
   // 이 작업의 과금 정보 — fal-proxy 서버가 여기 담긴 값으로 정확한 크레딧을 계산한다.
   // (지금까지는 영상만 이 정보를 넘겨서, 현장사진/렌더/편집/업스케일은 서버 쪽 기본값(20cr)으로
   //  처리되고 있었음 — 업스케일이나 "사람 추가" 편집처럼 원래 더 비싼 작업이 실제보다 적게
@@ -39003,7 +39038,9 @@ function procImgWithTask(task, onDone, onErr){
   // 768x1376 → 683x414" 처럼 원본의 가로로 긴 비율로 도로 잘리는 게 이 현상). 사용자가 비율을
   // 직접 골랐을 때는(forcedAspect가 'auto'가 아닐 때) 이 원본 비율 보정을 건너뛴다.
   var _tabForResizeSkip = getTab(G.wf);
-  var _hasForcedAspect = !!(_tabForResizeSkip && _tabForResizeSkip.forcedAspect && _tabForResizeSkip.forcedAspect!=='auto');
+  var _hasForcedAspect = (_taskForcedAspect!==undefined)
+    ? (!!_taskForcedAspect && _taskForcedAspect!=='auto')
+    : !!(_tabForResizeSkip && _tabForResizeSkip.forcedAspect && _tabForResizeSkip.forcedAspect!=='auto');
   if((wf==='space'||wf==='render'||wf==='edit') && !_hasForcedAspect){
     var _rawOnDone = onDone;
     var _selKForPost = task.selK;
@@ -39162,15 +39199,20 @@ function procImgWithTask(task, onDone, onErr){
   // 없는 완전히 죽어있는 UI였음. 여기서 슬라이더 값을 실제 프롬프트 문구로 번역해서 진짜로
   // 작동하게 만듦(0이면 아무 문구도 안 넣어서 기본 동작 그대로 유지).
   if(wf==='space' || wf==='render'){
+    // ⚠️ 버그 수정: 지금까지 여기서 "지금 화면의" 슬라이더 값(G.c0 등)을 바로 읽어서, 대기열에
+    // 넣어둔 작업이 실제로 실행될 때 그 사이 슬라이더를 바꿨으면 바뀐 값이 적용됐음 — 작업을
+    // 넣은 시점에 task에 저장해둔 값(task.c0 등)을 우선 쓰고, 없을 때만 현재 값을 씀.
+    var _sv=function(k){ return (task && typeof task[k]==='number') ? task[k] : (G[k]||0); };
+    var _c0=_sv('c0'), _h0=_sv('h0'), _r0=_sv('r0'), _f0=_sv('f0');
     var _sldTxt='';
-    if(G.c0>0) _sldTxt+=' Feel free to creatively reinterpret and add extra realistic detail beyond strict accuracy (creativity level '+G.c0+'/10).';
-    else if(G.c0<0) _sldTxt+=' Stay extremely literal and conservative — add nothing beyond the minimum needed for realism, no creative reinterpretation at all (conservatism level '+(-G.c0)+'/10).';
-    if(G.h0>0) _sldTxt+=' Increase the dynamic range and contrast — brighter highlights, deeper shadows, more vivid tonal range than a flat/neutral photo (HDR intensity '+G.h0+'/10).';
-    else if(G.h0<0) _sldTxt+=' Keep the dynamic range flat, soft and even — avoid strong contrast or punchy highlights/shadows (flatness level '+(-G.h0)+'/10).';
-    if(G.r0>0) _sldTxt+=' Stay very closely, strictly faithful to the original photo\'s exact structure, materials and details — minimize any deviation (fidelity level '+G.r0+'/10).';
-    else if(G.r0<0) _sldTxt+=' You may deviate a bit more freely from the original\'s exact details while keeping the overall scene recognizable (looser fidelity, level '+(-G.r0)+'/10).';
-    if(G.f0>0) _sldTxt+=' Add more fine surface micro-texture and detail — visible material grain, subtle imperfections, crisper fine detail (detail intensity '+G.f0+'/10).';
-    else if(G.f0<0) _sldTxt+=' Keep surfaces smoother and cleaner with less fine micro-texture (smoothness level '+(-G.f0)+'/10).';
+    if(_c0>0) _sldTxt+=' Feel free to creatively reinterpret and add extra realistic detail beyond strict accuracy (creativity level '+_c0+'/10).';
+    else if(_c0<0) _sldTxt+=' Stay extremely literal and conservative — add nothing beyond the minimum needed for realism, no creative reinterpretation at all (conservatism level '+(-_c0)+'/10).';
+    if(_h0>0) _sldTxt+=' Increase the dynamic range and contrast — brighter highlights, deeper shadows, more vivid tonal range than a flat/neutral photo (HDR intensity '+_h0+'/10).';
+    else if(_h0<0) _sldTxt+=' Keep the dynamic range flat, soft and even — avoid strong contrast or punchy highlights/shadows (flatness level '+(-_h0)+'/10).';
+    if(_r0>0) _sldTxt+=' Stay very closely, strictly faithful to the original photo\'s exact structure, materials and details — minimize any deviation (fidelity level '+_r0+'/10).';
+    else if(_r0<0) _sldTxt+=' You may deviate a bit more freely from the original\'s exact details while keeping the overall scene recognizable (looser fidelity, level '+(-_r0)+'/10).';
+    if(_f0>0) _sldTxt+=' Add more fine surface micro-texture and detail — visible material grain, subtle imperfections, crisper fine detail (detail intensity '+_f0+'/10).';
+    else if(_f0<0) _sldTxt+=' Keep surfaces smoother and cleaner with less fine micro-texture (smoothness level '+(-_f0)+'/10).';
     if(_sldTxt) ap += ' ⚠️ Additional fine-tuning requested by the user (apply these on top of everything above, without breaking any of the CRITICAL rules above):' + _sldTxt;
   }
 
@@ -42511,7 +42553,7 @@ function admMail(c){
     if(kSave)kSave.onclick=function(){
       var v=(gE('resend-key-inp')?gE('resend-key-inp').value:'').trim();
       localStorage.setItem('clover_resend_key',v);
-      if(_supa&&_supaUser){_supa.from('profiles').update({resend_key:v}).eq('id',_supaUser.id).catch(function(){});}
+      if(_supa&&_supaUser){_supa.from('profiles').update({resend_key:v}).eq('id',_supaUser.id).then(function(r){ if(r&&r.error) console.warn('[프로필 저장 실패]', r.error.message); }, function(){});}
       var st=gE('resend-key-status');
       if(st){st.style.color='var(--ac)';st.textContent='✓ 저장됨 (DB에도 백업됨)';}
       kSave.textContent='✓';kSave.style.background='#10b981';
@@ -42929,7 +42971,7 @@ function openPanel(id){
   selClearBtn.style.cssText='background:var(--c2);border:1px solid var(--bd2);color:var(--t2);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
   selClearBtn.onclick=function(){
     G._galSelected.clear();
-    renderGalleryGrid(G._curFilteredItems||items);
+    renderGalleryGrid(G._curFilteredItems||all);
   };
   selBar.appendChild(selClearBtn);
   var selDelBtn=document.createElement('button');
@@ -42945,7 +42987,7 @@ function openPanel(id){
     // 호출하면 현재 작업 중이던 워크플로우(공간 컨셉 등)의 메인 화면으로 통째로 다시 그려져서,
     // 갤러리 화면을 벗어나 엉뚱한 화면으로 튕겨나가는 것처럼 보였음. 갤러리는 별도 그리드
     // 렌더러(renderGalleryGrid)만 다시 그리면 충분해서 renderMain 호출 자체가 불필요했음.
-    renderGalleryGrid(G._curFilteredItems||items);
+    renderGalleryGrid(G._curFilteredItems||all);
   };
   selBar.appendChild(selDelBtn);
   // ⚠️ 요청 반영("갤러리 어디든 사진 있는 곳에서 두 사진을 클릭해서 슬라이더로 비교해서 보고
@@ -42959,7 +43001,7 @@ function openPanel(id){
   selCompareBtn.onclick=function(){
     if(G._galSelected.size!==2) return;
     var ids=Array.from(G._galSelected);
-    var allItemsNow=G._curFilteredItems||items;
+    var allItemsNow=G._curFilteredItems||all;
     var it1=allItemsNow.find(function(x){return x.id===ids[0];});
     var it2=allItemsNow.find(function(x){return x.id===ids[1];});
     if(!it1||!it2) return;
@@ -42979,7 +43021,7 @@ function openPanel(id){
     var n=G._galSelected.size;
     if(!n) return;
     var ids=Array.from(G._galSelected);
-    var allItemsNow=G._curFilteredItems||items;
+    var allItemsNow=G._curFilteredItems||all;
     var picked=ids.map(function(iid){return allItemsNow.find(function(x){return x.id===iid;});}).filter(function(x){return x && (x.result||x.orig||x.origThumb);});
     if(!picked.length){ alert('일괄 적용할 수 없는 항목만 선택되어 있어요(영상 등).'); return; }
     _openBulkPresetApply(picked);
@@ -42997,7 +43039,7 @@ function openPanel(id){
     var n=G._galSelected.size;
     if(!n) return;
     var ids=Array.from(G._galSelected);
-    var allItemsNow=G._curFilteredItems||items;
+    var allItemsNow=G._curFilteredItems||all;
     var picked=ids.map(function(iid){return allItemsNow.find(function(x){return x.id===iid;});})
       .filter(function(x){return x && x.wf!=='world3d' && !x.communityPostId && (x.result||x.orig);});
     if(!picked.length){ alert('공개할 수 있는 항목이 없어요(이미 공개됐거나, VR 투어이거나, 이미지가 없는 항목만 선택되어 있어요).'); return; }
@@ -43014,7 +43056,7 @@ function openPanel(id){
           selCommunityBtn.textContent=origText;
           saveHistToStorage();
           G._galSelected.clear();
-          renderGalleryGrid(G._curFilteredItems||items);
+          renderGalleryGrid(G._curFilteredItems||all);
           alert((picked.length-failed)+'개 공개 완료'+(failed?(', '+failed+'개는 실패했어요'):'')+'. 전부 익명으로 공개됐어요 — 닉네임을 표시하고 싶으면 커뮤니티 탭의 "내 공개 작품 관리"에서 설정할 수 있어요.');
         }
       });
@@ -45302,7 +45344,7 @@ function buildAccount(){
 
     if(isAdmin){
       var fi2=gE('fal-inp');if(fi2)fi2.value=FAL_KEY;
-      var fs=gE('fal-save');if(fs)fs.onclick=function(){var v=gE('fal-inp').value.trim();FAL_KEY=v;G_HAS_PERSONAL_KEY=!!v;localStorage.setItem('clover_fal_key',v);if(_supa&&_supaUser){_supa.from('profiles').update({fal_key:v}).eq('id',_supaUser.id).catch(function(){});}
+      var fs=gE('fal-save');if(fs)fs.onclick=function(){var v=gE('fal-inp').value.trim();FAL_KEY=v;G_HAS_PERSONAL_KEY=!!v;localStorage.setItem('clover_fal_key',v);if(_supa&&_supaUser){_supa.from('profiles').update({fal_key:v}).eq('id',_supaUser.id).then(function(r){ if(r&&r.error) console.warn('[프로필 저장 실패]', r.error.message); }, function(){});}
   fs.textContent='저장됨 ✓';fs.style.background='#10b981';setTimeout(function(){fs.textContent='저장';fs.style.background='var(--ac)';},2000);};
       var ft=gE('fal-test');if(ft)ft.onclick=function(){
         var kr=gE('key-res');if(kr){kr.style.color='var(--t2)';kr.textContent='확인 중...';}
