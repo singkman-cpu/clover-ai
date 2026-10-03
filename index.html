@@ -23500,7 +23500,7 @@ function _agentPollVR(operationId, onDone, onErr, retryCount){
         var su=splatAsset&&splatAsset.spz_urls;
         if(su){
           if(Array.isArray(su)){ spzUrl=su[0]; }
-          else if(typeof su==='object'){ spzUrl = su['full_res'] || su['500K'] || su['150K'] || su['100K'] || Object.values(su)[0]; }
+          else if(typeof su==='object'){ spzUrl = _w3dPickSpz(su); }
         }
         if(!spzUrl && splatAsset && splatAsset.spz_url) spzUrl=splatAsset.spz_url;
       }catch(e){}
@@ -36642,6 +36642,14 @@ function _w3dTabStart(){
 // 함수에는 없어서, 관리자가 아닌 회원은 완료되는 순간 매번 ReferenceError가 났음 → catch로 넘어가
 // 5번 재시도 후 "실패"로 끝나고 결과도 저장 안 됨(관리자는 차감을 건너뛰어서 정상으로 보였음).
 // 시작할 때 비용을 작업 ID별로 기억해두고(새로고침 대비 localStorage에도 같이 저장) 여기서 꺼내 씀.
+// VR 투어 3D 파일 고르기 — PC는 500K(충분히 선명하고 가벼움), 휴대폰은 150K 우선
+function _w3dPickSpz(su){
+  var isMobile = (window.innerWidth||1024) < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+  var order = isMobile ? ['150K','500K','100K','full_res'] : ['500K','150K','full_res','100K'];
+  for(var i=0;i<order.length;i++){ if(su[order[i]]) return su[order[i]]; }
+  var vals = Object.keys(su).map(function(k){return su[k];}).filter(Boolean);
+  return vals[0]||null;
+}
 var _w3dCostByOp = {};
 function _w3dCostFor(operationId){
   if(Object.prototype.hasOwnProperty.call(_w3dCostByOp, operationId)) return _w3dCostByOp[operationId];
@@ -36680,7 +36688,9 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
             spzUrl=su[0]; // 혹시 배열로 오는 경우도 대비
           } else if(typeof su==='object'){
             // 웹에서 빠르게 돌려보기엔 너무 무거운 full_res보다 중간 품질을 우선 선택
-            spzUrl = su['full_res'] || su['500K'] || su['150K'] || su['100K'] || Object.values(su)[0];
+            // ⚠️ 성능 수정("VR 렌더 엄청 느리다"): 주석엔 '중간 품질 우선'이라 돼 있었는데 실제로는 full_res(가장 무거운
+            // 원본)를 1순위로 골라서 다운로드도 오래 걸리고 열린 뒤에도 버벅였음 → _w3dPickSpz로 가벼운 파일 우선 선택.
+            spzUrl = _w3dPickSpz(su);
           }
         }
         if(!spzUrl && splatAsset && splatAsset.spz_url) spzUrl=splatAsset.spz_url;
@@ -41316,7 +41326,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         EVENT_DEFS.map(function(ev){return '<th style="padding:6px 8px;text-align:center">'+ev.l+'</th>';}).join('')+
       '</tr></thead><tbody>'+
         userList.map(function(u){
-          return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:'+(u.uid==='anon'?'var(--m2)':'var(--t2)')+'">'+u.email+'</td>'+
+          return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:'+(u.uid==='anon'?'var(--m2)':'var(--t2)')+'">'+_admEsc(u.email)+'</td>'+
             EVENT_DEFS.map(function(ev){var n=u.counts[ev.k]||0; return '<td style="padding:5px 8px;text-align:center;color:'+(n?'var(--t2)':'var(--m1)')+'">'+n+'</td>';}).join('')+
           '</tr>';
         }).join('')+
@@ -41594,7 +41604,7 @@ function admFindUser(){
   _supa.from('profiles').select('*').eq('email',email).single().then(function(res){
     if(res.error||!res.data){_admTargetUserId=null;if(info)info.innerHTML='<span style="color:#fca5a5">회원을 찾을 수 없습니다.</span>';return;}
     var u=res.data;_admTargetUserId=u.id;
-    if(info)info.innerHTML='<span style="color:var(--ac);font-weight:700">'+u.email+'</span> | 크레딧: <strong style="color:var(--ac)">'+(u.credits||0).toLocaleString()+'cr</strong> | 플랜: <strong>'+(u.plan||'free').toUpperCase()+'</strong>';
+    if(info)info.innerHTML='<span style="color:var(--ac);font-weight:700">'+_admEsc(u.email)+'</span> | 크레딧: <strong style="color:var(--ac)">'+(u.credits||0).toLocaleString()+'cr</strong> | 플랜: <strong>'+(u.plan||'free').toUpperCase()+'</strong>';
   });
 }
 
@@ -41641,6 +41651,10 @@ function admCoupon(c){
 // sort_order 컬럼을 두고, 관리자가 위/아래 버튼으로 순서를 직접 조정할 수 있게 함. 값이 작을수록
 // 커뮤니티 피드 앞쪽(먼저 보이는 자리)에 노출됨 — 아직 순서가 안 정해진(sort_order가 null인)
 // 게시물은 최신순으로 자동 정렬되다가, 관리자가 한 번 손대는 순간부터 그 순서가 고정됨.
+// ⚠️ 보안 수정(오픈 전 점검): 관리자 커뮤니티 관리 화면이 회원이 올린 image_url·caption을 그대로
+// innerHTML에 넣고 있었음 — 악의적인 회원이 Supabase API로 직접 따옴표·스크립트가 섞인 값을 넣으면
+// 관리자 브라우저에서 코드가 실행될 수 있었음(관리자 세션·키 탈취 위험). 화면에 넣기 전에 이스케이프함.
+function _admEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function admCommunity(c){
   if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
   c.innerHTML='<div style="text-align:center;padding:20px;color:var(--m2)">불러오는 중...</div>';
@@ -41706,13 +41720,13 @@ function _admCommunityRender(c, posts){
     card.draggable=true;
     card.style.cssText='position:relative;border-radius:12px;overflow:hidden;background:var(--c2);aspect-ratio:4/3;border:1px solid var(--bd2)';
     var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
-    card.innerHTML=isVid?'<video src="'+p.image_url+'" muted style="width:100%;height:100%;object-fit:cover;pointer-events:none"></video>':'<img src="'+p.image_url+'" style="width:100%;height:100%;object-fit:cover;pointer-events:none" draggable="false">';
+    card.innerHTML=isVid?'<video src="'+_admEsc(p.image_url)+'" muted style="width:100%;height:100%;object-fit:cover;pointer-events:none"></video>':'<img src="'+_admEsc(p.image_url)+'" style="width:100%;height:100%;object-fit:cover;pointer-events:none" draggable="false">';
     var grad=document.createElement('div');
     grad.style.cssText='position:absolute;left:0;right:0;bottom:0;height:46%;background:linear-gradient(transparent,rgba(0,0,0,.65));pointer-events:none';
     card.appendChild(grad);
     var info=document.createElement('div');
     info.style.cssText='position:absolute;bottom:6px;left:8px;right:30px;color:#fff;font-size:10px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none';
-    info.innerHTML=(p.caption||'<span style="opacity:.6">(문구 없음)</span>')+' · ❤️'+(p.like_count||0)+(p.is_public?'':' · <span style="color:#f59e0b">비공개</span>');
+    info.innerHTML=(p.caption?_admEsc(p.caption):'<span style="opacity:.6">(문구 없음)</span>')+' · ❤️'+(parseInt(p.like_count,10)||0)+(p.is_public?'':' · <span style="color:#f59e0b">비공개</span>');
     card.appendChild(info);
     var orderTag=document.createElement('div');
     orderTag.style.cssText='position:absolute;top:6px;left:6px;background:rgba(0,0,0,.55);color:#fff;font-size:10px;font-weight:800;border-radius:5px;padding:1px 6px;pointer-events:none';
@@ -48606,7 +48620,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
   metricScale = metricScale && metricScale > 0 ? metricScale : 1;
   try{
     var w = containerEl.clientWidth || 480, h = containerEl.clientHeight || 300;
-    var renderer = new THREE.WebGLRenderer({ antialias: true });
+    var renderer = new THREE.WebGLRenderer({ antialias: false }); // ⚠️ 성능: 3D 점 렌더링엔 효과 없고 GPU만 더 씀(Spark 권장)
     renderer.setSize(w, h);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); // 3→2: 고해상도(레티나) 기기에서 부담을 줄여 버벅거림 완화
     containerEl.innerHTML = '';
