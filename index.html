@@ -25005,8 +25005,25 @@ function _shortsRenderLivePreview(container){
       updPlayBtn();
     };
     v.onplay=updPlayBtn; v.onpause=updPlayBtn;
-    scrub.oninput=function(){ scrub._dragging=true; try{ v.currentTime=parseFloat(scrub.value); }catch(e){} };
-    scrub.onchange=function(){ scrub._dragging=false; };
+    // 요청 반영("재생바를 움직이면 아래 시작바도 같이 따라 움직여줘"): 재생바를 끌면 사용 구간의 시작점이 그 위치로
+    // 따라오고, 구간 길이는 그대로 유지한 채 끝점도 같이 밀려감(영상 끝을 넘지 않게). 손을 떼면 사이드바·예상 길이까지 반영.
+    var trimInputs={};
+    scrub.oninput=function(){
+      scrub._dragging=true;
+      var pos=parseFloat(scrub.value);
+      try{ v.currentTime=pos; }catch(e){}
+      if(vIm.speedMode) return; // 배속 모드는 전체 구간을 쓰므로 구간을 움직이지 않음
+      var fd=vIm._fullDuration||fullDur;
+      var len=Math.max(0.2, (vIm.trimEnd!=null?vIm.trimEnd:fd)-(vIm.trimStart||0));
+      var st=Math.max(0, Math.min(pos, fd-0.2));
+      var en=Math.min(fd, st+len);
+      if(en-st<0.2) st=Math.max(0, en-0.2);
+      vIm.trimStart=Math.round(st*10)/10; vIm.trimEnd=Math.round(en*10)/10;
+      if(trimInputs.trimStart) trimInputs.trimStart.value=String(vIm.trimStart);
+      if(trimInputs.trimEnd) trimInputs.trimEnd.value=String(vIm.trimEnd);
+      updUsed();
+    };
+    scrub.onchange=function(){ scrub._dragging=false; if(!vIm.speedMode) syncSidebar(); };
     // 2) 사용 구간 표시 + 시작/끝 슬라이더
     var usedLbl=document.createElement('div'); usedLbl.style.cssText='font-size:11px;font-weight:800;color:var(--ac)';
     function updUsed(){
@@ -25022,6 +25039,7 @@ function _shortsRenderLivePreview(container){
       var l=document.createElement('span'); l.style.cssText='font-size:10px;color:var(--m2);width:22px;flex-shrink:0'; l.textContent=label;
       var r=document.createElement('input'); r.type='range'; r.min='0'; r.max=String(vIm._fullDuration||fullDur); r.step='0.1'; r.value=String(vIm[key]);
       r.style.cssText='flex:1;accent-color:var(--ac)'; r.disabled=!!vIm.speedMode;
+      trimInputs[key]=r;
       var setB=document.createElement('button'); setB.type='button';
       setB.textContent = key==='trimStart' ? '⟦ 지금 위치' : '지금 위치 ⟧';
       setB.title = key==='trimStart' ? '재생 중인 현재 위치를 시작점으로' : '재생 중인 현재 위치를 끝점으로';
@@ -26114,9 +26132,9 @@ function sbShorts(p){
     if(!files.length)return;
     var remain=files.length;
     files.forEach(function(f){
-      _shortsVideoToPoster(f, function(poster, dur, bu){
+      _shortsVideoToPoster(f, function(poster, dur, bu, fullD){
         if(!poster){ alert('"'+f.name+'" 영상을 읽을 수 없어요.'); remain--; return; }
-        var _nv={id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur,
+        var _nv={id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur, _fullDuration:fullD||dur, trimStart:0, trimEnd:dur,
           role:'video_clip', autoRole:'video_clip', customLabel:'', source:'upload'};
         G_SHORTS.images.push(_nv); _shortsPersistVideo(_nv, f);
         remain--;
@@ -28098,8 +28116,8 @@ function _shortsVideoToPoster(file, cb){
         cv.width=v.videoWidth||720; cv.height=v.videoHeight||1280;
         var cx=cv.getContext('2d');
         cx.drawImage(v,0,0,cv.width,cv.height);
-        cb(cv.toDataURL('image/jpeg',0.85), dur, bu);
-      }catch(e){ cb(null, dur, bu); }
+        cb(cv.toDataURL('image/jpeg',0.85), dur, bu, v.duration||dur);
+      }catch(e){ cb(null, dur, bu, v.duration||dur); }
     };
   };
   v.onerror=fail;
@@ -28370,9 +28388,9 @@ function _shortsAddImageFlow(){
     vBtn.disabled=true;vBtn.textContent='영상 처리 중...';
     var remain=files.length, added=0;
     files.forEach(function(f){
-      _shortsVideoToPoster(f, function(poster, dur, bu){
+      _shortsVideoToPoster(f, function(poster, dur, bu, fullD){
         if(poster){
-          var _nv2={id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur,
+          var _nv2={id:Date.now()+Math.random(), img:poster, isVideo:true, videoUrl:bu, duration:dur, _fullDuration:fullD||dur, trimStart:0, trimEnd:dur,
             role:'video_clip', autoRole:'video_clip', customLabel:'', source:'upload'};
           G_SHORTS.images.push(_nv2); _shortsPersistVideo(_nv2, f);
           added++;
