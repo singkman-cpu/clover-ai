@@ -45072,7 +45072,15 @@ window.addEventListener('load', function(){
         });
       }).then(function(d){
         if(d.error){ alert('⚠️ 결제 확인 중 문제가 발생했어요: '+d.error); }
-        else { alert('✓ '+(d.credits||0).toLocaleString()+'cr이 충전됐어요! 화면을 새로고침할게요.'); history.replaceState({}, '', location.pathname); location.reload(); return; }
+        else {
+          // 요청 반영("회원이 크레딧 결제하면 회원가입 알림처럼 나한테 메일 오게"): 결제 승인 성공 시 관리자에게 알림 메일
+          try{ _sendAdminPaymentAlert((_supaUser&&_supaUser.email)||'', parseInt(amount,10)||0, d.credits||0, orderId); }catch(_pe){}
+          alert('✓ '+(d.credits||0).toLocaleString()+'cr이 충전됐어요! 화면을 새로고침할게요.');
+          history.replaceState({}, '', location.pathname);
+          // 알림 메일 요청이 나갈 시간을 잠깐 주고 새로고침(바로 새로고침하면 요청이 취소될 수 있음)
+          setTimeout(function(){ location.reload(); }, 800);
+          return;
+        }
         history.replaceState({}, '', location.pathname);
       }).catch(function(e){ console.error('[토스결제] confirm 네트워크 오류', e); alert('⚠️ 결제 확인 중 네트워크 오류가 발생했어요: '+(e&&e.message||e)); history.replaceState({}, '', location.pathname); });
       });
@@ -47702,6 +47710,26 @@ function supaResetPw(){
 
 // ── 클라우드 갤러리 로드 ──────────────────────────────────────────
 // 신규 가입 관리자 알림
+// 💳 결제 알림 — 회원이 크레딧을 결제(승인 완료)하면 관리자 메일로 알림(신규 가입 알림과 같은 방식)
+function _sendAdminPaymentAlert(email, amount, credits, orderId){
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  var now = new Date().toLocaleString('ko-KR', {timeZone:'Asia/Seoul'});
+  _resendProxy('','no-reply@cloverai.kr',['cloverai.design@gmail.com'],'[Clover AI] 💳 크레딧 결제 '+Number(amount||0).toLocaleString()+'원',
+    '<div style="font-family:sans-serif;padding:20px;color:#222">'+
+      '<h2 style="color:#00e5cc">🍀 Clover AI 크레딧 결제</h2>'+
+      '<p>회원이 크레딧을 결제했습니다!</p>'+
+      '<table style="border-collapse:collapse;width:100%;max-width:420px">'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">회원 이메일</td><td style="padding:8px">'+esc(email)+'</td></tr>'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">결제 금액</td><td style="padding:8px;font-weight:bold">'+Number(amount||0).toLocaleString()+'원</td></tr>'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">충전 크레딧</td><td style="padding:8px;color:#00e5cc;font-weight:bold">'+Number(credits||0).toLocaleString()+'cr</td></tr>'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">결제일시</td><td style="padding:8px">'+now+'</td></tr>'+
+        '<tr><td style="padding:8px;background:#f5f5f5;font-weight:bold">주문번호</td><td style="padding:8px;font-size:12px">'+esc(orderId)+'</td></tr>'+
+      '</table>'+
+      '<p style="margin-top:16px"><a href="https://www.cloverai.kr" style="color:#00e5cc">관리자 대시보드 바로가기</a></p>'+
+    '</div>'
+  ).then(function(){ console.log('[Admin] 결제 알림 발송:', email, amount); })
+   .catch(function(e){ console.warn('[Admin] 결제 알림 발송 실패:', e); });
+}
 function _sendAdminNewUserAlert(email){
   // API 키는 더 이상 신규가입자 브라우저의 localStorage에서 가져오지 않음 (당연히 없음).
   // 대신 Edge Function이 서버에 저장된 Secret(RESEND_API_KEY)을 직접 사용하도록 위임한다.
