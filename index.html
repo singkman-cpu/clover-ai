@@ -32233,7 +32233,11 @@ function _agedEnvWithCap(env){
 // 흐린 색면으로 채워 보내는데, AI가 그 흐린 면을 다시 그리지 않고 그대로 남겨서 결과에 네모난 블러 자국이 생김
 // (10차 때와 같은 문제 재발, 프롬프트로 다시 그리라고 해도 무시함). 결 입히기 등으로 채워봤지만 유령 건물·줄무늬가
 // 생겨서 더 나빴음 → 미리 줄이기 자체를 끔. 대신 건물 크기는 AI가 원본 크기를 따라 그리는 경향이 있음.
-var AGED_PRESHRINK_ENABLED=true; // 2026-10-03 재활성화: 빈자리를 블러 대신 평평한 회색으로 채우는 방식으로 변경(위 _agedEnvPreShrink 참고)
+// 2026-10-03 최종: 회색 방식도 "건물 방향이 틀어지고, 줄인 부분만 크기가 안 맞고, 회색 자리에 숲을 지어냄" → 사진을
+// 코드로 오려 붙이는 방식 자체가 원근·방향을 깨뜨림. 미리 줄이기를 끄고, 원본 사진을 그대로 보내되(방향·원근 유지)
+// 크기는 옆집 기준의 글 지시로, 주변은 대지 밖 원본 픽셀 복원으로 지키는 방식(AGED_TEXT_SCALE)으로 바꿈.
+var AGED_PRESHRINK_ENABLED=false;
+var AGED_TEXT_SCALE=true;
 var AGED_SHRINK=0.70; // (예전 값, 아래 두 개가 실제로 쓰임)
 // 19차: 높이·폭을 따로 조절. 1.0 = 원본 그대로, 0.7 = 30% 줄임
 //  · 건물 크기 전체 30% 축소: 높이 0.70, 폭 0.70
@@ -39411,6 +39415,7 @@ function procImgWithTask(task, onDone, onErr){
     var _agedEnv = (task.agedEnvelope && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData) ? _agedEnvWithCap(task.agedEnvelope) : null;
     var _agedShrunkOK = false; // 18차: 원본 건물을 미리 줄여서 보냈는지
     var _stageKeepOK = false; // 22차: 미완성 공사 주변 원본 복원 준비됨
+    var _agedTextScaleOK = false; // 2026-10-03: 노후 외관 — 원본 그대로 + 글로 크기 지시 + 대지 밖 원본 복원
     var _agedCompEnv = null; // 21차: 결과에서 대지 안쪽만 쓰고 바깥은 원본 픽셀로 덮을 영역(주변 나무 화질 보존)
     var _agedAuto = !_agedEnv && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData && !AGED_STAGE_METHOD; // 16차: 자동 박스(감지 부정확) 끔 // 직접 그린 박스 없으면 자동 감지
     // ⚠️ 되돌림(중요): 여기서 genSlug(끝에 /edit 안 붙은 순수 생성 모델)로 바꾸려고 시도했었는데,
@@ -39498,6 +39503,15 @@ function procImgWithTask(task, onDone, onErr){
           : editPrompt;
         _tabForMarkedFlag._markedRefIsPositionOnly = false; // 한 번 쓰고 나면 초기화(다음 실행에 잘못 남지 않도록)
         if(_agedEnv){ rp = _agedEnvPromptHead(_agedEnv) + rp + _agedEnvPromptTail(_agedEnv); console.log('[스케일 가이드] 박스 적용', _agedEnv); }
+        if(_agedTextScaleOK){
+          rp = 'SIZE, ORIENTATION AND SCALE RULES (read first, override every other size/storey rule below): '+
+            '(1) ORIENTATION — rebuild the old building on exactly the same spot, facing exactly the same direction as the current building, seen from exactly the same camera angle and perspective as the photo. Do not rotate it, turn it towards the camera, or move it. '+
+            '(2) HEIGHT — the old building is a low single-storey house. Use the CURRENT building\'s own ground floor as the ruler: the old house\'s eaves (where the roof starts) must be at about the height of the TOP of the current building\'s ground-floor doors and windows, and its whole roof must stay below where the current building\'s second floor or upper roof begins. If there are other references in the photo, they must agree: its ridge stays lower than any neighbouring two-storey house\'s second-floor windows, and its front door is only a little taller than a person and about as tall as a parked car is long divided by two. Its footprint may be the same as or a little smaller than the current building, never larger. '+
+            '(3) NO INVENTED STRUCTURES — the old house is the only building on this lot; do not add any extra house, shed or annex, and do not add new large trees or a forest that were not in the photo. '+
+            '(4) SMALL OBJECTS — bicycles, doors, gates, pots and steps must use the same real-world scale as the cars in the photo (a bicycle is about half a car long; a door is about 2 m tall). --- '
+            + rp + ' ⚠️ FINAL CHECK: same position, same facing direction and same camera angle as the original building; single storey with eaves at the height of the current building\'s ground-floor door tops; no new buildings or new forest; bicycles clearly smaller than cars.';
+          console.log('[노후 외관] 원본 그대로 + 글 크기 지시 + 대지 밖 원본 복원 방식');
+        }
         if(_agedShrunkOK){
           rp = 'NOTE ABOUT THIS INPUT PHOTO (read first): the main building in this photo has already been reduced to the correct smaller size, standing on its original ground line. The soft, blurry, featureless patch around it is NOT a real object — it is empty space where the larger previous building used to be, which has been completely DEMOLISHED: redraw that whole patch as sharp, natural background (the same trees and neighbouring houses that continue from around it) and, at ground level, as this lot\'s plain old yard surface (bare dirt or cracked cement), with no blur left anywhere. '+
             'NOTHING of the previous larger building may remain or be redrawn — no leftover roof peaks, gables, roof edges, wall fragments, windows or foundations of it anywhere behind, beside or around the old house. The old house is the ONLY building on this lot. --- '
@@ -39601,6 +39615,21 @@ function procImgWithTask(task, onDone, onErr){
               _doUpload(_shr, function(su){ _agedShrunkOK = true; uploadedMain = su; checkAllDone(); },
                 function(){ uploadedMain = origUrl; checkAllDone(); });
             });
+          });
+        }, handleError);
+      } else if(AGED_STAGE_METHOD && !AGED_PRESHRINK_ENABLED && AGED_TEXT_SCALE && AGED_EXT_ENVELOPE_PRESETS.indexOf(task.selK)!==-1 && !task.maskData && !task.agedOnEmptyLot){
+        // 2026-10-03: 원본 사진을 손대지 않고 보냄(건물 방향·원근이 그대로 유지됨). 대지 위치만 찾아서,
+        // 결과에서 대지 밖(옆집·숲·도로·주차된 차)은 원본 픽셀로 되돌림 → AI가 주변에 집·숲을 지어내도 지워짐.
+        _doUpload(img, function(origUrl){
+          uploadedMain = origUrl;
+          _agedTextScaleOK = true;
+          _agedEnvAutoDetect(origUrl, function(box){
+            if(box && box.bld){
+              var _b3=box.bld, _bh3=_b3.y1-_b3.y0;
+              _agedCompEnv={x0:box.x0, x1:box.x1, y0:Math.max(0,Math.min(box.y0,_b3.y0-_bh3*0.15)), y1:box.y1, noCap:true};
+              _stageKeepOK = true; // 아래 합성(대지 밖 원본 복원) 경로를 그대로 재사용
+            }
+            checkAllDone();
           });
         }, handleError);
       } else if(STAGE_SURROUND_KEEP && STAGE_SURROUND_KEYS.indexOf(task.selK)!==-1 && !task.maskData){
