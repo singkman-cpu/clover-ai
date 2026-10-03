@@ -8356,6 +8356,9 @@ function selectWF(wf){
           // 확인창이 매번 다시 떴음. "아니요"를 누르는 순간 클라우드 저장분도 빈 값으로 즉시
           // 덮어써서, 이후엔 로컬이든 클라우드든 다시 뜰 근거 자체가 없게 함.
           if(typeof _saveWorkspaceState==='function') _saveWorkspaceState('shorts_images', {images:[], opts:G_SHORTS.opts});
+          // ⚠️ 버그 수정("취소했는데 새로고침하면 '더 최신 임시저장(사진 N장)'이 또 뜬다"): IndexedDB
+          // 백업은 안 지워서 다음 새로고침 때 그걸 근거로 다시 물어봤음 — 같이 지움.
+          if(typeof idbDeleteDraft==='function') idbDeleteDraft(_shortsDraftKey()+'_idb').catch(function(){});
           G._shortsDraftDeclined = true;
         }
       } else if(typeof _shortsCloudLoadDraft==='function'){
@@ -8370,6 +8373,7 @@ function selectWF(wf){
             renderSB(); renderMain('shorts');
           } else {
             if(typeof _saveWorkspaceState==='function') _saveWorkspaceState('shorts_images', {images:[], opts:G_SHORTS.opts});
+            if(typeof idbDeleteDraft==='function') idbDeleteDraft(_shortsDraftKey()+'_idb').catch(function(){});
             G._shortsDraftDeclined = true; // 위와 같은 이유
           }
           _shortsCheckSettled();
@@ -8391,6 +8395,22 @@ function selectWF(wf){
             G_SHORTS.images=idbData.images;
             Object.assign(G_SHORTS.opts, idbData.opts||{});
             renderSB(); renderMain('shorts');
+          } else {
+            // ⚠️ 버그 수정(치명적, "'더 최신 임시저장' 확인창에서 취소를 눌러도 아무 일도 안 일어난다"):
+            // 이 확인창의 "취소"만 아무 처리가 없었음 — ①IndexedDB 백업이 그대로 남아서 새로고침할
+            // 때마다 똑같은 확인창이 계속 떴고, ②"거절" 표시(_shortsDraftDeclined)도 안 남겨서 확인창이
+            // 끝난 직후 사이드바의 조용한 클라우드 자동복원이 실행돼 "취소했는데 사진이 불러와지는"
+            // 상황이 생길 수 있었음. 이제 취소하면:
+            //  - 지금 화면에 사진이 하나도 없으면(=처음부터 새로 시작하겠다는 뜻) 로컬·IndexedDB·클라우드
+            //    저장분을 전부 지우고 이번 세션 동안 자동복원도 막음 → 빈 쇼츠 화면으로 시작.
+            //  - 이미 다른 확인창에서 불러온 작업이 있으면(예: 12장) 그건 그대로 두고, 이 더 큰 백업만
+            //    지움(지금 작업분은 6초 자동저장으로 곧바로 다시 백업됨).
+            idbDeleteDraft(_shortsDraftKey()+'_idb').catch(function(){});
+            if(!G_SHORTS.images.length){
+              _draftClear(_shortsDraftKey());
+              if(typeof _saveWorkspaceState==='function') _saveWorkspaceState('shorts_images', {images:[], opts:G_SHORTS.opts});
+              G._shortsDraftDeclined = true;
+            }
           }
           _shortsCheckSettled();
         }).catch(function(){ _shortsCheckSettled(); });
