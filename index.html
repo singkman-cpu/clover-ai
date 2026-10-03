@@ -23828,11 +23828,36 @@ function idbLoadVideo(key){
 // ⚠️ 요청 반영("외부에서 불러온 영상 클립이 새로고침하면 없어진다"): 업로드한 영상 파일은 이 탭에서만 쓸 수 있는
 // 임시 주소(blob:)라 새로고침하면 사라졌음 → 올리는 순간 원본 파일을 브라우저 저장소(IndexedDB)에 같이 보관하고,
 // 새로고침 후 쇼츠 화면이 열릴 때 그 파일로 다시 연결함.
-function _shortsVideoKey(item){ return 'shorts_vid_'+_draftKeyUid()+'_'+String(item.id); }
+// 영상 크게 보기 — 화면 가득 검은 배경 위에 영상을 재생. start~end 구간만 반복(없으면 전체), rate는 배속.
+function _openVideoLightbox(url, start, end, rate){
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box';
+  var v=document.createElement('video');
+  v.src=url; v.controls=true; v.autoplay=true; v.muted=false; v.playsInline=true;
+  v.style.cssText='max-width:100%;max-height:100%;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.6);background:#000';
+  var st=Math.max(0,start||0);
+  v.addEventListener('loadedmetadata', function(){ try{ v.currentTime=st; v.playbackRate=rate||1; }catch(e){} });
+  v.addEventListener('timeupdate', function(){ if(end!=null && end>st && v.currentTime>=end){ try{ v.currentTime=st; }catch(e){} } });
+  var close=document.createElement('button');
+  close.type='button'; close.textContent='✕';
+  close.style.cssText='position:absolute;top:16px;right:20px;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(0,0,0,.6);color:#fff;font-size:18px;cursor:pointer';
+  var info=document.createElement('div');
+  info.style.cssText='position:absolute;bottom:14px;left:50%;transform:translateX(-50%);font-size:12px;color:#ccc;background:rgba(0,0,0,.5);padding:5px 12px;border-radius:8px';
+  info.textContent = (end!=null && end>st) ? ('사용 구간 '+st.toFixed(1)+'s ~ '+end.toFixed(1)+'s 반복 재생') : '전체 재생';
+  function shut(){ try{ v.pause(); }catch(e){} ov.remove(); document.removeEventListener('keydown', onKey); }
+  function onKey(e){ if(e.key==='Escape') shut(); }
+  close.onclick=shut;
+  ov.addEventListener('click', function(e){ if(e.target===ov) shut(); });
+  document.addEventListener('keydown', onKey);
+  ov.appendChild(v); ov.appendChild(close); ov.appendChild(info);
+  document.body.appendChild(ov);
+}
+function _shortsVideoKey(item){ return item.vidKey || ('shorts_vid_'+_draftKeyUid()+'_'+String(item.id)); }
 function _shortsPersistVideo(item, fileOrBlob){
   if(!item || !fileOrBlob) return;
   item.vidStored = true;
-  idbSaveVideo(_shortsVideoKey(item), fileOrBlob).catch(function(e){ item.vidStored=false; console.warn('[쇼츠] 영상 클립 보관 실패(용량 부족 가능):', e); });
+  item.vidKey = _shortsVideoKey(item); // 복제된 클립들이 같은 파일을 함께 쓰도록 키를 기록
+  idbSaveVideo(item.vidKey, fileOrBlob).catch(function(e){ item.vidStored=false; console.warn('[쇼츠] 영상 클립 보관 실패(용량 부족 가능):', e); });
 }
 var _shortsRehydratingMap = {}; // 이 세션에서 지금 불러오는 중인 영상(저장 데이터에 섞이지 않도록 별도 보관)
 function _shortsRehydrateVideos(){
@@ -24753,6 +24778,7 @@ function _shortsRenderLivePreview(container){
     if(found) firstSlide=found;
   }
   var pIdx=slideOnlyList.indexOf(firstSlide);
+  if(!firstSlide.isVideo && window._shortsPvVid){ try{ window._shortsPvVid.pause(); }catch(e){} if(window._shortsPvRaf){ cancelAnimationFrame(window._shortsPvRaf); window._shortsPvRaf=0; } }
   var wrap=document.createElement('div');
   wrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:6px';
   // ⚠️ 요청 반영("미리보기에서 다음/이전 페이지 버튼으로 넘겨보고 싶다"): 라벨 옆에 ◀/▶ 버튼을
@@ -24845,6 +24871,9 @@ function _shortsRenderLivePreview(container){
     canvas.addEventListener('pointerup', endDrag);
     canvas.addEventListener('pointercancel', endDrag);
   })();
+  // 2026-10-03: 영상 클립 장면은 미리보기에서 실제 영상 프레임을 그림(재생·구간 편집용) — 없으면 포스터 이미지
+  var _pvVideoActive=null;
+  function _pvSrc(){ return (_pvVideoActive && _pvVideoActive.readyState>=2 && _pvVideoActive.videoWidth) ? _pvVideoActive : window._shortsPreviewImg; }
   function paint(){
     // ⚠️ 요청 반영("문구 껐는데 검은 띠는 그대로 남아있다"): 이 미리보기 캔버스는 _shortsDrawSlide와
     // 별개로 여기서 직접 그리고 있어서, 그쪽에 넣은 "문구 둘 다 꺼지면 레터박스 대신 꽉채우기로
@@ -24852,15 +24881,15 @@ function _shortsRenderLivePreview(container){
     // 여기도 동일하게 적용함.
     var _bothTextOffPv = !!firstSlide.skipTopText && !!firstSlide.skipBottomText;
     var _effFitModePv = ((G_SHORTS.opts.fitMode||'cover')==='contain' && _bothTextOffPv) ? 'cover' : (G_SHORTS.opts.fitMode||'cover');
-    _shortsDrawImage(ctx,1080,1920,window._shortsPreviewImg,_effFitModePv,firstSlide.zoom,firstSlide.offX,firstSlide.offY);
+    _shortsDrawImage(ctx,1080,1920,_pvSrc(),_effFitModePv,firstSlide.zoom,firstSlide.offX,firstSlide.offY);
     var _labelsShown = G_SHORTS.opts.showSlideLabels!==false;
     var _effTop = firstSlide.skipTopText ? '' : G_SHORTS.opts.topText;
     var _effBottom = firstSlide.skipBottomText ? '' : G_SHORTS.opts.bottomText;
     if(_effFitModePv==='contain'&&(_effTop||_effBottom)){
-      _shortsDrawLetterboxText(ctx,1080,1920,window._shortsPreviewImg,_effTop,_effBottom,G_SHORTS.opts.fontFamily,G_SHORTS.opts.topTextColor,G_SHORTS.opts.bottomTextColor,G_SHORTS.opts.topCharColors,G_SHORTS.opts.bottomCharColors,G_SHORTS.opts.topTextScale,G_SHORTS.opts.bottomTextScale);
-      if(firstSlide.label && _labelsShown) _shortsDrawSlideLabelBadge(ctx,1080,1920,window._shortsPreviewImg,firstSlide.label,G_SHORTS.opts.fontFamily,G_SHORTS.opts.textPos,!!_effTop,!!_effBottom,G_SHORTS.opts.labelStyle);
+      _shortsDrawLetterboxText(ctx,1080,1920,_pvSrc(),_effTop,_effBottom,G_SHORTS.opts.fontFamily,G_SHORTS.opts.topTextColor,G_SHORTS.opts.bottomTextColor,G_SHORTS.opts.topCharColors,G_SHORTS.opts.bottomCharColors,G_SHORTS.opts.topTextScale,G_SHORTS.opts.bottomTextScale);
+      if(firstSlide.label && _labelsShown) _shortsDrawSlideLabelBadge(ctx,1080,1920,_pvSrc(),firstSlide.label,G_SHORTS.opts.fontFamily,G_SHORTS.opts.textPos,!!_effTop,!!_effBottom,G_SHORTS.opts.labelStyle);
     } else if(firstSlide.label && _labelsShown){
-      _shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos,G_SHORTS.opts.fontFamily,window._shortsPreviewImg,_effFitModePv);
+      _shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos,G_SHORTS.opts.fontFamily,_pvSrc(),_effFitModePv);
     }
     if(G_SHORTS.opts.watermark)_shortsDrawWatermark(ctx,1080,1920);
   }
@@ -24892,6 +24921,152 @@ function _shortsRenderLivePreview(container){
     };
     img.src=firstSlide.img;
   }
+  // ── 🎬 영상 클립 미리보기 편집기 (요청: "좌측에서 재생 누르면 메인에서도 재생되고, 메인에서도 재생·구간 편집,
+  // 같은 영상을 다른 순서에 다른 구간으로도 쓰고 싶다") ───────────────────────────────────────────────
+  // · 메인 미리보기에서 실제 영상을 재생(문구·크롭·위치 그대로 합성된 화면으로) — 사용 구간만 반복
+  // · 재생바 / 시작·끝 슬라이더 / "현재 위치를 시작·끝으로" 버튼 → 사이드바 구간 설정과 같은 값이라 서로 실시간 연동
+  // · "이 영상 복제" → 같은 영상을 다음 순서에 하나 더 넣어서 다른 구간을 쓸 수 있음
+  // 영상 요소는 화면을 다시 그려도(renderMain) 계속 재사용해서, 구간을 바꾸는 중에도 재생이 끊기지 않게 함.
+  (function(){
+    if(firstSlide.type!=='slide' || !firstSlide.isVideo) return;
+    var vIm = G_SHORTS.images.find(function(im){ return im.img===firstSlide.img && im.isVideo; });
+    if(!vIm) return;
+    if(!vIm.videoUrl){
+      var lost=document.createElement('div');
+      lost.style.cssText='font-size:11px;color:#f59e0b;text-align:center;max-width:300px';
+      lost.textContent='⚠️ 영상 파일을 다시 불러오는 중이거나 찾을 수 없어요 — 잠시 후에도 안 되면 영상을 다시 올려주세요.';
+      wrap.appendChild(lost);
+      return;
+    }
+    var fullDur = vIm._fullDuration || vIm.duration || 0;
+    if(vIm.trimStart==null) vIm.trimStart=0;
+    if(vIm.trimEnd==null) vIm.trimEnd=fullDur;
+    // 영상 요소 재사용(같은 주소면 계속 같은 걸 씀 → 재생 상태 유지)
+    var v = window._shortsPvVid;
+    if(!v || v._src!==vIm.videoUrl){
+      if(v){ try{ v.pause(); }catch(e){} }
+      v=document.createElement('video');
+      v.playsInline=true; v.preload='auto'; v.muted=false;
+      v._src=vIm.videoUrl; v.src=vIm.videoUrl;
+      v.addEventListener('loadedmetadata', function(){
+        if(!vIm._fullDuration && v.duration && isFinite(v.duration)) vIm._fullDuration=v.duration;
+        try{ v.currentTime = vIm.speedMode ? 0 : (vIm.trimStart||0); }catch(e){}
+      });
+      window._shortsPvVid=v;
+    }
+    _pvVideoActive=v;
+    function rangeStart(){ return vIm.speedMode ? 0 : (vIm.trimStart||0); }
+    function rangeEnd(){ return vIm.speedMode ? (vIm._fullDuration||fullDur) : (vIm.trimEnd!=null?vIm.trimEnd:fullDur); }
+    try{ v.playbackRate = (vIm.speedMode && vIm.speedTargetDur>0) ? ((vIm._fullDuration||fullDur)/vIm.speedTargetDur) : 1; }catch(e){}
+    // 프레임 그리기 루프 — 이 캔버스가 화면에서 사라지면 자동 종료
+    if(window._shortsPvRaf) cancelAnimationFrame(window._shortsPvRaf);
+    function loop(){
+      if(!canvas.isConnected){ window._shortsPvRaf=0; try{ v.pause(); }catch(e){} return; } // 다른 화면으로 나가면 소리도 멈춤
+      if(!v.paused && v.currentTime >= rangeEnd()-0.03){ try{ v.currentTime=rangeStart(); }catch(e){} }
+      if(v.readyState>=2) paint();
+      updTime();
+      window._shortsPvRaf=requestAnimationFrame(loop);
+    }
+    v.addEventListener('seeked', function(){ if(canvas.isConnected) paint(); });
+
+    function fmt(s){ s=Math.max(0,s||0); return (Math.round(s*10)/10).toFixed(1)+'s'; }
+    var bar=document.createElement('div');
+    bar.style.cssText='width:300px;max-width:92vw;background:var(--card);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:7px;box-sizing:border-box';
+    // 1) 재생 버튼 + 현재 시간 + 재생바
+    var r1=document.createElement('div'); r1.style.cssText='display:flex;align-items:center;gap:8px';
+    var playB=document.createElement('button'); playB.type='button';
+    playB.style.cssText='width:34px;height:34px;flex-shrink:0;border-radius:50%;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:800;cursor:pointer';
+    var tLbl=document.createElement('span'); tLbl.style.cssText='font-size:10.5px;color:var(--t2);min-width:74px;font-variant-numeric:tabular-nums';
+    var scrub=document.createElement('input'); scrub.type='range'; scrub.min='0'; scrub.step='0.05'; scrub.style.cssText='flex:1;accent-color:var(--ac)';
+    r1.appendChild(playB); r1.appendChild(scrub); r1.appendChild(tLbl);
+    bar.appendChild(r1);
+    function updPlayBtn(){ playB.textContent = v.paused ? '▶' : '❚❚'; }
+    function updTime(){
+      var fd=vIm._fullDuration||fullDur;
+      scrub.max=String(fd||0);
+      if(!scrub._dragging) scrub.value=String(v.currentTime||0);
+      tLbl.textContent=fmt(v.currentTime)+' / '+fmt(fd);
+    }
+    playB.onclick=function(){
+      if(v.paused){
+        if(v.currentTime<rangeStart() || v.currentTime>=rangeEnd()-0.05){ try{ v.currentTime=rangeStart(); }catch(e){} }
+        var pp=v.play(); if(pp&&pp.catch) pp.catch(function(){ v.muted=true; v.play().catch(function(){}); });
+      } else v.pause();
+      updPlayBtn();
+    };
+    v.onplay=updPlayBtn; v.onpause=updPlayBtn;
+    scrub.oninput=function(){ scrub._dragging=true; try{ v.currentTime=parseFloat(scrub.value); }catch(e){} };
+    scrub.onchange=function(){ scrub._dragging=false; };
+    // 2) 사용 구간 표시 + 시작/끝 슬라이더
+    var usedLbl=document.createElement('div'); usedLbl.style.cssText='font-size:11px;font-weight:800;color:var(--ac)';
+    function updUsed(){
+      usedLbl.textContent = vIm.speedMode
+        ? '⏩ 배속 모드 — 전체 '+fmt(vIm._fullDuration||fullDur)+'를 '+fmt(vIm.speedTargetDur)+'로 압축 (구간 편집은 사이드바에서 배속을 끄면 가능)'
+        : '✂️ 사용 구간: '+fmt(vIm.trimStart)+' ~ '+fmt(vIm.trimEnd)+' (총 '+fmt(vIm.trimEnd-vIm.trimStart)+')';
+    }
+    bar.appendChild(usedLbl);
+    // 슬라이더를 놓았을 때(change) 사이드바·예상 길이까지 같은 값으로 다시 그림(끄는 중엔 미리보기만 갱신)
+    function syncSidebar(){ renderSB(); renderMain('shorts'); }
+    function mkTrimRow(label, key){
+      var row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:6px';
+      var l=document.createElement('span'); l.style.cssText='font-size:10px;color:var(--m2);width:22px;flex-shrink:0'; l.textContent=label;
+      var r=document.createElement('input'); r.type='range'; r.min='0'; r.max=String(vIm._fullDuration||fullDur); r.step='0.1'; r.value=String(vIm[key]);
+      r.style.cssText='flex:1;accent-color:var(--ac)'; r.disabled=!!vIm.speedMode;
+      var setB=document.createElement('button'); setB.type='button';
+      setB.textContent = key==='trimStart' ? '⟦ 지금 위치' : '지금 위치 ⟧';
+      setB.title = key==='trimStart' ? '재생 중인 현재 위치를 시작점으로' : '재생 중인 현재 위치를 끝점으로';
+      setB.style.cssText='flex-shrink:0;padding:3px 7px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:10px;cursor:pointer;font-family:inherit';
+      setB.disabled=!!vIm.speedMode;
+      function apply(val){
+        var fd=vIm._fullDuration||fullDur;
+        if(key==='trimStart'){ val=Math.max(0, Math.min(val, (vIm.trimEnd!=null?vIm.trimEnd:fd)-0.2)); }
+        else { val=Math.min(fd, Math.max(val, (vIm.trimStart||0)+0.2)); }
+        vIm[key]=Math.round(val*10)/10; r.value=String(vIm[key]);
+        try{ v.currentTime=vIm[key]; }catch(e){}
+        updUsed();
+      }
+      r.oninput=function(){ apply(parseFloat(r.value)); };
+      r.onchange=function(){ syncSidebar(); };
+      setB.onclick=function(){ apply(v.currentTime||0); syncSidebar(); };
+      row.appendChild(l); row.appendChild(r); row.appendChild(setB);
+      return row;
+    }
+    bar.appendChild(mkTrimRow('시작','trimStart'));
+    bar.appendChild(mkTrimRow('끝','trimEnd'));
+    // 3) 같은 영상 복제(다른 구간 쓰기)
+    var dupB=document.createElement('button'); dupB.type='button';
+    dupB.textContent='📋 이 영상 복제 — 다음 순서에 넣고 다른 구간 쓰기';
+    dupB.style.cssText='padding:7px 10px;border-radius:7px;border:1px dashed rgba(167,139,250,.5);background:rgba(167,139,250,.08);color:#c4b5fd;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+    dupB.onclick=function(){
+      dupB.disabled=true; dupB.textContent='복제 중...';
+      // 렌더링 때 영상이 서로 꼬이지 않게, 같은 파일이라도 새 주소(blob)를 따로 만들어 씀
+      fetch(vIm.videoUrl).then(function(r){ return r.blob(); }).then(function(blob){
+        var copy={};
+        Object.keys(vIm).forEach(function(k){ if(k.charAt(0)!=='_' || k==='_fullDuration') copy[k]=vIm[k]; });
+        copy.id=Date.now()+Math.random();
+        copy.videoUrl=URL.createObjectURL(blob);
+        copy.vidKey=vIm.vidKey || (vIm.vidStored ? _shortsVideoKey(vIm) : null);
+        if(!copy.vidKey){ _shortsPersistVideo(copy, blob); } else { copy.vidStored=true; }
+        // 기본 구간: 원본 구간 바로 뒤부터(남은 부분이 있으면), 아니면 전체
+        var fd=vIm._fullDuration||fullDur;
+        if(!vIm.speedMode && vIm.trimEnd!=null && fd - vIm.trimEnd > 0.5){ copy.trimStart=vIm.trimEnd; copy.trimEnd=fd; }
+        var at=G_SHORTS.images.indexOf(vIm);
+        G_SHORTS.images.splice(at+1,0,copy);
+        G._shortsPreviewIdx=at+1;
+        renderSB(); renderMain('shorts');
+      }).catch(function(e){ dupB.disabled=false; dupB.textContent='📋 이 영상 복제 — 다음 순서에 넣고 다른 구간 쓰기'; alert('영상 복제에 실패했어요: '+(e&&e.message||e)); });
+    };
+    bar.appendChild(dupB);
+    wrap.appendChild(bar);
+    updUsed(); updPlayBtn(); updTime();
+    // 사이드바에서 재생을 눌러 넘어온 경우 바로 재생
+    if(window._shortsPvWantPlay){
+      window._shortsPvWantPlay=false;
+      try{ v.currentTime=Math.max(rangeStart(), Math.min(v.currentTime||0, rangeEnd()-0.1)); }catch(e){}
+      var pp2=v.play(); if(pp2&&pp2.catch) pp2.catch(function(){ v.muted=true; v.play().catch(function(){}); });
+    }
+    window._shortsPvRaf=requestAnimationFrame(loop);
+  })();
   return wrap;
 }
 
@@ -25523,6 +25698,17 @@ function sbShorts(p){
           try{ trimPreviewVideo.currentTime = im.trimStart || 0; }catch(e){}
         });
         trimPreviewVideo.src = im.videoUrl;
+        // 요청 반영("좌측에서 재생 누르면 메인화면에서도 재생"): 사이드바 작은 영상에서 재생을 누르면 그 장면을
+        // 메인 미리보기로 띄우고 메인에서 큰 화면으로 재생(사이드바 쪽은 멈춤 — 소리가 겹치지 않게)
+        (function(item, myIdx, pv){
+          pv.addEventListener('play', function(){
+            try{ pv.pause(); }catch(e){}
+            G._shortsPreviewIdx = myIdx;
+            window._shortsPvWantPlay = true;
+            if(window._shortsPvVid && window._shortsPvVid._src===item.videoUrl){ try{ window._shortsPvVid.currentTime = pv.currentTime; }catch(e){} }
+            renderMain('shorts');
+          });
+        })(im, idx, trimPreviewVideo);
         trimWrap.appendChild(trimPreviewVideo);
       } else {
         var trimNoPreview = dv(''); trimNoPreview.style.cssText='padding:16px;text-align:center;background:#1a1a1a;border-radius:6px;margin-bottom:6px;color:#f59e0b;font-size:11px';
@@ -27720,6 +27906,22 @@ function _shortsRenderCanvas(ub){
       extendIcon.onclick=function(e){ e.stopPropagation(); _shortsExtendTo916(idx, extendIcon); };
       extendIcon.onmousedown=function(e){ e.stopPropagation(); };
       tile.appendChild(extendIcon);
+    } else {
+      // ⚠️ 요청 반영("영상 클립은 왜 크게 보기가 안 되냐"): 영상 타일에도 🔍 크게 보기 추가 — 큰 화면에서
+      // 실제 영상을 재생해서 보여주고, 사용 구간(시작~끝)을 정해뒀으면 그 구간만 반복 재생함.
+      var vZoomIcon=document.createElement('button');
+      vZoomIcon.type='button'; vZoomIcon.innerHTML='🔍';
+      vZoomIcon.title='영상 크게 보기';
+      vZoomIcon.style.cssText='position:absolute;top:6px;right:6px;z-index:2;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0';
+      vZoomIcon.onclick=function(e){
+        e.stopPropagation();
+        if(!im.videoUrl){ alert('영상 파일을 다시 불러오는 중이거나 찾을 수 없어요. 잠시 후 다시 눌러보시거나, 영상을 다시 올려주세요.'); return; }
+        var _s = im.speedMode ? 0 : (im.trimStart||0);
+        var _e = im.speedMode ? null : (im.trimEnd!=null ? im.trimEnd : null);
+        _openVideoLightbox(im.videoUrl, _s, _e, im.speedMode && im.speedTargetDur>0 ? ((im._fullDuration||im.duration||0)/im.speedTargetDur) : 1);
+      };
+      vZoomIcon.onmousedown=function(e){ e.stopPropagation(); };
+      tile.appendChild(vZoomIcon);
     }
     tile.addEventListener('dragstart',function(e){
       _dragFromIdx=idx;
