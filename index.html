@@ -24842,7 +24842,6 @@ function _shortsRenderLivePreview(container){
     if(!_imObj) return; // 2026-10-03: 영상 클립도 끌어서 위치 이동 가능(포스터 기준 미리보기, 실제 영상에도 같은 위치로 반영)
     var _bothOff = !!firstSlide.skipTopText && !!firstSlide.skipBottomText;
     var _fm = ((G_SHORTS.opts.fitMode||'cover')==='contain' && _bothOff) ? 'cover' : (G_SHORTS.opts.fitMode||'cover');
-    if(_fm==='contain') return;
     canvas.style.cursor='grab';
     canvas.style.touchAction='none'; // 휴대폰에서도 손가락으로 끌기 가능(화면 스크롤과 충돌 방지)
     canvas.title='드래그해서 사진 위치 이동 · 더블클릭하면 크게 보기';
@@ -24850,7 +24849,7 @@ function _shortsRenderLivePreview(container){
     function maxOff(){
       var im=window._shortsPreviewImg; if(!im) return null;
       var iw=im.naturalWidth||im.width, ih=im.naturalHeight||im.height; if(!iw||!ih) return null;
-      var sc=Math.max(1080/iw,1920/ih)*(_imObj.coverZoom||1);
+      var sc=(_fm==='contain' ? Math.min(1080/iw,1920/ih) : Math.max(1080/iw,1920/ih))*(_imObj.coverZoom||1);
       return {x:Math.abs(iw*sc-1080)/2, y:Math.abs(ih*sc-1920)/2};
     }
     canvas.addEventListener('pointerdown', function(e){
@@ -24962,8 +24961,13 @@ function _shortsRenderLivePreview(container){
         if(!vIm._fullDuration && v.duration && isFinite(v.duration)) vIm._fullDuration=v.duration;
         try{ v.currentTime = vIm.speedMode ? 0 : (vIm.trimStart||0); }catch(e){}
       });
+      v.addEventListener('error', function(){ v._loadErr=true; });
       window._shortsPvVid=v;
     }
+    // 일부 브라우저는 화면(DOM)에 붙어있지 않은 영상은 프레임을 디코딩하지 않아서 재생바를 움직여도 그림이 안 바뀜 →
+    // 보이지 않게(투명·1px) 화면에 붙여둠(재생·탐색 시 프레임이 확실히 갱신되도록)
+    v.style.cssText='position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    if(!v.isConnected) document.body.appendChild(v);
     _pvVideoActive=v;
     function rangeStart(){ return vIm.speedMode ? 0 : (vIm.trimStart||0); }
     function rangeEnd(){ return vIm.speedMode ? (vIm._fullDuration||fullDur) : (vIm.trimEnd!=null?vIm.trimEnd:fullDur); }
@@ -24972,6 +24976,12 @@ function _shortsRenderLivePreview(container){
     if(window._shortsPvRaf) cancelAnimationFrame(window._shortsPvRaf);
     function loop(){
       if(!canvas.isConnected){ window._shortsPvRaf=0; try{ v.pause(); }catch(e){} return; } // 다른 화면으로 나가면 소리도 멈춤
+      // 상태 안내: 아직 못 불러왔거나 불러오기 실패
+      if(stLbl){
+        var msg = v._loadErr ? '⚠️ 이 영상 파일을 브라우저가 재생하지 못해요(형식 문제일 수 있어요) — MP4(H.264)로 다시 올려보세요'
+                : (v.readyState<2 ? '⏳ 영상 불러오는 중…' : '');
+        if(stLbl._m!==msg){ stLbl._m=msg; stLbl.textContent=msg; stLbl.style.display=msg?'block':'none'; }
+      }
       if(!v.paused && v.currentTime >= rangeEnd()-0.03){ try{ v.currentTime=rangeStart(); }catch(e){} }
       if(v.readyState>=2) paint();
       updTime();
@@ -24990,6 +25000,8 @@ function _shortsRenderLivePreview(container){
     var scrub=document.createElement('input'); scrub.type='range'; scrub.min='0'; scrub.step='0.05'; scrub.style.cssText='flex:1;accent-color:var(--ac)';
     r1.appendChild(playB); r1.appendChild(scrub); r1.appendChild(tLbl);
     bar.appendChild(r1);
+    var stLbl=document.createElement('div'); stLbl.style.cssText='display:none;font-size:10.5px;color:#f59e0b;line-height:1.5';
+    bar.appendChild(stLbl);
     function updPlayBtn(){ playB.textContent = v.paused ? '▶' : '❚❚'; }
     function updTime(){
       var fd=vIm._fullDuration||fullDur;
@@ -27813,7 +27825,7 @@ function _shortsRenderCanvas(ub){
     var _pimForZoom = G_SHORTS.images[_previewIdxForZoom];
     var _pimBothTextOff = !!(_pimForZoom && _pimForZoom.skipTopText && _pimForZoom.skipBottomText);
     var _effFitModeForZoom = ((G_SHORTS.opts.fitMode||'cover')==='contain' && _pimBothTextOff) ? 'cover' : (G_SHORTS.opts.fitMode||'cover');
-    if(_effFitModeForZoom!=='contain'){
+    if(true){ // 2026-10-04: 레터박스 모드에서도 확대/이동 표시(이전엔 꽉채우기 장면에서만 보여서 장면마다 달랐음)
       var previewImgIdx = _previewIdxForZoom;
       var pim = _pimForZoom;
       if(pim){ // 2026-10-03: 영상 클립도 확대/이동 가능
@@ -29718,7 +29730,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
   }
   var _effFitMode = ((opts&&(opts.fitMode||'cover'))==='contain' && !!slide.skipTopText && !!slide.skipBottomText) ? 'cover' : (opts&&(opts.fitMode||'cover'));
   if(img){
-    _shortsDrawImage(ctx,W,H,img,_effFitMode,(slide.zoom||1)*_kbZoom,slide.offX,slide.offY);
+    _shortsDrawImage(ctx,W,H,img,_effFitMode,(slide.zoom||1)*(_effFitMode==='contain'?1:_kbZoom),slide.offX,slide.offY); // 레터박스 모드엔 켄번즈 미적용(예전과 동일)
   } else {
     // ⚠️ 이미지 로드 실패(위 loadEndVideo에서 이미 경고했지만, 사용자가 무시하고 진행한 경우 대비):
     // 그냥 검은 화면으로 남겨두면 "왜 멈췄지?" 알 수가 없으니, 최소한 원인을 알 수 있는 문구를
@@ -29927,21 +29939,23 @@ function _shortsDrawCoverImage(ctx, W, H, img, extraZoom, offX, offY){
 // 레터박스(전체 보이기) 모드 — 4:3 등 원본 비율이 다른 사진을 잘라내지 않고, 9:16 프레임 안에
 // 통째로 다 들어가게 줄인 뒤 남는 위/아래(또는 좌/우) 공간을 검은 여백으로 채움.
 // 인테리어·건축 사진은 크롭하면 중요한 디자인 디테일이 잘려나갈 수 있어서, 이 모드가 더 안전할 때가 많음.
-function _shortsDrawContainImage(ctx, W, H, img, barColor){
+function _shortsDrawContainImage(ctx, W, H, img, barColor, zoom, offX, offY){
   if(!img)return;
   var iw=img.naturalWidth||img.videoWidth||img.width, ih=img.naturalHeight||img.videoHeight||img.height;
   if(!iw||!ih)return;
   ctx.fillStyle=barColor||'#000';
   ctx.fillRect(0,0,W,H);
-  var scale=Math.min(W/iw, H/ih);
+  // 2026-10-04: 레터박스(전체 보이기) 모드에서도 확대·위치 이동 가능("어떤 장면은 확대되고 어떤 건 안 된다") —
+  // 100%면 예전과 똑같이 사진 전체가 보이고, 키우면 그만큼 확대돼서 끌거나 방향키로 보여줄 부분을 고를 수 있음
+  var scale=Math.min(W/iw, H/ih)*(zoom||1);
   var dw=iw*scale, dh=ih*scale;
-  var dx=(W-dw)/2, dy=(H-dh)/2;
+  var dx=(W-dw)/2 + (offX||0)*Math.abs(dw-W)/2, dy=(H-dh)/2 + (offY||0)*Math.abs(dh-H)/2;
   ctx.drawImage(img,dx,dy,dw,dh);
 }
 
 // 이미지 채우기 모드에 따라 크롭(꽉 채우기) 또는 레터박스(전체 보이기)를 골라서 그림
 function _shortsDrawImage(ctx, W, H, img, fitMode, zoom, offX, offY){
-  if(fitMode==='contain') _shortsDrawContainImage(ctx, W, H, img, '#000');
+  if(fitMode==='contain') _shortsDrawContainImage(ctx, W, H, img, '#000', zoom, offX, offY);
   else _shortsDrawCoverImage(ctx, W, H, img, zoom, offX, offY);
 }
 
