@@ -16684,6 +16684,50 @@ function _loadWorkspaceState(tabKey, cb){
 }
 // data: URL 이미지들을 클라우드 스토리지에 업로드해서 https URL로 바꿔주는 헬퍼(작업상태 저장 시
 // data: URL을 그대로 DB에 넣으면 용량이 너무 커지므로, 파일로 올리고 URL만 저장함).
+// ── 2026-10-04 요청("공간컨셉 '비슷하게'인데 거실·주방·다이닝이 가구만 바뀌고 벽·창·천장·벽난로가 참고 이미지와 똑같다") ──
+// 문구로 "구조를 바꿔라"를 여러 번 넣어도, AI는 첨부된 사진의 구도를 그대로 따라가는 성질이 너무 강했음(실측 확인).
+// 그래서 "비슷하게" + 실내 + 그 방 이름표가 붙은 참고 사진일 때는, 원본 사진 대신 그 사진을 조각내고 섞은
+// "마감재·색감 견본판"을 만들어 첨부함 → 재질·색상·가구 분위기는 보이지만 벽·창·천장의 배치(구도)는 읽을 수 없게 됨.
+function _scMakeSwatchBoard(url, cb){
+  var done=false; function fin(v){ if(done) return; done=true; cb(v); }
+  setTimeout(function(){ fin(null); }, 15000);
+  try{
+    var img=new Image(); img.crossOrigin='anonymous';
+    img.onload=function(){
+      try{
+        var iw=img.naturalWidth, ih=img.naturalHeight; if(!iw||!ih){ fin(null); return; }
+        var G=4, tw=iw/G, th=ih/G, tiles=[];
+        for(var y=0;y<G;y++) for(var x=0;x<G;x++) tiles.push([x,y]);
+        for(var i=tiles.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=tiles[i]; tiles[i]=tiles[j]; tiles[j]=t; }
+        var OUT=1024, N=3, gap=10, cell=(OUT-gap*(N+1))/N;
+        var cv=document.createElement('canvas'); cv.width=OUT; cv.height=OUT;
+        var cx=cv.getContext('2d'); cx.fillStyle='#ffffff'; cx.fillRect(0,0,OUT,OUT);
+        for(var k=0;k<N*N;k++){
+          var tl=tiles[k], side=Math.min(tw,th)*0.85;
+          var sx=tl[0]*tw+(tw-side)/2, sy=tl[1]*th+(th-side)/2;
+          var dx=gap+(k%N)*(cell+gap), dy=gap+Math.floor(k/N)*(cell+gap);
+          cx.drawImage(img, sx, sy, side, side, dx, dy, cell, cell);
+        }
+        var data=cv.toDataURL('image/jpeg',0.9);
+        _uploadDataUrlIfNeeded(data, 'swatch', function(u){ fin(u||data); });
+      }catch(e){ fin(null); }
+    };
+    img.onerror=function(){ fin(null); };
+    img.src=url;
+  }catch(e){ fin(null); }
+}
+var SC_SWATCH_NOTE=' ⚠️⚠️⚠️⚠️ 첨부 이미지 안내(매우 중요): 첫 번째 첨부 이미지는 참고 사진을 일부러 작은 조각으로 잘라 무작위로 섞어 놓은 "마감재·색감 견본판"입니다. 여기서는 바닥재·벽·천장 마감재의 종류와 색, 가구 원단·목재·금속의 재질과 색감, 조명과 전체 분위기만 가져오세요. 조각의 배치, 격자, 흰 테두리, 잘린 모양은 절대 그리지 말고(콜라주처럼 보이면 실패), 공간 구조·창문·천장·카메라 구도는 이 방 용도에 맞게 완전히 새로 설계한 한 장의 자연스러운 실내 사진으로 만드세요.';
+function _scMaybeSwatch(spTab, typeName, primary, noDirectMatch, input, cb){
+  if(spTab.autoRoomFidelity!=='medium' || noDirectMatch || !primary || _isExteriorViewType(typeName) || !input.image_urls || input.image_urls.indexOf(primary)===-1){ cb(); return; }
+  _scMakeSwatchBoard(primary, function(sw){
+    if(sw){
+      input.image_urls = input.image_urls.map(function(u){ return u===primary ? sw : u; });
+      input.prompt = (input.prompt||'') + SC_SWATCH_NOTE;
+      console.log('[공간컨셉] "비슷하게" — '+typeName+' 참고 사진을 견본판으로 바꿔서 첨부(구도 복제 방지)');
+    }
+    cb();
+  });
+}
 function _uploadDataUrlIfNeeded(url, pathHint, cb){
   if(!url || url.indexOf('data:')!==0){ cb(url); return; } // 이미 https:// 등이면 그대로 씀
   if(!(_supa && _supaUser)){ cb(url); return; }
@@ -21212,6 +21256,7 @@ function _padExteriorTo916WithBlur(url, cb){
       _arDoneN++;
       if(_arDoneN>=_arCandN && !_arAdvanced){ _arAdvanced = true; _autoRoomGenerateStep(idx+1, isApt); }
     }
+    _scMaybeSwatch(spTab, typeName, imgs0.primary, imgs0.noDirectMatch, _looseInput, function(){
     for(var _arCi=0; _arCi<_arCandN; _arCi++){
       (function(_arCi){
         falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _looseInput, function(d){
@@ -21247,6 +21292,7 @@ function _padExteriorTo916WithBlur(url, cb){
         }, {wf:'space', resolution:spTab.autoRoomResolution||'1K'});
       })(_arCi);
     }
+    });
     return;
   }
   var imgs = _autoRoomImagesFor(typeName);
@@ -21571,6 +21617,7 @@ function _autoRoomRetryOne(idx){
     // 모델을 써야 실제로 그 사진을 참고함('/edit' 없는 순수 생성 모델은 image_urls를 무시함).
     var _wantUrbanPro2 = !!spTab.autoRoomUrbanMode;
     var _looseModelBase2 = _wantUrbanPro2 ? 'fal-ai/nano-banana-pro' : 'fal-ai/nano-banana-2';
+    _scMaybeSwatch(spTab, typeName, imgs0b.primary, imgs0b.noDirectMatch, _looseInput2, function(){
     falRun(_looseRefs2.length ? (_looseModelBase2+'/edit') : _looseModelBase2, _looseInput2, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; st.running=false; renderSB(); return; }
@@ -21595,6 +21642,7 @@ function _autoRoomRetryOne(idx){
       st.running=false;
       renderSB();
     }, {wf:'space', resolution:spTab.autoRoomResolution||'1K'});
+    });
     return;
   }
   var imgs = _autoRoomImagesFor(typeName);
