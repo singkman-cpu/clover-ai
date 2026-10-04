@@ -24562,7 +24562,8 @@ function _shortsBuildSlides(){
       playbackRate:_speedRate,
       skipTopText:!!im.skipTopText, skipBottomText:!!im.skipBottomText,
       noSlider:!!im.noSlider, customDuration:(!im.isVideo && im.customDuration>0)?im.customDuration:null,
-      transitionOverride:im.transitionOverride||null});
+      transitionOverride:im.transitionOverride||null,
+      captions:(im.captions&&im.captions.length)?im.captions:null});
   });
   if(opts.ending){
     slides.push({type:'ending',label:'',img:SHORTS_ENDING_IMG});
@@ -24874,8 +24875,20 @@ function _shortsRenderLivePreview(container){
       var sc=(_fm==='contain' ? Math.min(1080/iw,1920/ih) : Math.max(1080/iw,1920/ih))*(_imObj.coverZoom||1);
       return {x:Math.abs(iw*sc-1080)/2, y:Math.abs(ih*sc-1920)/2};
     }
+    var capDrag=null;
+    function toCanvasXY(e){ var r=canvas.getBoundingClientRect(); return {x:(e.clientX-r.left)*1080/r.width, y:(e.clientY-r.top)*1920/r.height}; }
     canvas.addEventListener('pointerdown', function(e){
       if(e.button!==0) return;
+      // 자막 위를 누르면 사진 대신 그 자막을 끌어서 옮김
+      var pt=toCanvasXY(e), caps=_imObj.captions||[];
+      for(var ci=caps.length-1; ci>=0; ci--){
+        var bb=_capBoxes[caps[ci].id];
+        if(bb && pt.x>=bb.x && pt.x<=bb.x+bb.w && pt.y>=bb.y && pt.y<=bb.y+bb.h){
+          capDrag={c:caps[ci], dx:pt.x-(caps[ci].x*1080), dy:pt.y-(caps[ci].y*1920)};
+          try{ canvas.setPointerCapture(e.pointerId); }catch(_e){}
+          canvas.style.cursor='move'; e.preventDefault(); return;
+        }
+      }
       var m=maxOff(); if(!m) return;
       drag={sx:e.clientX, sy:e.clientY, ox:_imObj.coverOffX||0, oy:_imObj.coverOffY||0, m:m, moved:false};
       try{ canvas.setPointerCapture(e.pointerId); }catch(_e){}
@@ -24883,7 +24896,20 @@ function _shortsRenderLivePreview(container){
       e.preventDefault();
     });
     canvas.addEventListener('pointermove', function(e){
-      if(!drag) return;
+      if(capDrag){
+        var pt2=toCanvasXY(e);
+        capDrag.c.x=Math.max(0.02, Math.min(0.98, (pt2.x-capDrag.dx)/1080));
+        capDrag.c.y=Math.max(0.02, Math.min(0.98, (pt2.y-capDrag.dy)/1920));
+        if(!raf) raf=requestAnimationFrame(function(){ raf=0; paint(); });
+        return;
+      }
+      if(!drag){
+        // 자막 위에 마우스를 올리면 이동 커서로
+        var p3=toCanvasXY(e), over=false;
+        (_imObj.captions||[]).forEach(function(c){ var bb=_capBoxes[c.id]; if(bb && p3.x>=bb.x && p3.x<=bb.x+bb.w && p3.y>=bb.y && p3.y<=bb.y+bb.h) over=true; });
+        canvas.style.cursor = over ? 'move' : 'grab';
+        return;
+      }
       var k=1080/canvas.clientWidth; // 화면 픽셀 → 실제 1080 해상도 픽셀
       var dxp=(e.clientX-drag.sx)*k, dyp=(e.clientY-drag.sy)*k;
       if(Math.abs(e.clientX-drag.sx)+Math.abs(e.clientY-drag.sy)>2) drag.moved=true;
@@ -24893,6 +24919,7 @@ function _shortsRenderLivePreview(container){
       if(!raf) raf=requestAnimationFrame(function(){ raf=0; paint(); });
     });
     function endDrag(e){
+      if(capDrag){ capDrag=null; canvas.style.cursor='grab'; try{ canvas.releasePointerCapture(e.pointerId); }catch(_e){} return; }
       if(!drag) return;
       var moved=drag.moved; drag=null;
       canvas.style.cursor='grab';
@@ -24904,6 +24931,8 @@ function _shortsRenderLivePreview(container){
   })();
   // 2026-10-03: 영상 클립 장면은 미리보기에서 실제 영상 프레임을 그림(재생·구간 편집용) — 없으면 포스터 이미지
   var _pvVideoActive=null;
+  var _capBoxes={}; // 미리보기에 그려진 자막 위치(끌어서 옮기기용)
+  var _pvCapIm = (firstSlide && firstSlide.imId!=null) ? G_SHORTS.images.find(function(x){ return x.id===firstSlide.imId; }) : null;
   function _pvSrc(){ return (_pvVideoActive && _pvVideoActive.readyState>=2 && _pvVideoActive.videoWidth) ? _pvVideoActive : window._shortsPreviewImg; }
   function paint(){
     // ⚠️ 요청 반영("문구 껐는데 검은 띠는 그대로 남아있다"): 이 미리보기 캔버스는 _shortsDrawSlide와
@@ -24922,6 +24951,8 @@ function _shortsRenderLivePreview(container){
     } else if(firstSlide.label && _labelsShown){
       _shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos,G_SHORTS.opts.fontFamily,_pvSrc(),_effFitModePv);
     }
+    _capBoxes={};
+    _shortsDrawCaptions(ctx,1080,1920,_pvCapIm?_pvCapIm.captions:firstSlide.captions,G_SHORTS.opts.fontFamily,_capBoxes);
     if(G_SHORTS.opts.watermark)_shortsDrawWatermark(ctx,1080,1920);
   }
   // 이미지 URL이 이전과 같고 이미 로딩까지 끝난 상태면(꽉채우기/레터박스만 바꾼 경우처럼), 새로 안 불러오고
@@ -25123,6 +25154,7 @@ function _shortsRenderLivePreview(container){
         var copy={};
         Object.keys(vIm).forEach(function(k){ if(k.charAt(0)!=='_' || k==='_fullDuration') copy[k]=vIm[k]; });
         copy.id=Date.now()+Math.random();
+        if(vIm.captions) copy.captions=JSON.parse(JSON.stringify(vIm.captions)).map(function(c){ c.id='c'+Date.now()+Math.floor(Math.random()*100000); return c; });
         copy.videoUrl=URL.createObjectURL(blob); _shortsSessionBlobs[copy.videoUrl]=1;
         copy.vidKey=vIm.vidKey || (vIm.vidStored ? _shortsVideoKey(vIm) : null);
         if(!copy.vidKey){ _shortsPersistVideo(copy, blob); } else { copy.vidStored=true; }
@@ -25145,6 +25177,56 @@ function _shortsRenderLivePreview(container){
       var pp2=v.play(); if(pp2&&pp2.catch) pp2.catch(function(){ v.muted=true; v.play().catch(function(){}); });
     }
     window._shortsPvRaf=requestAnimationFrame(loop);
+  })();
+  // ── 💬 자막 편집 패널(사진·영상 장면 공통) ─────────────────────────────────────────
+  (function(){
+    if(firstSlide.type!=='slide' || !_pvCapIm) return;
+    var im=_pvCapIm;
+    var box=document.createElement('div');
+    box.style.cssText='width:'+Math.max(300,PW)+'px;max-width:92vw;background:var(--card);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;box-sizing:border-box';
+    var head=document.createElement('div'); head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px';
+    var ttl=document.createElement('div'); ttl.style.cssText='font-size:11.5px;font-weight:800;color:var(--t)'; ttl.textContent='💬 자막 (이 장면에만 표시)';
+    var addB=document.createElement('button'); addB.type='button'; addB.textContent='＋ 자막 추가';
+    addB.style.cssText='padding:5px 10px;border-radius:7px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+    addB.onclick=function(){
+      if(!im.captions) im.captions=[];
+      im.captions.push({id:'c'+Date.now()+Math.floor(Math.random()*1000), text:'자막을 입력하세요', x:0.5, y:0.5, size:64, color:'#ffffff', bg:true});
+      renderMain('shorts');
+    };
+    head.appendChild(ttl); head.appendChild(addB); box.appendChild(head);
+    var tip=document.createElement('div'); tip.style.cssText='font-size:10px;color:var(--m2);line-height:1.5';
+    tip.textContent=(im.captions&&im.captions.length)?'미리보기에서 자막을 마우스로 끌면 원하는 위치로 옮겨져요.':'예: 사진 오른쪽에 "이미지 업로드" 같은 설명을 넣을 수 있어요. 추가한 뒤 미리보기에서 끌어서 위치를 정하세요.';
+    box.appendChild(tip);
+    (im.captions||[]).forEach(function(c, ci){
+      var row=document.createElement('div'); row.style.cssText='display:flex;flex-direction:column;gap:5px;padding:7px;border:1px solid var(--bd2);border-radius:8px;background:var(--c2)';
+      var r1=document.createElement('div'); r1.style.cssText='display:flex;gap:6px;align-items:center';
+      var ta=document.createElement('textarea'); ta.rows=1; ta.value=c.text||''; ta.placeholder='자막 내용 (Shift+Enter 줄바꿈)';
+      ta.style.cssText='flex:1;resize:vertical;min-height:28px;padding:5px 7px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t);font-size:12px;font-family:inherit';
+      ta.oninput=function(){ c.text=ta.value; paint(); };
+      ta.onkeydown=function(e){ e.stopPropagation(); if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ta.blur(); } };
+      var del=document.createElement('button'); del.type='button'; del.textContent='✕'; del.title='이 자막 삭제';
+      del.style.cssText='width:26px;height:26px;flex-shrink:0;border-radius:6px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#fca5a5;cursor:pointer;font-size:11px';
+      del.onclick=function(){ im.captions.splice(ci,1); renderMain('shorts'); };
+      r1.appendChild(ta); r1.appendChild(del); row.appendChild(r1);
+      var r2=document.createElement('div'); r2.style.cssText='display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+      var szL=document.createElement('span'); szL.style.cssText='font-size:10px;color:var(--m2)'; szL.textContent='크기';
+      var sz=document.createElement('input'); sz.type='range'; sz.min='24'; sz.max='180'; sz.step='2'; sz.value=String(c.size||64); sz.style.cssText='width:90px;accent-color:var(--ac)';
+      sz.oninput=function(){ c.size=parseFloat(sz.value); paint(); };
+      r2.appendChild(szL); r2.appendChild(sz);
+      ['#ffffff','#facc15','#12E6E6','#111111','#f87171'].forEach(function(col){
+        var sw=document.createElement('button'); sw.type='button'; sw.title='글자색';
+        sw.style.cssText='width:18px;height:18px;border-radius:50%;cursor:pointer;padding:0;background:'+col+';border:2px solid '+((c.color||'#ffffff').toLowerCase()===col.toLowerCase()?'var(--ac)':'rgba(255,255,255,.25)');
+        sw.onclick=function(){ c.color=col; renderMain('shorts'); };
+        r2.appendChild(sw);
+      });
+      var bgL=document.createElement('label'); bgL.style.cssText='display:flex;align-items:center;gap:3px;font-size:10px;color:var(--m2);cursor:pointer;margin-left:4px';
+      var bgC=document.createElement('input'); bgC.type='checkbox'; bgC.checked=c.bg!==false; bgC.onchange=function(){ c.bg=bgC.checked; paint(); };
+      bgL.appendChild(bgC); bgL.appendChild(document.createTextNode('배경 박스'));
+      r2.appendChild(bgL);
+      row.appendChild(r2);
+      box.appendChild(row);
+    });
+    wrap.appendChild(box);
   })();
   return wrap;
 }
@@ -29855,6 +29937,41 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
 // 슬라이드 그리기
 // elapsed: 이 슬라이드가 화면에 나온 뒤 지난 시간(초) — 타이핑 애니메이션용. 없으면(undefined)
 // 전체 문구를 그대로 다 보여줌(썸네일·전환 중 프레임 등 애니메이션이 필요 없는 경우).
+// 💬 장면별 자막(요청: "영상 클립·사진 위 원하는 위치에 '이미지 업로드' 같은 자막을 넣고 싶다")
+// caption = {id, text, x, y(0~1, 화면 기준 가운데 위치), size(1080 기준 px), color, bg(배경 박스 여부)}
+function _shortsDrawCaptions(ctx, W, H, caps, fontKey, boxesOut){
+  if(!caps || !caps.length) return;
+  var k=W/1080;
+  caps.forEach(function(c){
+    var txt=String(c.text||'').trim(); if(!txt) return;
+    var fs=Math.max(10, (c.size||64)*k);
+    ctx.save();
+    ctx.font=_shortsFontCss(fontKey, fs);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    try{ ctx.letterSpacing='0px'; }catch(e){}
+    var lines=txt.split('\n'), lh=fs*1.25, wMax=0;
+    lines.forEach(function(l){ wMax=Math.max(wMax, ctx.measureText(l).width); });
+    var cx=(c.x!=null?c.x:0.5)*W, cy=(c.y!=null?c.y:0.5)*H, totalH=lh*lines.length;
+    var padX=fs*0.45, padY=fs*0.25;
+    var bx=cx-wMax/2-padX, by=cy-totalH/2-padY, bw=wMax+padX*2, bh=totalH+padY*2;
+    if(c.bg!==false){
+      ctx.fillStyle='rgba(0,0,0,0.62)';
+      var r=Math.min(fs*0.35, bh/2);
+      ctx.beginPath();
+      ctx.moveTo(bx+r,by); ctx.lineTo(bx+bw-r,by); ctx.quadraticCurveTo(bx+bw,by,bx+bw,by+r);
+      ctx.lineTo(bx+bw,by+bh-r); ctx.quadraticCurveTo(bx+bw,by+bh,bx+bw-r,by+bh);
+      ctx.lineTo(bx+r,by+bh); ctx.quadraticCurveTo(bx,by+bh,bx,by+bh-r);
+      ctx.lineTo(bx,by+r); ctx.quadraticCurveTo(bx,by,bx+r,by); ctx.closePath(); ctx.fill();
+    } else {
+      ctx.lineWidth=Math.max(2, fs*0.12); ctx.strokeStyle='rgba(0,0,0,0.85)'; ctx.lineJoin='round';
+      lines.forEach(function(l,i){ ctx.strokeText(l, cx, cy-totalH/2+lh*(i+0.5)); });
+    }
+    ctx.fillStyle=c.color||'#ffffff';
+    lines.forEach(function(l,i){ ctx.fillText(l, cx, cy-totalH/2+lh*(i+0.5)); });
+    ctx.restore();
+    if(boxesOut) boxesOut[c.id]={x:bx,y:by,w:bw,h:bh};
+  });
+}
 function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed, slideIdx, holdDuration){
   if(!slide)return;
   var revealCount=null;
@@ -29898,6 +30015,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
     } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
       _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,_vSrc,_effFitModeV);
     }
+    _shortsDrawCaptions(ctx,W,H,slide.captions,opts&&opts.fontFamily);
     return;
   }
   if(slide.type==='ending'){
@@ -29954,6 +30072,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
   } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
     _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,img,_effFitMode);
   }
+  _shortsDrawCaptions(ctx,W,H,slide.captions,opts&&opts.fontFamily);
 }
 
 // 레터박스에서 하단 검은 바는 고정 브랜드 문구가 차지하고 있을 때, 장면별 내용(현장 사진/AI
