@@ -23852,6 +23852,17 @@ function _openVideoLightbox(url, start, end, rate){
   ov.appendChild(v); ov.appendChild(close); ov.appendChild(info);
   document.body.appendChild(ov);
 }
+// 페이지를 열면 보관해둔 배경음악을 바로 불러와 둠(사이드바를 열기 전이나 임시저장 복원과 상관없이 항상 유지)
+setTimeout(function(){
+  try{
+    idbLoadVideo('shorts_bgm').then(function(f){
+      if(f && typeof G_SHORTS!=='undefined' && G_SHORTS.opts && !G_SHORTS.opts.bgmFile){
+        G_SHORTS.opts.bgmFile=f; G_SHORTS.opts.bgmUrl=URL.createObjectURL(f);
+        if(typeof G!=='undefined' && G.wf==='shorts' && typeof renderSB==='function') renderSB();
+      }
+    }).catch(function(){});
+  }catch(e){}
+}, 0);
 function _shortsVideoKey(item){ return item.vidKey || ('shorts_vid_'+_draftKeyUid()+'_'+String(item.id)); }
 function _shortsPersistVideo(item, fileOrBlob){
   if(!item || !fileOrBlob) return;
@@ -24106,7 +24117,7 @@ var SHORTS_END_VIDEO_MAX_SEC = 12; // 영상 클립은 최대 이만큼만 재�
 function _draftSave(key, stateObj){
   try{
     var clone=JSON.parse(JSON.stringify(stateObj, function(k,v){
-      if(k==='bgmFile') return undefined; // File 객체는 직렬화 불가 + 새로고침하면 어차피 무효
+      if(k==='bgmFile' || k==='bgmUrl') return undefined; // File 객체는 직렬화 불가 + 임시주소(bgmUrl)는 새로고침하면 무효
       if(k==='file') return undefined;
       // ⚠️ 2026-07-22: videoUrl을 무조건 지웠었는데, blob:(이 탭에서만 유효)는 맞지만
       // https:(클라우드에 업로드 완료된 영구 주소, 예: VR 회전영상)는 새로고침해도 여전히
@@ -24274,7 +24285,7 @@ function _shortsSaveDraftAsync(){
     // DataCloneError를 던지고 있었음 — 아래처럼 저장에 불필요한 함수/대용량 필드를 뺀 사본만
     // 만들어서 저장하도록 고침(임시저장 목적상 어차피 필요 없는 값들임).
     var fastSnap=JSON.parse(JSON.stringify(G_SHORTS, function(k,v){
-      if(k==='bgmFile'||k==='file'||k==='resultDownload'||k==='resultBlob') return undefined;
+      if(k==='bgmFile'||k==='bgmUrl'||k==='file'||k==='resultDownload'||k==='resultBlob') return undefined;
       if(k==='videoUrl' && typeof v==='string' && v.indexOf('blob:')===0) return undefined;
       if(k==='_thumb'||k==='_thumbLoading'||k==='_thumbFailed'||k==='_cachedDataUrl'||k==='_cachedDataUrlSrc'||k==='_blobFailCount') return undefined;
       return v;
@@ -24300,7 +24311,7 @@ function _shortsSaveDraftAsync(){
   })).then(function(dataUrls){
     // 실제 G_SHORTS.images는 건드리지 않고(화면엔 계속 가벼운 blob 그대로 씀), 저장용 사본만 변환함
     var snapshot=JSON.parse(JSON.stringify(G_SHORTS, function(k,v){
-      if(k==='bgmFile'||k==='file') return undefined;
+      if(k==='bgmFile'||k==='bgmUrl'||k==='file') return undefined;
       if(k==='videoUrl' && typeof v==='string' && v.indexOf('blob:')===0) return undefined;
       // ⚠️ 성능 개선: 이 내부 캐시 필드들(썸네일·변환 캐시)은 화면 표시·저장 최적화용으로
       // 이 세션 안에서만 쓰는 값이라 굳이 저장할 필요가 없음 — 그대로 두면 im.img 자체가
@@ -25111,9 +25122,41 @@ function _shortsRenderLivePreview(container){
     function updUsed(){
       usedLbl.textContent = vIm.speedMode
         ? '⏩ 배속 모드 — 전체 '+fmt(vIm._fullDuration||fullDur)+'를 '+fmt(vIm.speedTargetDur)+'로 압축 (구간 편집은 사이드바에서 배속을 끄면 가능)'
-        : '✂️ 사용 구간: '+fmt(vIm.trimStart)+' ~ '+fmt(vIm.trimEnd)+' (총 '+fmt(vIm.trimEnd-vIm.trimStart)+')';
+        : '✂️ 사용 구간: '+fmt(vIm.trimStart)+' ~ '+fmt(vIm.trimEnd)+' (총 '+fmt(vIm.trimEnd-vIm.trimStart)+')  ✎';
     }
     bar.appendChild(usedLbl);
+    // 요청 반영("사용 구간 정확한 초수를 쓰고 싶다, 더블클릭하면 숫자 바꿀 수 있게"): 사용 구간 글자를 더블클릭하면
+    // 시작·끝 초를 직접 입력하는 칸이 열림(엔터 또는 '적용'으로 반영, Esc로 취소)
+    usedLbl.title='더블클릭해서 시작·끝 초를 직접 입력';
+    usedLbl.style.cursor='text';
+    usedLbl.ondblclick=function(){
+      if(vIm.speedMode) return;
+      var fd=vIm._fullDuration||fullDur;
+      var ed=document.createElement('div'); ed.style.cssText='display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--t2)';
+      function numIn(val){ var i=document.createElement('input'); i.type='number'; i.min='0'; i.max=String(fd); i.step='0.1'; i.value=String(val);
+        i.style.cssText='width:64px;padding:4px 6px;border-radius:6px;border:1px solid var(--acb);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit;text-align:right';
+        return i; }
+      var sIn=numIn(vIm.trimStart||0), eIn=numIn(vIm.trimEnd!=null?vIm.trimEnd:fd);
+      var ok=document.createElement('button'); ok.type='button'; ok.textContent='적용';
+      ok.style.cssText='padding:4px 10px;border-radius:6px;border:none;background:var(--ac);color:#000;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit';
+      var cancel=document.createElement('button'); cancel.type='button'; cancel.textContent='취소';
+      cancel.style.cssText='padding:4px 8px;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
+      ed.appendChild(document.createTextNode('✂️ 시작')); ed.appendChild(sIn); ed.appendChild(document.createTextNode('초 ~ 끝')); ed.appendChild(eIn); ed.appendChild(document.createTextNode('초 (전체 '+fmt(fd)+')'));
+      ed.appendChild(ok); ed.appendChild(cancel);
+      function close(){ if(ed.parentNode) ed.parentNode.replaceChild(usedLbl, ed); }
+      function apply(){
+        var s=parseFloat(sIn.value), e=parseFloat(eIn.value);
+        if(!isFinite(s)||!isFinite(e)){ alert('숫자로 입력해 주세요.'); return; }
+        s=Math.max(0, Math.min(s, fd-0.2)); e=Math.max(s+0.2, Math.min(e, fd));
+        vIm.trimStart=Math.round(s*10)/10; vIm.trimEnd=Math.round(e*10)/10;
+        try{ v.currentTime=vIm.trimStart; }catch(_e){}
+        close(); syncSidebar();
+      }
+      [sIn,eIn].forEach(function(i){ i.onkeydown=function(ev){ ev.stopPropagation(); if(ev.key==='Enter'){ ev.preventDefault(); apply(); } else if(ev.key==='Escape'){ close(); } }; });
+      ok.onclick=apply; cancel.onclick=close;
+      usedLbl.parentNode.replaceChild(ed, usedLbl);
+      sIn.focus(); sIn.select();
+    };
     // 슬라이더를 놓았을 때(change) 사이드바·예상 길이까지 같은 값으로 다시 그림(끄는 중엔 미리보기만 갱신)
     function syncSidebar(){ renderSB(); renderMain('shorts'); }
     function mkTrimRow(label, key){
@@ -25490,11 +25533,10 @@ function sbShorts(p){
     resetAllBtn.textContent='↺ 전체 리셋';
     resetAllBtn.style.cssText='flex-shrink:0;padding:5px 11px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--m2);font-size:11px;cursor:pointer;font-family:inherit';
     resetAllBtn.onclick=function(){
-      if(!confirm('쇼츠에 올린 이미지, 역할 지정, 배경음악, 영상 클립을 전부 지우고 처음부터 다시 시작할까요?')) return;
+      if(!confirm('쇼츠에 올린 이미지, 역할 지정, 영상 클립을 전부 지우고 처음부터 다시 시작할까요?\n(배경음악은 그대로 유지돼요 — 바꾸려면 사이드바에서 ✕ 제거)')) return;
       _shortsForgetStoredVideos(G_SHORTS.images);
       G_SHORTS.images=[];
-      G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
-      idbDeleteVideo('shorts_bgm').catch(function(){}); // 저장해둔 배경음악도 같이 삭제(안내 문구대로)
+      // 요청 반영("음악은 제거할 때까지 무조건 고정"): 리셋해도 배경음악은 유지 — 사이드바 '✕ 제거'로만 지움
       G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null;
       G._shortsPreviewIdx=0;
       try{ localStorage.removeItem(_shortsDraftKey()); }catch(e){}
@@ -27940,11 +27982,10 @@ function _shortsRenderCanvas(ub){
     freshBtn.style.cssText='padding:9px 18px;border-radius:9px;border:1px solid rgba(250,204,21,.4);background:rgba(250,204,21,.08);color:#fde047;font-size:12px;cursor:pointer;font-family:inherit';
     freshBtn.textContent='🆕 완전히 새로 시작 (이미지 교체)';
     freshBtn.onclick=function(){
-      if(!confirm('지금 이미지·역할 지정·배경음악·결과 영상을 전부 지우고 완전히 새로 시작할까요?')) return;
+      if(!confirm('지금 이미지·역할 지정·결과 영상을 전부 지우고 완전히 새로 시작할까요?\n(배경음악은 그대로 유지돼요)')) return;
       _shortsForgetStoredVideos(G_SHORTS.images);
       G_SHORTS.images=[];
-      G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
-      idbDeleteVideo('shorts_bgm').catch(function(){});
+      // 배경음악은 유지('✕ 제거'로만 지움)
       G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null;
       G._shortsPreviewIdx=0;
       try{ localStorage.removeItem(_shortsDraftKey()); }catch(e){}
@@ -29735,6 +29776,9 @@ function _shortsGenerate(){
       // 시작하기 "전에" audioCtx.resume()을 명시적으로 호출하고, 그 Promise가 실제로 끝나서
       // audioCtx.state가 'running'이 된 뒤에야 finishWithAudio()를 실행하도록 순서를 바꿈.
       var _startShortsRecording=function(){
+        // ⚠️ 버그 수정("음악 한 번 넣으면 새로고침하거나 새 index를 올리면 노래가 안 나온다"): 저장된 임시주소(bgmUrl)가
+        // 새로고침 뒤엔 죽은 주소인데 그걸 그대로 써서 무음이 됐음 → 항상 보관된 음악 파일(bgmFile)에서 새 주소를 만들어 씀
+        if(opts.bgmFile){ try{ opts.bgmUrl=URL.createObjectURL(opts.bgmFile); }catch(e){} }
         if(opts.bgmUrl){
           audioEl=document.createElement('audio');
           audioEl.src=opts.bgmUrl;audioEl.loop=true;audioEl.crossOrigin='anonymous';
@@ -35291,8 +35335,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
         }
         if(_startFresh){
           G_SHORTS.images=[];
-          G_SHORTS.bgmFile=null; G_SHORTS.bgmUrl=null;
-          idbDeleteVideo('shorts_bgm').catch(function(){});
+          // 배경음악은 유지('✕ 제거'로만 지움)
           G_SHORTS.resultUrl=null; G_SHORTS.resultDownload=null; G_SHORTS.resultBlob=null;
         }
         G_SHORTS.images.push({id:Date.now()+Math.random(), img:item.result, orig:item.orig||null, role:'auto', autoRole:null, source:item.wf});
