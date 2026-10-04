@@ -29280,7 +29280,7 @@ function _shortsGenerate(){
       alert('영상 '+missing.length+'개가 새로고침 등으로 유실되어 이번 렌더에서는 빠집니다. 필요하면 사이드바에서 다시 업로드해주세요.');
     }
     var readyList=vSlides.filter(function(s){return s.videoUrl;});
-    if(!readyList.length){ startRender(); return; }
+    if(!readyList.length){ _beginAnyRender(); return; }
     if(progTxt)progTxt.textContent='영상 클립 준비 중...';
     var doneCount=0;
     readyList.forEach(function(vSlide){
@@ -29292,7 +29292,7 @@ function _shortsGenerate(){
         if(done)return; done=true;
         videoCache[vSlide.videoUrl]=vEl;
         doneCount++;
-        if(doneCount>=readyList.length) startRender();
+        if(doneCount>=readyList.length) _beginAnyRender();
       }
       // ⚠️ 버그 수정("트림 구간을 1~4초로 바꾸든 2~4초로 바꾸든 위치와 무관하게 항상 똑같이 끊김"):
       // 예전엔 'loadeddata'(맨 앞 프레임 정도만 준비된 상태)만 확인하고 바로 렌더링 시작 준비완료로
@@ -29326,6 +29326,61 @@ function _shortsGenerate(){
     });
   }
   loadNext();
+
+  // ── 🎯 프레임 단위 정밀 렌더링(2026-10-04, 요청: "4K 쇼츠 영상 부분이 아직도 살짝 버벅인다") ──
+  // 원인: 지금까지는 영상 클립을 "실제로 재생시키면서" 캔버스를 실시간 녹화했기 때문에, 4K처럼 무거우면
+  // 컴퓨터가 그 속도를 못 따라가 프레임이 빠지거나 겹쳐서(버벅임) 녹화됐음 — 녹화된 순간 이미 생긴
+  // 끊김이라 MP4 변환(CFR)으로도 못 고쳤음. 이제 영상 클립의 각 프레임을 정확한 시간에 하나씩 꺼내서
+  // 그리고, 그 프레임을 바로 인코더에 넣는 방식으로 바꿈 → 컴퓨터가 느려도 "시간이 더 걸릴 뿐" 결과물엔
+  // 프레임 누락·버벅임이 생기지 않음. 바로 MP4(H.264+AAC)로 만들어져서 다운로드 때 변환도 필요 없음.
+  // 이 방식이 안 되는 브라우저/기기면 자동으로 예전 실시간 녹화 방식으로 진행(결과는 그대로 나옴).
+  function _beginAnyRender(){
+    if(!SHORTS_OFFLINE_RENDER){ startRender(); return; }
+    _shortsRenderRealStart=performance.now();
+    if(progTxt) progTxt.textContent='정밀 렌더링 준비 중...';
+    _shortsRenderOffline({W:W,H:H,FPS:FPS,slides:slides,timeline:timeline,totalDuration:totalDuration,totalFrames:totalFrames,
+      opts:opts,imgCache:imgCache,videoCache:videoCache,
+      onProgress:function(p,label){
+        if(progFill) progFill.style.width=Math.round(p*100)+'%';
+        if(progTxt) progTxt.textContent=(label||'생성 중...')+' '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)';
+      }
+    }).then(function(r){
+      _finishRenderedBlob(r.blob, r.ext, r.mime, r);
+    }).catch(function(e){
+      console.warn('[쇼츠] 정밀 렌더링을 쓸 수 없어 기존 실시간 녹화 방식으로 진행합니다:', e);
+      if(progFill) progFill.style.width='0%';
+      if(progTxt) progTxt.textContent='기존 방식으로 만드는 중...';
+      startRender();
+    });
+  }
+  function _finishRenderedBlob(blob, ext, mimeType, info){
+    _shortsCleanupRenderGuards();
+    var url=URL.createObjectURL(blob);
+    G_SHORTS.resultUrl=url;
+    _draftClear(_shortsDraftKey());
+    function doDownload(){
+      var a=document.createElement('a');
+      a.href=url; a.download='cloverai_shorts_'+Date.now()+'.'+ext;
+      document.body.appendChild(a); a.click(); setTimeout(function(){ document.body.removeChild(a); },500);
+    }
+    var dlBtn=gE('shorts-dl-btn');
+    if(dlBtn){ dlBtn.onclick=doDownload; dlBtn.innerHTML='&#11015; 쇼츠 다운로드 ('+ext.toUpperCase()+')'; }
+    if(dlWrap){ dlWrap.style.display=''; }
+    if(genBtn){ genBtn.disabled=false; genBtn.style.opacity='1'; }
+    if(progTxt) progTxt.textContent='✅ 완성! (프레임 단위 정밀 렌더링'+(ext==='mp4'?' · MP4':'')+(info&&info.noAudio?' · 소리 없음':'')+') 메인 화면에서 바로 다운로드하세요.';
+    if(progFill) progFill.style.width='100%';
+    if(!G.HIST.shorts) G.HIST.shorts=[];
+    var vidId=Date.now()+Math.random();
+    idbSaveVideo(vidId, blob).catch(function(){});
+    G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&slides[0].img, result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
+    saveHistToStorage();
+    _shortsSaveGalleryMeta();
+    G_SHORTS.resultBlob=blob; G_SHORTS.resultMp4Blob=(ext==='mp4')?blob:null;
+    G_SHORTS.resultThumb=slides[0]&&slides[0].img;
+    G_SHORTS.resultExt=ext;
+    G_SHORTS.resultDownload=doDownload;
+    if(G.wf==='shorts') renderMain('shorts');
+  }
 
   function startRender(forceMimeType, attemptIdx, skipAudio){
     attemptIdx = attemptIdx || 0;
@@ -29948,6 +30003,175 @@ function runRenderLoop(ctx, W, H, slides, timeline, totalFrames, FPS, opts, imgC
   rafId=requestAnimationFrame(tick);
 }
 
+// ── 🎯 프레임 단위 정밀 렌더링(오프라인 인코딩) ─────────────────────────
+// 실시간 녹화 대신, t=0부터 1/FPS초씩 정확히 한 장면씩 그려서 바로 인코더(WebCodecs, Mediabunny)에 넣음.
+// 영상 클립은 해당 시각의 프레임을 디코더에서 정확히 꺼내 쓰므로 4K에서도 프레임 누락·겹침(버벅임)이 없음.
+// 소리(배경음악 + 영상 클립 소리)는 OfflineAudioContext로 미리 정확히 합성해서 넣음.
+var SHORTS_OFFLINE_RENDER=true;
+function _shortsYield(){ return new Promise(function(r){ try{ var ch=new MessageChannel(); ch.port1.onmessage=function(){ r(); }; ch.port2.postMessage(0); }catch(e){ setTimeout(r,0); } }); }
+async function _shortsRenderOffline(p){
+  var W=p.W, H=p.H, FPS=p.FPS, slides=p.slides, timeline=p.timeline, T=p.totalDuration, N=p.totalFrames, opts=p.opts;
+  if(typeof VideoEncoder==='undefined' || typeof VideoFrame==='undefined' || typeof OfflineAudioContext==='undefined') throw new Error('이 브라우저는 WebCodecs 미지원');
+  var MB=await _mbLoad();
+  var aacOk=false; try{ aacOk=await _mbEnsureAac(MB); }catch(e){}
+  var vbr = W>=2160 ? 24000000 : (W>=1080 ? 10000000 : 4000000);
+  var encChk={width:W, height:H, bitrate:vbr, frameRate:FPS};
+  var plans=[];
+  try{ if(aacOk && await MB.canEncodeVideo('avc', encChk)) plans.push({ext:'mp4', v:'avc', a:'aac'}); }catch(e){}
+  try{ if(await MB.canEncodeVideo('vp9', encChk) && await MB.canEncodeAudio('opus')) plans.push({ext:'webm', v:'vp9', a:'opus'}); }catch(e){}
+  if(!plans.length) throw new Error('이 해상도('+W+'×'+H+')로 인코딩할 수 있는 코덱이 없음');
+
+  // 1) 프레임마다 어느 타임라인 구간인지 미리 계산(_shortsRenderFrame과 같은 규칙)
+  var frameEntry=new Array(N);
+  for(var f=0; f<N; f++){
+    var t=f/FPS, ei=-1;
+    for(var i=0;i<timeline.length;i++){ if(t>=timeline[i].start && t<=timeline[i].end+0.001){ ei=i; break; } }
+    frameEntry[f]=ei;
+  }
+  // 영상 장면(hold) 구간별로, 필요한 프레임 시각(초) 목록
+  var vidTimes={}; // entryIdx -> [mediaTime...]
+  for(var f2=0; f2<N; f2++){
+    var e2=frameEntry[f2]; if(e2<0) continue;
+    var en=timeline[e2]; if(en.type!=='hold') continue;
+    var sl=slides[en.idx]; if(!sl || !sl.isVideo || !sl.videoUrl) continue;
+    (vidTimes[e2]=vidTimes[e2]||[]).push((sl.trimStart||0) + (f2/FPS - en.start)*(sl.playbackRate||1));
+  }
+
+  // 2) 영상 파일(blob) 준비 — 같은 영상을 복제해서 여러 구간에 써도 한 번만 받음
+  var blobCache={};
+  function getBlob(url){ if(!blobCache[url]) blobCache[url]=fetch(url).then(function(r){ if(!r.ok) throw new Error('영상 받기 실패'); return r.blob(); }); return blobCache[url]; }
+
+  // 3) 소리 합성
+  async function buildAudio(){
+    var SR=48000, len=Math.max(1, Math.ceil(T*SR));
+    var oac=new OfflineAudioContext(2, len, SR);
+    var hasSound=false;
+    var VOL=(opts.bgmVolume!=null?opts.bgmVolume:0.8), FADE=2;
+    try{
+      var ab=null;
+      if(opts.bgmFile) ab=await opts.bgmFile.arrayBuffer();
+      else if(opts.bgmUrl) ab=await (await fetch(opts.bgmUrl)).arrayBuffer();
+      if(ab){
+        var bbuf=await oac.decodeAudioData(ab);
+        var bs=oac.createBufferSource(); bs.buffer=bbuf; bs.loop=true;
+        var bg=oac.createGain();
+        bg.gain.setValueAtTime(VOL, 0);
+        if(T>FADE){ bg.gain.setValueAtTime(VOL, T-FADE); bg.gain.linearRampToValueAtTime(0.0001, T); }
+        bs.connect(bg); bg.connect(oac.destination); bs.start(0);
+        hasSound=true;
+      }
+    }catch(e){ console.warn('[쇼츠 정밀 렌더] 배경음악 불러오기 실패(음악 없이 진행):', e); }
+    // 영상 클립 자체 소리 — 그 장면이 나오는 동안만
+    var decoded={};
+    for(var k=0;k<timeline.length;k++){
+      var en3=timeline[k]; if(en3.type!=='hold') continue;
+      var s3=slides[en3.idx]; if(!s3 || !s3.isVideo || !s3.videoUrl) continue;
+      try{
+        if(!(s3.videoUrl in decoded)){
+          decoded[s3.videoUrl]=null;
+          var vb=await getBlob(s3.videoUrl);
+          decoded[s3.videoUrl]=await oac.decodeAudioData(await vb.arrayBuffer());
+        }
+        var abuf=decoded[s3.videoUrl]; if(!abuf) continue;
+        var rate=s3.playbackRate||1, segDur=en3.end-en3.start;
+        var src=oac.createBufferSource(); src.buffer=abuf; src.playbackRate.value=rate;
+        var g=oac.createGain();
+        g.gain.setValueAtTime(1, en3.start);
+        g.gain.setValueAtTime(1, Math.max(en3.start, en3.end-0.06));
+        g.gain.linearRampToValueAtTime(0, en3.end); // 장면 끝에서 '틱' 소리 안 나게 아주 짧게 줄임
+        src.connect(g); g.connect(oac.destination);
+        var off=Math.max(0, Math.min(s3.trimStart||0, abuf.duration-0.01));
+        src.start(en3.start, off, segDur*rate);
+        hasSound=true;
+      }catch(e){ /* 소리 트랙이 없는 영상 등 — 무음으로 진행 */ }
+    }
+    var out=await oac.startRendering();
+    return {buf:out, hasSound:hasSound};
+  }
+  var audio=await buildAudio();
+
+  // 4) 영상 프레임 공급자 — 기본은 디코더에서 정확한 시각의 프레임을 꺼냄(빠름),
+  //    이 기기가 그 영상 형식을 디코딩 못 하면 <video>를 한 프레임씩 탐색하는 방식(느리지만 확실)으로 대체
+  async function makeProvider(slide, times){
+    var maxDim=Math.max(W,H);
+    try{
+      var blob=await getBlob(slide.videoUrl);
+      var input=new MB.Input({source:new MB.BlobSource(blob), formats:MB.ALL_FORMATS});
+      var track=await input.getPrimaryVideoTrack();
+      if(!track || !(await track.canDecode())) throw new Error('디코딩 불가');
+      var dw=track.displayWidth, dh=track.displayHeight, sc=Math.min(1, maxDim/Math.max(dw,dh));
+      var sinkOpts={poolSize:2};
+      if(sc<1){ sinkOpts.width=Math.round(dw*sc); sinkOpts.height=Math.round(dh*sc); sinkOpts.fit='fill'; }
+      var sink=new MB.CanvasSink(track, sinkOpts);
+      var it=sink.canvasesAtTimestamps(times);
+      var last=null;
+      return { next: async function(){ var r=await it.next(); if(!r.done && r.value) last=r.value.canvas; return last; },
+               close: function(){ try{ it.return(); }catch(e){} try{ input.dispose && input.dispose(); }catch(e){} } };
+    }catch(err){
+      console.warn('[쇼츠 정밀 렌더] 디코더로 못 읽는 영상 → 한 프레임씩 탐색 방식으로 대체:', err && err.message);
+      var vEl=p.videoCache && p.videoCache[slide.videoUrl];
+      if(!vEl) throw new Error('영상 요소 없음');
+      vEl._noAutoPlay=true; try{ vEl.pause(); vEl.playbackRate=1; }catch(e){}
+      var idx=0;
+      return { next: function(){
+                 var mt=times[idx++]; var d=vEl.duration||0; if(d) mt=Math.min(mt, d-0.04);
+                 return new Promise(function(res){
+                   if(Math.abs(vEl.currentTime-mt)<0.001){ res(vEl); return; }
+                   var done=false; function fin(){ if(done)return; done=true; vEl.removeEventListener('seeked',fin); res(vEl); }
+                   vEl.addEventListener('seeked', fin); setTimeout(fin, 3000);
+                   try{ vEl.currentTime=Math.max(0,mt); }catch(e){ fin(); }
+                 });
+               },
+               close: function(){ vEl._noAutoPlay=false; } };
+    }
+  }
+
+  // 5) 인코딩
+  var lastErr=null;
+  for(var pi=0; pi<plans.length; pi++){
+    var plan=plans[pi];
+    var canvas=document.createElement('canvas'); canvas.width=W; canvas.height=H;
+    var ctx=canvas.getContext('2d', {alpha:false});
+    ctx.imageSmoothingEnabled=true; ctx.imageSmoothingQuality='high';
+    var target=new MB.BufferTarget();
+    var output=new MB.Output({ format: plan.ext==='mp4' ? new MB.Mp4OutputFormat({fastStart:'in-memory'}) : new MB.WebMOutputFormat(), target:target });
+    var vSrc=new MB.CanvasSource(canvas, {codec:plan.v, bitrate:vbr, keyFrameInterval:1});
+    output.addVideoTrack(vSrc, {frameRate:FPS});
+    var aSrc=new MB.AudioBufferSource({codec:plan.a, bitrate:192000});
+    output.addAudioTrack(aSrc);
+    var prov=null, provEntry=-1;
+    try{
+      await output.start();
+      await aSrc.add(audio.buf); aSrc.close();
+      for(var fr=0; fr<N; fr++){
+        var tt=fr/FPS, ent=frameEntry[fr], vc={};
+        var isVid = ent>=0 && vidTimes[ent];
+        if(isVid){
+          if(provEntry!==ent){ if(prov) prov.close(); prov=await makeProvider(slides[timeline[ent].idx], vidTimes[ent]); provEntry=ent; }
+          var srcCv=await prov.next();
+          if(srcCv) vc[slides[timeline[ent].idx].videoUrl]=srcCv;
+        } else if(prov){ prov.close(); prov=null; provEntry=-1; }
+        _shortsRenderFrame(ctx, W, H, tt, slides, timeline, opts, p.imgCache, vc);
+        await vSrc.add(tt, 1/FPS);
+        if(fr%6===0){ p.onProgress && p.onProgress(fr/N, '정밀 렌더링 중'+(plan.ext==='mp4'?'(MP4)':'')+'...'); await _shortsYield(); }
+      }
+      if(prov){ prov.close(); prov=null; }
+      vSrc.close();
+      p.onProgress && p.onProgress(1, '마무리 중...');
+      await output.finalize();
+      var blobOut=new Blob([target.buffer], {type: plan.ext==='mp4'?'video/mp4':'video/webm'});
+      console.log('[쇼츠 정밀 렌더] 완료 —', plan.ext, W+'×'+H, FPS+'fps', (blobOut.size/1048576).toFixed(1)+'MB', audio.hasSound?'(소리 포함)':'(무음 트랙)');
+      return {blob:blobOut, ext:plan.ext, mime:blobOut.type, noAudio:!audio.hasSound};
+    }catch(err){
+      lastErr=err;
+      console.warn('[쇼츠 정밀 렌더] '+plan.v+' 인코딩 실패'+(pi+1<plans.length?' → 다른 코덱으로 재시도':''), err);
+      if(prov){ try{ prov.close(); }catch(e){} }
+      try{ await output.cancel(); }catch(e){}
+    }
+  }
+  throw lastErr || new Error('정밀 렌더링 실패');
+}
+
 // ── 프레임 렌더링 ─────────────────────────────────────────────────
 function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, videoCache){
   ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
@@ -30036,7 +30260,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
     var vEl=videoCache&&videoCache[slide.videoUrl];
     var _vSrc=null;
     if(vEl){
-      if(vEl.paused){
+      if(vEl.paused && !vEl._noAutoPlay){ // _noAutoPlay: 정밀 렌더링(한 프레임씩 탐색) 중엔 재생시키지 않음
         // 준비 단계(seekThenPrime)에서 이미 트림 시작지점까지 탐색해뒀으므로, 위치가 어긋나 있을
         // 때(예: 안전장치 타임아웃으로 예열을 못 마치고 진입한 경우)만 다시 탐색함 — 정상적인
         // 경우엔 재탐색 없이 곧바로 재생만 시작해서 끊김 없이 이어짐.
@@ -46069,6 +46293,7 @@ function buildAccount(){
           G.plan=G.supaRole==='admin'?'admin':(res.data.plan||'free');
           G.cr=G.supaRole==='admin'?999999:(res.data.credits||G.cr);
           if(res.data.fal_key && G.supaRole==='admin'){FAL_KEY=res.data.fal_key;G_HAS_PERSONAL_KEY=true;}
+          else if(!res.data.fal_key){ FAL_KEY=''; G_HAS_PERSONAL_KEY=false; try{ localStorage.removeItem('clover_fal_key'); }catch(e){} } // 서버에서 지운 키가 이 기기에 남아있으면 같이 정리
           G.refOverride = (res.data.ref_override!=null) ? res.data.ref_override : null;
           G.concurrentOverride = (res.data.concurrent_override!=null) ? res.data.concurrent_override : null;
         }
@@ -48235,6 +48460,7 @@ function onSupaLogin(user){
       // 일반 회원은 개인 키가 (예전 테스트 등으로) DB에 남아있어도 무시하고 무조건 fal-proxy를 거친다 —
       // 그래야 "일반 계정인데 fal.ai로 직접 호출 나가는" 우회가 원천 차단된다.
       if(res.data.fal_key && dbRole==='admin' && !FAL_KEY){ FAL_KEY = res.data.fal_key; G_HAS_PERSONAL_KEY = true; }
+      else if(!res.data.fal_key){ FAL_KEY=''; G_HAS_PERSONAL_KEY=false; try{ localStorage.removeItem('clover_fal_key'); }catch(e){} } // 2026-10-04: 서버엔 없는데 기기에만 남은 예전 키 정리(휴대폰 등)
       // 관리자가 개별 회원에게 따로 풀어준 레퍼런스 슬롯 개수 (없으면 null = 플랜 기준)
       G.refOverride = (res.data.ref_override!=null) ? res.data.ref_override : null;
       // 관리자가 개별 회원에게 따로 풀어준 동시 렌더링 개수 (없으면 null = 플랜 기준)
