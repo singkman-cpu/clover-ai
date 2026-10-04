@@ -27740,9 +27740,47 @@ function _shortsRenderCanvas(ub){
     vidWrap.appendChild(video);
     var dlBtn2=document.createElement('button');dlBtn2.type='button';
     dlBtn2.style.cssText='padding:13px 26px;border-radius:11px;border:none;background:#10b981;color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit;width:100%';
-    dlBtn2.innerHTML='&#11015; 쇼츠 다운로드 ('+((G_SHORTS.resultExt||'mp4').toUpperCase())+')';
-    dlBtn2.onclick=function(){ if(G_SHORTS.resultDownload)G_SHORTS.resultDownload(); };
-    vidWrap.appendChild(dlBtn2);
+    var _isWebm = (G_SHORTS.resultExt||'mp4')!=='mp4';
+    if(!_isWebm){
+      dlBtn2.innerHTML='&#11015; 쇼츠 다운로드 (MP4)';
+      dlBtn2.onclick=function(){ if(G_SHORTS.resultDownload)G_SHORTS.resultDownload(); };
+      vidWrap.appendChild(dlBtn2);
+    } else {
+      // WebM으로 녹화된 경우: 기본 다운로드 버튼이 자동으로 MP4로 변환해서 저장(인스타·틱톡·유튜브 바로 업로드용)
+      dlBtn2.innerHTML='&#11015; 쇼츠 다운로드 (MP4)';
+      dlBtn2.title='브라우저 안에서 MP4로 바꿔서 저장해요(외부 사이트 필요 없음)';
+      var _mp4Note=document.createElement('div');
+      _mp4Note.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;line-height:1.5;margin-top:-6px';
+      _mp4Note.textContent='누르면 이 컴퓨터에서 바로 MP4로 변환돼요 (처음 한 번은 변환 도구를 받느라 조금 더 걸려요)';
+      dlBtn2.onclick=function(){
+        if(G_SHORTS.resultMp4Blob){ _shortsSaveBlob(G_SHORTS.resultMp4Blob, 'cloverai_shorts_'+Date.now()+'.mp4'); return; }
+        if(!G_SHORTS.resultBlob){ if(G_SHORTS.resultDownload) G_SHORTS.resultDownload(); return; }
+        dlBtn2.disabled=true; dlBtn2.style.opacity='.8';
+        dlBtn2.textContent='MP4로 변환 준비 중…';
+        _shortsConvertToMp4(G_SHORTS.resultBlob, function(p, lbl){ dlBtn2.textContent='MP4로 변환 중… '+Math.round((p||0)*100)+'%'+(lbl&&lbl!=='원본 해상도'?' ('+lbl+')':''); })
+          .then(function(mp4){
+            G_SHORTS.resultMp4Blob=mp4;
+            _shortsSaveBlob(mp4, 'cloverai_shorts_'+Date.now()+'.mp4');
+            dlBtn2.disabled=false; dlBtn2.style.opacity='1';
+            dlBtn2.innerHTML='✓ MP4 저장 완료 — 다시 받기';
+            _mp4Note.textContent = mp4._droppedAudio ? '⚠️ 이 브라우저에선 소리(AAC) 변환이 안 돼서 소리 없이 저장됐어요 — 크롬 최신 버전에서 다시 시도해 주세요.' : ('✓ MP4(H.264)로 저장됐어요'+(mp4._resLabel&&mp4._resLabel!=='원본 해상도'?' — 이 컴퓨터는 원본 해상도 변환이 안 돼서 '+mp4._resLabel+'로 저장(쇼츠 표준 해상도)':'')+' — 인스타·틱톡·유튜브에 바로 올리면 돼요.');
+          })
+          .catch(function(e){
+            console.warn('[쇼츠 MP4 변환 실패]', e);
+            dlBtn2.disabled=false; dlBtn2.style.opacity='1';
+            dlBtn2.innerHTML='&#11015; 쇼츠 다운로드 (MP4)';
+            alert('MP4 변환에 실패했어요: '+(e&&e.message||e)+'\n\n원본(WebM)으로 대신 저장할게요.');
+            if(G_SHORTS.resultDownload) G_SHORTS.resultDownload();
+          });
+      };
+      vidWrap.appendChild(dlBtn2);
+      vidWrap.appendChild(_mp4Note);
+      var webmBtn=document.createElement('button'); webmBtn.type='button';
+      webmBtn.textContent='WebM 원본 그대로 받기';
+      webmBtn.style.cssText='margin-top:-6px;padding:4px 10px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:10.5px;cursor:pointer;font-family:inherit';
+      webmBtn.onclick=function(){ if(G_SHORTS.resultDownload)G_SHORTS.resultDownload(); };
+      vidWrap.appendChild(webmBtn);
+    }
 
     // 카카오톡 공유 — 일반 이미지 결과랑 똑같이 바로 카톡으로 보낼 수 있게 함.
     // 영상 파일 자체는 카카오 피드 카드에 못 넣으니(카드는 이미지+링크 형태만 지원), 첫 프레임(썸네일)을
@@ -28166,6 +28204,97 @@ function _shortsRenderCanvas(ub){
 // ── 영상 파일 → 포스터 썸네일 + 길이 추출 ───────────────────────────
 // 영상도 이제 이미지와 똑같이 images 배열의 한 항목으로 들어가서 그리드에 순서대로 표시되므로,
 // 그리드 타일에 쓸 정지 프레임(포스터)이 필요함 — 0.1초 지점을 캡처(0초는 검은 프레임인 경우가 많음).
+// ── 🎞 WebM → MP4 변환 (요청: "쇼츠 렌더링하면 webm이라 매일 변환 사이트 찾아서 mp4로 바꾼다, 간단한 방법 없나") ──
+// 이 기기에선 녹화 단계에서 바로 MP4로 녹화하면 멈추는 문제가 있어(위 beginRecord 주석) 녹화는 WebM으로 하고,
+// 다운로드할 때 브라우저 안에서 MP4(H.264 영상 + AAC 소리)로 변환함. 파일이 외부로 업로드되지 않고 내 컴퓨터에서
+// 바로 변환되며, 그래픽카드 가속(WebCodecs)을 써서 빠름. 변환 라이브러리(Mediabunny)는 처음 한 번만 받아옴.
+// 변환 도구는 처음 한 번만 받아옴. CDN 파일을 그대로 <script>로 넣으면 서버가 알려주는 파일 형식(MIME) 때문에 막힐 수
+// 있어서, 내용을 받아서 브라우저 안에서 스크립트로 실행함(전역 Mediabunny / MediabunnyAacEncoder 생성).
+var _MB_BASE='https://cdn.jsdelivr.net/npm/';
+var _MB_FILES={ core:_MB_BASE+'mediabunny@1.61.1/dist/bundles/mediabunny.min.cjs',
+                aac:_MB_BASE+'@mediabunny/aac-encoder@1.61.1/dist/bundles/mediabunny-aac-encoder.min.js' };
+var _mbLoading=null, _mbAacReady=null;
+function _loadScriptText(url){
+  return fetch(url).then(function(r){ if(!r.ok) throw new Error('변환 도구를 받지 못했어요 ('+r.status+')'); return r.text(); })
+    .then(function(code){ return new Promise(function(res,rej){
+      var u=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+      var s=document.createElement('script'); s.src=u; s.onload=function(){ URL.revokeObjectURL(u); res(); }; s.onerror=function(){ rej(new Error('변환 도구 실행 실패')); };
+      document.head.appendChild(s);
+    }); });
+}
+function _mbLoad(){
+  if(window.Mediabunny) return Promise.resolve(window.Mediabunny);
+  if(!_mbLoading) _mbLoading=_loadScriptText(_MB_FILES.core).then(function(){ if(!window.Mediabunny) throw new Error('변환 도구 로드 실패'); return window.Mediabunny; });
+  return _mbLoading;
+}
+// ⚠️ 버그 수정("MP4로 바꾸니 소리 없이 저장된다"): 크롬 일부 환경은 AAC(소리) 인코더가 내장돼 있지 않아서 소리 트랙이
+// 빠졌음 → 그럴 땐 AAC 인코더(작은 WASM)를 추가로 받아 등록해서 소리까지 MP4에 넣음
+function _mbEnsureAac(MB){
+  if(_mbAacReady) return _mbAacReady;
+  _mbAacReady = MB.canEncodeAudio('aac').catch(function(){ return false; }).then(function(native){
+    if(native) return true;
+    return _loadScriptText(_MB_FILES.aac).then(function(){
+      if(window.MediabunnyAacEncoder && window.MediabunnyAacEncoder.registerAacEncoder){ window.MediabunnyAacEncoder.registerAacEncoder(); return true; }
+      return false;
+    }).catch(function(e){ console.warn('[MP4 변환] AAC 인코더 추가 실패:', e); return false; });
+  });
+  return _mbAacReady;
+}
+// ⚠️ 버그 수정("MP4가 아니라 여전히 WebM으로 저장됐다"): 4K 세로(2160×3840)처럼 큰 해상도는 많은 컴퓨터의 H.264
+// 인코더가 지원하지 않아서 변환이 거절되고 WebM으로 대신 저장됐음 → 원본 해상도로 먼저 시도하고, 안 되면
+// 쇼츠 표준인 1080×1920(세로 1920)으로, 그래도 안 되면 소프트웨어 인코더·더 낮은 해상도 순서로 자동 재시도.
+function _shortsConvertToMp4(blob, onProgress){
+  var attempts=[
+    { label:'원본 해상도',          video:{} },
+    { label:'1080×1920',          video:{ height:1920 } },
+    { label:'1080×1920(소프트웨어)', video:{ height:1920, hardwareAcceleration:'prefer-software' } },
+    { label:'720×1280',           video:{ height:1280, hardwareAcceleration:'prefer-software' } }
+  ];
+  var reasons=[];
+  return _mbLoad().then(function(MB){
+    return _mbEnsureAac(MB).then(function(){
+      function tryAt(i){
+        if(i>=attempts.length) return Promise.reject(new Error('이 컴퓨터의 브라우저에서 MP4(H.264) 변환이 안 돼요 — '+reasons.join(' / ')));
+        var a=attempts[i];
+        var input=new MB.Input({ source:new MB.BlobSource(blob), formats:MB.ALL_FORMATS });
+        var target=new MB.BufferTarget();
+        var output=new MB.Output({ format:new MB.Mp4OutputFormat({ fastStart:'in-memory' }), target:target });
+        var vopt={ codec:'avc', quality:MB.QUALITY_HIGH, forceTranscode:true };
+        Object.keys(a.video).forEach(function(k){ vopt[k]=a.video[k]; });
+        return MB.Conversion.init({
+          input:input, output:output, video:vopt,
+          audio:{ codec:'aac', quality:MB.QUALITY_HIGH, forceTranscode:true },
+          showWarnings:false
+        }).then(function(conv){
+          var droppedAudio=(conv.discardedTracks||[]).some(function(d){ return d.track && d.track.type==='audio'; });
+          var droppedVideo=(conv.discardedTracks||[]).some(function(d){ return d.track && d.track.type==='video'; });
+          if(!conv.isValid || droppedVideo){
+            reasons.push(a.label+': '+((conv.discardedTracks||[]).map(function(d){return d.reason;}).join(',')||'지원 안 됨'));
+            return tryAt(i+1);
+          }
+          if(onProgress) conv.onProgress=function(p){ onProgress(p, a.label); };
+          return conv.execute().then(function(){
+            var out=new Blob([target.buffer], {type:'video/mp4'});
+            out._droppedAudio=droppedAudio; out._resLabel=a.label;
+            console.log('[MP4 변환] 완료 —', a.label, (out.size/1048576).toFixed(1)+'MB', droppedAudio?'(소리 없음)':'(소리 포함)');
+            return out;
+          }, function(err){
+            reasons.push(a.label+': '+(err&&err.message||err));
+            console.warn('[MP4 변환] '+a.label+' 실패 → 다음 방법으로 재시도', err);
+            return tryAt(i+1);
+          });
+        }, function(err){ reasons.push(a.label+': '+(err&&err.message||err)); return tryAt(i+1); });
+      }
+      return tryAt(0);
+    });
+  });
+}
+function _shortsSaveBlob(blob, name){
+  var u=URL.createObjectURL(blob);
+  var a=document.createElement('a'); a.href=u; a.download=name;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(u); }, 60000);
+}
 function _shortsVideoToPoster(file, cb){
   var bu=URL.createObjectURL(file);
   _shortsSessionBlobs[bu]=1;
@@ -29418,7 +29547,7 @@ function _shortsGenerate(){
           _shortsSaveGalleryMeta();
         }
         // 카카오톡 공유 버튼이 나중에 영상을 업로드할 때 쓸 수 있게 blob과 썸네일을 같이 보관
-        G_SHORTS.resultBlob=blob;
+        G_SHORTS.resultBlob=blob; G_SHORTS.resultMp4Blob=null;
         G_SHORTS.resultThumb=slides[0]&&slides[0].img;
         G_SHORTS.resultExt=ext;
         // 메인 화면에서 바로 미리보기+다운로드 가능하도록 즉시 갱신
