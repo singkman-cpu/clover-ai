@@ -23859,18 +23859,21 @@ function _shortsPersistVideo(item, fileOrBlob){
   item.vidKey = _shortsVideoKey(item); // 복제된 클립들이 같은 파일을 함께 쓰도록 키를 기록
   idbSaveVideo(item.vidKey, fileOrBlob).catch(function(e){ item.vidStored=false; console.warn('[쇼츠] 영상 클립 보관 실패(용량 부족 가능):', e); });
 }
+var _shortsSessionBlobs = {}; // 이번 페이지에서 만든 영상 임시주소(blob:) 목록
 var _shortsRehydratingMap = {}; // 이 세션에서 지금 불러오는 중인 영상(저장 데이터에 섞이지 않도록 별도 보관)
 function _shortsRehydrateVideos(){
   if(!G_SHORTS || !G_SHORTS.images) return;
   G_SHORTS.images.forEach(function(im){
     var _rk=String(im.id);
     if(!im.isVideo || !im.vidStored || _shortsRehydratingMap[_rk]) return;
-    if(im.videoUrl && !(im.videoUrl.indexOf('blob:')===0 && im._blobDead)) return; // 이미 쓸 수 있는 주소가 있으면 그대로
+    // blob: 주소는 그 주소를 만든 페이지(세션)에서만 살아있음 → 이번 세션에서 만든 게 아니면 죽은 주소로 보고 보관 파일로 다시 연결
+    var _isLiveBlob = im.videoUrl && im.videoUrl.indexOf('blob:')===0 && _shortsSessionBlobs[im.videoUrl] && !im._blobDead;
+    if(im.videoUrl && (im.videoUrl.indexOf('blob:')!==0 || _isLiveBlob)) return; // 이미 쓸 수 있는 주소가 있으면 그대로
     _shortsRehydratingMap[_rk] = true;
     idbLoadVideo(_shortsVideoKey(im)).then(function(blob){
       _shortsRehydratingMap[_rk] = false;
       if(!blob) return;
-      im.videoUrl = URL.createObjectURL(blob);
+      im.videoUrl = URL.createObjectURL(blob); _shortsSessionBlobs[im.videoUrl]=1;
       im._blobDead = false;
       if(G.wf==='shorts'){ renderSB(); renderMain('shorts'); }
     }).catch(function(){ _shortsRehydratingMap[_rk] = false; });
@@ -24980,7 +24983,22 @@ function _shortsRenderLivePreview(container){
         if(!vIm._fullDuration && v.duration && isFinite(v.duration)) vIm._fullDuration=v.duration;
         try{ v.currentTime = vIm.speedMode ? 0 : (vIm.trimStart||0); }catch(e){}
       });
-      v.addEventListener('error', function(){ v._loadErr=true; });
+      v.addEventListener('error', function(){
+        var code = v.error ? v.error.code : 0;
+        console.warn('[쇼츠 미리보기] 영상 불러오기 실패 code='+code+' ('+(v.error&&v.error.message||'')+') src='+String(v._src).slice(0,60));
+        // 자동 복구: 임시 주소(blob)가 이미 무효가 된 경우가 대부분 → 브라우저에 보관해둔 원본 파일로 새 주소를 만들어 다시 시도(1회)
+        if(!v._retried && vIm.vidStored){
+          v._retried=true;
+          idbLoadVideo(_shortsVideoKey(vIm)).then(function(blob){
+            if(blob){
+              vIm.videoUrl=URL.createObjectURL(blob); _shortsSessionBlobs[vIm.videoUrl]=1; vIm._blobDead=false;
+              window._shortsPvVid=null; renderSB(); renderMain('shorts');
+            } else { v._loadErr=code||true; v._noStore=true; }
+          }).catch(function(){ v._loadErr=code||true; });
+          return;
+        }
+        v._loadErr=code||true;
+      });
       window._shortsPvVid=v;
     }
     // 일부 브라우저는 화면(DOM)에 붙어있지 않은 영상은 프레임을 디코딩하지 않아서 재생바를 움직여도 그림이 안 바뀜 →
@@ -24997,7 +25015,9 @@ function _shortsRenderLivePreview(container){
       if(!canvas.isConnected){ window._shortsPvRaf=0; try{ v.pause(); }catch(e){} return; } // 다른 화면으로 나가면 소리도 멈춤
       // 상태 안내: 아직 못 불러왔거나 불러오기 실패
       if(stLbl){
-        var msg = v._loadErr ? '⚠️ 이 영상 파일을 브라우저가 재생하지 못해요(형식 문제일 수 있어요) — MP4(H.264)로 다시 올려보세요'
+        var msg = v._loadErr ? (v._noStore || !vIm.vidStored
+                    ? '⚠️ 이 영상의 원본 파일 연결이 끊겼어요(새로고침 전에 올린 영상) — 이 클립을 지우고 영상을 한 번만 다시 올려주세요. 이후엔 새로고침해도 유지돼요.'
+                    : '⚠️ 이 영상을 브라우저가 재생하지 못해요(오류 '+v._loadErr+') — MP4(H.264) 형식으로 다시 올려보세요')
                 : (v.readyState<2 ? '⏳ 영상 불러오는 중…' : '');
         if(stLbl._m!==msg){ stLbl._m=msg; stLbl.textContent=msg; stLbl.style.display=msg?'block':'none'; }
       }
@@ -25103,7 +25123,7 @@ function _shortsRenderLivePreview(container){
         var copy={};
         Object.keys(vIm).forEach(function(k){ if(k.charAt(0)!=='_' || k==='_fullDuration') copy[k]=vIm[k]; });
         copy.id=Date.now()+Math.random();
-        copy.videoUrl=URL.createObjectURL(blob);
+        copy.videoUrl=URL.createObjectURL(blob); _shortsSessionBlobs[copy.videoUrl]=1;
         copy.vidKey=vIm.vidKey || (vIm.vidStored ? _shortsVideoKey(vIm) : null);
         if(!copy.vidKey){ _shortsPersistVideo(copy, blob); } else { copy.vidStored=true; }
         // 기본 구간: 원본 구간 바로 뒤부터(남은 부분이 있으면), 아니면 전체
@@ -28148,6 +28168,7 @@ function _shortsRenderCanvas(ub){
 // 그리드 타일에 쓸 정지 프레임(포스터)이 필요함 — 0.1초 지점을 캡처(0초는 검은 프레임인 경우가 많음).
 function _shortsVideoToPoster(file, cb){
   var bu=URL.createObjectURL(file);
+  _shortsSessionBlobs[bu]=1;
   var v=document.createElement('video');
   v.preload='metadata'; v.muted=true; v.playsInline=true;
   var settled=false;
