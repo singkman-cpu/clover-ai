@@ -2201,7 +2201,7 @@ function _buildProposalPDF(data, cb){
     var pageMeta=[]; // 각 페이지가 실제로 무엇인지(표지/목차/어떤 공간/견적/마무리) 기록 —
     // 완성 화면에서 "이 페이지 삭제"를 누르면 이 메타로 무엇을 껐다/지웠다를 판단함.
     pageCanvases.push(isEd ? _proposalDrawCoverPageEd(data, loaded.hero, loaded.logo) : _proposalDrawCoverPage(data, loaded.hero, loaded.logo)); pageMeta.push({kind:'cover'});
-    if(includeToc){ pageCanvases.push(_proposalDrawTOCPage(data, totalPages, loaded)); pageMeta.push({kind:'toc'}); }
+    if(includeToc){ pageCanvases.push(isEd ? _proposalDrawTOCPageEd(data, totalPages, loaded, loaded.logo) : _proposalDrawTOCPage(data, totalPages, loaded)); pageMeta.push({kind:'toc'}); }
     if(includeConcept){ pageCanvases.push(_proposalDrawConceptPageEd(data, loaded, (includeToc?2:1), totalPages, loaded.logo)); pageMeta.push({kind:'concept'}); }
     chunks.forEach(function(chunk, ci){
       pageCanvases.push(isEd ? _proposalDrawContentPageEd(chunk, loaded, data, pagesBeforeContent+ci, totalPages, loaded.logo)
@@ -2897,6 +2897,77 @@ function _proposalDrawConceptPageEd(data, loaded, pageIndex, totalPages, logoImg
   var ll=_wrapCanvasText(ctx, list, innerW)[0]||''; ctx.fillText(ll, pad, Math.min(y, H-112));
 
   _proposalEdFooter(ctx, data, t, pad, pageIndex, totalPages, logoImg);
+  return canvas;
+}
+
+// 목차(매거진형) — 요청: "렌더링하면 목차가 이상하게 들어간다" → 예전 클래식 목차(모서리 브라켓, 점선,
+// 들쭉날쭉한 특수 항목)가 매거진형 문서 안에 그대로 끼어 있었음. 같은 디자인 언어로 새로 그림:
+// 페이지 순서대로 [페이지번호 | 구분 + 제목 | 썸네일] 한 줄씩, 항목 수에 맞춰 줄 높이가 페이지를 꽉 채움.
+function _proposalDrawTOCPageEd(data, totalPages, loaded, logoImg){
+  var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H;
+  var canvas=document.createElement('canvas'); canvas.width=W; canvas.height=H;
+  var ctx=canvas.getContext('2d');
+  var t=_proposalEffectiveTheme(data);
+  var pad=88, innerW=W-pad*2;
+  ctx.fillStyle=t.bg; ctx.fillRect(0,0,W,H);
+  _proposalEdHeader(ctx, data, t, pad, 'Contents');
+  var scenes=data.scenes||[];
+  var cStart=data._contentStartPage||3;
+  var hasBudget = scenes.some(function(sc){return sc.budgetSnapshot;}) && data.includeBudgetPage!==false;
+  var rows=[];
+  if(cStart>3) rows.push({page:3, kind:'OVERVIEW', title:'디자인 컨셉', sub:'컨셉 · 무드보드 · 마감재'});
+  scenes.forEach(function(sc,i){
+    var pr=_propEdScenePrice(sc), sub=data.spaceLabel||'';
+    if(pr){ try{ sub+=(sub?'  ·  ':'')+'예상 '+_proposalFormatBudget(pr); }catch(e){} }
+    var mats=(sc.materials||[]).filter(function(m){return m&&m.v;}).slice(0,2).map(function(m){return m.v;});
+    if(!pr && mats.length) sub+=(sub?'  ·  ':'')+mats.join(', ');
+    rows.push({page:Math.floor(i/PROPOSAL_SCENES_PER_PAGE)+cStart, kind:'SPACE '+_propEdPad2(i+1), title:_propEdSceneLabel(sc,i), sub:sub, thumb:loaded?loaded['a'+i]:null});
+  });
+  var contentPages=Math.ceil(scenes.length/PROPOSAL_SCENES_PER_PAGE);
+  if(hasBudget) rows.push({page:cStart+contentPages, kind:'ESTIMATE', title:'견적 요약', sub:'공간별 예상 공사비'});
+  if(data.includeClosing!==false) rows.push({page:totalPages, kind:'CLOSING', title:'마무리 인사', sub:'진행 절차 · 연락처'});
+
+  // 큰 제목
+  var y=128;
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  ctx.fillStyle=t.ink; ctx.font='800 72px '+PROPOSAL_FONT; _propEdLS(ctx,-1);
+  ctx.fillText('Contents', pad-3, y); _propEdLS(ctx,0);
+  ctx.fillStyle=t.muted; ctx.font='500 20px '+PROPOSAL_FONT;
+  ctx.textAlign='right';
+  ctx.fillText('목차  ·  총 '+totalPages+'페이지', W-pad, y+44);
+  y+=120;
+  ctx.fillStyle=t.ink; ctx.fillRect(pad, y, innerW, 2);
+
+  // 줄 높이: 남는 세로 공간을 항목 수로 나눠 꽉 채움(너무 크거나 작지 않게)
+  var avail=(H-70-40)-y;
+  var rowH=Math.max(64, Math.min(190, Math.floor(avail/Math.max(1,rows.length))));
+  var showThumb=rowH>=96;
+  var thH=rowH-28, thW=Math.round(thH*1.5);
+  rows.forEach(function(r){
+    var cy=y+rowH/2;
+    // 페이지 번호(크게, 포인트 색)
+    ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillStyle=t.accent; ctx.font='800 '+Math.min(54, Math.round(rowH*0.42))+'px '+PROPOSAL_FONT; _propEdLS(ctx,-1);
+    ctx.fillText(_propEdPad2(r.page), pad, cy+2); _propEdLS(ctx,0);
+    var tx=pad+130, tMaxW=innerW-130-(showThumb && r.thumb ? thW+30 : 0);
+    // 구분 라벨 + 제목 + 보조설명
+    ctx.fillStyle=t.muted; ctx.font='700 13px '+PROPOSAL_FONT; _propEdLS(ctx,2.5); ctx.textBaseline='alphabetic';
+    var titleSize=Math.min(34, Math.max(20, Math.round(rowH*0.2)));
+    var blockH=18+titleSize+ (r.sub?28:0);
+    var ty=cy-blockH/2;
+    ctx.fillText(r.kind, tx, ty+12); _propEdLS(ctx,0);
+    ctx.fillStyle=t.ink; _propEdFitFont(ctx, r.title, '800', titleSize, 16, tMaxW);
+    ctx.fillText(r.title, tx, ty+18+titleSize*0.9);
+    if(r.sub){
+      ctx.fillStyle=t.desc; ctx.font='400 17px '+PROPOSAL_FONT;
+      var sub=r.sub; while(ctx.measureText(sub).width>tMaxW && sub.length>3) sub=sub.slice(0,-2)+'…';
+      ctx.fillText(sub, tx, ty+18+titleSize+24);
+    }
+    if(showThumb && r.thumb){ _proposalCoverDrawRounded(ctx, r.thumb, W-pad-thW, y+14, thW, thH, 4); }
+    y+=rowH;
+    ctx.fillStyle=t.divider; ctx.fillRect(pad, y-1, innerW, 1);
+  });
+  _proposalEdFooter(ctx, data, t, pad, 1, totalPages, logoImg);
   return canvas;
 }
 
@@ -9291,6 +9362,16 @@ function renderMain(callWf, preserveScroll){
       // id가 비정상(NaN/문자열)인 게 하나라도 섞이면 정렬 순서가 깨져서
       // 방금 시작한 로딩 카드가 맨 위가 아니라 중간에 끼어드는 버그가 있었음.
       // → id 값에 의존하지 않고 그냥 배열을 반전(oldest-first)해서 넣는다.
+      // ⚠️ 버그 수정("VR 투어 탭 맨 위에 새로 만든 게 아니라 예전 것이 있다"): VR 탭은 만든 시각(id) 기준으로
+      // 최신이 맨 위에 오도록 확실히 정렬(진행 중 카드는 항상 맨 위). id가 숫자가 아닌 항목은 원래 순서 유지.
+      if(wf==='world3d'){
+        items = items.map(function(x,i){ return {x:x,i:i}; }).sort(function(a,b){
+          if(!!a.x.loading !== !!b.x.loading) return a.x.loading ? -1 : 1;
+          var ai=+a.x.id, bi=+b.x.id;
+          if(isFinite(ai) && isFinite(bi) && ai!==bi) return bi-ai;
+          return a.i-b.i;
+        }).map(function(o){ return o.x; });
+      }
       var sorted=items.slice().reverse();
       // ⚠️ 버그 방어("렌더링은 분명 끝났는데 메인화면엔 아무것도 안 뜬다, 로딩중 표시도 안 뜬다" —
       // 관리자 계정에선 재현이 안 되고 일반 계정에서만 재현된다는 신고): addHistEl은 항목 하나하나를
@@ -27529,7 +27610,7 @@ function _proposalLightbox(urls, start){
 // ⚠️ 예전엔 서버 'llm'(텍스트 전용 모델)을 써서 AI가 사진을 실제로 못 보고 지어냈음(외관 사진에 '포세린타일').
 // 이제 사진을 직접 볼 수 있는 Claude 경로(chat-assistant)로 사진+질문을 보내고, 각 마감재가 보이는
 // 위치(사각형 좌표)까지 받아서 그 부분을 원본에서 잘라 실제 마감재 샘플 이미지로 씀.
-var MATERIAL_ANALYSIS_VER = 2;
+var MATERIAL_ANALYSIS_VER = 3; // 3: 샘플 자동 채우기(위치 누락 시 부위별 기본 위치 + 가장 고른 부분 자동 선택)
 var _propMatBusy = (typeof WeakSet!=='undefined') ? new WeakSet() : null;
 var _propMatFailed = (typeof WeakSet!=='undefined') ? new WeakSet() : null; // 실패는 이번 접속에서만 기억(새로고침하면 다시 시도)
 function _proposalMatFailed(sc){ return !!(_propMatFailed && _propMatFailed.has(sc)); }
@@ -27561,21 +27642,62 @@ function _proposalImgToB64(src, cb){
   im.onerror=function(){ cb(null, null); };
   im.src=src;
 }
+// 부위 이름으로 "대략 어디에 있을지" 기본 위치(0~1000) — AI가 위치를 안 줬을 때 자동으로 씀
+function _proposalDefaultMatRegion(k){
+  k=String(k||'');
+  if(/바닥|마루|데크|floor|deck|바닥재/i.test(k)) return [200,720,800,990];
+  if(/천장|지붕|ceiling|roof/i.test(k)) return [200,10,800,260];
+  if(/외벽|벽|wall|facade/i.test(k)) return [40,280,960,700];
+  if(/창|window/i.test(k)) return [300,300,700,650];
+  return [250,250,750,750];
+}
 // 원본 이미지에서 정사각 샘플(스와치) 잘라내기 — box는 0~1000 기준 [x0,y0,x1,y1], 또는 point {x,y}(0~1)
+// 상자 안에서 여러 후보 위치를 비교해 "가장 고르게 재질만 보이는 곳"(색 변화가 가장 적고 너무
+// 어둡거나 하얗게 날아가지 않은 곳)을 자동으로 골라 자름 — 가구 모서리·경계선이 섞이는 걸 줄임.
 function _proposalCropSwatch(im, box, pt){
   try{
-    var W=im.naturalWidth, H=im.naturalHeight, side, cx, cy;
-    if(pt){ side=Math.min(W,H)*0.14; cx=pt.x*W; cy=pt.y*H; }
-    else {
+    var W=im.naturalWidth, H=im.naturalHeight, side, sx, sy;
+    if(pt){
+      side=Math.min(W,H)*0.14;
+      sx=Math.max(0, Math.min(W-side, pt.x*W-side/2)); sy=Math.max(0, Math.min(H-side, pt.y*H-side/2));
+    } else {
       var x0=box[0]/1000*W, y0=box[1]/1000*H, x1=box[2]/1000*W, y1=box[3]/1000*H;
-      side=Math.max(Math.min(W,H)*0.06, Math.min(x1-x0, y1-y0)*0.7); cx=(x0+x1)/2; cy=(y0+y1)/2;
+      var bw=Math.max(1,x1-x0), bh=Math.max(1,y1-y0);
+      side=Math.max(Math.min(W,H)*0.06, Math.min(bw, bh)*0.6); side=Math.min(side, W, H);
+      var tc=document.createElement('canvas'); tc.width=tc.height=16;
+      var tx=tc.getContext('2d',{willReadFrequently:true});
+      var best=null, N=4;
+      for(var gy=0; gy<N; gy++) for(var gx=0; gx<N; gx++){
+        var cx0=x0+(bw-side)*(N>1?gx/(N-1):.5), cy0=y0+(bh-side)*(N>1?gy/(N-1):.5);
+        cx0=Math.max(0, Math.min(W-side, cx0)); cy0=Math.max(0, Math.min(H-side, cy0));
+        tx.clearRect(0,0,16,16); tx.drawImage(im, cx0, cy0, side, side, 0, 0, 16, 16);
+        var d=tx.getImageData(0,0,16,16).data, sum=0, sum2=0, n=0;
+        for(var i=0;i<d.length;i+=4){ var L=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; sum+=L; sum2+=L*L; n++; }
+        var mean=sum/n, v=sum2/n-mean*mean;
+        var score=v + (mean<28?3000:0) + (mean>245?1500:0);
+        if(!best || score<best.s) best={s:score, x:cx0, y:cy0};
+      }
+      sx=best.x; sy=best.y;
     }
-    side=Math.min(side, W, H);
-    var sx=Math.max(0, Math.min(W-side, cx-side/2)), sy=Math.max(0, Math.min(H-side, cy-side/2));
     var c=document.createElement('canvas'); c.width=c.height=240;
     c.getContext('2d').drawImage(im, sx, sy, side, side, 0, 0, 240, 240);
     return c.toDataURL('image/jpeg', 0.88);
   }catch(e){ return null; }
+}
+// 마감재 이름은 있는데 샘플 이미지가 빠진 칸 → 부위별 기본 위치에서 자동으로 잘라 채움(AI 호출·크레딧 없음)
+var _propSwFillBusy = (typeof WeakSet!=='undefined') ? new WeakSet() : null;
+function _proposalFillMissingSwatches(sc, cb){
+  if(!sc || !sc.result || !sc.materials) return;
+  var need=sc.materials.some(function(m){ return m && m.v && String(m.v).trim() && !m.img; });
+  if(!need) return;
+  if(_propSwFillBusy){ if(_propSwFillBusy.has(sc)) return; _propSwFillBusy.add(sc); }
+  var im=new Image(); im.crossOrigin='anonymous';
+  im.onload=function(){
+    var changed=false;
+    (sc.materials||[]).forEach(function(m){ if(m && m.v && String(m.v).trim() && !m.img){ var sw=_proposalCropSwatch(im, _proposalDefaultMatRegion(m.k)); if(sw){ m.img=sw; changed=true; } } });
+    if(changed && cb) cb();
+  };
+  im.src=sc.result;
 }
 function _proposalAnalyzeMaterials(sc, cb){
   if(!sc || !sc.result || sc._matEdited || _proposalMatFailed(sc)) return;
@@ -27583,11 +27705,11 @@ function _proposalAnalyzeMaterials(sc, cb){
   if(_propMatBusy){ if(_propMatBusy.has(sc)) return; _propMatBusy.add(sc); }
   var prompt='[마감재 분석 요청 — 아래 형식으로만 답변, 인사말·설명 금지]\n'+
     '첨부한 사진을 직접 보고, 실제로 보이는 마감재를 알려줘. 실내 사진이면 바닥/벽/천장/포인트, 건물 외관 사진이면 지붕/외벽/창호/포인트(데크·석재 등) — 딱 4줄.\n'+
-    '각 줄 형식:  부위: 재질과 색상(18자 이내) | x1,y1,x2,y2\n'+
+    '각 줄 형식:  부위: 재질과 색상(18자 이내) | x1,y1,x2,y2   ← 4줄 모두 좌표 필수(빠뜨리지 말 것)\n'+
     '좌표는 사진 전체를 가로·세로 0~1000으로 봤을 때, 그 마감재가 가구·사람·차·그림자에 가리지 않고 그 재질만 넓게 보이는 부분을 감싸는 사각형.\n'+
     '예시(내용은 사진에 맞게):\n지붕: 블랙 징크 강판 | 380,120,620,330\n외벽: 차콜 금속 패널 | 330,400,420,700';
   function done(r, im){
-    if(r && im){ r.forEach(function(m){ if(m.box){ var sw=_proposalCropSwatch(im, m.box); if(sw) m.img=sw; } delete m.box; }); }
+    if(r && im){ r.forEach(function(m){ var sw=_proposalCropSwatch(im, m.box || _proposalDefaultMatRegion(m.k)); if(sw) m.img=sw; delete m.box; }); }
     if(_propMatBusy) _propMatBusy.delete(sc);
     if(r){ sc.materials=r; sc.matV=MATERIAL_ANALYSIS_VER; } else if(_propMatFailed){ _propMatFailed.add(sc); }
     if(cb) cb();
@@ -27641,7 +27763,7 @@ function _proposalMaterialsReady(){
 var _propLayoutPrevCache={key:null, urls:null};
 function _proposalLayoutPreview(box, opts, scenes){
   var wrap=document.createElement('div');
-  wrap.style.cssText='width:100%;max-width:760px;display:flex;flex-direction:column;align-items:center;gap:12px';
+  wrap.style.cssText='width:100%;max-width:900px;display:flex;flex-direction:column;align-items:center;gap:12px';
   var seg=document.createElement('div');
   seg.style.cssText='display:flex;gap:6px;background:var(--c2);border:1px solid var(--bd2);border-radius:12px;padding:5px';
   var lay=opts.layout||'editorial';
@@ -27655,7 +27777,7 @@ function _proposalLayoutPreview(box, opts, scenes){
   });
   wrap.appendChild(seg);
   var strip=document.createElement('div');
-  strip.style.cssText='display:flex;gap:10px;width:100%;overflow-x:auto;padding:4px 2px 10px;justify-content:center';
+  strip.style.cssText='display:flex;gap:10px;width:100%;overflow-x:auto;padding:4px 2px 10px;justify-content:safe center';
   var note=document.createElement('div');
   note.style.cssText='font-size:11px;color:var(--m2)';
   note.textContent='실제로 만들어질 PDF 페이지 미리보기 · 레이아웃과 색상 테마를 바꾸면 바로 바뀌어요';
@@ -27663,21 +27785,21 @@ function _proposalLayoutPreview(box, opts, scenes){
   box.appendChild(wrap);
 
   var cover=opts.coverImg || (_proposalGetCoverScene(scenes)||scenes[0]).result;
-  var key=[lay, opts.styleKey, opts.useCustomColors?JSON.stringify(opts.customColors||{}):'', opts.client, opts.summary, opts.company, opts.contact, cover,
+  var key=[lay, opts.includeToc!==false, opts.includeConcept!==false, opts.includeClosing!==false, opts.includeBudgetPage!==false, opts.styleKey, opts.useCustomColors?JSON.stringify(opts.customColors||{}):'', opts.client, opts.summary, opts.company, opts.contact, cover,
     scenes.map(function(s){return (s.result||'').slice(-40)+'|'+(s.orig||'').slice(-40)+'|'+(s.label||'')+'|'+(s.desc||'')+'|'+JSON.stringify((s.materials||[]).map(function(m){return [m.k,m.v,m.img?m.img.length:0];}));}).join(';')].join('#');
   function show(urls, big){
     strip.innerHTML='';
     urls.forEach(function(u, i){
       var im=document.createElement('img'); im.src=u;
       im.title='클릭하면 크게 보기';
-      im.style.cssText='height:230px;width:auto;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);box-shadow:0 6px 18px rgba(0,0,0,.35);cursor:zoom-in;background:#fff';
+      im.style.cssText='height:200px;width:auto;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);box-shadow:0 6px 18px rgba(0,0,0,.35);cursor:zoom-in;background:#fff';
       im.onclick=function(){ _proposalLightbox(big||urls, i); };
       strip.appendChild(im);
     });
   }
   if(_propLayoutPrevCache.key===key && _propLayoutPrevCache.urls){ show(_propLayoutPrevCache.urls, _propLayoutPrevCache.big); return; }
   strip.innerHTML='<div style="height:230px;display:flex;align-items:center;color:var(--m2);font-size:12px">미리보기 만드는 중...</div>';
-  var list=scenes.slice(0,4), loaded={}, toLoad=[{k:'hero',s:cover}];
+  var list=scenes.slice(0,12), loaded={}, toLoad=[{k:'hero',s:cover}];
   list.forEach(function(sc,i){ toLoad.push({k:'a'+i,s:sc.result}); if(sc.orig) toLoad.push({k:'b'+i,s:sc.orig});
     (sc.materials||[]).forEach(function(m,j){ if(m && m.img) toLoad.push({k:'m'+i+'_'+j, s:m.img}); }); });
   if(opts.logo) toLoad.push({k:'logo',s:opts.logo});
@@ -27694,15 +27816,22 @@ function _proposalLayoutPreview(box, opts, scenes){
       var data={client:opts.client, spaceLabel:(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l||'공간',
         summary:opts.summary, company:opts.company, contact:opts.contact, scenes:scenes, _tone:parsed.tone,
         styleKey:opts.styleKey||'gold', customColors:opts.useCustomColors?opts.customColors:null, layout:lay};
-      var total=scenes.length+(lay==='editorial'?4:3), c=[];
+      // 실제 PDF와 같은 규칙으로 페이지 수·번호 계산(목차·컨셉·견적·마무리 켜짐/꺼짐 반영)
+      var _inToc=opts.includeToc!==false, _inCon=(lay==='editorial') && opts.includeConcept!==false, _inClo=opts.includeClosing!==false;
+      var _hasBud=scenes.some(function(sc){return sc.budgetSnapshot;}) && opts.includeBudgetPage!==false;
+      var _before=1+(_inToc?1:0)+(_inCon?1:0);
+      var total=_before+Math.ceil(scenes.length/PROPOSAL_SCENES_PER_PAGE)+(_hasBud?1:0)+(_inClo?1:0), c=[];
+      data._contentStartPage=_before+1; data.includeToc=_inToc; data.includeConcept=_inCon; data.includeClosing=_inClo; data.includeBudgetPage=opts.includeBudgetPage!==false;
       if(lay==='editorial'){
         c.push(_proposalDrawCoverPageEd(data, loaded.hero, loaded.logo));
-        c.push(_proposalDrawConceptPageEd(data, loaded, 2, total, loaded.logo));
-        c.push(_proposalDrawContentPageEd([{scene:scenes[0],idx:0}], loaded, data, 3, total, loaded.logo));
-        c.push(_proposalDrawClosingPageEd(data, loaded, total, loaded.logo));
+        if(_inToc) c.push(_proposalDrawTOCPageEd(data, total, loaded, loaded.logo));
+        if(_inCon) c.push(_proposalDrawConceptPageEd(data, loaded, _inToc?2:1, total, loaded.logo));
+        c.push(_proposalDrawContentPageEd([{scene:scenes[0],idx:0}], loaded, data, _before, total, loaded.logo));
+        if(_inClo) c.push(_proposalDrawClosingPageEd(data, loaded, total, loaded.logo));
       } else {
         c.push(_proposalDrawCoverPage(data, loaded.hero, loaded.logo));
-        c.push(_proposalDrawContentPage([{scene:scenes[0],idx:0}], loaded, data, 2, total, loaded.logo));
+        if(_inToc) c.push(_proposalDrawTOCPage(data, total, loaded));
+        c.push(_proposalDrawContentPage([{scene:scenes[0],idx:0}], loaded, data, _before, total, loaded.logo));
         c.push(_proposalDrawClosingPage(data, total));
       }
       var urls=c.map(function(cv){
@@ -27913,7 +28042,7 @@ function _proposalRenderCanvas(ub){
   // 레이아웃 선택 + 실제 PDF 페이지 미리보기(요청: "매거진형/클래식 눌러도 반응이 없다" → 고르는 즉시
   // 실제로 만들어질 페이지가 여기 바로 보이게 함)
   _proposalLayoutPreview(box, opts, scenes);
-  scenes.forEach(function(sc){ _proposalAnalyzeMaterials(sc, _proposalMaterialsReady); });
+  scenes.forEach(function(sc){ _proposalAnalyzeMaterials(sc, _proposalMaterialsReady); _proposalFillMissingSwatches(sc, _proposalMaterialsReady); });
 
   var theme=_proposalTheme(opts.styleKey);
   var GOLD=theme.accent, MOCKW=560;
@@ -36246,7 +36375,8 @@ function addHistEl(item, scroll, targetHs, atBottom){
         // 전부 동시에 IntersectionObserver로 자동 로드를 시도해서 — 무거운 3D 뷰어 여러 개가
         // 한꺼번에 네트워크/GPU를 다투면서 VR 탭 진입 자체가 느려지고 버벅였음.
         // → 가장 최근 결과 1개만 자동으로 켜고, 나머지는 클릭해야만 로드되게 함.
-        var _isNewestW3D = !!(G.HIST.world3d && G.HIST.world3d[0] && G.HIST.world3d[0].id===item.id);
+        var _w3Newest = (G.HIST.world3d||[]).filter(function(x){ return !x.loading && x.spzUrl; }).sort(function(a,b){ return (+b.id||0)-(+a.id||0); })[0];
+        var _isNewestW3D = !!(_w3Newest && _w3Newest.id===item.id);
         var _w3dInitOnce=function(){
           if(_w3dActive) return;
           var iw=w3frameWrap.offsetWidth;
@@ -50206,6 +50336,8 @@ function loadCloudGallery(){
             var _spzUrlsMeta=meta.spzUrls||null;
           }catch(e){}
         }
+        // VR: 같은 3D 파일(spzUrl)을 가진 항목이 이미 있으면 같은 결과로 보고 합침(중복 카드 방지)
+        if(!exists && wf==='world3d' && spzUrl){ exists=G.HIST[wf].find(function(h){ return h.spzUrl===spzUrl; }); }
         if(exists){
           if(exists&&!exists.gallery_id) exists.gallery_id=row.id;
           if(exists&&!exists.orig&&row.orig_url){
@@ -50877,7 +51009,12 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     loadingOverlay.style.cssText='position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#05050a;z-index:8;color:#fff;font-size:12.5px;gap:12px';
     loadingOverlay.innerHTML='<div style="width:32px;height:32px;border:3px solid rgba(255,255,255,.2);border-top-color:#12E6E6;border-radius:50%;animation:_w3spin .8s linear infinite"></div><div>3D 화면 불러오는 중...</div>';
     containerEl.appendChild(loadingOverlay);
-    setTimeout(function(){ if(loadingOverlay && loadingOverlay.parentNode) loadingOverlay.remove(); }, 1200);
+    // ⚠️ 고화질 버벅임 수정: 예전엔 1.2초 뒤 무조건 로딩 화면을 치워서, 무거운 고화질 파일이 아직 다 안
+    // 불러와졌는데도 반쯤 받아진 상태로 그리느라 버벅였음 → 실제로 다 불러와진 뒤(splat.initialized)에 치움.
+    var _loadTextEl = loadingOverlay.lastChild;
+    var _loadDone = false;
+    function _vrHideLoading(){ if(_loadDone) return; _loadDone=true; if(loadingOverlay && loadingOverlay.parentNode) loadingOverlay.remove(); }
+    setTimeout(_vrHideLoading, 90000); // 혹시 완료 신호를 못 받아도 90초 뒤엔 치움
 
     // 전체화면 버튼 (우상단, PC/모바일 공통) — containerEl을 그대로 전체화면으로 키우면
     // 이미 있는 ResizeObserver가 크기 변화를 감지해서 렌더러 사이즈도 자동으로 맞춰준다.
@@ -50943,7 +51080,17 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // 선명하게(뒤쪽 20%, 옆 40%) 그려서, 고개를 돌릴 때마다 새로 보이는 쪽을 다시 계산하며 거칠다가 선명해졌음.
     // → 모든 방향을 같은 디테일로(behind/coneFoveate=1) 만들고, 회전으로는 재계산이 안 일어나게 방향을 고정.
     //   (이동할 때만 다시 계산 — 제자리에서 둘러보는 동안은 화면이 흔들리지 않음)
-    var _lodCount = _isMob ? 400000 : 800000;
+    // 화질 단계: 생성 때 받은 버전 목록에서 지금 파일이 어느 단계인지 판단(고화질=full_res)
+    var _vq = containerEl._vrQuality || 'normal';
+    try{
+      var _vv = containerEl._spzVariants;
+      if(!containerEl._vrQuality && _vv && typeof _vv==='object'){
+        Object.keys(_vv).forEach(function(k){ if(_vv[k]===spzUrl){ var lk=String(k).toLowerCase(); _vq = lk==='full_res' ? 'high' : (lk==='500k' ? 'normal' : 'light'); } });
+      }
+    }catch(e){}
+    var _isHighQ = _vq==='high';
+    // 고화질: 화면에 그리는 점 개수를 조금 더 주고(더 선명), 점 줄이는 방식도 정밀 모드("quality")로.
+    var _lodCount = _isHighQ ? (_isMob ? 500000 : 1200000) : (_isMob ? 400000 : 800000);
     var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount, lodSplatScale: 1,
       maxStdDev: Math.sqrt(6), maxPixelRadius: 256, behindFoveate: 1, coneFoveate: 1 });
     try{ spark.behindFoveate=1; spark.coneFoveate=1; spark.lodQuatOverride = new THREE.Quaternion(); }catch(e){}
@@ -50951,8 +51098,22 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     scene.add(spark);
 
     var splat;
-    try{ splat = new SplatMesh({ url: spzUrl, lod: true }); }
+    var _onProg = function(ev){
+      try{
+        if(_loadDone || !_loadTextEl || !ev || !ev.total) return;
+        var pct = Math.min(99, Math.round(ev.loaded/ev.total*100));
+        _loadTextEl.textContent = (_isHighQ ? '고화질 3D 불러오는 중... ' : '3D 화면 불러오는 중... ')+pct+'%';
+      }catch(e){}
+    };
+    try{ splat = new SplatMesh({ url: spzUrl, lod: _isHighQ ? 'quality' : true, onProgress: _onProg }); }
     catch(e){ splat = new SplatMesh({ url: spzUrl }); }
+    if(_isHighQ && _loadTextEl) _loadTextEl.textContent='고화질 3D 불러오는 중... (파일이 커서 조금 걸려요)';
+    try{
+      splat.initialized.then(function(){
+        if(_loadTextEl && !_loadDone) _loadTextEl.textContent='화면 준비 완료!';
+        setTimeout(function(){ _vrHideLoading(); _vrStartMaterialize(); if(typeof _vrMarkDirty==='function') _vrMarkDirty(2500); }, 250);
+      }).catch(function(){ _vrHideLoading(); });
+    }catch(e){ setTimeout(_vrHideLoading, 1200); }
     // World Labs(Marble)의 스플랫은 Y/Z축이 Three.js 기준과 반대로 나와서
     // 보정 없이 그대로 쓰면 위아래가 뒤집히고 카메라가 바닥을 보게 된다 → 180도 회전 보정
     splat.rotation.x = Math.PI;
@@ -50965,7 +51126,8 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // (실제 포인트 단위 스캐터/컨버지까지는 라이브러리 API로 직접 제어하기 어려워서,
     //  스케일 그로우 + 파티클 오버레이로 같은 느낌을 냄)
     splat.scale.setScalar(0.02);
-    (function(){
+    var _matStarted=false;
+    function _vrStartMaterialize(){ if(_matStarted) return; _matStarted=true;
       var matStart=null, matDur=1400;
       function matStep(ts){
         if(matStart==null) matStart=ts;
@@ -50976,7 +51138,8 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         if(t<1) requestAnimationFrame(matStep);
       }
       requestAnimationFrame(matStep);
-    })();
+    }
+    setTimeout(_vrStartMaterialize, 90000); // 안전장치
     // 반짝이는 파티클 오버레이 — 로딩 스피너와 같은 자리에, 스플랫이 커지는 동안만 잠깐 보여주고
     // 자연스럽게 사라짐(별도 캔버스라 3D 렌더링 자체에는 영향 없음, 순수 장식).
     (function(){
@@ -51030,7 +51193,8 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // 계속 다시 그려서 그래픽카드가 쉬지 못했음 → 둘러보기/이동/화면크기 변경 직후 잠깐만 그리고,
     // 가만히 있으면 그리기를 멈춤(마지막 화면 그대로 유지). 녹화 중·처음 로딩 20초는 계속 그림.
     var _vrDirtyUntil=0, _vrStartT=performance.now(), _vrLastRender=0;
-    function _vrMarkDirty(ms){ _vrDirtyUntil=Math.max(_vrDirtyUntil, performance.now()+(ms||1500)); }
+    var _vrLastInput=0, _vrBasePR=null;
+    function _vrMarkDirty(ms){ var n=performance.now(); _vrLastInput=n; _vrDirtyUntil=Math.max(_vrDirtyUntil, n+(ms||1200)); }
     function applyRotation(){
       _vrMarkDirty();
       camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
@@ -51120,7 +51284,11 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
           qSel.title='화질 — 버벅이면 "가볍게"를 골라주세요';
           qSel.style.cssText=ratioSel.style.cssText;
           _qOpts.forEach(function(o){ var op=document.createElement('option'); op.value=_low[o[0]]; op.textContent='화질: '+o[1]; op.style.color='#111'; op.style.background='#fff'; if(_low[o[0]]===spzUrl) op.selected=true; qSel.appendChild(op); });
-          qSel.onchange=function(){ var u=qSel.value; if(u && u!==spzUrl) window._w3dInitViewer(containerEl, u, metricScale, origThumb, shareResult); };
+          qSel.onchange=function(){
+            var u=qSel.value; if(!u || u===spzUrl) return;
+            containerEl._vrQuality = (u===_low['full_res']) ? 'high' : (u===_low['500k'] ? 'normal' : 'light');
+            window._w3dInitViewer(containerEl, u, metricScale, origThumb, shareResult);
+          };
           recBtnGroup.appendChild(qSel);
         }
       }
@@ -51461,7 +51629,17 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
       if(_moving) _vrMarkDirty();
       var _rec = (typeof _recorder!=='undefined' && _recorder && _recorder.state==='recording');
       if(!_rec && _nowR>=_vrDirtyUntil && _nowR-_vrStartT>20000){ _fpsFrames=0; _fpsT0=_nowR; return; } // 가만히 있음 → 그리지 않고 쉼
-      if(!_rec && _nowR-_vrLastRender < 15.5) return; // 최대 초당 60번(144Hz 모니터에서 2배 넘게 그리던 것 방지)
+      // ⚠️ "움직일 때 팬 소리" 완화: 둘러보거나 이동하는 "동안"에는 해상도를 낮춰(약 40%만 계산) 그래픽카드
+      // 부담을 크게 줄이고 초당 45번까지만 그림 → 손을 멈추는 순간 원래 해상도로 선명하게 한 번 다시 그림.
+      // 해상도를 바꿔도 점 계산(LoD)은 그대로 유지되게 lodRenderScale로 보정(이글거림 재발 방지).
+      if(_vrBasePR==null) _vrBasePR=renderer.getPixelRatio();
+      var _interacting = !_rec && (_moving || (_nowR-_vrLastInput) < 450);
+      var _wantPR = _interacting ? Math.max(0.5, _vrBasePR*0.62) : _vrBasePR;
+      if(Math.abs(renderer.getPixelRatio()-_wantPR) > 0.01){
+        renderer.setPixelRatio(_wantPR);
+        try{ spark.lodRenderScale = _wantPR/_vrBasePR; }catch(e){}
+      }
+      if(!_rec && _nowR-_vrLastRender < (_interacting ? 21.5 : 15.5)) return; // 움직이는 중 최대 45fps, 평소 60fps
       _vrLastRender=_nowR;
       renderer.render(scene, camera);
       window._vrViewerBeat = performance.now(); // VR 화면이 돌아가는 중 표시 → 무거운 자동저장 잠시 멈춤
@@ -51479,7 +51657,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         // 다시 계산해서 깜빡이는 원인이 됐음. 한 번 맞춰지면 그 상태로 고정.
         if(_now>_fpsStart && _now-_fpsStart < 12000 && fps<30){
           if(ls>0.6) spark.lodSplatScale=Math.max(0.6, ls-0.2); // 너무 내리면 그림처럼 뭉개져서 하한 0.6
-          else if(pr>0.6) renderer.setPixelRatio(Math.max(0.6, pr-0.2));
+          else if(_vrBasePR>0.6){ _vrBasePR=Math.max(0.6, _vrBasePR-0.2); }
         }
       }
     }
