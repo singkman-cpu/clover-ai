@@ -2170,6 +2170,7 @@ function _buildProposalPDF(data, cb){
   scenes.forEach(function(sc, i){
     if(sc.orig) toLoad.push({key:'b'+i, src:sc.orig});
     toLoad.push({key:'a'+i, src:sc.result});
+    (sc.materials||[]).forEach(function(m, j){ if(m && m.img) toLoad.push({key:'m'+i+'_'+j, src:m.img}); });
   });
 
   var loaded={};
@@ -2864,7 +2865,7 @@ function _proposalDrawConceptPageEd(data, loaded, pageIndex, totalPages, logoImg
 
   // 마감재 보드(전체 공간의 주요 마감재 모음) — 마감재 정보가 없으면 컬러 팔레트로 대체
   var allMats=[], seenM={};
-  scenes.forEach(function(sc){ (sc.materials||[]).forEach(function(m){ if(!m||!m.v) return; var v=String(m.v).trim(); if(!v||seenM[v]) return; seenM[v]=1; allMats.push({k:String(m.k||''), v:v}); }); });
+  scenes.forEach(function(sc, si){ (sc.materials||[]).forEach(function(m, mj){ if(!m||!m.v) return; var v=String(m.v).trim(); if(!v||seenM[v]) return; seenM[v]=1; allMats.push({k:String(m.k||''), v:v, sw:loaded['m'+si+'_'+mj]||null}); }); });
   allMats=allMats.slice(0,8);
   ctx.fillStyle=t.accent; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.textAlign='left'; ctx.textBaseline='top';
   ctx.fillText(allMats.length?'MATERIAL BOARD':'COLOR PALETTE', pad, y); _propEdLS(ctx,0);
@@ -2872,17 +2873,20 @@ function _proposalDrawConceptPageEd(data, loaded, pageIndex, totalPages, logoImg
   ctx.fillText(allMats.length?'이 프로젝트에 쓰이는 주요 마감재':'시안 이미지에서 추출한 대표 컬러', W-pad, y+1);
   y+=34;
   if(allMats.length){
-    var mcw=(innerW-24)/2, rows=Math.ceil(allMats.length/2), rowH=Math.min(48, Math.floor(200/Math.max(1,rows)));
-    ctx.fillStyle=t.divider; ctx.fillRect(pad, y, innerW, 1);
+    // 마감재 샘플 타일 그리드(실제 사진에서 잘라낸 재질) — 최대 8개, 4열
+    var cols=4, gap=16, tw=(innerW-gap*(cols-1))/cols, rows=Math.ceil(allMats.length/cols);
+    var tileH=Math.min(110, Math.floor((210-rows*48)/Math.max(1,rows)));
+    var rowH=tileH+48;
     allMats.forEach(function(m,i){
-      var mx=pad+(i%2)*(mcw+24), myy=y+10+Math.floor(i/2)*rowH;
-      ctx.fillStyle=t.muted; ctx.font='700 13px '+PROPOSAL_FONT; ctx.textAlign='left'; ctx.textBaseline='top'; _propEdLS(ctx,1);
-      ctx.fillText(m.k, mx, myy+4); _propEdLS(ctx,0);
-      ctx.fillStyle=t.ink; _propEdFitFont(ctx, m.v, '600', 19, 13, mcw-80);
-      ctx.fillText(m.v, mx+72, myy+1);
-      ctx.fillStyle=t.divider; ctx.fillRect(mx, myy+rowH-8, mcw, 1);
+      var mx=pad+(i%cols)*(tw+gap), myy=y+4+Math.floor(i/cols)*rowH;
+      if(m.sw) _proposalCoverDrawRounded(ctx, m.sw, mx, myy, tw, tileH, 4);
+      else { ctx.fillStyle=t.divider; if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(mx,myy,tw,tileH,4); ctx.fill(); } else ctx.fillRect(mx,myy,tw,tileH); }
+      ctx.fillStyle=t.muted; ctx.font='700 12px '+PROPOSAL_FONT; ctx.textAlign='left'; ctx.textBaseline='top'; _propEdLS(ctx,1.5);
+      ctx.fillText(m.k, mx, myy+tileH+8); _propEdLS(ctx,0);
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, m.v, '600', 16, 11, tw);
+      ctx.fillText(m.v, mx, myy+tileH+26);
     });
-    y+=10+rows*rowH+24;
+    y+=4+rows*rowH+16;
   } else {
     _proposalEdPaletteRow(ctx, t, _proposalExtractPalette(imgs, 6), pad, y, innerW, 96);
     y+=96+44;
@@ -2931,7 +2935,7 @@ function _proposalDrawContentPageEd(chunk, loaded, data, pageIndex, totalPages, 
   var descText=(sc.desc&&sc.desc.trim())?sc.desc.trim():_proposalSceneDesc(sc.label, data._tone);
   var colW=Math.round(innerW*0.56);
   var descLines=_wrapCanvasText(ctx, descText, colW).slice(0,8);
-  var noteH=Math.max(230, 44+descLines.length*32);
+  var noteH=Math.max(270, 44+descLines.length*32);
   var heroMaxH=(H-70-40)-y-noteH-48;
 
   var afterImg=loaded['a'+i], beforeImg=loaded['b'+i];
@@ -2983,15 +2987,18 @@ function _proposalDrawContentPageEd(chunk, loaded, data, pageIndex, totalPages, 
   ctx.fillStyle=t.divider; ctx.fillRect(rx, y+28, rw, 1);
   var pal=mats.length ? [] : _proposalExtractPalette(afterImg?[afterImg]:[], 5);
   if(mats.length){
-    var my=y+44;
-    mats.slice(0,4).forEach(function(m){
-      ctx.fillStyle=t.accent; ctx.fillRect(rx, my+8, 6, 6);
-      ctx.fillStyle=t.muted; ctx.font='700 13px '+PROPOSAL_FONT; _propEdLS(ctx,1); ctx.textAlign='left'; ctx.textBaseline='top';
-      ctx.fillText(String(m.k||''), rx+16, my+2); _propEdLS(ctx,0);
-      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '600', 18, 13, rw-86);
-      ctx.fillText(String(m.v), rx+80, my);
-      ctx.fillStyle=t.divider; ctx.fillRect(rx, my+34, rw, 1);
-      my+=46;
+    var my=y+42;
+    (sc.materials||[]).forEach(function(m, j){
+      if(!m || !m.v || !String(m.v).trim() || my>y+42+4*54) return;
+      var sw=loaded['m'+i+'_'+j];
+      // 마감재 샘플(사진에서 잘라낸 실제 재질) — 없으면 테마색 사각형
+      if(sw){ _proposalCoverDrawRounded(ctx, sw, rx, my, 44, 44, 4); }
+      else { ctx.fillStyle=t.divider; if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(rx,my,44,44,4); ctx.fill(); } else ctx.fillRect(rx,my,44,44); }
+      ctx.fillStyle=t.muted; ctx.font='700 12px '+PROPOSAL_FONT; _propEdLS(ctx,1.5); ctx.textAlign='left'; ctx.textBaseline='top';
+      ctx.fillText(String(m.k||''), rx+58, my+3); _propEdLS(ctx,0);
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '600', 18, 12, rw-64);
+      ctx.fillText(String(m.v), rx+58, my+21);
+      my+=54;
     });
   }
   if(pal.length){
@@ -27517,34 +27524,111 @@ function _proposalLightbox(urls, start){
   show();
 }
 
-// ── 공간별 마감재 자동 분석(요청: "컬러칩 대신 차라리 마감재질을 넣어줘") ──
-// 완성 이미지를 비전 AI에 보여주고 실내면 바닥/벽/천장/포인트, 외관이면 지붕/외벽/창호/포인트를 4줄로 받음.
-// 결과는 sc.materials=[{k,v}]에 저장 — 메인 미리보기에서 바로 고칠 수 있음(AI가 틀려도 직접 수정).
+// ── 공간별 마감재 자동 분석 + 마감재 샘플(스와치) 추출 ──
+// 요청: "사진 보고 마감재질 추출해서, 바닥이 아이보리 포세린타일이면 이미지에서 그 타일 부분을 잘라 넣어줘"
+// ⚠️ 예전엔 서버 'llm'(텍스트 전용 모델)을 써서 AI가 사진을 실제로 못 보고 지어냈음(외관 사진에 '포세린타일').
+// 이제 사진을 직접 볼 수 있는 Claude 경로(chat-assistant)로 사진+질문을 보내고, 각 마감재가 보이는
+// 위치(사각형 좌표)까지 받아서 그 부분을 원본에서 잘라 실제 마감재 샘플 이미지로 씀.
+var MATERIAL_ANALYSIS_VER = 2;
 var _propMatBusy = (typeof WeakSet!=='undefined') ? new WeakSet() : null;
-function _proposalParseMaterials(d){
-  var t=(d&&(d.output||d.text||d.response||d.message))||'';
-  if(typeof t!=='string') return null;
+var _propMatFailed = (typeof WeakSet!=='undefined') ? new WeakSet() : null; // 실패는 이번 접속에서만 기억(새로고침하면 다시 시도)
+function _proposalMatFailed(sc){ return !!(_propMatFailed && _propMatFailed.has(sc)); }
+function _proposalParseMaterials(txt){
+  if(txt && typeof txt==='object') txt=txt.reply||txt.output||txt.text||'';
+  if(typeof txt!=='string') return null;
   var out=[];
-  t.split(/\n/).forEach(function(l){
-    var m=l.replace(/^[\s\-\*•\d\.\)]+/,'').replace(/[*_`#]/g,'').match(/^([가-힣A-Za-z ]{1,6})\s*[:：]\s*(.{2,40})$/);
-    if(m && out.length<4 && !/^예/.test(m[1])) out.push({k:m[1].trim(), v:m[2].trim()});
+  txt.split(/\n/).forEach(function(l){
+    l=l.replace(/^[\s\-\*•\d\.\)]+/,'').replace(/[*_`#]/g,'').trim();
+    var m=l.match(/^([가-힣A-Za-z ]{1,6})\s*[:：]\s*([^|]{2,40}?)\s*(?:\|\s*\[?\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*,\s*(\d{1,4})\s*\]?)?\s*$/);
+    if(!m || out.length>=4 || /^예/.test(m[1])) return;
+    var it={k:m[1].trim(), v:m[2].trim()};
+    if(m[3]!=null){ var x0=+m[3],y0=+m[4],x1=+m[5],y1=+m[6]; if(x1>x0 && y1>y0 && x1<=1000 && y1<=1000) it.box=[x0,y0,x1,y1]; }
+    out.push(it);
   });
   return out.length>=2 ? out : null;
 }
-function _proposalAnalyzeMaterials(sc, cb){
-  if(!sc || !sc.result || sc.materials || sc._matFail) return;
-  if(_propMatBusy){ if(_propMatBusy.has(sc)) return; _propMatBusy.add(sc); }
-  var url=sc.result;
-  var prompt='이 건축/인테리어 사진에 실제로 보이는 마감재를 분석해줘. 실내 사진이면 바닥/벽/천장/포인트, 건물 외관 사진이면 지붕/외벽/창호/포인트 순서로 딱 4줄만, 아래 형식 그대로 한국어로만 답해(다른 설명·인사말 금지). 재질과 색상을 함께, 각 18자 이내로.\n형식 예시(내용은 사진에 맞게 바꿔서):\n바닥: 내추럴 오크 원목마루\n벽: 웜화이트 도장\n천장: 화이트 평천장·간접조명\n포인트: 우드 슬랫 월';
-  function done(r){ if(_propMatBusy) _propMatBusy.delete(sc); if(r) sc.materials=r; else sc._matFail=true; if(cb) cb(); }
-  function fallback(){
-    _falProxyCall('llm', { input:{ model:'google/gemini-flash-1.5-8b', prompt:prompt, image_url:url } },
-      function(d){ done(_proposalParseMaterials(d)); }, function(){ done(null); });
-  }
+// 이미지를 최대 1024px JPEG(base64)로 — Claude 비전에 보내기 좋은 크기
+function _proposalImgToB64(src, cb){
+  var im=new Image(); im.crossOrigin='anonymous';
+  im.onload=function(){
+    try{
+      var sc=Math.min(1, 1024/Math.max(im.naturalWidth, im.naturalHeight));
+      var c=document.createElement('canvas'); c.width=Math.round(im.naturalWidth*sc); c.height=Math.round(im.naturalHeight*sc);
+      c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+      cb(c.toDataURL('image/jpeg',0.86).split(',')[1], im);
+    }catch(e){ cb(null, im); }
+  };
+  im.onerror=function(){ cb(null, null); };
+  im.src=src;
+}
+// 원본 이미지에서 정사각 샘플(스와치) 잘라내기 — box는 0~1000 기준 [x0,y0,x1,y1], 또는 point {x,y}(0~1)
+function _proposalCropSwatch(im, box, pt){
   try{
-    _falProxyCall('llm', { endpoint:'fal-ai/any-llm/vision', input:{ model:'google/gemini-2.5-flash', prompt:prompt, image_url:url, image_urls:[url] } },
-      function(d){ var r=_proposalParseMaterials(d); if(r) done(r); else fallback(); }, fallback);
-  }catch(e){ done(null); }
+    var W=im.naturalWidth, H=im.naturalHeight, side, cx, cy;
+    if(pt){ side=Math.min(W,H)*0.14; cx=pt.x*W; cy=pt.y*H; }
+    else {
+      var x0=box[0]/1000*W, y0=box[1]/1000*H, x1=box[2]/1000*W, y1=box[3]/1000*H;
+      side=Math.max(Math.min(W,H)*0.06, Math.min(x1-x0, y1-y0)*0.7); cx=(x0+x1)/2; cy=(y0+y1)/2;
+    }
+    side=Math.min(side, W, H);
+    var sx=Math.max(0, Math.min(W-side, cx-side/2)), sy=Math.max(0, Math.min(H-side, cy-side/2));
+    var c=document.createElement('canvas'); c.width=c.height=240;
+    c.getContext('2d').drawImage(im, sx, sy, side, side, 0, 0, 240, 240);
+    return c.toDataURL('image/jpeg', 0.88);
+  }catch(e){ return null; }
+}
+function _proposalAnalyzeMaterials(sc, cb){
+  if(!sc || !sc.result || sc._matEdited || _proposalMatFailed(sc)) return;
+  if(sc.materials && sc.matV===MATERIAL_ANALYSIS_VER) return;
+  if(_propMatBusy){ if(_propMatBusy.has(sc)) return; _propMatBusy.add(sc); }
+  var prompt='[마감재 분석 요청 — 아래 형식으로만 답변, 인사말·설명 금지]\n'+
+    '첨부한 사진을 직접 보고, 실제로 보이는 마감재를 알려줘. 실내 사진이면 바닥/벽/천장/포인트, 건물 외관 사진이면 지붕/외벽/창호/포인트(데크·석재 등) — 딱 4줄.\n'+
+    '각 줄 형식:  부위: 재질과 색상(18자 이내) | x1,y1,x2,y2\n'+
+    '좌표는 사진 전체를 가로·세로 0~1000으로 봤을 때, 그 마감재가 가구·사람·차·그림자에 가리지 않고 그 재질만 넓게 보이는 부분을 감싸는 사각형.\n'+
+    '예시(내용은 사진에 맞게):\n지붕: 블랙 징크 강판 | 380,120,620,330\n외벽: 차콜 금속 패널 | 330,400,420,700';
+  function done(r, im){
+    if(r && im){ r.forEach(function(m){ if(m.box){ var sw=_proposalCropSwatch(im, m.box); if(sw) m.img=sw; } delete m.box; }); }
+    if(_propMatBusy) _propMatBusy.delete(sc);
+    if(r){ sc.materials=r; sc.matV=MATERIAL_ANALYSIS_VER; } else if(_propMatFailed){ _propMatFailed.add(sc); }
+    if(cb) cb();
+  }
+  _proposalImgToB64(sc.result, function(b64, im){
+    var imgBlock = b64 ? {type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}
+                       : {type:'image', source:{type:'url', url:sc.result}};
+    try{
+      _falProxyCall('chat-assistant', { messages:[{role:'user', content:[imgBlock, {type:'text', text:prompt}]}] }, function(res){
+        var r=_proposalParseMaterials(res);
+        if(!r) console.warn('[제안서 마감재] 분석 응답을 해석하지 못함:', res);
+        done(r, im);
+      }, function(err){ console.warn('[제안서 마감재] 분석 실패:', err); done(null, im); });
+    }catch(e){ done(null, im); }
+  });
+}
+// 마감재 샘플을 사용자가 직접 찍어서 지정(AI가 위치를 못 잡았거나 틀렸을 때)
+function _proposalPickSwatch(sc, mi, onDone){
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;box-sizing:border-box';
+  var t=document.createElement('div'); t.style.cssText='color:#fff;font-size:14px;font-weight:700';
+  var mm=(sc.materials||[])[mi]||{};
+  t.textContent='"'+(mm.k||'마감재')+(mm.v?' · '+mm.v:'')+'" 이(가) 잘 보이는 곳을 클릭하세요';
+  var im=new Image(); im.crossOrigin='anonymous'; im.src=sc.result;
+  im.style.cssText='max-width:92vw;max-height:80vh;cursor:crosshair;border-radius:6px';
+  var x=document.createElement('button'); x.type='button'; x.textContent='취소';
+  x.style.cssText='padding:8px 18px;border-radius:8px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;font-family:inherit;cursor:pointer';
+  function shut(){ if(ov.parentNode) ov.remove(); }
+  x.onclick=shut; ov.onclick=function(e){ if(e.target===ov) shut(); };
+  im.onclick=function(e){
+    var r=im.getBoundingClientRect();
+    var sw=_proposalCropSwatch(im, null, {x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.height});
+    shut();
+    if(!sw){ alert('이 이미지는 잘라낼 수 없어요(외부 이미지 보안 제한).'); return; }
+    if(!sc.materials) sc.materials=[];
+    while(sc.materials.length<=mi) sc.materials.push({k:'',v:''});
+    sc.materials[mi].img=sw; sc._matEdited=true;
+    if(onDone) onDone();
+  };
+  ov.appendChild(t); ov.appendChild(im); ov.appendChild(x);
+  document.body.appendChild(ov);
 }
 function _proposalMaterialsReady(){
   // 분석이 끝나면: 입력 중이 아니면 화면 갱신, 입력 중이면 미리보기 썸네일만 다음 갱신 때 반영
@@ -27580,7 +27664,7 @@ function _proposalLayoutPreview(box, opts, scenes){
 
   var cover=opts.coverImg || (_proposalGetCoverScene(scenes)||scenes[0]).result;
   var key=[lay, opts.styleKey, opts.useCustomColors?JSON.stringify(opts.customColors||{}):'', opts.client, opts.summary, opts.company, opts.contact, cover,
-    scenes.map(function(s){return (s.result||'').slice(-40)+'|'+(s.orig||'').slice(-40)+'|'+(s.label||'')+'|'+(s.desc||'')+'|'+JSON.stringify(s.materials||null);}).join(';')].join('#');
+    scenes.map(function(s){return (s.result||'').slice(-40)+'|'+(s.orig||'').slice(-40)+'|'+(s.label||'')+'|'+(s.desc||'')+'|'+JSON.stringify((s.materials||[]).map(function(m){return [m.k,m.v,m.img?m.img.length:0];}));}).join(';')].join('#');
   function show(urls, big){
     strip.innerHTML='';
     urls.forEach(function(u, i){
@@ -27594,7 +27678,8 @@ function _proposalLayoutPreview(box, opts, scenes){
   if(_propLayoutPrevCache.key===key && _propLayoutPrevCache.urls){ show(_propLayoutPrevCache.urls, _propLayoutPrevCache.big); return; }
   strip.innerHTML='<div style="height:230px;display:flex;align-items:center;color:var(--m2);font-size:12px">미리보기 만드는 중...</div>';
   var list=scenes.slice(0,4), loaded={}, toLoad=[{k:'hero',s:cover}];
-  list.forEach(function(sc,i){ toLoad.push({k:'a'+i,s:sc.result}); if(sc.orig) toLoad.push({k:'b'+i,s:sc.orig}); });
+  list.forEach(function(sc,i){ toLoad.push({k:'a'+i,s:sc.result}); if(sc.orig) toLoad.push({k:'b'+i,s:sc.orig});
+    (sc.materials||[]).forEach(function(m,j){ if(m && m.img) toLoad.push({k:'m'+i+'_'+j, s:m.img}); }); });
   if(opts.logo) toLoad.push({k:'logo',s:opts.logo});
   var left=toLoad.length;
   toLoad.forEach(function(t){
@@ -27985,8 +28070,13 @@ function _proposalRenderCanvas(ub){
     var matHead=document.createElement('div');
     matHead.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px';
     var _matBusy=_propMatBusy && _propMatBusy.has(sc);
-    matHead.innerHTML='<span style="color:'+GOLD+';font-size:10px;font-weight:800;letter-spacing:2px">MATERIALS · 마감재</span><span style="font-size:10px;color:'+theme.muted+'">'+
-      (_matBusy?'AI가 사진에서 마감재 찾는 중...':(sc.materials?'AI 자동 입력 · 직접 고칠 수 있어요':(sc._matFail?'자동 분석 실패 · 직접 입력해주세요':'')))+'</span>';
+    matHead.style.flexWrap='wrap'; matHead.style.gap='4px';
+    matHead.innerHTML='<span style="color:'+GOLD+';font-size:10px;font-weight:800;letter-spacing:2px;white-space:nowrap">MATERIALS · 마감재</span><span style="font-size:10px;color:'+theme.muted+';text-align:right">'+
+      (_matBusy?'AI가 사진에서 마감재 찾는 중...':(sc.materials?'AI 자동 입력 · 직접 고칠 수 있어요 · 샘플 칸을 누르면 위치 직접 지정':(_proposalMatFailed(sc)?'자동 분석 실패 · 직접 입력해주세요':'')))+'</span>';
+    var reBtn=document.createElement('button'); reBtn.type='button'; reBtn.textContent='↻ AI 다시 분석';
+    reBtn.style.cssText='margin-left:8px;font-size:10px;border:1px solid var(--bd2);background:transparent;color:'+theme.muted+';border-radius:5px;padding:2px 7px;cursor:pointer;font-family:inherit';
+    reBtn.onclick=function(){ sc.materials=null; sc.matV=null; sc._matEdited=false; if(_propMatFailed) _propMatFailed.delete(sc); _proposalAnalyzeMaterials(sc, _proposalMaterialsReady); renderMain('proposal'); };
+    if(!_matBusy) matHead.lastChild.appendChild(reBtn);
     matBox.appendChild(matHead);
     var _mlist=(sc.materials&&sc.materials.length)?sc.materials:[{k:'바닥',v:''},{k:'벽',v:''},{k:'천장',v:''},{k:'포인트',v:''}];
     var matGrid=document.createElement('div'); matGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:5px 10px';
@@ -27995,12 +28085,20 @@ function _proposalRenderCanvas(ub){
       var kIn=document.createElement('input'); kIn.value=m.k||''; kIn.placeholder='부위';
       var vIn=document.createElement('input'); vIn.value=m.v||''; vIn.placeholder='예: 오크 원목마루';
       var inCss='background:'+(theme.dark?'rgba(255,255,255,.06)':'#fff')+';border:1px dashed var(--bd2);border-radius:5px;color:'+theme.ink+';font-size:11.5px;font-family:inherit;padding:5px 6px;box-sizing:border-box;min-width:0';
-      kIn.style.cssText=inCss+';width:58px;flex-shrink:0;font-weight:700;color:'+theme.muted;
+      kIn.style.cssText=inCss+';width:52px;flex-shrink:0;font-weight:700;color:'+theme.muted;
       vIn.style.cssText=inCss+';flex:1';
+      // 마감재 샘플(사진에서 잘라낸 실제 재질) — 누르면 사진에서 위치를 직접 찍어서 다시 지정
+      var swB=document.createElement('div');
+      swB.title='누르면 사진에서 이 마감재 위치를 직접 지정';
+      swB.style.cssText='width:30px;height:30px;flex-shrink:0;border-radius:5px;cursor:pointer;border:1px solid var(--bd2);background:'+(m.img?'url('+m.img+') center/cover':'repeating-linear-gradient(45deg,#ddd 0 4px,#f4f4f4 4px 8px)')+';display:flex;align-items:center;justify-content:center;font-size:12px;color:#888';
+      if(!m.img) swB.textContent='+';
+      swB.onclick=function(){ sync(); _proposalPickSwatch(sc, mi, function(){ renderMain('proposal'); }); };
+      row.appendChild(swB);
       function sync(){
         var arr=(sc.materials&&sc.materials.length)?sc.materials.slice():_mlist.map(function(x){return {k:x.k,v:x.v};});
-        arr[mi]={k:kIn.value.trim(), v:vIn.value.trim()};
-        sc.materials=arr; sc._matFail=false;
+        var old=arr[mi]||{};
+        arr[mi]={k:kIn.value.trim(), v:vIn.value.trim(), img:old.img||null};
+        sc.materials=arr; sc._matEdited=true;
       }
       kIn.oninput=sync; vIn.oninput=sync;
       vIn.onchange=function(){ renderMain('proposal'); }; kIn.onchange=vIn.onchange; // 고친 내용이 위쪽 PDF 미리보기에도 반영되게
@@ -50841,9 +50939,14 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     var _isMob = (window.innerWidth||1024) < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
     // Spark 2.1 소스 확인: lodSplatCount/lodSplatScale은 렌더러 "인스턴스" 옵션(기본 PC 250만개 → 너무 많음).
     // maxStdDev/maxPixelRadius: 카메라 바로 앞의 거대한 점이 화면을 통째로 덮어 GPU를 잡아먹는 것(가장 흔한 버벅임 원인) 제한.
-    var _lodCount = _isMob ? 300000 : 600000;
+    // ⚠️ "마우스 움직일 때마다 화면이 이글거리며 다시 읽는 느낌" 수정: Spark는 기본으로 보고 있는 방향만
+    // 선명하게(뒤쪽 20%, 옆 40%) 그려서, 고개를 돌릴 때마다 새로 보이는 쪽을 다시 계산하며 거칠다가 선명해졌음.
+    // → 모든 방향을 같은 디테일로(behind/coneFoveate=1) 만들고, 회전으로는 재계산이 안 일어나게 방향을 고정.
+    //   (이동할 때만 다시 계산 — 제자리에서 둘러보는 동안은 화면이 흔들리지 않음)
+    var _lodCount = _isMob ? 400000 : 800000;
     var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount, lodSplatScale: 1,
-      maxStdDev: Math.sqrt(6), maxPixelRadius: 256 });
+      maxStdDev: Math.sqrt(6), maxPixelRadius: 256, behindFoveate: 1, coneFoveate: 1 });
+    try{ spark.behindFoveate=1; spark.coneFoveate=1; spark.lodQuatOverride = new THREE.Quaternion(); }catch(e){}
     window._w3dSpark = spark;
     scene.add(spark);
 
@@ -50923,7 +51026,13 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     var lookSpeed = 0.0028;
 
     function clampPitch(p){ return Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, p)); }
+    // ⚠️ "VR 켜면 그래픽카드 팬이 엄청 크게 돈다" 수정: 예전엔 아무것도 안 움직여도 1초에 60~144번씩
+    // 계속 다시 그려서 그래픽카드가 쉬지 못했음 → 둘러보기/이동/화면크기 변경 직후 잠깐만 그리고,
+    // 가만히 있으면 그리기를 멈춤(마지막 화면 그대로 유지). 녹화 중·처음 로딩 20초는 계속 그림.
+    var _vrDirtyUntil=0, _vrStartT=performance.now(), _vrLastRender=0;
+    function _vrMarkDirty(ms){ _vrDirtyUntil=Math.max(_vrDirtyUntil, performance.now()+(ms||1500)); }
     function applyRotation(){
+      _vrMarkDirty();
       camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
     }
 
@@ -50991,8 +51100,9 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
       var ratioSel=document.createElement('select');
       ratioSel.title='화면 비율 — 고른 비율 그대로 녹화돼요';
       ratioSel.style.cssText='padding:6px 8px;border-radius:7px;background:rgba(0,0,0,.6);color:#fff;font-weight:700;font-size:12px;border:1px solid rgba(255,255,255,.35);cursor:pointer;font-family:inherit';
-      [['','📐 화면 그대로'],['1.7778','16:9 가로'],['1','1:1 정사각'],['1.3333','4:3'],['0.75','3:4'],['0.5625','9:16 세로(쇼츠)']].forEach(function(o){
-        var op=document.createElement('option'); op.value=o[0]; op.textContent=o[1]; op.style.color='#000'; ratioSel.appendChild(op);
+      [['','📐 화면 비율'],['1.7778','16:9 가로'],['1','1:1 정사각'],['1.3333','4:3'],['0.75','3:4'],['0.5625','9:16 세로(쇼츠)']].forEach(function(o){
+        // 펼친 목록이 검은 배경에 검은 글씨라 안 보였음 → 흰 배경+진한 글씨로
+        var op=document.createElement('option'); op.value=o[0]; op.textContent=o[1]; op.style.color='#111'; op.style.background='#fff'; ratioSel.appendChild(op);
       });
       ratioSel.onchange=function(){
         containerEl._vrRatio = parseFloat(ratioSel.value)||0;
@@ -51009,7 +51119,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
           var qSel=document.createElement('select');
           qSel.title='화질 — 버벅이면 "가볍게"를 골라주세요';
           qSel.style.cssText=ratioSel.style.cssText;
-          _qOpts.forEach(function(o){ var op=document.createElement('option'); op.value=_low[o[0]]; op.textContent='화질: '+o[1]; op.style.color='#000'; if(_low[o[0]]===spzUrl) op.selected=true; qSel.appendChild(op); });
+          _qOpts.forEach(function(o){ var op=document.createElement('option'); op.value=_low[o[0]]; op.textContent='화질: '+o[1]; op.style.color='#111'; op.style.background='#fff'; if(_low[o[0]]===spzUrl) op.selected=true; qSel.appendChild(op); });
           qSel.onchange=function(){ var u=qSel.value; if(u && u!==spzUrl) window._w3dInitViewer(containerEl, u, metricScale, origThumb, shareResult); };
           recBtnGroup.appendChild(qSel);
         }
@@ -51258,16 +51368,37 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // 📐 화면 비율(요청: "VR도 16:9 1:1 4:3 3:4 9:16 같은 화면 비율 넣어줘"): 비율을 고르면 뷰어 화면 자체를
     // 그 비율로 맞추고(남는 곳은 검은 여백) 가운데 둠 → 보이는 그대로 녹화되므로 잘리는 부분이 없음.
     function _vrApplySize(){
+      if(typeof _vrMarkDirty==='function') _vrMarkDirty();
       var cw = containerEl.clientWidth || w, ch = containerEl.clientHeight || h;
       var nw = cw, nh = ch, r = containerEl._vrRatio || 0;
-      if(r){ if(cw/ch > r){ nh = ch; nw = Math.max(1, Math.round(ch*r)); } else { nw = cw; nh = Math.max(1, Math.round(cw/r)); } }
+      // ⚠️ 버그 수정("9:16으로 했는데 가로가 더 커 보인다"): VR 칸의 실제 높이가 화면에 보이는 영역보다
+      // 커서(아래쪽이 잘려 안 보임) 그 전체 높이 기준으로 9:16을 만들면 위아래가 잘려 3:4처럼 보였음.
+      // → 실제로 "보이는" 영역(잘리는 부모·브라우저 창 기준) 안에서 비율을 맞추고 그 가운데에 놓음.
+      var visTop = 0, visH = ch, visLeft = 0, visW = cw;
+      if(r){
+        try{
+          var cr = containerEl.getBoundingClientRect();
+          var t0 = Math.max(cr.top, 0), b0 = Math.min(cr.bottom, window.innerHeight);
+          var l0 = Math.max(cr.left, 0), r0 = Math.min(cr.right, window.innerWidth);
+          for(var an = containerEl.parentElement; an && an!==document.body; an = an.parentElement){
+            var ov = getComputedStyle(an);
+            if(/(hidden|auto|scroll|clip)/.test(ov.overflow+ov.overflowY+ov.overflowX)){
+              var ar = an.getBoundingClientRect();
+              t0 = Math.max(t0, ar.top); b0 = Math.min(b0, ar.bottom); l0 = Math.max(l0, ar.left); r0 = Math.min(r0, ar.right);
+            }
+          }
+          if(document.fullscreenElement===containerEl){ t0=cr.top; b0=cr.bottom; l0=cr.left; r0=cr.right; }
+          if(b0-t0 > 50 && r0-l0 > 50){ visTop = t0-cr.top; visH = b0-t0; visLeft = l0-cr.left; visW = r0-l0; }
+        }catch(e){}
+        if(visW/visH > r){ nh = visH; nw = Math.max(1, Math.round(visH*r)); } else { nw = visW; nh = Math.max(1, Math.round(visW/r)); }
+      }
       renderer.setSize(nw, nh);
       camera.aspect = nw / nh;
       camera.updateProjectionMatrix();
       var cv = renderer.domElement;
       cv.style.position = r ? 'absolute' : '';
-      cv.style.left = r ? Math.round((cw-nw)/2)+'px' : '';
-      cv.style.top = r ? Math.round((ch-nh)/2)+'px' : '';
+      cv.style.left = r ? Math.round(visLeft+(visW-nw)/2)+'px' : '';
+      cv.style.top = r ? Math.round(visTop+(visH-nh)/2)+'px' : '';
       containerEl.style.background = r ? '#000' : '';
     }
     containerEl._vrApplySize = _vrApplySize;
@@ -51324,6 +51455,14 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         }
       }
 
+      var _nowR=performance.now();
+      window._vrViewerBeat = _nowR; // VR 화면이 열려 있는 동안 무거운 자동저장은 계속 쉼(쉬는 중에도)
+      var _moving = moveDir.lengthSq()>0 || (!isTouch && ((typeof vy!=='undefined' && vy!==0) || keys['['] || keys[']']));
+      if(_moving) _vrMarkDirty();
+      var _rec = (typeof _recorder!=='undefined' && _recorder && _recorder.state==='recording');
+      if(!_rec && _nowR>=_vrDirtyUntil && _nowR-_vrStartT>20000){ _fpsFrames=0; _fpsT0=_nowR; return; } // 가만히 있음 → 그리지 않고 쉼
+      if(!_rec && _nowR-_vrLastRender < 15.5) return; // 최대 초당 60번(144Hz 모니터에서 2배 넘게 그리던 것 방지)
+      _vrLastRender=_nowR;
       renderer.render(scene, camera);
       window._vrViewerBeat = performance.now(); // VR 화면이 돌아가는 중 표시 → 무거운 자동저장 잠시 멈춤
 
@@ -51336,14 +51475,15 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         _fpsFrames=0; _fpsT0=_now;
         var pr=renderer.getPixelRatio();
         var ls=spark.lodSplatScale||1;
-        // 느리면: 점 개수 먼저 줄이고(화질 손실 적음) → 그래도 느리면 해상도 낮춤. 여유 생기면 반대로 복구.
-        if(fps<30 && ls>0.35){ spark.lodSplatScale=Math.max(0.35, ls-0.15); }
-        else if(fps<30 && pr>0.6){ renderer.setPixelRatio(Math.max(0.6, pr-0.15)); }
-        else if(fps>55 && pr<_maxPR){ renderer.setPixelRatio(Math.min(_maxPR, pr+0.1)); }
-        else if(fps>55 && ls<1){ spark.lodSplatScale=Math.min(1, ls+0.1); }
+        // 처음 12초 동안만, "낮추는 방향으로만" 맞춤 — 예전처럼 올렸다 내렸다 반복하면 그때마다 화면을
+        // 다시 계산해서 깜빡이는 원인이 됐음. 한 번 맞춰지면 그 상태로 고정.
+        if(_now>_fpsStart && _now-_fpsStart < 12000 && fps<30){
+          if(ls>0.6) spark.lodSplatScale=Math.max(0.6, ls-0.2); // 너무 내리면 그림처럼 뭉개져서 하한 0.6
+          else if(pr>0.6) renderer.setPixelRatio(Math.max(0.6, pr-0.2));
+        }
       }
     }
-    var _fpsFrames=0, _fpsT0=performance.now(), _maxPR=Math.min(window.devicePixelRatio||1, 1.5);
+    var _fpsFrames=0, _fpsT0=performance.now(), _fpsStart=performance.now()+2500, _maxPR=Math.min(window.devicePixelRatio||1, 1.5); // +2.5초: 로딩 직후 프레임은 원래 느리니 측정에서 제외
     renderer.setPixelRatio(Math.min(renderer.getPixelRatio(), _maxPR));
     animate();
 
