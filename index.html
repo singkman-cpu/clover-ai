@@ -9107,6 +9107,7 @@ function rUB(b,key){
           var _autoTier = _longSide<=1024 ? '1K' : '2K';
           _rTab2.resolution = _autoTier;
           _rTab2._autoResAppliedForImg = v;
+          _rTab2._resManual=false; _rTab2._resAutoBrush=false;
           console.log('['+G.wf+'] 원본 '+w+'×'+h+'px → 자동 해상도 선택: '+_autoTier);
           renderSB();
         }
@@ -13180,6 +13181,7 @@ function mkResolution(p){
     // 문제없음).
     function _applyRes(){
       getTab(G.wf).resolution=ro.k;
+      getTab(G.wf)._resManual=true; getTab(G.wf)._resAutoBrush=false; // 사용자가 직접 고른 해상도는 자동 전환하지 않음
       // 버튼 스타일 + cr 표시 업데이트
       g.querySelectorAll('button').forEach(function(x,i){
         x.style.borderColor=RES_OPTS[i].k===getTab(G.wf).resolution?'var(--acb)':'var(--bd2)';
@@ -21274,7 +21276,13 @@ function _padExteriorTo916WithBlur(url, cb){
     _scMaybeSwatch(spTab, typeName, imgs0.primary, imgs0.noDirectMatch, _looseInput, function(){
     for(var _arCi=0; _arCi<_arCandN; _arCi++){
       (function(_arCi){
-        falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _looseInput, function(d){
+        // 2026-10-05 버그 수정("건축투시도 3장 뽑았는데 같은 게 2장 나온다"): 후보들이 완전히 똑같은 요청(같은 사진+같은 문구)으로
+        // 나가서 AI가 거의 같은 그림을 돌려주는 경우가 있었음 → 2번째 후보부터는 카메라 위치·시점만 다르게 지정해서 보냄(디자인은 동일).
+        var _candVar = _isExteriorViewType(typeName)
+          ? ['', ' ⚠️ 후보 2 전용 지시: 같은 건물·같은 디자인을 그대로 두고, 카메라만 왼쪽 앞 모서리 쪽으로 약 30도 옮겨서 조금 더 높은 시점에서 바라본 구도로 그리세요(첫 번째 후보와 구도가 확실히 달라야 합니다).', ' ⚠️ 후보 3 전용 지시: 같은 건물·같은 디자인을 그대로 두고, 카메라만 오른쪽 앞 모서리 쪽으로 약 30도 옮겨서 사람 눈높이에서 바라본 구도로 그리세요(다른 후보들과 구도가 확실히 달라야 합니다).']
+          : ['', ' ⚠️ 후보 2 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라만 방의 다른 모서리로 옮겨서 반대쪽 벽 방향을 바라본 구도로 그리세요(첫 번째 후보와 구도가 확실히 달라야 합니다).', ' ⚠️ 후보 3 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라를 방 입구 쪽 낮은 위치로 옮겨서 공간 깊이가 잘 보이는 구도로 그리세요(다른 후보들과 구도가 확실히 달라야 합니다).'];
+        var _candInput = _arCi===0 ? _looseInput : Object.assign({}, _looseInput, {prompt: (_looseInput.prompt||'') + (_candVar[_arCi]||'')});
+        falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _candInput, function(d){
           var resultUrl=falExtractImageUrl(d);
           if(!resultUrl){ if(_arCi===0){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1); } _arAfterOneCandidate(); return; }
           function _finishLoose(finalUrl){
@@ -33012,6 +33020,7 @@ function _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedC
     if(_markedImg){
       var _hadRealStyleRefs = refImgs.length>0;
       refImgs.unshift(_markedImg);
+      getTab(G.wf)._markedRefImgForCrop = _markedImg;
       getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·다각형 테두리로 표시를 남긴 "위치 확인용" 사진입니다. 이 표시용 사진의 유일한 목적은 "위에서 설명한 각 수정을 정확히 어느 위치에 적용해야 하는지" 알려주는 것입니다 — 표시된 위치를 정확히 확인한 다음, 위에서 설명한 수정 지시사항(삭제·교체·색상 변경 등)을 그 위치에 실제로 적용하는 게 핵심 목표입니다. 표시를 "지우고 깨끗하게 만드는 것" 자체는 목적이 아니라 부수 효과일 뿐입니다 — 실제 지시사항을 실행하지 않고 표시만 지운 원본에 가까운 결과를 내놓으면 완전한 실패입니다. 결과물에는 색칠·화살표·다각형 테두리 자체가 조금이라도 남으면 안 되지만, 그것과 별개로 지시사항은 반드시 실제로 실행되어야 합니다.';
       getTab(G.wf)._markedRefIsPositionOnly = !_hadRealStyleRefs;
     }
@@ -33792,6 +33801,61 @@ function _mkAgedEnvelopePanel(p){
   p.appendChild(w);
 }
 
+// ── 🔍 칠한 부분 주변만 잘라서 편집(2026-10-05 요청: "4천 px 사진을 AI 편집에서 1K로 돌려도 원본 화질 유지하고 싶다") ──
+// 마스크(브러시·영역)가 사진의 일부분이면, 사진 전체를 1K로 줄여 보내는 대신 칠한 부분 주변만(원본과 같은 비율의
+// 창으로) 잘라서 보냄 → 같은 1K 비용으로 고친 부분이 훨씬 선명함. 결과는 원래 자리에 다시 붙이고, 칠하지 않은 곳은
+// 원본 픽셀 그대로(기존 마스크 합성 그대로 사용).
+function _editMaybeCropForMask(imgUrl, maskUrl, resLabel, cb){
+  if(!imgUrl || !maskUrl){ cb(null); return; }
+  var target = resLabel==='4K' ? 4096 : resLabel==='2K' ? 2048 : 1024;
+  _loadImageForComposite(imgUrl, function(oi){
+    if(!oi){ cb(null); return; }
+    var W=oi.naturalWidth, H=oi.naturalHeight;
+    if(!W||!H || Math.max(W,H) < target*1.3){ cb(null); return; } // 원본이 작으면 자를 이득이 없음
+    _loadImageForComposite(maskUrl, function(mi){
+      if(!mi){ cb(null); return; }
+      try{
+        var sw=Math.min(512, mi.naturalWidth), sh=Math.round(sw*mi.naturalHeight/mi.naturalWidth);
+        var mc=document.createElement('canvas'); mc.width=sw; mc.height=sh;
+        var mx=mc.getContext('2d'); mx.drawImage(mi,0,0,sw,sh);
+        var d=mx.getImageData(0,0,sw,sh).data, x0=sw, y0=sh, x1=-1, y1=-1;
+        for(var y=0;y<sh;y++) for(var x=0;x<sw;x++){ if(d[(y*sw+x)*4]>40){ if(x<x0)x0=x; if(y<y0)y0=y; if(x>x1)x1=x; if(y>y1)y1=y; } }
+        if(x1<0){ cb(null); return; }
+        // 마스크 범위(0~1) + 주변 여유(범위의 50%, 최소 사진의 8%)
+        var bx0=x0/sw, by0=y0/sh, bx1=(x1+1)/sw, by1=(y1+1)/sh;
+        var padX=Math.max((bx1-bx0)*0.5, 0.08), padY=Math.max((by1-by0)*0.5, 0.08);
+        var need=Math.max(bx1-bx0+padX*2, by1-by0+padY*2, 0.3); // 원본과 같은 비율의 창 크기(원본 대비 비율)
+        if(need>0.72){ cb(null); return; } // 사진 대부분을 칠했으면 그냥 전체로 보냄
+        var cw=Math.round(W*need), ch=Math.round(H*need);
+        var cx=Math.round(((bx0+bx1)/2)*W - cw/2), cy=Math.round(((by0+by1)/2)*H - ch/2);
+        cx=Math.max(0,Math.min(W-cw,cx)); cy=Math.max(0,Math.min(H-ch,cy));
+        function crop(srcImg, isMask){
+          var c=document.createElement('canvas'); c.width=cw; c.height=ch;
+          var sx=srcImg.naturalWidth/W, sy=srcImg.naturalHeight/H;
+          c.getContext('2d').drawImage(srcImg, cx*sx, cy*sy, cw*sx, ch*sy, 0, 0, cw, ch);
+          return isMask ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.95);
+        }
+        cb({img:crop(oi,false), mask:crop(mi,true), rect:{x:cx,y:cy,w:cw,h:ch,W:W,H:H}, crop:crop, origImg:oi});
+      }catch(e){ console.warn('[AI 편집] 부분 자르기 실패 → 전체로 진행', e); cb(null); }
+    });
+  });
+}
+function _editPasteCropBack(fullImgUrl, fullMaskUrl, cropResultUrl, rect, cb){
+  _loadImageForComposite(fullImgUrl, function(fi){
+    _loadImageForComposite(cropResultUrl, function(ri){
+      if(!fi || !ri){ cb(null); return; }
+      try{
+        var c=document.createElement('canvas'); c.width=rect.W; c.height=rect.H;
+        var x=c.getContext('2d'); x.imageSmoothingEnabled=true; x.imageSmoothingQuality='high';
+        x.drawImage(fi,0,0,rect.W,rect.H);
+        x.drawImage(ri, rect.x, rect.y, rect.w, rect.h);
+        var pasted=c.toDataURL('image/jpeg',0.95);
+        // 칠하지 않은 곳은 원본 픽셀 그대로 되돌림
+        _compositeMaskedResult(fullImgUrl, pasted, fullMaskUrl, function(finalUrl){ cb(finalUrl || pasted); });
+      }catch(e){ cb(null); }
+    });
+  });
+}
 function _compositeMaskedResult(origUrl, resultUrl, maskDataUrl, cb){
   try{
     var origImg=null, resImg=null, maskImg=null;
@@ -34006,6 +34070,17 @@ function togDraw(on, mode){
   // → 이미지 로딩과 무관하게 "지금 도구가 켜져있는지"를 동기적으로 바로 알 수 있는 별도 플래그를
   // 여기(togDraw 진입 시점)에서 즉시 세팅해서, 버튼 표시는 이 플래그만 보고 판단하게 함.
   G._dmOn = !!on;
+  // 2026-10-05 요청("AI 편집 일반 렌더링은 기본 2K, 브러시로 편집하는 곳은 기본 1K로"): 브러시·영역 편집은 칠한 부분 주변만
+  // 잘라서 보내고 나머지는 원본 픽셀 그대로라 1K로도 충분 → 편집 도구를 켜면 자동으로 1K(사용자가 직접 고른 해상도는 그대로 존중)
+  if(G.wf==='edit'){
+    var _etR=getTab('edit');
+    if(on && !_etR._resManual && !_etR._resAutoBrush && _etR.resolution!=='1K'){
+      _etR._resBeforeBrush=_etR.resolution||'2K'; _etR.resolution='1K'; _etR._resAutoBrush=true;
+      console.log('[AI 편집] 브러시 편집 → 해상도 자동 1K (칠하지 않은 곳은 원본 화질 유지)');
+    } else if(!on && _etR._resAutoBrush && !_etR._pendingCompositeMask && !(G.drawHist&&G.drawHist.length) && !(G.polyAreas&&G.polyAreas.length) && !(G.arrows&&G.arrows.length)){
+      _etR.resolution=_etR._resBeforeBrush||'2K'; _etR._resAutoBrush=false; // 아무것도 안 칠하고 도구를 끄면 원래대로
+    }
+  }
   if(on){
     // ⚠️ 버그 수정(핵심 원인): Z키+마우스휠 확대 기능은 #hist-s(사진이 들어있는 요소)에만
     // CSS transform:scale()을 걸고, 브러시·다각형·사각형·화살표가 그려지는 오버레이
@@ -40046,6 +40121,7 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
   probe.src=origImg;
 }
 function procImgWithTask(task, onDone, onErr){
+  try{ if(task && task.maskData && (task.wf||G.wf)==='edit'){ var _etR2=getTab('edit'); if(_etR2._resAutoBrush){ _etR2.resolution=_etR2._resBeforeBrush||'2K'; _etR2._resAutoBrush=false; if(G.wf==='edit' && typeof updateResBtnCr==='function') setTimeout(function(){ try{ renderSB(); }catch(e){} }, 0); } } }catch(e){}
   onErr = onErr || function(e){console.error('[procImgWithTask]',e);};
   var img     = task.img;
   var wf      = task.wf;
@@ -40082,13 +40158,25 @@ function procImgWithTask(task, onDone, onErr){
   if((wf==='space'||wf==='render'||wf==='edit') && !_hasForcedAspect){
     var _rawOnDone = onDone;
     var _selKForPost = task.selK;
+    var _postOrigImg = img; // ⚠️ 아래에서 "칠한 부분만 잘라서 편집"할 때 img가 잘린 조각으로 바뀌므로, 원본을 따로 잡아둠
+    var _hadMaskForPost = !!task.maskData;
     onDone = function(ri){
       if(_selKForPost==='texture_from_photo' || _selKForPost==='texture_seamless' || _selKForPost==='texture_normal_map'){
         // 텍스처/맵소스 프리셋은 원본 크기에 맞출 필요가 없음(타일링용 정사각 이미지) —
         // 대신 이음새가 안 끊기도록 기계적 보정(오프셋 블렌드)을 한 번 더 거친다.
         _makeSeamlessTile(ri, _rawOnDone);
+      } else if(_hadMaskForPost){
+        // 2026-10-05 버그 수정("4천 px 사진을 칠해서 1K로 편집하면 1천 px로 나온다"): 칠한 부분만 바꾸는 편집은
+        // 이미 원본 크기 그대로 합성돼 있는데(칠하지 않은 곳은 원본 픽셀), 여기서 다시 1K 크기로 줄여버리고 있었음.
+        // 결과가 원본과 같은 크기면 줄이지 않고 그대로 씀.
+        loadImgSafe(_postOrigImg, function(o){
+          loadImgSafe(ri, function(r){
+            if(o.naturalWidth===r.naturalWidth && o.naturalHeight===r.naturalHeight){ console.log('[AI 편집] 원본 크기 유지 —', r.naturalWidth+'×'+r.naturalHeight); _rawOnDone(ri); }
+            else _resizeToOriginalScale(_postOrigImg, ri, resolution, _rawOnDone);
+          }, function(){ _resizeToOriginalScale(_postOrigImg, ri, resolution, _rawOnDone); });
+        }, function(){ _resizeToOriginalScale(_postOrigImg, ri, resolution, _rawOnDone); });
       } else {
-        _resizeToOriginalScale(img, ri, resolution, _rawOnDone);
+        _resizeToOriginalScale(_postOrigImg, ri, resolution, _rawOnDone);
       }
     };
   } else if(wf==='space'||wf==='render'||wf==='edit'){
@@ -40487,6 +40575,36 @@ function procImgWithTask(task, onDone, onErr){
 
     console.log('[edit] 레퍼런스:',editRefs2.length,'개 | 엔진:',nb2Slug,'| 프롬프트:',editPrompt.slice(0,80));
 
+    // 🔍 칠한 부분 주변만 잘라서 보내기(원본이 크고 마스크가 일부분일 때) — 결과는 원래 자리에 다시 붙임
+    var _cropFullImg=img, _cropFullMask=task.maskData, _cropRect=null;
+    var _cropAllowed = !!task.maskData && !_agedEnv && !_isBgQualityMatch && !(getTab('edit').forcedAspect && getTab('edit').forcedAspect!=='auto') && !_shouldSkipColorCastFix(task.selK);
+    (_cropAllowed ? function(k){ _editMaybeCropForMask(img, task.maskData, getTab('edit').resolution||'1K', k); } : function(k){ k(null); })(function(_cc){
+    if(_cc){
+      _cropRect=_cc.rect;
+      var _markedRef=getTab('edit')._markedRefImgForCrop;
+      var _refJobs=editRefs2.map(function(r){ return r && r===_markedRef; });
+      img=_cc.img; task.maskData=_cc.mask;
+      var _origOnDone=onDone;
+      onDone=function(u){
+        _editPasteCropBack(_cropFullImg, _cropFullMask, u, _cropRect, function(full){
+          task.maskData=_cropFullMask;
+          _origOnDone(full || u);
+        });
+      };
+      // 위치 표시용 참고 사진(원본 전체에 칠한 표시)도 같은 범위로 잘라서 맞춤
+      if(_refJobs.some(Boolean)){
+        _loadImageForComposite(_markedRef, function(mImg){
+          if(mImg){ editRefs2=editRefs2.map(function(r,i){ return _refJobs[i] ? _cc.crop(mImg,false) : r; }); }
+          console.log('[AI 편집] 칠한 부분 주변만 잘라서 편집 —', _cropRect.w+'×'+_cropRect.h, '/', _cropRect.W+'×'+_cropRect.H);
+          _go();
+        });
+        return;
+      }
+      console.log('[AI 편집] 칠한 부분 주변만 잘라서 편집 —', _cropRect.w+'×'+_cropRect.h, '/', _cropRect.W+'×'+_cropRect.H);
+    }
+    _go();
+    });
+    function _go(){
     getEditRes(img, function(editRes, origW, origH){
       // URL 그대로 onDone — urlToDataUrl 변환 제거 (속도 개선)
       function finishWithResize(u, done){
@@ -40687,6 +40805,7 @@ function procImgWithTask(task, onDone, onErr){
         _doUpload(rd, function(rUrl){ refUrls[ri] = rUrl; checkAllDone(); }, function(){ checkAllDone(); }); // 레퍼런스 업로드 실패는 그 1장만 제외하고 진행
       });
     });
+    }
     return;
   }
 
