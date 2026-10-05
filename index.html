@@ -2875,7 +2875,7 @@ function _proposalDrawConceptPageEd(data, loaded, pageIndex, totalPages, logoImg
   if(allMats.length){
     // 마감재 샘플 타일 그리드(실제 사진에서 잘라낸 재질) — 최대 8개, 4열
     var cols=4, gap=16, tw=(innerW-gap*(cols-1))/cols, rows=Math.ceil(allMats.length/cols);
-    var tileH=Math.min(110, Math.floor((210-rows*48)/Math.max(1,rows)));
+    var tileH=Math.max(60, Math.min(tw, Math.floor((196-rows*48)/Math.max(1,rows)))); // 재질 텍스처가 잘 보이게 정사각에 가깝게
     var rowH=tileH+48;
     allMats.forEach(function(m,i){
       var mx=pad+(i%cols)*(tw+gap), myy=y+4+Math.floor(i/cols)*rowH;
@@ -2894,7 +2894,7 @@ function _proposalDrawConceptPageEd(data, loaded, pageIndex, totalPages, logoImg
   // 공간 목록
   ctx.fillStyle=t.ink; ctx.font='600 17px '+PROPOSAL_FONT; ctx.textAlign='left';
   var list=scenes.map(function(sc,i){ return _propEdPad2(i+1)+' '+_propEdSceneLabel(sc,i); }).join('    ');
-  var ll=_wrapCanvasText(ctx, list, innerW)[0]||''; ctx.fillText(ll, pad, Math.min(y, H-112));
+  var ll=_wrapCanvasText(ctx, list, innerW)[0]||''; if(y<=H-112) ctx.fillText(ll, pad, y); // 공간이 남을 때만(겹침 방지)
 
   _proposalEdFooter(ctx, data, t, pad, pageIndex, totalPages, logoImg);
   return canvas;
@@ -3006,7 +3006,7 @@ function _proposalDrawContentPageEd(chunk, loaded, data, pageIndex, totalPages, 
   var descText=(sc.desc&&sc.desc.trim())?sc.desc.trim():_proposalSceneDesc(sc.label, data._tone);
   var colW=Math.round(innerW*0.56);
   var descLines=_wrapCanvasText(ctx, descText, colW).slice(0,8);
-  var noteH=Math.max(270, 44+descLines.length*32);
+  var noteH=Math.max(300, 44+descLines.length*32);
   var heroMaxH=(H-70-40)-y-noteH-48;
 
   var afterImg=loaded['a'+i], beforeImg=loaded['b'+i];
@@ -3060,16 +3060,16 @@ function _proposalDrawContentPageEd(chunk, loaded, data, pageIndex, totalPages, 
   if(mats.length){
     var my=y+42;
     (sc.materials||[]).forEach(function(m, j){
-      if(!m || !m.v || !String(m.v).trim() || my>y+42+4*54) return;
-      var sw=loaded['m'+i+'_'+j];
-      // 마감재 샘플(사진에서 잘라낸 실제 재질) — 없으면 테마색 사각형
-      if(sw){ _proposalCoverDrawRounded(ctx, sw, rx, my, 44, 44, 4); }
-      else { ctx.fillStyle=t.divider; if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(rx,my,44,44,4); ctx.fill(); } else ctx.fillRect(rx,my,44,44); }
+      if(!m || !m.v || !String(m.v).trim() || my>y+42+4*62) return;
+      var sw=loaded['m'+i+'_'+j], SW=54;
+      // 마감재 샘플(재질 텍스처 또는 사진에서 잘라낸 부분) — 없으면 테마색 사각형
+      if(sw){ _proposalCoverDrawRounded(ctx, sw, rx, my, SW, SW, 4); }
+      else { ctx.fillStyle=t.divider; if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(rx,my,SW,SW,4); ctx.fill(); } else ctx.fillRect(rx,my,SW,SW); }
       ctx.fillStyle=t.muted; ctx.font='700 12px '+PROPOSAL_FONT; _propEdLS(ctx,1.5); ctx.textAlign='left'; ctx.textBaseline='top';
-      ctx.fillText(String(m.k||''), rx+58, my+3); _propEdLS(ctx,0);
-      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '600', 18, 12, rw-64);
-      ctx.fillText(String(m.v), rx+58, my+21);
-      my+=54;
+      ctx.fillText(String(m.k||''), rx+SW+14, my+7); _propEdLS(ctx,0);
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '600', 18, 12, rw-SW-20);
+      ctx.fillText(String(m.v), rx+SW+14, my+27);
+      my+=62;
     });
   }
   if(pal.length){
@@ -27699,6 +27699,65 @@ function _proposalFillMissingSwatches(sc, cb){
   };
   im.src=sc.result;
 }
+// ── 마감재 "텍스처 이미지" 생성(요청: "위치 지정이 아니라, 이렇게 평평한 재질 이미지로 넣어달라") ──
+// 기존 프리셋 '사진에서 맵소스 추출'(texture_from_photo)과 같은 원리로, 이 공간 사진에 보이는
+// 마감재 최대 4개를 "2×2 재질 보드" 한 장으로 한 번에 생성(이미지 생성 1회 = 20cr) → 4칸으로 잘라
+// 각 마감재 칸에 평평한 정면 텍스처(원근·그림자·가구 없음)로 넣음. 4개를 따로 만들면 80cr라 1회로 묶음.
+var PROPOSAL_TEX_COST = 20;
+var _propTexBusy = (typeof WeakSet!=='undefined') ? new WeakSet() : null;
+function _proposalTexBusy(sc){ return !!(_propTexBusy && _propTexBusy.has(sc)); }
+function _proposalMakeTextures(sc, done){
+  var mats=(sc.materials||[]).filter(function(m){ return m && m.v && String(m.v).trim(); }).slice(0,4);
+  if(!mats.length){ alert('먼저 마감재 이름을 채워주세요(AI 분석이 끝나거나 직접 입력).'); return; }
+  if(_proposalTexBusy(sc)) return;
+  var cells=['TOP-LEFT','TOP-RIGHT','BOTTOM-LEFT','BOTTOM-RIGHT'];
+  var list=mats.map(function(m,i){ return cells[i]+' cell = the "'+m.k+'" material: '+m.v; }).join('\n');
+  var prompt='TASK: Create a MATERIAL BOARD image made of exactly 4 equal square cells in a 2x2 grid (the whole output is square). '+
+    'Separate the cells with thin pure-white gaps (about 2% of the image width) and leave a thin pure-white outer margin. NO text, NO labels, NO numbers, NO logos anywhere.\n'+
+    'Each cell shows ONE finishing material that is actually visible in this photo, extracted and rendered as a clean, flat, seamless texture swatch (like a material sample used in 3D software):\n'+list+'\n'+
+    (mats.length<4 ? 'Any remaining cell(s) must be left completely plain pure white.\n' : '')+
+    'For EVERY cell: locate that exact material in the photo and use only its real surface pattern, color, scale and texture. '+
+    'FLATTEN PERSPECTIVE — a perfectly flat, orthographic, straight-on view of the material itself, as if scanned flat, filling the whole cell edge to edge (tiles/planks/panels/stone/joints shown at a realistic scale with several repeats visible). '+
+    'Remove directional shadows, highlights, reflections and vignetting, but KEEP all natural color/tone variation of the material (e.g. stone veins, wood grain, mixed tile tones). '+
+    'Remove all furniture, objects, people and other surfaces. Photorealistic material photograph quality, even diffuse lighting.';
+  if(_propTexBusy) _propTexBusy.add(sc);
+  if(done) done('start');
+  function fail(msg){ if(_propTexBusy) _propTexBusy.delete(sc); alert('재질 이미지 만들기 실패: '+(msg||'')+'\n(크레딧은 결과가 나와야 차감돼요)'); if(done) done('fail'); }
+  _doUpload(sc.result, function(imgUrl){
+    try{
+      falRun('fal-ai/nano-banana-2/edit', {prompt:prompt, image_urls:[imgUrl], num_images:1, aspect_ratio:'1:1'}, function(d){
+        var url=(typeof falExtractImageUrl==='function') ? falExtractImageUrl(d) : (d&&d.images&&d.images[0]&&d.images[0].url);
+        if(!url){ fail('AI가 이미지를 돌려주지 않았어요'); return; }
+        var im=new Image(); im.crossOrigin='anonymous';
+        im.onload=function(){
+          try{
+            var W=im.naturalWidth, H=im.naturalHeight, cw=W/2, ch=H/2, ins=0.07; // 칸 사이 흰 여백을 피하려고 안쪽만 자름
+            mats.forEach(function(m,i){
+              var cx=(i%2)*cw, cy=Math.floor(i/2)*ch;
+              var c=document.createElement('canvas'); c.width=c.height=320;
+              c.getContext('2d').drawImage(im, cx+cw*ins, cy+ch*ins, cw*(1-2*ins), ch*(1-2*ins), 0, 0, 320, 320);
+              m.img=c.toDataURL('image/jpeg',0.9); m.tex=true;
+            });
+            sc._matEdited=true; // 다시 자동 분석돼서 덮어쓰지 않게
+            if(_propTexBusy) _propTexBusy.delete(sc);
+            if(done) done('ok');
+          }catch(e){ fail('이미지 자르기 실패(외부 이미지 보안 제한)'); }
+        };
+        im.onerror=function(){ fail('결과 이미지를 불러오지 못했어요'); };
+        im.src=url;
+      }, function(err){ fail(err); }, {wf:'edit', resolution:'1K'});
+    }catch(e){ fail(e.message); }
+  }, function(err){ fail('사진 업로드 실패: '+err); });
+}
+function _proposalTexConfirmRun(targets){
+  targets=(targets||[]).filter(function(sc){ return sc && (sc.materials||[]).some(function(m){return m&&m.v;}) && !_proposalTexBusy(sc); });
+  if(!targets.length){ alert('재질 이미지를 만들 공간이 없어요 — 마감재 이름이 먼저 채워져 있어야 해요.'); return; }
+  var cost=targets.length*PROPOSAL_TEX_COST;
+  if(G.supaRole!=='admin' && (G.cr||0)<cost){ alert('크레딧이 부족해요. ('+cost+'cr 필요)'); if(typeof openMd==='function') openMd('credits'); return; }
+  if(!confirm('공간 '+targets.length+'개의 마감재를 실제 재질 이미지(평평한 텍스처)로 만들까요?\n공간당 이미지 1장 생성 = '+PROPOSAL_TEX_COST+'cr · 총 '+cost+'cr\n(마감재 4개를 한 장에 묶어서 만들어 비용을 아꼈어요)')) return;
+  targets.forEach(function(sc){ _proposalMakeTextures(sc, function(){ if(typeof G!=='undefined' && G.wf==='proposal') renderMain('proposal'); }); });
+}
+
 function _proposalAnalyzeMaterials(sc, cb){
   if(!sc || !sc.result || sc._matEdited || _proposalMatFailed(sc)) return;
   if(sc.materials && sc.matV===MATERIAL_ANALYSIS_VER) return;
@@ -27782,6 +27841,17 @@ function _proposalLayoutPreview(box, opts, scenes){
   note.style.cssText='font-size:11px;color:var(--m2)';
   note.textContent='실제로 만들어질 PDF 페이지 미리보기 · 레이아웃과 색상 테마를 바꾸면 바로 바뀌어요';
   wrap.appendChild(strip); wrap.appendChild(note);
+  // 전체 공간 마감재를 한 번에 재질 이미지로
+  var _texTargets=scenes.filter(function(sc){ return (sc.materials||[]).some(function(m){return m&&m.v;}); });
+  if(_texTargets.length){
+    var allTex=document.createElement('button'); allTex.type='button';
+    var _busyN=scenes.filter(_proposalTexBusy).length;
+    allTex.textContent=_busyN ? ('🎨 재질 이미지 만드는 중... ('+_busyN+'개 공간)') : ('🎨 전체 공간 마감재를 실제 재질 이미지로 ('+(_texTargets.length*PROPOSAL_TEX_COST)+'cr)');
+    allTex.disabled=!!_busyN;
+    allTex.style.cssText='padding:9px 16px;border-radius:9px;border:1px solid var(--ac);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit';
+    allTex.onclick=function(){ _proposalTexConfirmRun(scenes); };
+    wrap.appendChild(allTex);
+  }
   box.appendChild(wrap);
 
   var cover=opts.coverImg || (_proposalGetCoverScene(scenes)||scenes[0]).result;
@@ -28207,6 +28277,15 @@ function _proposalRenderCanvas(ub){
     reBtn.onclick=function(){ sc.materials=null; sc.matV=null; sc._matEdited=false; if(_propMatFailed) _propMatFailed.delete(sc); _proposalAnalyzeMaterials(sc, _proposalMaterialsReady); renderMain('proposal'); };
     if(!_matBusy) matHead.lastChild.appendChild(reBtn);
     matBox.appendChild(matHead);
+    var _hasMatNames=(sc.materials||[]).some(function(m){return m&&m.v;});
+    var _hasTex=(sc.materials||[]).some(function(m){return m&&m.tex;});
+    var texBtn=document.createElement('button'); texBtn.type='button';
+    if(_proposalTexBusy(sc)){ texBtn.textContent='🎨 재질 이미지 만드는 중... (30초~1분)'; texBtn.disabled=true; }
+    else texBtn.textContent=(_hasTex?'🎨 재질 이미지 다시 만들기':'🎨 실제 재질 이미지로 만들기')+' ('+PROPOSAL_TEX_COST+'cr)';
+    texBtn.title='사진 속 마감재를 평평한 정면 텍스처 이미지로 만들어 넣어요(기존 "사진에서 맵소스 추출"과 같은 방식)';
+    texBtn.style.cssText='width:100%;margin:0 0 7px;padding:7px;border-radius:7px;border:1px solid '+GOLD+';background:'+(theme.dark?'rgba(255,255,255,.04)':'#fff')+';color:'+GOLD+';font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit;opacity:'+(_hasMatNames?1:.5);
+    texBtn.onclick=function(){ _proposalTexConfirmRun([sc]); };
+    matBox.appendChild(texBtn);
     var _mlist=(sc.materials&&sc.materials.length)?sc.materials:[{k:'바닥',v:''},{k:'벽',v:''},{k:'천장',v:''},{k:'포인트',v:''}];
     var matGrid=document.createElement('div'); matGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:5px 10px';
     _mlist.slice(0,4).forEach(function(m, mi){
@@ -50793,6 +50872,12 @@ if ('serviceWorker' in navigator) {
 <script type="module">
 import * as THREE from "three";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
+// VR 뷰어를 정리(화질 변경·다른 VR 열기)할 때 Spark 작업 스레드가 끝나면서 남기는 무해한 에러
+// ("Worker terminate", undefined)가 콘솔에 빨간 에러로 쌓이던 것 — 이 두 가지만 조용히 무시.
+window.addEventListener('unhandledrejection', function(e){
+  var r=e.reason;
+  if(r===undefined || (r && (r==='Worker terminate' || r.message==='Worker terminate'))){ e.preventDefault(); }
+});
 
 window._w3dViewers = window._w3dViewers || {};
 
@@ -51045,11 +51130,14 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
 
     // 브라우저가 메모리 압박 등으로 WebGL 컨텍스트를 강제로 회수하면(특히 모바일/탭 백그라운드)
     // 그대로 두면 화면이 영구히 까맣게 남는다 → 컨텍스트가 복구되면 같은 자리에 뷰어를 다시 만든다.
+    var _vrSelfDisposed = false;
     renderer.domElement.addEventListener('webglcontextlost', function(e){
       e.preventDefault();
+      if(_vrSelfDisposed) return; // 우리가 일부러 정리한 것(화질 변경·다른 VR 열기) — 경고 아님
       console.warn('[VR 투어 뷰어] WebGL 컨텍스트 손실됨');
     }, false);
     renderer.domElement.addEventListener('webglcontextrestored', function(){
+      if(_vrSelfDisposed) return;
       var rc = parseInt(containerEl.dataset.w3RetryCount||'0',10) + 1;
       containerEl.dataset.w3RetryCount = String(rc);
       try{ stopped = true; ro.disconnect(); }catch(e){}
@@ -51090,7 +51178,10 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     }catch(e){}
     var _isHighQ = _vq==='high';
     // 고화질: 화면에 그리는 점 개수를 조금 더 주고(더 선명), 점 줄이는 방식도 정밀 모드("quality")로.
-    var _lodCount = _isHighQ ? (_isMob ? 500000 : 1200000) : (_isMob ? 400000 : 800000);
+    // ⚠️ "고화질이 전보다 더 버벅인다" → 고화질에 점 개수를 120만으로 올리고 정밀 모드를 썼던 게 원인이라
+    // 되돌림. 고화질도 화면에 그리는 점 개수는 보통과 같게(PC 80만) 두고, 대신 원본(full_res)에서 골라
+    // 그리기 때문에 같은 점 개수로도 가까운 곳 디테일은 더 좋음. 움직일 땐 점 수를 조금 더 줄여 부드럽게.
+    var _lodCount = _isMob ? 400000 : 800000;
     var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount, lodSplatScale: 1,
       maxStdDev: Math.sqrt(6), maxPixelRadius: 256, behindFoveate: 1, coneFoveate: 1 });
     try{ spark.behindFoveate=1; spark.coneFoveate=1; spark.lodQuatOverride = new THREE.Quaternion(); }catch(e){}
@@ -51101,11 +51192,12 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     var _onProg = function(ev){
       try{
         if(_loadDone || !_loadTextEl || !ev || !ev.total) return;
-        var pct = Math.min(99, Math.round(ev.loaded/ev.total*100));
-        _loadTextEl.textContent = (_isHighQ ? '고화질 3D 불러오는 중... ' : '3D 화면 불러오는 중... ')+pct+'%';
+        var pct = Math.min(100, Math.round(ev.loaded/ev.total*100));
+        _loadTextEl.textContent = pct>=99 ? '다운로드 완료 · 3D 화면 정리 중... (고화질은 몇 초 더 걸려요)'
+          : ((_isHighQ ? '고화질 3D 불러오는 중... ' : '3D 화면 불러오는 중... ')+pct+'%');
       }catch(e){}
     };
-    try{ splat = new SplatMesh({ url: spzUrl, lod: _isHighQ ? 'quality' : true, onProgress: _onProg }); }
+    try{ splat = new SplatMesh({ url: spzUrl, lod: true, onProgress: _onProg }); }
     catch(e){ splat = new SplatMesh({ url: spzUrl }); }
     if(_isHighQ && _loadTextEl) _loadTextEl.textContent='고화질 3D 불러오는 중... (파일이 커서 조금 걸려요)';
     try{
@@ -51682,6 +51774,11 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
       // 반납되지 않아서, 카드를 여러 번 오가면 컨텍스트가 계속 쌓이다가 브라우저 한도(보통
       // 8~16개)를 넘기면 "Too many active WebGL contexts" 경고와 함께 오래된 뷰어부터
       // 화면이 까맣게 사라지는 문제가 있었음 — WEBGL_lose_context로 확실하게 반납함.
+      // ⚠️ "고화질 바꾸면 그래픽 메모리 부족(컨텍스트 손실)이 반복된다" 수정: 화질을 바꾸거나 다른 VR을
+      // 열 때 이전 3D 데이터(고화질은 점 227만개)·작업 스레드가 메모리에 그대로 남아 쌓였음 → 확실히 해제.
+      _vrSelfDisposed = true;
+      try{ if(splat){ scene.remove(splat); if(splat.dispose) splat.dispose(); } }catch(e){}
+      try{ if(spark){ scene.remove(spark); if(spark.dispose) spark.dispose(); } }catch(e){}
       try{
         var gl = renderer.getContext();
         var ext = gl && gl.getExtension('WEBGL_lose_context');
