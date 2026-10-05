@@ -27451,6 +27451,80 @@ function sbShorts(p){
 
 // ── 메인 캔버스: 이미지 목록 + 결과 영상 미리보기/다운로드 ─────────
 // ── 제안서 탭: 메인 화면 (쇼츠 탭과 동일한 패턴) ──────────────────────
+var _propLayoutPrevCache={key:null, urls:null};
+function _proposalLayoutPreview(box, opts, scenes){
+  var wrap=document.createElement('div');
+  wrap.style.cssText='width:100%;max-width:760px;display:flex;flex-direction:column;align-items:center;gap:12px';
+  var seg=document.createElement('div');
+  seg.style.cssText='display:flex;gap:6px;background:var(--c2);border:1px solid var(--bd2);border-radius:12px;padding:5px';
+  var lay=opts.layout||'editorial';
+  [['editorial','✨ 매거진형 (NEW)'],['classic','클래식']].forEach(function(L){
+    var on=lay===L[0];
+    var b=document.createElement('button'); b.type='button'; b.textContent=L[1];
+    b.style.cssText='padding:9px 18px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:800;'+
+      (on?'background:var(--ac);color:#000':'background:transparent;color:var(--t2)');
+    b.onclick=function(){ if(opts.layout===L[0]) return; opts.layout=L[0]; if(typeof renderSB==='function') renderSB(); renderMain('proposal'); };
+    seg.appendChild(b);
+  });
+  wrap.appendChild(seg);
+  var strip=document.createElement('div');
+  strip.style.cssText='display:flex;gap:10px;width:100%;overflow-x:auto;padding:4px 2px 10px;justify-content:center';
+  var note=document.createElement('div');
+  note.style.cssText='font-size:11px;color:var(--m2)';
+  note.textContent='실제로 만들어질 PDF 페이지 미리보기 · 레이아웃과 색상 테마를 바꾸면 바로 바뀌어요';
+  wrap.appendChild(strip); wrap.appendChild(note);
+  box.appendChild(wrap);
+
+  var cover=opts.coverImg || (_proposalGetCoverScene(scenes)||scenes[0]).result;
+  var key=[lay, opts.styleKey, opts.useCustomColors?JSON.stringify(opts.customColors||{}):'', opts.client, opts.summary, opts.company, opts.contact, cover,
+    scenes.map(function(s){return (s.result||'').slice(-40)+'|'+(s.orig||'').slice(-40)+'|'+(s.label||'')+'|'+(s.desc||'');}).join(';')].join('#');
+  function show(urls){
+    strip.innerHTML='';
+    urls.forEach(function(u){
+      var im=document.createElement('img'); im.src=u;
+      im.style.cssText='height:230px;width:auto;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);box-shadow:0 6px 18px rgba(0,0,0,.35);cursor:zoom-in;background:#fff';
+      im.onclick=function(){ var w=window.open(); if(w){ w.document.write('<img src="'+u+'" style="max-width:100%">'); } };
+      strip.appendChild(im);
+    });
+  }
+  if(_propLayoutPrevCache.key===key && _propLayoutPrevCache.urls){ show(_propLayoutPrevCache.urls); return; }
+  strip.innerHTML='<div style="height:230px;display:flex;align-items:center;color:var(--m2);font-size:12px">미리보기 만드는 중...</div>';
+  var list=scenes.slice(0,4), loaded={}, toLoad=[{k:'hero',s:cover}];
+  list.forEach(function(sc,i){ toLoad.push({k:'a'+i,s:sc.result}); if(sc.orig) toLoad.push({k:'b'+i,s:sc.orig}); });
+  if(opts.logo) toLoad.push({k:'logo',s:opts.logo});
+  var left=toLoad.length;
+  toLoad.forEach(function(t){
+    var im=new Image(); im.crossOrigin='anonymous';
+    im.onload=function(){ loaded[t.k]=im; if(--left===0) draw(); };
+    im.onerror=function(){ if(--left===0) draw(); };
+    im.src=t.s;
+  });
+  function draw(){
+    try{
+      var parsed=_proposalParseDescription(opts.description);
+      var data={client:opts.client, spaceLabel:(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l||'공간',
+        summary:opts.summary, company:opts.company, contact:opts.contact, scenes:scenes, _tone:parsed.tone,
+        styleKey:opts.styleKey||'gold', customColors:opts.useCustomColors?opts.customColors:null, layout:lay};
+      var total=scenes.length+(lay==='editorial'?4:3), c=[];
+      if(lay==='editorial'){
+        c.push(_proposalDrawCoverPageEd(data, loaded.hero, loaded.logo));
+        c.push(_proposalDrawConceptPageEd(data, loaded, 2, total, loaded.logo));
+        c.push(_proposalDrawContentPageEd([{scene:scenes[0],idx:0}], loaded, data, 3, total, loaded.logo));
+        c.push(_proposalDrawClosingPageEd(data, loaded, total, loaded.logo));
+      } else {
+        c.push(_proposalDrawCoverPage(data, loaded.hero, loaded.logo));
+        c.push(_proposalDrawContentPage([{scene:scenes[0],idx:0}], loaded, data, 2, total, loaded.logo));
+        c.push(_proposalDrawClosingPage(data, total));
+      }
+      var urls=c.map(function(cv){
+        var s=document.createElement('canvas'); s.width=420; s.height=Math.round(420*cv.height/cv.width);
+        s.getContext('2d').drawImage(cv,0,0,s.width,s.height); return s.toDataURL('image/jpeg',0.85);
+      });
+      _propLayoutPrevCache={key:key, urls:urls};
+      if(document.body.contains(strip)) show(urls);
+    }catch(e){ console.warn('[제안서 미리보기]', e); strip.innerHTML=''; }
+  }
+}
 function _proposalRenderCanvas(ub){
   ub.classList.add('hide-zone');
   var zone=ub.querySelector('.cub-zone');
@@ -27644,6 +27718,10 @@ function _proposalRenderCanvas(ub){
     box.appendChild(addBigBtn);
     return;
   }
+
+  // 레이아웃 선택 + 실제 PDF 페이지 미리보기(요청: "매거진형/클래식 눌러도 반응이 없다" → 고르는 즉시
+  // 실제로 만들어질 페이지가 여기 바로 보이게 함)
+  _proposalLayoutPreview(box, opts, scenes);
 
   var theme=_proposalTheme(opts.styleKey);
   var GOLD=theme.accent, MOCKW=560;
@@ -50356,7 +50434,7 @@ window._w3dCaptureSpinVideo = function(spzUrl, metricScale, opts, onProgress, on
     camera.position.set(0,0,0);
     var spark = new SparkRenderer({renderer:renderer});
     scene.add(spark);
-    var splat = new SplatMesh({url:spzUrl});
+    var splat; try{ splat = new SplatMesh({url:spzUrl, lod:true}); }catch(e){ splat = new SplatMesh({url:spzUrl}); }
     splat.rotation.x = Math.PI; // world3d 뷰어와 동일한 좌표계 보정
     scene.add(splat);
 
@@ -50581,10 +50659,18 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // 실제 콘텐츠가 없는 빈 공간을 보게 되어 화면이 어둡게/까맣게 나오는 원인이 된다
     camera.position.set(0, 0, 0);
 
-    var spark = new SparkRenderer({ renderer });
+    // ⚠️ 성능("VR 아직도 엄청 버벅거림"): 무거운 3D 파일(이미 저장된 full_res 등)이라도 화면에 그리는
+    // 점 개수를 상한으로 묶어서(LoD) 부드럽게 돌아가게 함. 가까운 곳은 선명하게, 먼 곳은 성기게 그림.
+    var _isMob = (window.innerWidth||1024) < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+    var _lodCount = _isMob ? 350000 : 800000;
+    try{ SparkRenderer.lodSplatCount = _lodCount; SparkRenderer.lodSplatScale = 1; }catch(e){}
+    var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount });
+    try{ spark.lodSplatCount = _lodCount; }catch(e){}
     scene.add(spark);
 
-    var splat = new SplatMesh({ url: spzUrl });
+    var splat;
+    try{ splat = new SplatMesh({ url: spzUrl, lod: true }); }
+    catch(e){ splat = new SplatMesh({ url: spzUrl }); }
     // World Labs(Marble)의 스플랫은 Y/Z축이 Three.js 기준과 반대로 나와서
     // 보정 없이 그대로 쓰면 위아래가 뒤집히고 카메라가 바닥을 보게 된다 → 180도 회전 보정
     splat.rotation.x = Math.PI;
@@ -51054,7 +51140,10 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         var fps=_fpsFrames*1000/(_now-_fpsT0);
         _fpsFrames=0; _fpsT0=_now;
         var pr=renderer.getPixelRatio();
-        if(fps<28 && pr>0.5){ renderer.setPixelRatio(Math.max(0.5, pr-0.2)); }
+        var ls=1; try{ ls=SparkRenderer.lodSplatScale||1; }catch(e){}
+        if(fps<28 && pr>0.6){ renderer.setPixelRatio(Math.max(0.6, pr-0.2)); }
+        else if(fps<28 && ls>0.3){ try{ SparkRenderer.lodSplatScale=Math.max(0.3, ls-0.2); }catch(e){} } // 해상도로도 부족하면 점 개수 줄임
+        else if(fps>55 && ls<1){ try{ SparkRenderer.lodSplatScale=Math.min(1, ls+0.1); }catch(e){} }
         else if(fps>55 && pr<_maxPR){ renderer.setPixelRatio(Math.min(_maxPR, pr+0.1)); }
       }
     }
