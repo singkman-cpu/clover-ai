@@ -16777,9 +16777,10 @@ function _scPrepExtFromInterior(spTab, typeName, input, cb){
     _scBuildInteriorBoard(others, function(board){
       // 2026-10-05: 이 세트에서 이미 만든 외관 사진이 있으면(예: 투시뷰를 먼저 만들고 지금 조감뷰) 그 사진을 맨 앞에 같이 보내서
       // 같은 건물로 이어지게 함(예전엔 실내 사진으로만 바꿔치기해서 뷰마다 다른 건물이 나올 수 있었음)
-      var _prevExt=(spTab.autoRoomGenExtUrls||[]).filter(Boolean);
+      var _prevExt=input._noPrevExt?[]:(spTab.autoRoomGenExtUrls||[]).filter(Boolean); // 후보 여러 장일 땐 서로 다른 건물이어야 하므로 이전 외관을 안 붙임
       var _prevExtUrl=_prevExt.length?_prevExt[_prevExt.length-1]:null;
       input.image_urls=(_prevExtUrl?[_prevExtUrl]:[]).concat([living.img]).concat(board?[board]:[]);
+      input._prevExtUrl=_prevExtUrl||null;
       var _ordA=_prevExtUrl?'두 번째':'첫 번째', _ordB=_prevExtUrl?'세 번째':'두 번째';
       input.prompt=(input.prompt||'')+' ⚠️⚠️⚠️⚠️ 실내 사진으로 이 건물의 외관을 추론하기(건축 외관 참고 사진이 없음 — 이 프롬프트의 가장 중요한 마지막 지시): '+(_prevExtUrl?'첫 번째 첨부 이미지는 이 세트에서 이미 만든 "같은 건물"의 외관 사진입니다 — 지붕 형태·층수·매스·창 배치·외장재를 그대로 유지하고 카메라 시점만 이번 뷰에 맞게 바꾸세요(다른 건물로 바꾸면 실패). ':'')+_ordA+' 첨부 이미지는 이 집 "'+(living.label||'거실')+'"의 실내 사진'+(board?(', '+_ordB+' 이미지는 같은 집의 다른 실내 공간들('+others.map(function(a){return a.label||'실내';}).join(', ')+')을 이름표와 함께 모아 놓은 참고판입니다(참고판의 격자·흰 여백·이름표 글자는 절대 그리지 마세요)'):'')+'. 이 실내들을 모두 품고 있는 "하나의 건물"을 밖에서 찍은 사진을 그리세요. 반드시 지킬 것: (1) '+(living.label||'거실')+' 창호: '+(living.label||'거실')+' 실내 사진 속 창의 모양(예: 박공·삼각 통창, 바닥까지 내려오는 큰 창, 창 분할 패턴)과 창틀 색이 외관에서 그 공간이 있는 쪽 벽에 그대로 보여야 합니다. 그 실내 천장이 박공(삼각)이면 그 위 지붕도 박공이어야 합니다. (2) 층수·규모: '+(multi?'계단실 등 위층으로 올라가는 공간이 있으므로 이 건물은 반드시 2층 이상입니다(단층 건물로 그리면 실패). ':'')+'실내 공간 '+_uniq.length+'개('+_uniq.join(', ')+')가 다 들어갈 수 있는 규모로 그리세요.'+_sizeText+(_outdoor.length?(' 또 이 집에는 '+_outdoor.join(', ')+'이(가) 있으니, 외관 사진에서 보이는 방향이라면 실제로 그 시설이 보이게 그리세요(예: 옥상이 있으면 평지붕 옥상 난간, 중정이 있으면 건물이 ㄷ·ㅁ자로 감싼 마당, 야외수영장이면 마당의 수영장).'):'')+' (3) 주변 환경: 실내 사진들의 창밖에 보이는 풍경(예: 멀리 보이는 강·호수, 숲, 데크, 마당)을 외관 사진에서도 똑같이 보여주세요 — '+(living.label||'거실')+' 큰 창이 그 경관 쪽을 향하도록 배치하세요. (4) 창틀 색·외장재·색감은 실내 사진들의 톤과 같은 건축가가 설계한 집처럼 이어지게 하세요.';
       console.log('[공간컨셉] 외관 — 실내 사진 '+ints.length+'장으로 추론(거실 1장 + 참고판'+(board?' 1장':' 실패')+', 2층 이상: '+multi+')');
@@ -20092,7 +20093,7 @@ function mkAutoRoomCamera(p){
             var ct=document.createElement('img'); ct.src=cu; ct.title='후보 '+(ci+1)+' — 누르면 대표 결과로 선택';
             var on=(cu===result.url);
             ct.style.cssText='flex:1;min-width:0;aspect-ratio:3/4;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid '+(on?'var(--ac)':'transparent')+';opacity:'+(on?'1':'.75');
-            ct.onclick=function(){ result.url=cu; _showRoomResultInMain(null, cu, typeName+' (후보'+(ci+1)+')'); renderSB(); };
+            ct.onclick=function(){ var _old=result.url; result.url=cu; if(_isExteriorViewType(typeName) && spTab.autoRoomGenExtUrls){ var _k=spTab.autoRoomGenExtUrls.indexOf(_old); if(_k!==-1) spTab.autoRoomGenExtUrls[_k]=cu; else spTab.autoRoomGenExtUrls.push(cu); } _showRoomResultInMain(null, cu, typeName+' (후보'+(ci+1)+')'); renderSB(); }; // 고른 후보가 다음 외관 뷰(조감뷰 등)의 기준 건물이 됨
             cRow.appendChild(ct);
           });
           rRow.appendChild(cRow);
@@ -21362,15 +21363,28 @@ function _padExteriorTo916WithBlur(url, cb){
       _arDoneN++;
       if(_arDoneN>=_arCandN && !_arAdvanced){ _arAdvanced = true; _autoRoomGenerateStep(idx+1, isApt); }
     }
+    _looseInput._noPrevExt = (_arCandN>1);
     _scMaybeSwatch(spTab, typeName, imgs0.primary, imgs0.noDirectMatch, _looseInput, function(){
     for(var _arCi=0; _arCi<_arCandN; _arCi++){
       (function(_arCi){
         // 2026-10-05 버그 수정("건축투시도 3장 뽑았는데 같은 게 2장 나온다"): 후보들이 완전히 똑같은 요청(같은 사진+같은 문구)으로
         // 나가서 AI가 거의 같은 그림을 돌려주는 경우가 있었음 → 2번째 후보부터는 카메라 위치·시점만 다르게 지정해서 보냄(디자인은 동일).
-        var _candVar = _isExteriorViewType(typeName)
-          ? ['', ' ⚠️ 후보 2 전용 지시: 같은 건물·같은 디자인을 그대로 두고, 카메라만 왼쪽 앞 모서리 쪽으로 약 30도 옮겨서 조금 더 높은 시점에서 바라본 구도로 그리세요(첫 번째 후보와 구도가 확실히 달라야 합니다).', ' ⚠️ 후보 3 전용 지시: 같은 건물·같은 디자인을 그대로 두고, 카메라만 오른쪽 앞 모서리 쪽으로 약 30도 옮겨서 사람 눈높이에서 바라본 구도로 그리세요(다른 후보들과 구도가 확실히 달라야 합니다).']
-          : ['', ' ⚠️ 후보 2 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라만 방의 다른 모서리로 옮겨서 반대쪽 벽 방향을 바라본 구도로 그리세요(첫 번째 후보와 구도가 확실히 달라야 합니다).', ' ⚠️ 후보 3 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라를 방 입구 쪽 낮은 위치로 옮겨서 공간 깊이가 잘 보이는 구도로 그리세요(다른 후보들과 구도가 확실히 달라야 합니다).'];
-        var _candInput = _arCi===0 ? _looseInput : Object.assign({}, _looseInput, {prompt: (_looseInput.prompt||'') + (_candVar[_arCi]||'')});
+        // 2026-10-05 사용자 정정: "후보 3장이 같은 건물에 카메라만 살짝 다르다 — 전부 다른 건물 디자인이어야 하고, 각도는 정면만 아니면 랜덤"
+        var _candDesigns=['박공지붕 2개가 엇갈려 붙은 매스, 우드+화이트 스타코','평지붕과 박공을 섞은 계단식 매스, 노출콘크리트+우드','하나의 긴 박공 매스에 돌출된 박스형 2층, 짙은 금속 패널+목재','ㄱ자로 꺾인 두 날개 매스, 화이트 벽돌+블랙 프레임','비대칭 경사지붕(외쪽지붕) 매스, 회색 석재+따뜻한 목재 루버'];
+        var _candVar=[];
+        if(_isExteriorViewType(typeName)){
+          var _dPool=_candDesigns.slice().sort(function(){return Math.random()-0.5;});
+          for(var _cv=0; _cv<_arCandN; _cv++){
+            var _ang=15+Math.round(Math.random()*30), _side=Math.random()<0.5?'왼쪽':'오른쪽';
+            var _angTxt=/투시/.test(typeName)?(' 카메라는 정면을 피해서 정면 축에서 '+_side+'으로 약 '+_ang+'도 틀어 선 2점 투시 구도로 찍으세요.'):'';
+            _candVar.push(_arCandN>1 ? (' ⚠️⚠️⚠️ 후보 '+(_cv+1)+'/'+_arCandN+' 전용 지시(가장 마지막, 매우 중요): 이 후보는 다른 후보들과 "완전히 다른 건물 디자인"이어야 합니다 — 지붕 형태·매스 구성·외장재 조합·창 배치가 확실히 달라야 하고, 같은 건물을 각도만 바꾼 것처럼 보이면 실패입니다. 이번 후보의 디자인 방향: '+_dPool[_cv%_dPool.length]+'. 단, 실내 사진에서 정해지는 조건(거실 창 모양, 층수, 공간 규모·깊이, 창틀 색, 주변 환경)은 그대로 지키세요. 첨부 이미지 중 이 세트에서 이전에 만든 외관 사진이 있더라도 그 건물을 따라 그리지 마세요.'+_angTxt) : _angTxt);
+          }
+        } else {
+          _candVar=['', ' ⚠️ 후보 2 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라만 방의 다른 모서리로 옮겨서 반대쪽 벽 방향을 바라본 구도로 그리세요(첫 번째 후보와 구도가 확실히 달라야 합니다).', ' ⚠️ 후보 3 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라를 방 입구 쪽 낮은 위치로 옮겨서 공간 깊이가 잘 보이는 구도로 그리세요(다른 후보들과 구도가 확실히 달라야 합니다).'];
+        }
+        var _candInput = Object.assign({}, _looseInput, {prompt: (_looseInput.prompt||'') + (_candVar[_arCi]||'')});
+        delete _candInput._noPrevExt; delete _candInput._prevExtUrl; // 내부용 표시값은 API로 보내지 않음
+        if(_arCandN>1 && _isExteriorViewType(typeName) && _looseInput._prevExtUrl && _candInput.image_urls){ _candInput.image_urls=_candInput.image_urls.filter(function(u){ return u!==_looseInput._prevExtUrl; }); } // 후보끼리 다른 건물이어야 하므로 이전 외관 사진은 빼고 보냄
         falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _candInput, function(d){
           var resultUrl=falExtractImageUrl(d);
           if(!resultUrl){ if(_arCi===0){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1); } _arAfterOneCandidate(); return; }
@@ -21734,6 +21748,7 @@ function _autoRoomRetryOne(idx){
     var _wantUrbanPro2 = !!spTab.autoRoomUrbanMode;
     var _looseModelBase2 = _wantUrbanPro2 ? 'fal-ai/nano-banana-pro' : 'fal-ai/nano-banana-2';
     _scMaybeSwatch(spTab, typeName, imgs0b.primary, imgs0b.noDirectMatch, _looseInput2, function(){
+    delete _looseInput2._noPrevExt; delete _looseInput2._prevExtUrl;
     falRun(_looseRefs2.length ? (_looseModelBase2+'/edit') : _looseModelBase2, _looseInput2, function(d){
       var resultUrl=falExtractImageUrl(d);
       if(!resultUrl){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; st.running=false; renderSB(); return; }
