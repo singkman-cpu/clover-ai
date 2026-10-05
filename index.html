@@ -2862,14 +2862,31 @@ function _proposalDrawConceptPageEd(data, loaded, pageIndex, totalPages, logoImg
     for(var r=0;r<4;r++) cell(imgs[r+1], pad+lw+g+(r%2)*(rw+g), y+Math.floor(r/2)*(rh+g), rw, rh); }
   y+=mh+44;
 
-  // 컬러 팔레트
+  // 마감재 보드(전체 공간의 주요 마감재 모음) — 마감재 정보가 없으면 컬러 팔레트로 대체
+  var allMats=[], seenM={};
+  scenes.forEach(function(sc){ (sc.materials||[]).forEach(function(m){ if(!m||!m.v) return; var v=String(m.v).trim(); if(!v||seenM[v]) return; seenM[v]=1; allMats.push({k:String(m.k||''), v:v}); }); });
+  allMats=allMats.slice(0,8);
   ctx.fillStyle=t.accent; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.textAlign='left'; ctx.textBaseline='top';
-  ctx.fillText('COLOR PALETTE', pad, y); _propEdLS(ctx,0);
+  ctx.fillText(allMats.length?'MATERIAL BOARD':'COLOR PALETTE', pad, y); _propEdLS(ctx,0);
   ctx.fillStyle=t.muted; ctx.font='400 15px '+PROPOSAL_FONT; ctx.textAlign='right';
-  ctx.fillText('시안 이미지에서 추출한 대표 컬러', W-pad, y+1);
+  ctx.fillText(allMats.length?'이 프로젝트에 쓰이는 주요 마감재':'시안 이미지에서 추출한 대표 컬러', W-pad, y+1);
   y+=34;
-  _proposalEdPaletteRow(ctx, t, _proposalExtractPalette(imgs, 6), pad, y, innerW, 96);
-  y+=96+44;
+  if(allMats.length){
+    var mcw=(innerW-24)/2, rows=Math.ceil(allMats.length/2), rowH=Math.min(48, Math.floor(200/Math.max(1,rows)));
+    ctx.fillStyle=t.divider; ctx.fillRect(pad, y, innerW, 1);
+    allMats.forEach(function(m,i){
+      var mx=pad+(i%2)*(mcw+24), myy=y+10+Math.floor(i/2)*rowH;
+      ctx.fillStyle=t.muted; ctx.font='700 13px '+PROPOSAL_FONT; ctx.textAlign='left'; ctx.textBaseline='top'; _propEdLS(ctx,1);
+      ctx.fillText(m.k, mx, myy+4); _propEdLS(ctx,0);
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, m.v, '600', 19, 13, mcw-80);
+      ctx.fillText(m.v, mx+72, myy+1);
+      ctx.fillStyle=t.divider; ctx.fillRect(mx, myy+rowH-8, mcw, 1);
+    });
+    y+=10+rows*rowH+24;
+  } else {
+    _proposalEdPaletteRow(ctx, t, _proposalExtractPalette(imgs, 6), pad, y, innerW, 96);
+    y+=96+44;
+  }
   // 공간 목록
   ctx.fillStyle=t.ink; ctx.font='600 17px '+PROPOSAL_FONT; ctx.textAlign='left';
   var list=scenes.map(function(sc,i){ return _propEdPad2(i+1)+' '+_propEdSceneLabel(sc,i); }).join('    ');
@@ -2958,12 +2975,25 @@ function _proposalDrawContentPageEd(chunk, loaded, data, pageIndex, totalPages, 
   ctx.fillStyle=t.desc; ctx.font='400 20px '+PROPOSAL_FONT;
   var dy=y+46; descLines.forEach(function(l){ ctx.fillText(l, pad, dy); dy+=32; });
 
-  // 컬러 팔레트(우)
+  // 마감재(우) — 요청: "컬러칩 대신 마감재질을 넣어줘". 마감재 정보가 없을 때만 컬러 팔레트로 대체.
   var rx=pad+colW+56, rw=W-pad-rx;
+  var mats=(sc.materials||[]).filter(function(m){ return m && m.v && String(m.v).trim(); });
   ctx.fillStyle=t.accent; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,3);
-  ctx.fillText('COLOR PALETTE', rx, y); _propEdLS(ctx,0);
+  ctx.fillText(mats.length?'MATERIALS':'COLOR PALETTE', rx, y); _propEdLS(ctx,0);
   ctx.fillStyle=t.divider; ctx.fillRect(rx, y+28, rw, 1);
-  var pal=_proposalExtractPalette(afterImg?[afterImg]:[], 5);
+  var pal=mats.length ? [] : _proposalExtractPalette(afterImg?[afterImg]:[], 5);
+  if(mats.length){
+    var my=y+44;
+    mats.slice(0,4).forEach(function(m){
+      ctx.fillStyle=t.accent; ctx.fillRect(rx, my+8, 6, 6);
+      ctx.fillStyle=t.muted; ctx.font='700 13px '+PROPOSAL_FONT; _propEdLS(ctx,1); ctx.textAlign='left'; ctx.textBaseline='top';
+      ctx.fillText(String(m.k||''), rx+16, my+2); _propEdLS(ctx,0);
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '600', 18, 13, rw-86);
+      ctx.fillText(String(m.v), rx+80, my);
+      ctx.fillStyle=t.divider; ctx.fillRect(rx, my+34, rw, 1);
+      my+=46;
+    });
+  }
   if(pal.length){
     var gap=8, cw=(rw-gap*(pal.length-1))/pal.length;
     pal.forEach(function(c,k){
@@ -9193,7 +9223,10 @@ function renderMain(callWf, preserveScroll){
     // 필터링 전에는 결과가 있었다면, 이 필터를 아예 적용하지 않고 전부 보여줌 — "결과가 분명히
     // 있는데 화면엔 텅 빈 업로드 화면만 보이는" 최악의 상황만큼은 막음(아파트 결과가 섞여
     // 보이는 것보다 결과가 아예 안 보이는 쪽이 훨씬 나쁜 경험이라 이렇게 우선순위를 둠).
-    if(_filteredItems.length || !items.length){
+    // ⚠️ 버그 수정(2026-10-05, "공간컨셉디자인에서 만든 건축외관이 아파트 컨셉 디자인 메인화면에 보인다"):
+    // 아파트 모드에서 아파트 결과가 아직 0개면 위 방어 로직이 "필터 없이 전부"를 보여줘서 공간컨셉
+    // 결과가 통째로 섞여 보였음 — 아파트 모드에서는 절대 섞지 않고 빈 화면(업로드 화면)을 보여줌.
+    if(_filteredItems.length || !items.length || _curIsApt){
       items = _filteredItems;
     } else {
       console.warn('[renderMain] spaceset isApt 필터가 결과를 전부 가려서(총 '+items.length+'개), 필터 없이 그대로 표시함 — isApt 태그 확인 필요');
@@ -24968,7 +25001,10 @@ function _shortsSaveSnapshot(snapshot){
   }
   _shortsCloudSaveDraft(snapshot);
 }
+// VR 화면이 돌아가는 동안은 무거운 자동저장(큰 이미지 직렬화)이 몇 초마다 화면을 멈칫하게 만들어서 잠시 건너뜀
+function _vrBusy(){ return !!window._vrViewerBeat && (performance.now()-window._vrViewerBeat) < 1500; }
 setInterval(function(){
+  if(_vrBusy()) return;
   _shortsSaveDraftAsync();
   if(G_PROPOSAL.scenes && G_PROPOSAL.scenes.length) _draftSave(_proposalDraftKey(), G_PROPOSAL);
 }, 6000); // 6초마다 자동 저장 (이미지나 문구가 있을 때만)
@@ -27451,6 +27487,73 @@ function sbShorts(p){
 
 // ── 메인 캔버스: 이미지 목록 + 결과 영상 미리보기/다운로드 ─────────
 // ── 제안서 탭: 메인 화면 (쇼츠 탭과 동일한 패턴) ──────────────────────
+// ── 제안서 페이지 크게 보기(앱 안 라이트박스) — 새 창 대신 cloverai 화면 안에서 크게, ‹ › 로 넘겨보기 ──
+function _proposalLightbox(urls, start){
+  if(!urls || !urls.length) return;
+  var idx=Math.max(0, Math.min(urls.length-1, start||0));
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box';
+  var img=document.createElement('img');
+  img.style.cssText='max-width:min(92vw,980px);max-height:92vh;width:auto;height:auto;border-radius:6px;box-shadow:0 20px 60px rgba(0,0,0,.6);background:#fff';
+  var cnt=document.createElement('div');
+  cnt.style.cssText='position:absolute;top:18px;left:50%;transform:translateX(-50%);color:#fff;font-size:13px;font-weight:700;background:rgba(255,255,255,.12);padding:5px 12px;border-radius:20px';
+  function mkBtn(txt, css){ var b=document.createElement('button'); b.type='button'; b.innerHTML=txt;
+    b.style.cssText='position:absolute;border:none;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;font-family:inherit;border-radius:50%;width:48px;height:48px;font-size:26px;display:flex;align-items:center;justify-content:center;'+css; return b; }
+  var prev=mkBtn('‹','left:18px;top:50%;transform:translateY(-50%)');
+  var next=mkBtn('›','right:18px;top:50%;transform:translateY(-50%)');
+  var close=mkBtn('✕','top:14px;right:16px;width:40px;height:40px;font-size:18px');
+  function show(){ img.src=urls[idx]; cnt.textContent=(idx+1)+' / '+urls.length; prev.style.opacity=idx>0?'1':'.3'; next.style.opacity=idx<urls.length-1?'1':'.3'; }
+  function go(d){ var n=idx+d; if(n<0||n>=urls.length) return; idx=n; show(); }
+  function shut(){ document.removeEventListener('keydown', onKey, true); if(ov.parentNode) ov.remove(); }
+  function onKey(e){ if(e.key==='Escape'){ e.preventDefault(); shut(); } else if(e.key==='ArrowLeft'){ e.preventDefault(); go(-1); } else if(e.key==='ArrowRight'){ e.preventDefault(); go(1); } }
+  prev.onclick=function(e){ e.stopPropagation(); go(-1); };
+  next.onclick=function(e){ e.stopPropagation(); go(1); };
+  close.onclick=function(e){ e.stopPropagation(); shut(); };
+  img.onclick=function(e){ e.stopPropagation(); };
+  ov.onclick=shut;
+  document.addEventListener('keydown', onKey, true);
+  ov.appendChild(img); ov.appendChild(cnt); if(urls.length>1){ ov.appendChild(prev); ov.appendChild(next); } ov.appendChild(close);
+  document.body.appendChild(ov);
+  show();
+}
+
+// ── 공간별 마감재 자동 분석(요청: "컬러칩 대신 차라리 마감재질을 넣어줘") ──
+// 완성 이미지를 비전 AI에 보여주고 실내면 바닥/벽/천장/포인트, 외관이면 지붕/외벽/창호/포인트를 4줄로 받음.
+// 결과는 sc.materials=[{k,v}]에 저장 — 메인 미리보기에서 바로 고칠 수 있음(AI가 틀려도 직접 수정).
+var _propMatBusy = (typeof WeakSet!=='undefined') ? new WeakSet() : null;
+function _proposalParseMaterials(d){
+  var t=(d&&(d.output||d.text||d.response||d.message))||'';
+  if(typeof t!=='string') return null;
+  var out=[];
+  t.split(/\n/).forEach(function(l){
+    var m=l.replace(/^[\s\-\*•\d\.\)]+/,'').replace(/[*_`#]/g,'').match(/^([가-힣A-Za-z ]{1,6})\s*[:：]\s*(.{2,40})$/);
+    if(m && out.length<4 && !/^예/.test(m[1])) out.push({k:m[1].trim(), v:m[2].trim()});
+  });
+  return out.length>=2 ? out : null;
+}
+function _proposalAnalyzeMaterials(sc, cb){
+  if(!sc || !sc.result || sc.materials || sc._matFail) return;
+  if(_propMatBusy){ if(_propMatBusy.has(sc)) return; _propMatBusy.add(sc); }
+  var url=sc.result;
+  var prompt='이 건축/인테리어 사진에 실제로 보이는 마감재를 분석해줘. 실내 사진이면 바닥/벽/천장/포인트, 건물 외관 사진이면 지붕/외벽/창호/포인트 순서로 딱 4줄만, 아래 형식 그대로 한국어로만 답해(다른 설명·인사말 금지). 재질과 색상을 함께, 각 18자 이내로.\n형식 예시(내용은 사진에 맞게 바꿔서):\n바닥: 내추럴 오크 원목마루\n벽: 웜화이트 도장\n천장: 화이트 평천장·간접조명\n포인트: 우드 슬랫 월';
+  function done(r){ if(_propMatBusy) _propMatBusy.delete(sc); if(r) sc.materials=r; else sc._matFail=true; if(cb) cb(); }
+  function fallback(){
+    _falProxyCall('llm', { input:{ model:'google/gemini-flash-1.5-8b', prompt:prompt, image_url:url } },
+      function(d){ done(_proposalParseMaterials(d)); }, function(){ done(null); });
+  }
+  try{
+    _falProxyCall('llm', { endpoint:'fal-ai/any-llm/vision', input:{ model:'google/gemini-2.5-flash', prompt:prompt, image_url:url, image_urls:[url] } },
+      function(d){ var r=_proposalParseMaterials(d); if(r) done(r); else fallback(); }, fallback);
+  }catch(e){ done(null); }
+}
+function _proposalMaterialsReady(){
+  // 분석이 끝나면: 입력 중이 아니면 화면 갱신, 입력 중이면 미리보기 썸네일만 다음 갱신 때 반영
+  if(typeof G==='undefined' || G.wf!=='proposal') return;
+  var ae=document.activeElement, tag=ae&&ae.tagName;
+  if(tag==='TEXTAREA'||tag==='INPUT') return;
+  renderMain('proposal');
+}
+
 var _propLayoutPrevCache={key:null, urls:null};
 function _proposalLayoutPreview(box, opts, scenes){
   var wrap=document.createElement('div');
@@ -27477,17 +27580,18 @@ function _proposalLayoutPreview(box, opts, scenes){
 
   var cover=opts.coverImg || (_proposalGetCoverScene(scenes)||scenes[0]).result;
   var key=[lay, opts.styleKey, opts.useCustomColors?JSON.stringify(opts.customColors||{}):'', opts.client, opts.summary, opts.company, opts.contact, cover,
-    scenes.map(function(s){return (s.result||'').slice(-40)+'|'+(s.orig||'').slice(-40)+'|'+(s.label||'')+'|'+(s.desc||'');}).join(';')].join('#');
-  function show(urls){
+    scenes.map(function(s){return (s.result||'').slice(-40)+'|'+(s.orig||'').slice(-40)+'|'+(s.label||'')+'|'+(s.desc||'')+'|'+JSON.stringify(s.materials||null);}).join(';')].join('#');
+  function show(urls, big){
     strip.innerHTML='';
-    urls.forEach(function(u){
+    urls.forEach(function(u, i){
       var im=document.createElement('img'); im.src=u;
+      im.title='클릭하면 크게 보기';
       im.style.cssText='height:230px;width:auto;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);box-shadow:0 6px 18px rgba(0,0,0,.35);cursor:zoom-in;background:#fff';
-      im.onclick=function(){ var w=window.open(); if(w){ w.document.write('<img src="'+u+'" style="max-width:100%">'); } };
+      im.onclick=function(){ _proposalLightbox(big||urls, i); };
       strip.appendChild(im);
     });
   }
-  if(_propLayoutPrevCache.key===key && _propLayoutPrevCache.urls){ show(_propLayoutPrevCache.urls); return; }
+  if(_propLayoutPrevCache.key===key && _propLayoutPrevCache.urls){ show(_propLayoutPrevCache.urls, _propLayoutPrevCache.big); return; }
   strip.innerHTML='<div style="height:230px;display:flex;align-items:center;color:var(--m2);font-size:12px">미리보기 만드는 중...</div>';
   var list=scenes.slice(0,4), loaded={}, toLoad=[{k:'hero',s:cover}];
   list.forEach(function(sc,i){ toLoad.push({k:'a'+i,s:sc.result}); if(sc.orig) toLoad.push({k:'b'+i,s:sc.orig}); });
@@ -27520,8 +27624,9 @@ function _proposalLayoutPreview(box, opts, scenes){
         var s=document.createElement('canvas'); s.width=420; s.height=Math.round(420*cv.height/cv.width);
         s.getContext('2d').drawImage(cv,0,0,s.width,s.height); return s.toDataURL('image/jpeg',0.85);
       });
-      _propLayoutPrevCache={key:key, urls:urls};
-      if(document.body.contains(strip)) show(urls);
+      var big=c.map(function(cv){ return cv.toDataURL('image/jpeg',0.88); });
+      _propLayoutPrevCache={key:key, urls:urls, big:big};
+      if(document.body.contains(strip)) show(urls, big);
     }catch(e){ console.warn('[제안서 미리보기]', e); strip.innerHTML=''; }
   }
 }
@@ -27560,7 +27665,8 @@ function _proposalRenderCanvas(ub){
       pageWrap.style.cssText='width:100%;position:relative';
       var img=document.createElement('img');
       img.src=pageSrc;
-      img.style.cssText='width:100%;display:block;border-radius:10px;border:1px solid var(--bd2);box-shadow:0 8px 30px rgba(0,0,0,.4)';
+      img.style.cssText='width:100%;display:block;border-radius:10px;border:1px solid var(--bd2);box-shadow:0 8px 30px rgba(0,0,0,.4);cursor:zoom-in';
+      img.onclick=function(){ _proposalLightbox(G_PROPOSAL.resultPages||[G_PROPOSAL.resultUrl], pi); };
       pageWrap.appendChild(img);
       var pageNum=document.createElement('div');
       pageNum.style.cssText='position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px';
@@ -27722,6 +27828,7 @@ function _proposalRenderCanvas(ub){
   // 레이아웃 선택 + 실제 PDF 페이지 미리보기(요청: "매거진형/클래식 눌러도 반응이 없다" → 고르는 즉시
   // 실제로 만들어질 페이지가 여기 바로 보이게 함)
   _proposalLayoutPreview(box, opts, scenes);
+  scenes.forEach(function(sc){ _proposalAnalyzeMaterials(sc, _proposalMaterialsReady); });
 
   var theme=_proposalTheme(opts.styleKey);
   var GOLD=theme.accent, MOCKW=560;
@@ -27769,6 +27876,29 @@ function _proposalRenderCanvas(ub){
   coverChg.style.cssText='position:absolute;top:10px;right:10px;background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.35);font-size:10.5px;font-weight:700;padding:4px 9px;border-radius:6px;cursor:pointer;font-family:inherit';
   coverChg.onclick=function(e){ e.stopPropagation(); _propPickCover(); };
   coverCard.appendChild(coverChg);
+  // 매거진형이면 큰 표지 미리보기도 실제 PDF와 같은 구성(위 60% 사진 + 아래 단색 패널)으로 즉시 바꿈
+  if((opts.layout||'editorial')==='editorial'){
+    var _et=_proposalEffectiveTheme({styleKey:opts.styleKey, customColors:opts.useCustomColors?opts.customColors:null});
+    coverCard.style.background=_et.bg;
+    coverBgImg.style.cssText='position:absolute;left:0;top:0;width:100%;height:60%;object-fit:cover;opacity:1';
+    coverGrad.style.cssText='position:absolute;left:0;top:0;width:100%;height:14%;background:linear-gradient(to bottom,rgba(0,0,0,.45),rgba(0,0,0,0));pointer-events:none';
+    var _edTag=document.createElement('div');
+    _edTag.style.cssText='position:absolute;left:7%;top:60%;transform:translateY(-50%);background:'+_et.accent+';color:'+(_et.dark?'#000':'#fff')+';font-size:9px;font-weight:800;letter-spacing:2px;padding:7px 12px';
+    _edTag.textContent='INTERIOR DESIGN PROPOSAL';
+    coverCard.appendChild(_edTag);
+    coverText.style.cssText='position:absolute;left:7%;right:7%;top:65%;bottom:4%;color:'+_et.ink+';display:flex;flex-direction:column';
+    var _spL=((opts.spaceType?(PROPOSAL_SPACE_TYPES.find(function(t){return t.k===opts.spaceType;})||{}).l:'공간')||'공간');
+    var _d=new Date(), _ymd=_d.getFullYear()+'.'+String(_d.getMonth()+1).padStart(2,'0')+'.'+String(_d.getDate()).padStart(2,'0');
+    coverText.innerHTML='<div style="font-weight:800;font-size:26px;line-height:1.2;margin-bottom:8px">'+clientDisp+'</div>';
+    summaryTa.style.cssText='width:100%;min-height:54px;flex:1;background:transparent;border:1px dashed '+_et.divider+';border-radius:4px;color:'+_et.desc+';font-size:12px;line-height:1.55;font-family:inherit;padding:6px;box-sizing:border-box;resize:none';
+    coverText.appendChild(summaryTa);
+    var _grid=document.createElement('div');
+    _grid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);border-top:2px solid '+_et.ink+';margin-top:8px;padding-top:6px';
+    [['SPACE',_spL],['ROOMS',scenes.length+'개 공간'],['DESIGNER',opts.company||'-'],['DATE',_ymd]].forEach(function(m,i){
+      _grid.innerHTML+='<div style="padding-left:'+(i?'8px':'0')+';border-left:'+(i?'1px solid '+_et.divider:'none')+';min-width:0"><div style="color:'+_et.accent+';font-size:8px;font-weight:800;letter-spacing:1.5px">'+m[0]+'</div><div style="font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+String(m[1]).replace(/</g,'&lt;')+'</div></div>';
+    });
+    coverText.appendChild(_grid);
+  }
   if(opts.coverImg){ var coverReset=document.createElement('button'); coverReset.type='button'; coverReset.textContent='↺ 원래대로'; coverReset.style.cssText='position:absolute;top:40px;right:10px;background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.35);font-size:10px;padding:3px 8px;border-radius:6px;cursor:pointer;font-family:inherit'; coverReset.onclick=function(e){ e.stopPropagation(); opts.coverImg=null; renderMain('proposal'); }; coverCard.appendChild(coverReset); }
   mockWrap.appendChild(coverCard);
 
@@ -27836,7 +27966,48 @@ function _proposalRenderCanvas(ub){
       addB.onclick=function(e){ e.stopPropagation(); _proposalOpenImageEditPicker(sc, 'orig', function(u){ sc.orig=u; renderSB(); renderMain('proposal'); }); };
       aWrap.appendChild(addB);
     }
+    var _isEdL=(opts.layout||'editorial')==='editorial';
+    if(_isEdL){
+      // 매거진형: 큰 번호 + AFTER 크게, BEFORE는 사진 오른쪽 아래에 작게 겹쳐서(실제 PDF와 동일)
+      sceneHead.innerHTML='<span style="color:'+GOLD+';font-weight:800;font-size:40px;line-height:1;letter-spacing:-1px">'+(idx+1<10?'0':'')+(idx+1)+'</span><span style="color:'+theme.ink+';font-weight:800;font-size:20px">'+(sc.label&&sc.label.trim()?sc.label.trim():'공간 '+(idx+1))+'</span>';
+      imgRow.style.cssText='position:relative;display:block;margin-bottom:3%';
+      aWrap.style.cssText='position:relative;width:100%;background:#eee;border-radius:4px;overflow:hidden';
+      if(sc.orig && bWrap){
+        bWrap.style.cssText='position:absolute;right:4%;bottom:5%;width:30%;z-index:2;background:'+theme.bg+';padding:4px;border-radius:2px;box-shadow:0 6px 16px rgba(0,0,0,.35)';
+        imgRow.appendChild(bWrap); // AFTER 위에 오도록 뒤로 이동
+      }
+    }
     sceneCard.appendChild(imgRow);
+
+    // 마감재 — AI가 사진을 보고 자동으로 채움, 틀리면 여기서 바로 고치기(PDF에 그대로 들어감)
+    var matBox=document.createElement('div');
+    matBox.style.cssText='position:relative;margin-bottom:3%;border-top:1px solid '+theme.divider+';padding-top:8px';
+    var matHead=document.createElement('div');
+    matHead.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px';
+    var _matBusy=_propMatBusy && _propMatBusy.has(sc);
+    matHead.innerHTML='<span style="color:'+GOLD+';font-size:10px;font-weight:800;letter-spacing:2px">MATERIALS · 마감재</span><span style="font-size:10px;color:'+theme.muted+'">'+
+      (_matBusy?'AI가 사진에서 마감재 찾는 중...':(sc.materials?'AI 자동 입력 · 직접 고칠 수 있어요':(sc._matFail?'자동 분석 실패 · 직접 입력해주세요':'')))+'</span>';
+    matBox.appendChild(matHead);
+    var _mlist=(sc.materials&&sc.materials.length)?sc.materials:[{k:'바닥',v:''},{k:'벽',v:''},{k:'천장',v:''},{k:'포인트',v:''}];
+    var matGrid=document.createElement('div'); matGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:5px 10px';
+    _mlist.slice(0,4).forEach(function(m, mi){
+      var row=document.createElement('div'); row.style.cssText='display:flex;gap:4px;align-items:center;min-width:0';
+      var kIn=document.createElement('input'); kIn.value=m.k||''; kIn.placeholder='부위';
+      var vIn=document.createElement('input'); vIn.value=m.v||''; vIn.placeholder='예: 오크 원목마루';
+      var inCss='background:'+(theme.dark?'rgba(255,255,255,.06)':'#fff')+';border:1px dashed var(--bd2);border-radius:5px;color:'+theme.ink+';font-size:11.5px;font-family:inherit;padding:5px 6px;box-sizing:border-box;min-width:0';
+      kIn.style.cssText=inCss+';width:58px;flex-shrink:0;font-weight:700;color:'+theme.muted;
+      vIn.style.cssText=inCss+';flex:1';
+      function sync(){
+        var arr=(sc.materials&&sc.materials.length)?sc.materials.slice():_mlist.map(function(x){return {k:x.k,v:x.v};});
+        arr[mi]={k:kIn.value.trim(), v:vIn.value.trim()};
+        sc.materials=arr; sc._matFail=false;
+      }
+      kIn.oninput=sync; vIn.oninput=sync;
+      vIn.onchange=function(){ renderMain('proposal'); }; kIn.onchange=vIn.onchange; // 고친 내용이 위쪽 PDF 미리보기에도 반영되게
+      row.appendChild(kIn); row.appendChild(vIn); matGrid.appendChild(row);
+    });
+    matBox.appendChild(matGrid);
+    sceneCard.appendChild(matBox);
 
     var descTa=document.createElement('textarea');
     descTa.value = sc.desc&&sc.desc.trim() ? sc.desc : _proposalSceneDesc(sc.label, _tone);
@@ -35757,7 +35928,7 @@ function _loadSpaceSetPersist(){
     if(aw && !_sp.autoRoomWeather) _sp.autoRoomWeather=aw;
   }catch(e){ console.warn('[공간컨셉디자인 프롬프트 복원 실패]', e.message); }
 }
-try{ window.addEventListener('beforeunload', _saveSpaceSetPersist); setInterval(_saveSpaceSetPersist, 4000); }catch(e){}
+try{ window.addEventListener('beforeunload', _saveSpaceSetPersist); setInterval(function(){ if(typeof _vrBusy==='function' && _vrBusy()) return; _saveSpaceSetPersist(); }, 4000); }catch(e){}
 
 function saveHistToStorage(){try{
     localStorage.setItem('clover_eng',    G.eng||'nano2');
@@ -35984,6 +36155,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
           if(iw<=0){ setTimeout(_w3dInitOnce, 80); return; }
           var inner=dv('');inner.style.cssText='position:absolute;top:0;left:0;width:100%;height:100%';
           w3frameWrap.innerHTML='';w3frameWrap.appendChild(inner);
+          inner._spzVariants = item.spzUrls || null;
           if(window._w3dInitViewer) window._w3dInitViewer(inner, item.spzUrl, item.metricScale, item.orig||null, item.result||null);
           _w3dActive=true;
         };
@@ -38434,7 +38606,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       var url=world&&(world.world_marble_url||(world.world_id?('https://marble.worldlabs.ai/world/'+world.world_id):null));
       // 우리 사이트 안에서 직접 렌더링하기 위한 원본 스플랫(.spz) 파일 URL
       // 실제 응답 구조: assets.splats.spz_urls = { "100K":url, "150K":url, "500K":url, "full_res":url } (배열 아님!)
-      var spzUrl=null;
+      var spzUrl=null, _spzAll=null;
       try{
         var splatAsset=world&&world.assets&&world.assets.splats;
         var su=splatAsset&&splatAsset.spz_urls;
@@ -38446,6 +38618,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
             // ⚠️ 성능 수정("VR 렌더 엄청 느리다"): 주석엔 '중간 품질 우선'이라 돼 있었는데 실제로는 full_res(가장 무거운
             // 원본)를 1순위로 골라서 다운로드도 오래 걸리고 열린 뒤에도 버벅였음 → _w3dPickSpz로 가벼운 파일 우선 선택.
             spzUrl = _w3dPickSpz(su);
+            _spzAll = su; // 화질 선택용으로 모든 버전 주소 보관
           }
         }
         if(!spzUrl && splatAsset && splatAsset.spz_url) spzUrl=splatAsset.spz_url;
@@ -38471,7 +38644,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
       var _doneCost = _w3dCostFor(operationId);
       delete _w3dCostByOp[operationId];
       if(G.supaRole!=='admin' && _doneCost>0) deductCredits(_doneCost);
-      var newItem={id:Date.now(),orig:thumbUrl||srcImg,result:url,spzUrl:spzUrl,metricScale:metricScale,origThumb:null,tags:['VR 투어'],ai:'',cx:50,fav:false,wf:'world3d'};
+      var newItem={id:Date.now(),orig:thumbUrl||srcImg,result:url,spzUrl:spzUrl,spzUrls:_spzAll,metricScale:metricScale,origThumb:null,tags:['VR 투어'],ai:'',cx:50,fav:false,wf:'world3d'};
       G.HIST.world3d.unshift(newItem);
       saveHistToStorage();
       try{ localStorage.removeItem('clover_w3d_pending'); }catch(e){}
@@ -38485,7 +38658,7 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
         try{
           _supa.from('gallery').insert({
             user_id:_supaUser.id, wf:'world3d', orig_url:thumbUrl||srcImg||null, public_url:thumbUrl||url,
-            engine:'world3d', resolution:'', style_key:JSON.stringify({spzUrl:spzUrl||null, metricScale:metricScale||1})
+            engine:'world3d', resolution:'', style_key:JSON.stringify({spzUrl:spzUrl||null, spzUrls:_spzAll||null, metricScale:metricScale||1})
           }).then(function(res){ if(res&&res.error) console.error('[VR 투어] 클라우드 저장 실패:', res.error); })
             .catch(function(e){ console.error('[VR 투어] 클라우드 저장 실패(예외):', e); });
         }catch(e){ console.error('[VR 투어] 클라우드 저장 시도 자체 실패:', e); }
@@ -47705,6 +47878,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
 
   // ── 30초마다 자동 저장 ────────────────────────────────────────
   setInterval(function(){
+    if(typeof _vrBusy==='function' && _vrBusy()) return;
     saveHistToStorage();
   }, 30000);
   var crn=gE('cr-n');if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
@@ -49931,6 +50105,7 @@ function loadCloudGallery(){
             var meta=JSON.parse(row.style_key);
             spzUrl=meta.spzUrl||null;
             metricScale=meta.metricScale||1;
+            var _spzUrlsMeta=meta.spzUrls||null;
           }catch(e){}
         }
         if(exists){
@@ -49945,6 +50120,7 @@ function loadCloudGallery(){
           if(!exists.budgetSnapshot && row.budget_snapshot){
             try{ exists.budgetSnapshot = (typeof row.budget_snapshot==='string') ? JSON.parse(row.budget_snapshot) : row.budget_snapshot; origRestored=true; }catch(e){}
           }
+          if(wf==='world3d' && typeof _spzUrlsMeta!=='undefined' && _spzUrlsMeta && !exists.spzUrls){ exists.spzUrls=_spzUrlsMeta; origRestored=true; }
           if(wf==='world3d' && spzUrl && !exists.spzUrl){
             exists.spzUrl=spzUrl; exists.metricScale=metricScale; origRestored=true;
           }
@@ -49996,6 +50172,7 @@ function loadCloudGallery(){
           orig_cloud_url: row.orig_url||null,
           origThumb: null,
           spzUrl: spzUrl,
+          spzUrls: (typeof _spzUrlsMeta!=='undefined' ? _spzUrlsMeta : null),
           metricScale: metricScale,
           tags: tags,
           wf: wf,
@@ -50662,10 +50839,12 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // ⚠️ 성능("VR 아직도 엄청 버벅거림"): 무거운 3D 파일(이미 저장된 full_res 등)이라도 화면에 그리는
     // 점 개수를 상한으로 묶어서(LoD) 부드럽게 돌아가게 함. 가까운 곳은 선명하게, 먼 곳은 성기게 그림.
     var _isMob = (window.innerWidth||1024) < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
-    var _lodCount = _isMob ? 350000 : 800000;
-    try{ SparkRenderer.lodSplatCount = _lodCount; SparkRenderer.lodSplatScale = 1; }catch(e){}
-    var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount });
-    try{ spark.lodSplatCount = _lodCount; }catch(e){}
+    // Spark 2.1 소스 확인: lodSplatCount/lodSplatScale은 렌더러 "인스턴스" 옵션(기본 PC 250만개 → 너무 많음).
+    // maxStdDev/maxPixelRadius: 카메라 바로 앞의 거대한 점이 화면을 통째로 덮어 GPU를 잡아먹는 것(가장 흔한 버벅임 원인) 제한.
+    var _lodCount = _isMob ? 300000 : 600000;
+    var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount, lodSplatScale: 1,
+      maxStdDev: Math.sqrt(6), maxPixelRadius: 256 });
+    window._w3dSpark = spark;
     scene.add(spark);
 
     var splat;
@@ -50820,6 +50999,21 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         if(containerEl._vrApplySize) containerEl._vrApplySize();
       };
       recBtnGroup.appendChild(ratioSel);
+      // 화질 선택 — 생성 때 받은 여러 버전(가벼운/보통/원본) 중 고를 수 있음(2026-10-05 이후 생성분부터)
+      var _vars = containerEl._spzVariants;
+      if(_vars && typeof _vars==='object'){
+        var _low={}; Object.keys(_vars).forEach(function(k){ _low[String(k).toLowerCase()]=_vars[k]; });
+        var _qOpts=[['100k','⚡ 가볍게'],['150k','⚡ 가볍게'],['500k','보통'],['full_res','고화질(무거움)']]
+          .filter(function(o,i,arr){ if(!_low[o[0]]) return false; if(o[0]==='150k' && _low['100k']) return false; return true; });
+        if(_qOpts.length>1){
+          var qSel=document.createElement('select');
+          qSel.title='화질 — 버벅이면 "가볍게"를 골라주세요';
+          qSel.style.cssText=ratioSel.style.cssText;
+          _qOpts.forEach(function(o){ var op=document.createElement('option'); op.value=_low[o[0]]; op.textContent='화질: '+o[1]; op.style.color='#000'; if(_low[o[0]]===spzUrl) op.selected=true; qSel.appendChild(op); });
+          qSel.onchange=function(){ var u=qSel.value; if(u && u!==spzUrl) window._w3dInitViewer(containerEl, u, metricScale, origThumb, shareResult); };
+          recBtnGroup.appendChild(qSel);
+        }
+      }
       recBtnGroup.appendChild(recBtn);
       recBtnGroup.appendChild(previewBtn);
       if(spzUrl && typeof cloverShareVR==='function'){
@@ -51131,6 +51325,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
       }
 
       renderer.render(scene, camera);
+      window._vrViewerBeat = performance.now(); // VR 화면이 돌아가는 중 표시 → 무거운 자동저장 잠시 멈춤
 
       // ⚠️ 성능("VR 엄청 버벅거림"): 프레임이 느리면 렌더 해상도를 자동으로 낮추고,
       // 여유가 생기면 다시 올림 — 무거운 3D 파일이라도 화면 돌리기가 부드럽게 유지되도록.
@@ -51140,11 +51335,12 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         var fps=_fpsFrames*1000/(_now-_fpsT0);
         _fpsFrames=0; _fpsT0=_now;
         var pr=renderer.getPixelRatio();
-        var ls=1; try{ ls=SparkRenderer.lodSplatScale||1; }catch(e){}
-        if(fps<28 && pr>0.6){ renderer.setPixelRatio(Math.max(0.6, pr-0.2)); }
-        else if(fps<28 && ls>0.3){ try{ SparkRenderer.lodSplatScale=Math.max(0.3, ls-0.2); }catch(e){} } // 해상도로도 부족하면 점 개수 줄임
-        else if(fps>55 && ls<1){ try{ SparkRenderer.lodSplatScale=Math.min(1, ls+0.1); }catch(e){} }
+        var ls=spark.lodSplatScale||1;
+        // 느리면: 점 개수 먼저 줄이고(화질 손실 적음) → 그래도 느리면 해상도 낮춤. 여유 생기면 반대로 복구.
+        if(fps<30 && ls>0.35){ spark.lodSplatScale=Math.max(0.35, ls-0.15); }
+        else if(fps<30 && pr>0.6){ renderer.setPixelRatio(Math.max(0.6, pr-0.15)); }
         else if(fps>55 && pr<_maxPR){ renderer.setPixelRatio(Math.min(_maxPR, pr+0.1)); }
+        else if(fps>55 && ls<1){ spark.lodSplatScale=Math.min(1, ls+0.1); }
       }
     }
     var _fpsFrames=0, _fpsT0=performance.now(), _maxPR=Math.min(window.devicePixelRatio||1, 1.5);
