@@ -22443,6 +22443,7 @@ function sbRender(p){
 // 화면 캡처는 WebGL 캔버스에서 이미지를 뽑아내는 방식이라, 타일 서버가 CORS를 허용 안 하면
 // 실패할 수 있음(이땐 브라우저 자체 스크린샷 기능으로 직접 캡처해서 올리도록 안내).
 var VWORLD_API_KEY = 'CCA2A6BE-4D04-47E6-9D6A-1F5C6764281D';
+var _vwPinLon=null, _vwPinLat=null; // 마지막 주소검색 위치(핀 표시용 — 창을 다시 열어도 핀 복원)
 var _vwScriptLoaded = false;
 var _vwMapInstance = null;
 // ⚠️ 요청 반영("캡처하고 옆에도 캡처하고 싶은데 처음부터 다시 해야 하는 번거로움"): 창을 닫았다 다시
@@ -22722,6 +22723,77 @@ function _openVworldModal(){
       }
     }
 
+    // ── 검색 위치 표시(핀) ──
+    // 요청 반영("주소검색했는데 위치표시가 안나오네"): 예전엔 카메라만 그 근처로 옮기고 표시가 없었고,
+    // 카메라를 주소 바로 위에 두고 비스듬히(-50°) 내려다봐서 실제 주소 지점이 화면 중앙이 아니라
+    // 화면 아래쪽(심하면 화면 밖)에 있었음. → ① 빨간 핀을 주소 지점에 꽂고(건물에 가려지지 않게 항상
+    // 위에 그림), ② 카메라를 남쪽으로 물려서 주소 지점이 화면 중앙에 오게 함. 캡처할 땐 핀을 잠깐 숨김.
+    var _vwPinImg=(function(){
+      var c=document.createElement('canvas'); c.width=48; c.height=64; var x=c.getContext('2d');
+      x.fillStyle='rgba(0,0,0,.35)'; x.beginPath(); x.ellipse(24,60,9,3,0,0,Math.PI*2); x.fill();
+      x.fillStyle='#ff2d55'; x.strokeStyle='#fff'; x.lineWidth=3;
+      x.beginPath(); x.moveTo(24,58); x.bezierCurveTo(10,40,4,30,4,22); x.arc(24,22,20,Math.PI,0); x.bezierCurveTo(44,30,38,40,24,58); x.closePath(); x.fill(); x.stroke();
+      x.fillStyle='#fff'; x.beginPath(); x.arc(24,22,7,0,Math.PI*2); x.fill();
+      return c.toDataURL('image/png');
+    })();
+    var _vwPin=null;
+    function _vwRemovePin(){
+      if(!_vwPin) return;
+      try{
+        if(_vwPin.kind==='cesium') _vwPin.viewer.entities.remove(_vwPin.obj);
+        else if(_vwPin.obj){ if(_vwPin.obj.destroy) _vwPin.obj.destroy(); else if(_vwMapInstance&&_vwMapInstance.removeObjectById) _vwMapInstance.removeObjectById(_vwPin.id); }
+      }catch(e){}
+      _vwPin=null;
+    }
+    function _vwSetPinVisible(v){
+      if(!_vwPin) return;
+      try{
+        if(_vwPin.kind==='cesium'){ _vwPin.obj.show=v; if(_vwPin.viewer.scene&&_vwPin.viewer.scene.requestRender) _vwPin.viewer.scene.requestRender(); }
+        else if(_vwPin.obj){ if(v){ if(_vwPin.obj.show) _vwPin.obj.show(); } else { if(_vwPin.obj.hide) _vwPin.obj.hide(); } }
+      }catch(e){}
+    }
+    function _vwAddPin(lon, lat){
+      _vwRemovePin();
+      var C=window.Cesium, viewer=(window.ws3d&&window.ws3d.viewer)||null;
+      // 1순위: 브이월드 3D 내부 엔진(Cesium) 엔티티 — 건물에 안 가려지게 depth test 끔
+      if(C && viewer && viewer.entities && C.Cartesian3){
+        try{
+          var ent=viewer.entities.add({
+            position:C.Cartesian3.fromDegrees(lon, lat, 0),
+            billboard:{ image:_vwPinImg, width:36, height:48,
+              verticalOrigin:C.VerticalOrigin?C.VerticalOrigin.BOTTOM:undefined,
+              heightReference:C.HeightReference?C.HeightReference.CLAMP_TO_GROUND:undefined,
+              disableDepthTestDistance:Number.POSITIVE_INFINITY }
+          });
+          _vwPin={kind:'cesium', obj:ent, viewer:viewer};
+          if(viewer.scene&&viewer.scene.requestRender) viewer.scene.requestRender();
+          return;
+        }catch(e){ console.warn('[VWorld] 핀(Cesium) 실패', e); }
+      }
+      // 2순위: 브이월드 SDK 기본 포인트 객체
+      try{
+        if(window.vw && vw.geom && vw.geom.Point){
+          var id='clover_vw_pin';
+          var pt=new vw.geom.Point(new vw.Coord(lon, lat));
+          if(pt.setId) pt.setId(id);
+          if(pt.setImage) pt.setImage(_vwPinImg);
+          if(pt.setName) pt.setName('검색 위치');
+          if(pt.setFont) pt.setFont('고딕');
+          if(pt.setFontSize) pt.setFontSize(14);
+          pt.create();
+          _vwPin={kind:'vw', obj:pt, id:id};
+          return;
+        }
+      }catch(e){ console.warn('[VWorld] 핀(vw.geom.Point) 실패', e); }
+      console.warn('[VWorld] 위치 핀을 표시할 방법을 못 찾음', {Cesium:!!C, ws3d:!!window.ws3d, vwGeom:!!(window.vw&&vw.geom)});
+    }
+    // 카메라를 주소 남쪽으로 물려서, 비스듬히 내려다볼 때 주소 지점이 화면 중앙에 오게 함
+    function flyToTarget(lon, lat, height, pitch){
+      var back = height / Math.tan(Math.abs(pitch)*Math.PI/180); // 미터
+      var camLat = lat - back/111320;
+      flyTo(lon, camLat, height, pitch);
+    }
+
     panel.querySelector('#vw-search').onclick=function(){
       var addr=panel.querySelector('#vw-addr').value.trim();
       if(!addr){ showErr('주소를 입력해주세요.'); return; }
@@ -22729,9 +22801,18 @@ function _openVworldModal(){
       _vworldGeocode(addr, function(lon,lat,err2){
         if(err2){ showErr(err2); return; }
         curLon=lon; curLat=lat; _vwLastLon=lon; _vwLastLat=lat; _vwLastAddr=addr;
-        flyTo(lon, lat, 500, -50);
+        flyToTarget(lon, lat, 500, -50);
+        _vwPinLon=lon; _vwPinLat=lat;
+        _vwAddPin(lon, lat);
       });
     };
+    // 창을 닫았다 다시 열었을 때도 마지막 검색 위치 핀을 다시 꽂음(지도 엔진이 준비될 때까지 몇 번 재시도)
+    if(_vwPinLon!=null){
+      (function retryPin(n){
+        if(window.ws3d&&window.ws3d.viewer || n<=0){ _vwAddPin(_vwPinLon,_vwPinLat); return; }
+        setTimeout(function(){ retryPin(n-1); }, 500);
+      })(12);
+    }
 
     // ⚠️ 기능 제거("고화질 꺼짐 누르니까 지도 전체가 깨짐 — MapJson 로딩 실패, 렌더링 중단"): 화질을
     // 런타임에 바꾸려고 options를 고친 뒤 loadMap()으로 강제 재로드했더니 이 SDK가 아예 복구 불가능한
@@ -22805,7 +22886,8 @@ function _openVworldModal(){
       // 누르면 무조건 지금 화면에 보이는 그대로만 찍힘. 멀리서 찍었을 때 화질이 떨어지는 문제는
       // (브이월드 3D 타일 자체의 해상도 한계라 이 단계에서 더 손볼 수 없음) AI 렌더링 프롬프트
       // 쪽의 배경 건물 화질 강제 지침으로 보완함.
-      setBasemap('PHOTO', function(){ doCapture(function(){ setBasemap('HYBRID', function(){}); }); });
+      _vwSetPinVisible(false); // 참고 이미지에 핀이 찍히지 않게 캡처 동안만 숨김
+      setBasemap('PHOTO', function(){ doCapture(function(){ setBasemap('HYBRID', function(){}); _vwSetPinVisible(true); }); });
     };
     function doCapture(after){
       var cv=mapDiv.querySelector('canvas');
