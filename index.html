@@ -13736,6 +13736,7 @@ function mkResolution(p){
       });
       _refreshResInfo();
       updBtn();
+      if(G.wf==='edit' && G.editMode==='light' && typeof _lightUpdateGoBtn==='function') _lightUpdateGoBtn();
     }
     b.onpointerdown=function(e){ e.preventDefault(); _applyRes(); };
     b.onclick=_applyRes;
@@ -32512,16 +32513,22 @@ function mkLightEdit(p){
   _mkLightOpts(p, tab, function(){ renderSB(); });
   mkResolution(p);
   var cost=getBaseCost('edit');
-  var go=mk('button','actbtn ok');go.type='button';
+  var go=mk('button','actbtn ok');go.type='button';go.id='light-go-btn';
   var total=lm.lines.length+lm.spots.length;
   go.disabled=!total || !!tab.lightRunning;
   go.style.cssText='width:100%;padding:12px;font-size:13.5px;font-weight:800;margin-top:6px';
-  go.innerHTML=tab.lightRunning?'💡 조명 렌더링 중...':('💡 조명 렌더링 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+cost+'cr</span>');
+  go.innerHTML=_lightGoLabel(tab);
   go.onclick=function(){ _lightRun(); };
   p.appendChild(go);
   if(!total){ var t2=dv('');t2.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';t2.textContent='먼저 "조명 위치 그리기"에서 라인이나 할로겐을 1개 이상 그려주세요'; p.appendChild(t2); }
   if(tab.lightError){ var er=dv('');er.style.cssText='margin-top:8px;font-size:11.5px;color:#f87171;background:rgba(248,113,113,.08);border-radius:7px;padding:8px 10px';er.textContent='⚠️ '+tab.lightError; p.appendChild(er); }
 }
+function _lightGoLabel(tab){
+  var c=getBaseCost('edit', null, tab.resolution||'1K');
+  return tab.lightRunning?'💡 조명 렌더링 중...':('💡 조명 렌더링 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+c+'cr</span>');
+}
+// 1K/2K/4K를 누르면 아래 "조명 렌더링" 버튼의 크레딧도 바로 바뀌게(2026-10-06 버그 신고)
+function _lightUpdateGoBtn(){ var b=document.getElementById('light-go-btn'); if(b) b.innerHTML=_lightGoLabel(getTab('edit')); }
 function _mkLightOpts(p, tab, onChange, dark){
   var o=tab.lightOpts;
   function row(label, key, items){
@@ -32561,6 +32568,13 @@ function _lightGuideCanvas(img, lm){
     // 속이 빈 고리 — 원래 있던 매입등이 가려지지 않고 고리 안에 그대로 보이게(그 등을 켜는 경우)
     x.strokeStyle='#000'; x.lineWidth=S*0.006; x.beginPath(); x.arc(cx,cy,r*1.25,0,7); x.stroke();
     x.strokeStyle=LIGHT_SPOT_COLOR; x.lineWidth=S*0.0038; x.beginPath(); x.arc(cx,cy,r*1.25,0,7); x.stroke();
+  });
+  // 할로겐 번호(1,2,3…) — AI가 개수를 정확히 세도록 각 고리 옆에 번호 표시
+  x.font='bold '+Math.round(S*0.018)+'px sans-serif'; x.textBaseline='bottom';
+  lm.spots.forEach(function(sp, i){
+    var tx=sp.x*W+S*0.016, ty=sp.y*H-S*0.008;
+    x.lineWidth=S*0.004; x.strokeStyle='#000'; x.strokeText(String(i+1), tx, ty);
+    x.fillStyle=LIGHT_SPOT_COLOR; x.fillText(String(i+1), tx, ty);
   });
   return c;
 }
@@ -32672,7 +32686,7 @@ function _openLightEditor(){
     var sp=document.createElement('div'); sp.style.cssText='flex:1'; bar.appendChild(sp);
     var cnt=document.createElement('div'); cnt.style.cssText='font-size:12px;color:#aaa;margin-right:6px'; cnt.textContent='라인 '+lm.lines.length+'개 · 할로겐 '+lm.spots.length+'개'; bar.appendChild(cnt);
     bar.appendChild(btn('✓ 완료', false, function(){ ov.remove(); renderSB(); }));
-    bar.appendChild(btn('💡 이대로 렌더링 ('+getBaseCost('edit')+'cr)', true, function(){ if(!(lm.lines.length+lm.spots.length)){ alert('먼저 라인이나 할로겐을 그려주세요.'); return; } ov.remove(); _lightRun(); }, ';background:#00e5cc;color:#000'));
+    bar.appendChild(btn('💡 이대로 렌더링 ('+getBaseCost('edit', null, tab.resolution||'1K')+'cr)', true, function(){ if(!(lm.lines.length+lm.spots.length)){ alert('먼저 라인이나 할로겐을 그려주세요.'); return; } ov.remove(); _lightRun(); }, ';background:#00e5cc;color:#000'));
   }
   function renderSide(){
     side.innerHTML='<div style="font-size:13px;font-weight:800;margin-bottom:8px">💡 조명 옵션</div>'+
@@ -32759,19 +32773,20 @@ function _lightRun(){
     return 'LINE '+(i+1)+' ('+_dirTxt(ln[0], ln[ln.length-1])+', one continuous line): '+pts.join(' → ');
   }).join('; ');
   var spotDesc=lm.spots.map(function(sp,i){ return 'SPOT '+(i+1)+' at ('+_pc(sp.x)+' from left, '+_pc(sp.y)+' from top)'; }).join('; ');
+  var spotStrict = nS ? ('⚠️ HALOGEN COUNT IS EXACT: exactly '+nS+' downlight'+(nS>1?'s':'')+' may be ON in the whole image — the '+nS+' numbered yellow ring'+(nS>1?'s':'')+' (1'+(nS>1?'–'+nS:'')+'), one light per ring. The ceiling in image 1 may contain MORE recessed downlights than '+nS+' — every downlight that is NOT inside a numbered ring must stay completely OFF and dark (no glow at the fixture, no beam, no light pool on the wall below it). Do not light "the neighbouring" fixtures, do not add new ones between or beside the rings, and do not split one ring into two lights. Exactly '+nS+' light pool'+(nS>1?'s':'')+' must be visible on the wall/surface, one under each ring.\n') : '';
   var prompt='⚠️ STRICT RULE FIRST — LIGHT ONLY WHERE MARKED: the ONLY new light sources allowed are the '+nL+' marked line(s) and '+nS+' marked spot(s) listed below. Every other edge, surface and fixture must stay exactly as unlit as in image 1.\n'+
     'You receive TWO images. IMAGE 1 = the original photo/render to edit. IMAGE 2 = the SAME image with lighting GUIDE MARKS drawn on it (guide only — never copy the marks).\n'+
     (nL? '• ORANGE lines in image 2 ('+nL+' line'+(nL>1?'s':'')+') = the EXACT positions of concealed linear LED indirect lighting. For EVERY orange line, install a hidden LED strip along that exact edge/surface for its full drawn length, so a continuous '+tempTxt+' glow washes out from that edge onto the nearby surface (e.g. under a counter top, along a ceiling cove or step, under shelves/cabinets, along a wall base). The light source itself stays hidden — show the soft glowing band and its gradient falloff, not a visible tube.\n' : '')+
-    (nS? '• YELLOW rings in image 2 ('+nS+' ring'+(nS>1?'s':'')+', each with a short yellow direction line) = the EXACT positions (ring centers) of recessed halogen / downlight spotlights. For EVERY yellow ring: if a light fixture (downlight, recessed spot, pendant, sconce) ALREADY EXISTS inside or right next to that ring in image 1, simply TURN THAT EXISTING FIXTURE ON — do not add a second fixture or change its design; if no fixture is there, place one small recessed fixture at the ring center. Either way, make it emit a '+tempTxt+' beam in the direction of its short yellow line, creating the classic soft scallop / cone-shaped light pool on the wall or surface below it.\n' : '')+
+    (nS? '• YELLOW rings in image 2 ('+nS+' numbered ring'+(nS>1?'s':'')+', each with a short yellow direction line) = the EXACT positions (ring centers) of recessed halogen / downlight spotlights. For EVERY yellow ring: if a light fixture (downlight, recessed spot, pendant, sconce) ALREADY EXISTS inside or right next to that ring in image 1, simply TURN THAT EXISTING FIXTURE ON — do not add a second fixture or change its design; if no fixture is there, place one small recessed fixture at the ring center. Either way, make it emit a '+tempTxt+' beam in the direction of its short yellow line, creating the classic soft scallop / cone-shaped light pool on the wall or surface below it.\n' : '')+
     (nL? 'EXACT LINE POSITIONS (image coordinates): '+lineDesc+'.\n' : '')+
-    (nS? 'EXACT SPOT POSITIONS: '+spotDesc+'.\n' : '')+
+    (nS? 'EXACT SPOT POSITIONS: '+spotDesc+'.\n' : '')+ spotStrict +
     'COUNT CHECK: the result must contain exactly '+nL+' indirect light line(s) and '+nS+' halogen spot(s) at the marked places — none missing, and do NOT add extra light fixtures anywhere else.\n'+
     'DO NOT ADD LED / INDIRECT GLOW ANYWHERE THAT IS NOT MARKED — in particular NOT under ceiling beams or soffits, NOT along ceiling edges or coves, NOT around signage frames, niches, artwork or wall panels, NOT along the floor / base / kick of counters or furniture, NOT under shelves, hoods or cabinets, NOT around windows — unless an orange line is drawn exactly there. Unmarked recessed downlights and other existing fixtures stay OFF (as in image 1) unless a yellow ring marks them.\n'+
     'Light intensity: '+powTxt+'. '+
     (o.mood==='dark' ? 'OVERALL MOOD: atmospheric evening/night mood — lower the general ambient light so the room is moody and ONLY the marked indirect lines and halogen pools become the main light, with soft shadows in the corners and warm reflections on surfaces. Achieve the mood ONLY by dimming the overall ambient light — NEVER by adding extra LED strips, cove lights or glowing edges that are not marked. Keep everything still readable, never pitch black.\n' : 'OVERALL MOOD: keep the overall brightness of the original — just add the marked lights naturally on top.\n')+
     (o.photoreal ? 'If IMAGE 1 is a raw 3D model screenshot (e.g. SketchUp-like flat colors/no real lighting), render it as a photorealistic high-end interior visualization with realistic materials and global illumination, keeping every object, material choice, color and position the same. If it is already a photo/realistic render, keep its style.\n' : 'Keep the rendering style of image 1 as it is.\n')+
     'KEEP IDENTICAL: camera angle, framing, composition, architecture, walls, ceiling, furniture, materials, colors, decor and their positions — only the lighting changes. ABSOLUTELY NO orange or yellow guide marks, lines, rings, dots, numbers or arrows may appear in the output. Output one single image.\n'+
-    '⚠️ FINAL CHECK (most important): compare your result with image 2 — if there is ANY glowing LED line, cove glow, under-glow or lit fixture that does NOT sit exactly on an orange line or yellow ring, remove it and leave that spot unlit. The number of light lines in the result must be exactly '+nL+'.';
+    '⚠️ FINAL CHECK (most important): compare your result with image 2 — if there is ANY glowing LED line, cove glow, under-glow or lit fixture that does NOT sit exactly on an orange line or yellow ring, remove it and leave that spot unlit. The number of light lines in the result must be exactly '+nL+'.'+(nS?(' Count the lit downlights / light pools: there must be exactly '+nS+' — if you see more, switch the extra ones OFF.'):'');
   if(!G.HIST.edit) G.HIST.edit=[];
   var loadingId=Date.now()+Math.random();
   G.HIST.edit.unshift({ id:loadingId, orig:baseImg, result:null, origThumb:null, tags:['💡 조명 렌더링 중... (라인 '+nL+' · 할로겐 '+nS+')'], ai:'', cx:50, fav:false, wf:'edit', preview:false, loading:true });
