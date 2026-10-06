@@ -45741,7 +45741,36 @@ function _galleryZoomShow(list, idx){
   closeB.textContent='✕ 닫기';
   closeB.style.cssText='padding:10px 20px;background:var(--c2);border:1px solid var(--bd2);color:var(--t2);border-radius:20px;font-size:13px;cursor:pointer;font-family:inherit';
   closeB.onclick=function(e){e.stopPropagation();ov.remove();document.removeEventListener('keydown',_galZoomKeyHandler);};
-  btns.appendChild(dlB);btns.appendChild(shB);btns.appendChild(tagB);btns.appendChild(favB);btns.appendChild(projB);btns.appendChild(closeB);
+  // 2026-10-06 요청: 크게 보기에서 바로 커뮤니티로 공개/취소(갤러리 카드의 🌍 버튼과 같은 기능)
+  var comB=document.createElement('button');
+  function _comBSync(){
+    var on=!!it.communityPostId;
+    comB.textContent=on?'🌍 커뮤니티 공개중':'🌍 커뮤니티 올리기';
+    comB.title=on?'눌러서 커뮤니티 공개 취소':'다른 회원들이 볼 수 있게 커뮤니티에 바로 올려요(익명)';
+    comB.style.cssText='padding:10px 20px;background:'+(on?'var(--ac)':'rgba(0,229,204,.1)')+';border:1px solid var(--ac);color:'+(on?'#000':'var(--ac)')+';border-radius:20px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit';
+  }
+  _comBSync();
+  comB.onclick=function(e){
+    e.stopPropagation();
+    if(!_supa || !_supaUser){ alert('커뮤니티에 올리려면 먼저 로그인해주세요.'); return; }
+    if(it.communityPostId){
+      if(!confirm('커뮤니티 공개를 취소할까요? 다른 회원들이 더 이상 볼 수 없게 돼요.')) return;
+      comB.disabled=true;
+      _supa.from('community_posts').delete().eq('id', it.communityPostId).then(function(res){
+        comB.disabled=false;
+        if(res.error){ alert('공개 취소에 실패했어요: '+res.error.message); return; }
+        delete it.communityPostId; saveHistToStorage(); _comBSync();
+      });
+      return;
+    }
+    comB.disabled=true; comB.textContent='🌍 올리는 중...';
+    _communityPublishItemSilent(it, function(ok){
+      comB.disabled=false;
+      if(!ok){ _comBSync(); alert('커뮤니티 공개에 실패했어요.\n관리자에게 community_posts 테이블 설정을 확인해달라고 요청해주세요.'); return; }
+      saveHistToStorage(); _comBSync();
+    });
+  };
+  btns.appendChild(dlB);btns.appendChild(comB);btns.appendChild(shB);btns.appendChild(tagB);btns.appendChild(favB);btns.appendChild(projB);btns.appendChild(closeB);
   var _budgetPanel = _buildBudgetInfoPanel(it.budgetSnapshot);
   if(_budgetPanel){
     var mediaRow=document.createElement('div');
