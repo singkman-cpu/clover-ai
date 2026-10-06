@@ -32647,6 +32647,13 @@ function _openLightEditor(){
     }
   }
   function endChain(){ activeLine=null; anchorPt=null; }
+  // 되돌리기(Ctrl+Z) / 다시 실행(Ctrl+Y, Ctrl+Shift+Z) — 그리기 동작마다 직전 상태를 저장
+  var undoStack=[], redoStack=[];
+  function _snapStr(){ return JSON.stringify({lines:lm.lines, spots:lm.spots}); }
+  function snap(){ undoStack.push(_snapStr()); if(undoStack.length>200) undoStack.shift(); redoStack=[]; }
+  function _restore(str){ var o=JSON.parse(str); lm.lines=o.lines; lm.spots=o.spots; }
+  function undo(){ if(!undoStack.length) return; redoStack.push(_snapStr()); _restore(undoStack.pop()); endChain(); draw(); renderSide(); }
+  function redo(){ if(!redoStack.length) return; undoStack.push(_snapStr()); _restore(redoStack.pop()); endChain(); draw(); renderSide(); }
   function btn(txt, on, fn, css){ var b=document.createElement('button'); b.type='button'; b.textContent=txt;
     b.style.cssText='padding:8px 12px;border-radius:8px;font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit;'+(on?'border:1.5px solid #00e5cc;background:rgba(0,229,204,.18);color:#00e5cc':'border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#ddd')+(css||'');
     b.onclick=fn; return b; }
@@ -32658,10 +32665,9 @@ function _openLightEditor(){
       bar.appendChild(btn(straightMode?'📏 직선 모드 켜짐':'📏 직선 모드', straightMode, function(){ straightMode=!straightMode; renderBar(); renderSide(); }));
       if(activeLine||anchorPt) bar.appendChild(btn('⏹ 이 라인 끝내기', false, function(){ endChain(); renderBar(); draw(); }));
     }
-    bar.appendChild(btn('↶ 마지막 지우기', false, function(){
-      if(lastKind==='spot' && lm.spots.length) lm.spots.pop(); else if(lm.lines.length) lm.lines.pop(); else lm.spots.pop();
-      lastKind=null; endChain(); draw(); renderSide(); }));
-    bar.appendChild(btn('🗑 전체 지우기', false, function(){ if(!confirm('그린 조명을 모두 지울까요?')) return; lm.lines=[]; lm.spots=[]; endChain(); draw(); renderSide(); }));
+    bar.appendChild(btn('↶ 되돌리기 (Ctrl+Z)', false, function(){ undo(); }, undoStack.length?'':';opacity:.45'));
+    bar.appendChild(btn('↷ 다시 (Ctrl+Y)', false, function(){ redo(); }, redoStack.length?'':';opacity:.45'));
+    bar.appendChild(btn('🗑 전체 지우기', false, function(){ if(!confirm('그린 조명을 모두 지울까요?')) return; snap(); lm.lines=[]; lm.spots=[]; endChain(); draw(); renderSide(); }));
     bar.appendChild(btn(showGlow?'✨ 빛 미리보기 켜짐':'✨ 빛 미리보기 꺼짐', showGlow, function(){ showGlow=!showGlow; renderBar(); draw(); }));
     var sp=document.createElement('div'); sp.style.cssText='flex:1'; bar.appendChild(sp);
     var cnt=document.createElement('div'); cnt.style.cssText='font-size:12px;color:#aaa;margin-right:6px'; cnt.textContent='라인 '+lm.lines.length+'개 · 할로겐 '+lm.spots.length+'개'; bar.appendChild(cnt);
@@ -32680,6 +32686,7 @@ function _openLightEditor(){
   cv.addEventListener('pointerdown', function(e){
     e.preventDefault(); cv.setPointerCapture(e.pointerId);
     var p0=pos(e);
+    snap(); // 이 동작 직전 상태 저장(되돌리기용)
     if(tool==='line'){
       var chain = e.shiftKey || straightMode;
       if(chain && activeLine && activeLine.length){ activeLine.push(p0); drawing={kind:'seg'}; lastKind='line'; draw(); renderBar(); return; }
@@ -32713,16 +32720,19 @@ function _openLightEditor(){
     if(!drawing) return;
     if(drawing.kind==='seg'){ drawing=null; draw(); renderSide(); return; }
     if(drawing.kind==='line'){
-      if(drawing.pts.length<2){ lm.lines.pop(); anchorPt=drawing.pts[0]; activeLine=null; } // 그냥 클릭 = 시작점만 찍음
+      if(drawing.pts.length<2){ lm.lines.pop(); anchorPt=drawing.pts[0]; activeLine=null; undoStack.pop(); } // 그냥 클릭 = 시작점만 찍음(바뀐 게 없으니 되돌리기 기록도 취소)
       else { activeLine=drawing.pts; anchorPt=null; } // 이어서 Shift+클릭하면 이 라인 끝에서 직선으로 이어짐
     }
     lastKind=drawing.kind==='seg'?'line':drawing.kind; drawing=null; draw(); renderSide();
   }
   function onKey(e){
-    if(!document.getElementById('light-editor-ov')){ window.removeEventListener('keydown', onKey); return; }
-    if(e.key==='Escape'||e.key==='Enter'){ e.preventDefault(); endChain(); renderBar(); draw(); }
+    if(!document.getElementById('light-editor-ov')){ window.removeEventListener('keydown', onKey, true); return; }
+    if(e.key==='Escape'||e.key==='Enter'){ e.preventDefault(); endChain(); renderBar(); draw(); return; }
+    var k=(e.key||'').toLowerCase();
+    if((e.ctrlKey||e.metaKey) && k==='z' && !e.shiftKey){ e.preventDefault(); e.stopPropagation(); undo(); return; }
+    if((e.ctrlKey||e.metaKey) && (k==='y' || (k==='z' && e.shiftKey))){ e.preventDefault(); e.stopPropagation(); redo(); return; }
   }
-  window.addEventListener('keydown', onKey);
+  window.addEventListener('keydown', onKey, true); // 캡처 단계: 다른 탭의 Ctrl+Z보다 먼저 받음
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
   window.addEventListener('resize', fit);
   img.onload=function(){ renderSide(); fit(); };
