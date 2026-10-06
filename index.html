@@ -2258,6 +2258,7 @@ function _proposalGeneratePDF(onDone){
     includeConcept: opts.includeConcept!==false
   }, function(pdf, pageCanvases, pageMeta){
     G_PROPOSAL.resultPdf=pdf;
+    try{ _trackAction('proposal_pdf'); }catch(e){}
     G_PROPOSAL.resultPages=pageCanvases.map(function(c){return c.toDataURL('image/jpeg',0.9);});
     G_PROPOSAL.resultPageMeta=pageMeta;
     G_PROPOSAL.resultUrl=G_PROPOSAL.resultPages[0]; // 갤러리 썸네일 = 표지
@@ -7192,6 +7193,7 @@ function _psFitStage(){
 // 필요하면 PNG 다운로드).
 function _psExport(kind){
   if(!PSE.doc) return;
+  try{ _trackAction(kind==='gallery'?'psedit_save':'psedit_download'); }catch(e){}
   _psCommitPending(); _psRequestRender();
   try{
     var flat=_psFlatten(kind!=='png');
@@ -8771,6 +8773,7 @@ function selectSpaceShortcut(kind){
 // (spaceset)의 "컨셉 확장" 모드를 그대로 재사용 — 서브모드를 강제로 'auto'로 맞춰서 아파트
 // 평형 템플릿 섹션이 있는 화면으로 바로 들어가게 함.
 function selectAptShortcut(){
+  try{ _trackTabOnce('apt'); }catch(e){}
   // ⚠️ 버그 수정("아파트 컨셉 디자인 클릭하면 좌측 작업영역이 안 보이고, 현장사진 업로드
   // 화면이 뜬다"): 예전엔 selectWF('spaceset')를 부르기도 전에 getTab('spaceset')로 서브모드를
   // 먼저 바꾸려고 했는데, 탭이 아직 정식으로 초기화되기 전이라 타이밍이 꼬여서 엉뚱하게
@@ -8793,6 +8796,7 @@ function selectAptShortcut(){
   }, 50);
 }
 function selectWF(wf){
+  try{ _trackTabOnce(wf); }catch(e){}
   // ⚠️ 2026-07-25: 영상 제작을 Pro 전용으로 막아뒀었는데, 전체 플랜에서 다 쓸 수 있게 풀어달라는
   // 요청으로 제한을 없앰. 크레딧만 있으면 어떤 플랜이든 영상 제작 가능.
   // 1. home-s 숨김
@@ -17131,6 +17135,23 @@ function _trackEvent(eventType){
     _supa.from('analytics_events').insert({event_type:eventType, user_id:(_supaUser?_supaUser.id:null)})
       .then(function(){}).catch(function(){});
   }catch(e){}
+}
+// ⚠️ 요청 반영(2026-10-06, "크레딧 없는 회원이 계속 접속하는데 뭘 하는지 알고 싶다"): 로그인 회원이
+// 어떤 탭을 열었는지(탭마다 하루 1번만) + 핵심 작업(쇼츠 완성·제안서 PDF 생성·포토샵 저장)을 기록 →
+// 관리자 > 회원 이메일 클릭(회원 상세)에서 확인. 관리자 본인 계정은 기록하지 않음.
+function _trackTabOnce(wf){
+  try{
+    if(!_supa || !_supaUser || !wf || (typeof G!=='undefined' && G.supaRole==='admin')) return;
+    var d=new Date(Date.now()+9*3600000).toISOString().slice(0,10); // 한국 날짜
+    var k='clover_tablog_'+_supaUser.id+'_'+d, m={};
+    try{ m=JSON.parse(localStorage.getItem(k)||'{}')||{}; }catch(e){}
+    if(m[wf]) return;
+    m[wf]=1; try{ localStorage.setItem(k, JSON.stringify(m)); }catch(e){}
+    _trackEvent('tab_'+wf);
+  }catch(e){}
+}
+function _trackAction(name){
+  try{ if(!_supaUser || (typeof G!=='undefined' && G.supaRole==='admin')) return; _trackEvent('act_'+name); }catch(e){}
 }
 // ⚠️ 요청 반영("같은 계정으로 로그인했으면 브라우저 달라도 하루 1번만 잡히게 해달라"): 로컬
 // 저장소(localStorage) 기준은 브라우저/기기별로 따로 저장되기 때문에, 같은 사람이 PC·폰·시크릿
@@ -30562,6 +30583,7 @@ function _shortsGenerate(){
   }
   function _finishRenderedBlob(blob, ext, mimeType, info){
     _shortsCleanupRenderGuards();
+    try{ _trackAction('shorts_render'); }catch(e){}
     var url=URL.createObjectURL(blob);
     G_SHORTS.resultUrl=url;
     _draftClear(_shortsDraftKey());
@@ -43647,7 +43669,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           var email=r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인';
           var kt=_kst(r.created_at);
           return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+kt.date+' '+kt.time+'</td>'+
-            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:r.event_type)+'</td>'+
+            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:(r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
         }).join('')+
       '</tbody></table></div>';
@@ -43833,6 +43855,26 @@ function _admMemberDetail(uid){
     var wfKeys=Object.keys(wfCnt).sort(function(a,b){return wfCnt[b]-wfCnt[a];});
     h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🧰 어떤 기능을 썼나 (갤러리에 저장된 결과 기준)</div>';
     h+= wfKeys.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+wfKeys.map(function(k){return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px">'+_admEsc(_ADM_WF_LABEL[k]||k)+' <b style="color:var(--ac)">'+wfCnt[k]+'</b></span>';}).join('')+'</div>' : '<div style="margin-bottom:12px">'+(out.gErr?('갤러리 조회 실패: '+_admEsc(out.gErr.message||'')):'저장된 결과물이 없어요.')+'</div>';
+    // 2026-10-06: 어떤 탭을 열었나(하루 1번씩) + 핵심 작업 기록 — 저장 안 한 작업도 여기서 확인 가능
+    var _ACT_LABEL={shorts_render:'쇼츠 영상 완성', proposal_pdf:'제안서 PDF 생성', psedit_save:'포토샵 편집 갤러리 저장', psedit_download:'포토샵 편집 다운로드'};
+    var tabDays={}, tabLast={}, acts={}, actLast={};
+    (out.ev||[]).forEach(function(e){
+      var t=e.event_type||'';
+      if(t.indexOf('tab_')===0){ var w=t.slice(4); tabDays[w]=(tabDays[w]||0)+1; if(!tabLast[w]) tabLast[w]=e.created_at; }
+      else if(t.indexOf('act_')===0){ var a=t.slice(4); acts[a]=(acts[a]||0)+1; if(!actLast[a]) actLast[a]=e.created_at; }
+    });
+    var tabKeys=Object.keys(tabDays).sort(function(a,b){ return tabDays[b]-tabDays[a]; });
+    h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🧭 열어본 기능 (최근 90일, 기능마다 하루 1번씩 셈)</div>';
+    if(tabKeys.length){
+      h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">'+tabKeys.map(function(k){
+        return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px" title="마지막 '+_admKstDT(tabLast[k])+'">'+_admEsc(_ADM_WF_LABEL[k]||k)+' <b style="color:var(--ac)">'+tabDays[k]+'일</b> <span style="color:var(--m2);font-size:10px">· 마지막 '+_admKstDT(tabLast[k]).slice(5,10)+'</span></span>';
+      }).join('')+'</div>';
+    } else h+='<div style="margin-bottom:10px;color:var(--m2)">아직 기록 없음 — 이 기능은 2026-10-06부터 기록돼요.</div>';
+    var actKeys=Object.keys(acts);
+    h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">✅ 한 작업 (저장 안 해도 기록)</div>';
+    h+= actKeys.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+actKeys.map(function(k){
+        return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px">'+_admEsc(_ACT_LABEL[k]||k)+' <b style="color:var(--ac)">'+acts[k]+'회</b> <span style="color:var(--m2);font-size:10px">· 마지막 '+_admKstDT(actLast[k]).slice(5,16)+'</span></span>';
+      }).join('')+'</div>' : '<div style="margin-bottom:12px;color:var(--m2)">아직 기록 없음 (쇼츠 완성·제안서 PDF·포토샵 저장/다운로드를 하면 기록돼요)</div>';
     // 최근 결과물 썸네일
     var thumbs=(out.g||[]).filter(function(g){return g.public_url && !/\.(mp4|webm|mov)(\?|$)/i.test(g.public_url);}).slice(0,12);
     if(thumbs.length){
