@@ -3750,7 +3750,7 @@ var PLANS=[
   {n:'Basic',    p:9900,   cr:700,   tag:'',             hot:false, desc:'가볍게 시작하기 좋아요'},
   {n:'Pro',      p:19900,  cr:1500,  tag:'POPULAR',      hot:true,  desc:'가장 많이 찾는 구성'},
   {n:'Studio',   p:49900,  cr:4200,  tag:'',             hot:false, desc:'본격적으로 쓰기 좋아요'},
-  {n:'Business', p:99000,  cr:8800,  tag:'BEST VALUE',   hot:false, desc:'우선 처리 · 대량 작업에 최적'}
+  {n:'Business', p:99000,  cr:8800,  tag:'BEST VALUE',   hot:false, desc:'대량 작업에 최적 · 동시 6개'}
 ];
 var G={
   wf:'',
@@ -9122,6 +9122,20 @@ var WF_INFO={
 // 그대로인 채 카메라 거리만으로 층수 증가를 해결하도록 함. (예전엔 여기서 무조건 '9:16'으로
 // 강제해서, 원본이 3:4처럼 그다지 세로로 길지 않은 사진이어도 결과물이 9:16으로 확 달라져
 // 보이는 문제가 있었음 — 이제 아래 일반 측정 로직을 그대로 타서 원본과 가장 가까운 비율을 씀.)
+// 브라우저 자동완성 차단(2026-10-07 신고: "스타일 프리셋 검색창에 내 네이버 이메일이 자꾸 들어가 있다") —
+// 사이트가 저장한 게 아니라, 로그인창(비밀번호 칸)이 있는 페이지라서 크롬·웨일이 첫 번째 글자 입력칸을
+// 아이디 칸으로 착각하고 저장된 이메일을 채워 넣는 현상. autocomplete 끄기 + 검색칸 표시 + 혹시 채워지면 지움.
+function _noAutofill(inp){
+  try{
+    inp.setAttribute('autocomplete','off'); inp.setAttribute('autocorrect','off'); inp.setAttribute('autocapitalize','off'); inp.setAttribute('spellcheck','false');
+    inp.setAttribute('name','q_'+Math.random().toString(36).slice(2,8)); inp.setAttribute('data-lpignore','true'); inp.setAttribute('data-form-type','other');
+    inp.setAttribute('role','searchbox');
+    var typed=false; inp.addEventListener('keydown', function(){ typed=true; });
+    function wipe(){ if(!typed && /@|^\S+\.(com|net|kr|co)\b/i.test(inp.value||'')){ inp.value=''; if(window._presetSearchQuery && /@/.test(window._presetSearchQuery)) window._presetSearchQuery=''; try{ inp.dispatchEvent(new Event('input')); }catch(e){} } }
+    [50, 400, 1200, 2500].forEach(function(t){ setTimeout(wipe, t); });
+    inp.addEventListener('change', wipe);
+  }catch(e){}
+}
 function _withExplicitAspect(imgSrc, cb, forcedOverride){
   // ⚠️ 버그 수정: 대기열 작업은 "지금 보고 있는 탭"이 아니라 "작업을 넣은 탭"의 출력 비율을 써야 함 —
   // forcedOverride(작업 생성 시점에 저장한 값)가 넘어오면 그걸 우선함.
@@ -13047,6 +13061,7 @@ function makePi(q, g){
     var searchInput=mk('input','');
     searchInput.type='text';
     searchInput.placeholder='\uD504\uB9AC\uC14B \uAC80\uC0C9 (\uC608: \uCE74\uD398, \uC220\uC9D1, \uBCD1\uC6D0, \uD5EC\uC2A4\uC7A5...)';
+    _noAutofill(searchInput); // 2026-10-07: 브라우저가 저장된 아이디(이메일)를 검색창에 자동으로 채우던 문제
     searchInput.style.cssText='flex:1;min-width:0;border:none;outline:none;background:transparent;color:var(--t);font-size:14.5px;font-weight:600';
     var searchClear=mk('span','');searchClear.textContent='\u2715';
     searchClear.style.cssText='font-size:12px;opacity:.5;cursor:pointer;padding:3px 5px;display:none;flex-shrink:0';
@@ -13708,12 +13723,8 @@ function canUseFeature(feat){
     // -1이 나오고, 그러면 어떤 플랜이든(심지어 free도) "내 등급(0 이상) >= -1"이 항상 참이 돼서
     // 이 두 기능은 사실상 플랜 제한이 전혀 안 걸리고 있었음 — 무료 회원도 100% 이용 가능한
     // 상태였음. 가장 낮은 유료 등급인 'basic'을 기준으로 바로잡음.
-    case 'ai_edit':   return planGte('basic');
-    case 'video':     return planGte('pro');
-    case 'magnific':  return planGte('pro');
-    case 'upscale_8x':return planGte('pro');
-    case 'hd_2k':     return planGte('basic');
-    case 'hd_4k':     return planGte('pro');
+    // 2026-10-07: 요금제 정리 — 모든 기능·1K/2K/4K는 전 등급 동일(등급 차이는 레퍼런스·동시 렌더·워터마크뿐).
+    // (이 함수는 현재 어디서도 호출되지 않지만, 나중에 다시 쓰더라도 요금제 문구와 어긋나지 않게 맞춰둠)
     default: return true;
   }
 }
@@ -29015,6 +29026,398 @@ function _consultPartTypical(st){ return _consultSp(st).reduce(function(a,s){ re
 // "마감재 보드가 4가지뿐 — 공간마다 벽·바닥·시트지·타일 등 실제로 필요한 마감이 다 나와야".
 // → 시안마다 '마감재 스케줄'(바닥·벽·천장·문/문틀 필름·창호 시트지·주방·욕실 타일…)을 먼저 정하고,
 //   모든 공간 렌더 프롬프트에 똑같이 넣어서 통일. 공간별 보드/PDF에는 그 공간에 해당하는 항목만 보여줌.
+// 실제 제품 카탈로그 — 2026-10-07 조사(제조사·공식 카탈로그·판매처 페이지에서 확인된 품번만, 출처 URL 포함). hex는 대표색 추정치.
+// 형식: [분류(film/wallpaper/paint/floor/window/tile), 브랜드, 제품 라인, 품번, 색 이름, 마감, 대표색, 출처]
+var CONSULT_CATALOG=[
+["film", "LX하우시스", "베니프 빅스톤 (Big Stone)", "BM001", "Big Stone marble", "stone/marble", "#E9E6E1", "https://www.lxhausys.com/eu-en/product/benif/bm001/"],
+["film", "LX하우시스", "베니프 빅스톤 (Big Stone)", "BM013", "Marbled stone with straight crack details", "stone/marble", "#E6E2DC", "https://www.lxhausys.com/eu-en/product/benif/bm013/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES118", "Gray", "solid", "#B5B4B0", "https://www.lxhausys.com/eu-en/product/benif/es118/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES127", "Green", "solid", "#7F9481", "https://www.lxhausys.com/eu-en/product/benif/es127/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES13", "White", "solid", "#F4F3EF", "https://www.lxhausys.com/eu-en/product/benif/es13/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES134", "Dark Gray", "solid", "#4A4B4D", "https://www.lxhausys.com/eu-en/product/benif/es134/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES164", "Gray", "solid", "#A8A7A3", "https://www.lxhausys.com/eu-en/product/benif/es164/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES176", "Beige", "solid", "#CFC1AC", "https://www.lxhausys.com/eu-en/product/benif/es176/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES181", "White", "solid", "#F2F0EA", "https://www.lxhausys.com/eu-en/product/benif/es181/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES22", "Black", "solid", "#1E1E1F", "https://www.lxhausys.com/eu-en/product/benif/es22/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES40", "Beige", "solid", "#E3D6C2", "https://www.lxhausys.com/eu-en/product/benif/es40/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES45", "Brown", "solid", "#6B4F3A", "https://www.lxhausys.com/eu-en/product/benif/es45/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES49", "Beige", "solid", "#D8C8B0", "https://www.lxhausys.com/eu-en/product/benif/es49/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES51", "Dark Gray", "solid", "#5A5B5C", "https://www.lxhausys.com/eu-en/product/benif/es51/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES61", "Blue", "solid", "#2F3E56", "https://www.lxhausys.com/eu-en/product/benif/es61/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES68", "Gray", "solid", "#C9C9C6", "https://www.lxhausys.com/eu-en/product/benif/es68/"],
+["film", "LX하우시스", "베니프 솔리드 (Solid)", "ES70", "White", "solid", "#EFEDE6", "https://www.lxhausys.com/eu-en/product/benif/es70/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW033", "Brown Oak", "wood grain", "#8E6A4A", "https://www.lxhausys.com/eu-en/product/benif/nw033/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW041", "Yellowish Oak", "wood grain", "#D2B48A", "https://www.lxhausys.com/eu-en/product/benif/nw041/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW060", "Brown Walnut", "wood grain", "#5C4130", "https://www.lxhausys.com/eu-en/product/benif/nw060/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW082", "Yellowish Oak", "wood grain", "#C9A87A", "https://www.lxhausys.com/eu-en/product/benif/nw082/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW084", "Brown Oak", "wood grain", "#9C7552", "https://www.lxhausys.com/eu-en/product/benif/nw084/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW099", "Yellowish Walnut", "wood grain", "#8A6845", "https://www.lxhausys.com/eu-en/product/benif/nw099/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW100", "Reddish Walnut", "wood grain", "#5E3A2C", "https://www.lxhausys.com/eu-en/product/benif/nw100/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW113", "Grayish Ash", "wood grain", "#B9B2A6", "https://www.lxhausys.com/eu-en/product/benif/nw113/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW118", "Grayish Oak", "wood grain", "#B3A898", "https://www.lxhausys.com/eu-en/product/benif/nw118/"],
+["film", "LX하우시스", "베니프 프리미엄우드 (Premium Wood)", "NW124", "Grayish Oak", "wood grain", "#A69B8C", "https://www.lxhausys.com/eu-en/product/benif/nw124/"],
+["film", "현대L&C", "보닥 내추럴우드 (Natural Wood)", "W741", "Soft Noche", "wood grain", "#3A302B", "https://bodaq.com/catalogue/wood/soft-noche-natural-wood-collection-w741/"],
+["film", "현대L&C", "보닥 내추럴우드 (Natural Wood)", "W957", "Velvet Oak", "wood grain", "#C8A97F", "https://bodaq.com/catalogue/wood/velvet-oak-natural-wood-collection-w957/"],
+["film", "현대L&C", "보닥 메탈 (Metal)", "RM002", "Antique Brushed Silver", "metallic", "#A7A6A2", "https://bodaq.com/product/bodaq-rm002-real-metal-interior-film-metal-collection/"],
+["film", "현대L&C", "보닥 메탈 (Metal)", "RM005", "Brushed Silver", "metallic", "#C0C0BE", "https://bodaq.com/catalogue/metal/real/bodaq-rm005-real-metal-interior-film-metal-collection/"],
+["film", "현대L&C", "보닥 메탈 (Metal)", "RM051", "Vegas Gold", "metallic", "#C5A56A", "https://bodaq.com/product/bodaq-rm051-real-metal-interior-film-metal-collection/"],
+["film", "현대L&C", "보닥 베이직 (Basic)", "HS204", "White High Gloss", "high gloss", "#FAFAF8", "https://bodaq.com/catalogue/most-popular/bodaq-hs204-textured-interior-film-texture-collection/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S126", "Solid White", "solid", "#F5F5F2", "https://bodaq.com/catalogue/solid-color/s126-solid-color-interior-film-solid-color-collection/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S140", "Solid Black", "solid", "#1A1A1A", "https://bodaq.com/catalogue/most-popular/bodaq-s140-solid-color-interior-film-solid-color-collection/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S143", "Stone Gray", "solid", "#9E9C97", "https://bodaq.com/catalogue/solid-color/bodaq-s143-solid-color-interior-film-solid-color-collection/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S159", "Dim Gray", "solid", "#6B6B6B", "https://bodaq.com/catalogue/most-popular/bodaq-s159-solid-color-interior-film-solid-color-collection/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S179", "Perfect Beige", "solid", "#D6C6AC", "https://bodaq.com/catalogue/solid-color/bodaq-s179-solid-color-interior-film-solid-color-collection/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S245", "Light Creme", "solid", "#EFE6D3", "https://bodaq.com/catalogue/solid-color/s245-solid-color-collection/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S261", "Deep Slate", "solid", "#4A4D50", "https://bodaq.com/catalogue/solid-color/deep-slate-solid-color-collection-s261/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S264", "Pebble Grey", "solid", "#B2ADA4", "https://bodaq.com/catalogue/solid-color/pebble-grey-solid-color-collection-s264/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S265", "Obsidian Blue", "solid", "#25324A", "https://bodaq.com/catalogue/solid-color/obsidian-blue-solid-color-collection-s265/"],
+["film", "현대L&C", "보닥 솔리드컬러 (Solid Color)", "S266", "Deep Forest", "solid", "#2F4A3C", "https://bodaq.com/catalogue/solid-color/deep-forest-solid-color-collection-s266/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT01", "Winter White", "super matte", "#F3F2EE", "https://bodaq.com/catalogue/most-popular/bodaq-smt01-interior-film-super-matt-collection/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT02", "Warm Ecru", "super matte", "#E8E0D0", "https://bodaq.com/catalogue/solid-color/bodaq-smt02-interior-film-super-matt-collection/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT03", "Almond", "super matte", "#D9CBB5", "https://bodaq.com/catalogue/most-popular/bodaq-smt03-interior-film-super-matt-collection/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT04", "Dried Sage", "super matte", "#A3AA94", "https://bodaq.com/catalogue/solid-color/bodaq-smt04-interior-film-super-matt-collection/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT07", "Black", "super matte", "#222222", "https://bodaq.com/catalogue/most-popular/bodaq-smt07-interior-film-super-matt-collection/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT12", "Soft Grey", "super matte", "#CFCDC8", "https://bodaq.com/catalogue/most-popular/smt12-interior-film-super-matte-collection/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT16", "Cotton", "super matte", "#EEEAE1", "https://bodaq.com/catalogue/most-popular/smt16-super-matte/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT18", "French Gray", "super matte", "#B9B6AE", "https://bodaq.com/catalogue/most-popular/smt18-super-matte/"],
+["film", "현대L&C", "보닥 슈퍼매트 (Super Matte)", "SMT24", "Classic White", "super matte", "#F1EFE9", "https://bodaq.com/catalogue/most-popular/smt24-classic-white-interior-film-super-matte-collection/"],
+["film", "현대L&C", "보닥 스탠다드우드 (Standard Wood)", "W011", "Whitewashed Oak", "wood grain", "#DDD3C3", "https://bodaq.com/catalogue/wood/standard/w011-oak-interior-film-standard-wood-collection/"],
+["film", "현대L&C", "보닥 스탠다드우드 (Standard Wood)", "W141", "Rich Walnut", "wood grain", "#5B3F2C", "https://bodaq.com/catalogue/wood/w141-walnut-interior-film-standard-wood-collection/"],
+["film", "현대L&C", "보닥 스탠다드우드 (Standard Wood)", "W882", "Ashen Grey Oak", "wood grain", "#A89F92", "https://bodaq.com/catalogue/wood/w882-grey-oak-interior-film-standard-wood-collection/"],
+["film", "현대L&C", "보닥 스탠다드우드 (Standard Wood)", "W883", "Espresso Roast Oak", "wood grain", "#3F2E24", "https://bodaq.com/catalogue/wood/w883-dark-oak-interior-film-standard-wood-collection/"],
+["film", "현대L&C", "보닥 스탠다드우드 (Standard Wood)", "W953", "Umber Oak", "wood grain", "#8B6A4B", "https://bodaq.com/catalogue/wood/w953-oak-interior-film-standard-wood-collection/"],
+["film", "현대L&C", "보닥 스톤&마블 (Stone & Marble)", "NS118", "Antique White Marble", "stone/marble", "#ECE8E1", "https://bodaq.com/catalogue/stone-marble/bodaq-ns118-marble-interior-film-stone-marble-collection/"],
+["film", "현대L&C", "보닥 스톤&마블 (Stone & Marble)", "NS119", "Gray Marble", "stone/marble", "#B8B7B3", "https://bodaq.com/catalogue/stone-marble/bodaq-ns119-marble-interior-film-stone-marble-collection/"],
+["film", "현대L&C", "보닥 스톤&마블 (Stone & Marble)", "PM007", "Pietra Dark Grey Marble", "stone/marble", "#4D4E50", "https://bodaq.com/catalogue/most-popular/bodaq-pm007-pietra-interior-film-premium-marble-collection/"],
+["film", "현대L&C", "보닥 오크그레인우드 (Oak Grain Wood)", "OGW01", "Noble Oak", "wood grain", "#B58E62", "https://bodaq.com/catalogue/wood/noble-oak-oak-grain-wood-collection-ogw01/"],
+["film", "현대L&C", "보닥 페인티드콘크리트 (Painted Concrete)", "PNC46", "Iron Gray Concrete", "concrete", "#77777A", "https://bodaq.com/catalogue/stone-marble/concrete-stone-marble/pnc46-premium-painted-concrete-stone-marble-collection/"],
+["film", "현대L&C", "보닥 하이퍼포먼스 (High-Performance)", "EXF53", "Wild Concrete", "concrete", "#9B9893", "https://bodaq.com/catalogue/stone-marble/concrete-stone-marble/wild-concrete-high-performance-collection-exf53/"],
+["floor", "LX하우시스", "LX Z:IN 강마루 스탠다드 섬유판(강그린 프로)", "FMKGP004-B009500SW", "로우 오크", "강마루 (폭 95mm)", "#BE9A70", "https://www.lxzin.com/zin/category/a060000?mcate=a060200&page=2"],
+["floor", "LX하우시스", "LX Z:IN 강마루 스탠다드 섬유판(강그린 프로)", "FMKGP017-B009500SW", "로스티드 카카오", "강마루 (폭 95mm)", "#6A4A36", "https://www.lxzin.com/zin/category/a060000?mcate=a060200&page=2"],
+["floor", "LX하우시스", "LX Z:IN 강마루 스탠다드 합판(강그린 수퍼)", "FMKGS005-B009500SW", "모노 화이트", "강마루 95×800×6T", "#E8E3DA", "https://www.lxzin.com/zin/product/12711"],
+["floor", "LX하우시스", "LX Z:IN 강마루 스탠다드 합판(강그린 수퍼)", "FMKGS008-B009500SW", "모노 그레이", "강마루 95×800×6T", "#A9A6A1", "https://www.lxzin.com/zin/product/12713"],
+["floor", "LX하우시스", "LX Z:IN 강마루 스탠다드 합판(강그린 수퍼)", "FMKGS017-B009500SW", "애쉬 리얼", "강마루 95×800×6T", "#C8B79E", "https://www.lxzin.com/zin/product/12717"],
+["floor", "LX하우시스", "LX Z:IN 강마루 스탠다드 합판(강그린 수퍼)", "FMKGS018-B009500SW", "내추럴 오크", "강마루 95×800×6T", "#C29B6C", "https://www.lxzin.com/zin/product/12718"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 섬유판(강그린 프로맥스)", "FMKPM002-W01650000", "우드/베이직 오크", "강마루 165×1200×7.0T", "#C4A27A", "https://www.lxzin.com/zin/product/100134"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 섬유판(강그린 프로맥스)", "FMKPM004-W01650000", "우드/울프 그레이", "강마루 165×1200×7.0T", "#9C968E", "https://www.lxzin.com/zin/product/100136"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 섬유판(강그린 프로맥스)", "FMKPM010-W01650000", "우드 스페셜/그란데 오크", "강마루 165×1200×7.0T", "#B98F62", "https://www.lxzin.com/zin/product/100142"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 125", "FMKGA071-W01250000", "페일 화이트", "강마루 125×1200×7.5T", "#E6DCCB", "https://www.lxzin.com/zin/product/103230"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 125", "FMKGA072-W01250000", "크리미 워시드", "강마루 125×1200×7.5T", "#DCCDB4", "https://www.lxzin.com/zin/product/103231"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 125", "FMKGA074-W01250000", "마일드 오크", "강마루 125×1200×7.5T", "#C9A97F", "https://www.lxzin.com/zin/product/103232"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 125", "FMKGA075-W01250000", "어니스트오크", "강마루 125×1200×7.5T", "#B98E5E", "https://www.lxzin.com/zin/product/13302"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 125", "FMKGA077-W01250000", "로얄 월넛", "강마루 125×1200×7.5T", "#5E4130", "https://www.lxzin.com/zin/product/13304"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 125", "FMKGA083-W01250000", "그릿 애쉬", "강마루 125×1200×7.5T", "#B8AC9C", "https://www.lxzin.com/zin/product/101560"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 125", "FMKGA084-W01250000", "라임 오크", "강마루 125×1200×7.5T", "#D6C3A2", "https://www.lxzin.com/zin/product/101561"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 165", "FMKGA304-W01650000", "텍스쳐브라운", "강마루 165×1200×7.5T", "#7A5A40", "https://www.lxzin.com/zin/category/a060000?mcate=a060200&page=1"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 165", "FMKGA305-W01650000", "스탠다드내추럴", "강마루 165×1200×7.5T", "#C19A6B", "https://www.lxzin.com/zin/product/103211"],
+["floor", "LX하우시스", "LX Z:IN 강마루 프리미엄 합판(강그린와이드) 우드 165", "FMKGA306-W01650000", "스탠다드라이트", "강마루 165×1200×7.5T", "#D8BF98", "https://www.lxzin.com/zin/category/a060000?mcate=a060200&page=1"],
+["floor", "LX하우시스", "LX Z:IN 시트 프리미엄 2.2(지아자연애)", "ZJ32981-11", "화이트 오크 / 화이트", "장판 2.2T (1830mm×30m)", "#E2D8C8", "https://www.lxzin.com/zin/product/10474"],
+["floor", "LX하우시스", "LX Z:IN 시트 프리미엄 2.2(지아자연애)", "ZJ33562-11", "오크", "장판 2.2T", "#C49A68", "https://www.lxzin.com/zin/product/11683"],
+["floor", "LX하우시스", "LX Z:IN 시트 프리미엄 2.2(지아자연애)", "ZJ33871-11", "모던 오크", "장판 2.2T", "#BE9C74", "https://www.lxzin.com/zin/product/13083"],
+["floor", "LX하우시스", "LX Z:IN 시트 프리미엄 2.2(지아자연애)", "ZJ34331-11", "윈터 오크", "장판 2.2T", "#D5C6AE", "https://www.lxzin.com/zin/product/100784"],
+["floor", "LX하우시스", "LX Z:IN 시트 프리미엄 2.2(지아자연애)", "ZJ44821-22", "베이지 샌드", "장판 2.2T", "#D8CBB6", "https://www.lxzin.com/zin/product/103134"],
+["floor", "LX하우시스", "LX Z:IN 엑스컴포트 4.5(지아소리잠)", "ZS82991-11", "[4.5]라임 오크", "장판 4.5T", "#D3C09E", "https://www.lxzin.com/zin/product/10557"],
+["floor", "LX하우시스", "LX Z:IN 엑스컴포트 4.5(지아소리잠)", "ZS83051-11", "[4.5]멀티 헤링본", "장판 4.5T (1830mm×20m)", "#B99470", "https://www.lxzin.com/zin/product/10552"],
+["floor", "LX하우시스", "LX Z:IN 엑스컴포트 4.5(지아소리잠)", "ZS84041-11", "[4.5]클래식 오크", "장판 4.5T", "#B88D5E", "https://www.lxzin.com/zin/product/13529"],
+["floor", "LX하우시스", "LX Z:IN 엑스컴포트 5.0", "XCF3451", "애쉬 화이트", "장판 5.0T (1830mm×20m)", "#E3DCD0", "https://www.lxzin.com/zin/product/12127"],
+["floor", "LX하우시스", "LX Z:IN 엑스컴포트 5.0", "XCF4043", "스탠다드 오크", "장판 5.0T (1830mm×20m)", "#C29E72", "https://www.lxzin.com/zin/product/101622"],
+["floor", "LX하우시스", "LX Z:IN 원목마루(지아마루 원목)", "FMKZW001-B01250000", "워시드 오크", "원목마루", "#CDB89A", "https://www.lxzin.com/zin/product/10229"],
+["floor", "LX하우시스", "LX Z:IN 원목마루(지아마루 원목)", "FMKZW002-B01250000", "내추럴 오크", "원목마루", "#BF9563", "https://www.lxzin.com/zin/product/10230"],
+["floor", "LX하우시스", "LX Z:IN 지아마루 원목", "FMKZW004-B01250000", "스모키 브라운", "원목마루", "#6F5442", "https://www.lxzin.com/zin/product/10232"],
+["floor", "구정마루", "구정 모던강 115", "", "모던 라이트 오크", "강마루", "#D2B48C", "https://jangpannara.kr/category/%EA%B0%95%EB%A7%88%EB%A3%A8/2043/"],
+["floor", "구정마루", "구정 프레스티지", "", "오크", "강마루 (와이드)", "#C09668", "https://marupia.com/product/%EA%B5%AC%EC%A0%95-%ED%94%84%EB%A0%88%EC%8A%A4%ED%8B%B0%EC%A7%80/19/"],
+["floor", "구정마루", "구정 프레스티지", "", "화이트오크", "강마루 (와이드)", "#DCCDB5", "https://marupia.com/product/%EA%B5%AC%EC%A0%95-%ED%94%84%EB%A0%88%EC%8A%A4%ED%8B%B0%EC%A7%80/19/"],
+["floor", "구정마루", "구정 프레스티지", "", "애쉬", "강마루 (와이드)", "#CDBDA3", "https://marupia.com/product/%EA%B5%AC%EC%A0%95-%ED%94%84%EB%A0%88%EC%8A%A4%ED%8B%B0%EC%A7%80/19/"],
+["floor", "구정마루", "구정 프레스티지", "", "블랙오크", "강마루 (와이드)", "#3E3630", "https://marupia.com/product/%EA%B5%AC%EC%A0%95-%ED%94%84%EB%A0%88%EC%8A%A4%ED%8B%B0%EC%A7%80/19/"],
+["floor", "동화자연마루", "동화 강 텍스쳐", "", "프렌치 오크", "강마루 165×1205×7.5T", "#B58C60", "https://www.greendongwha.com/product/detail/2539/"],
+["floor", "동화자연마루", "동화 나투스진 그란데 (타일형)", "JG2001", "마블 화이트", "타일형 강마루 325×810×7T", "#EDEBE7", "https://ezmyzip.com/shop/10010/dh-natus-grande/"],
+["floor", "동화자연마루", "동화 나투스진 그란데 (타일형)", "JG2003", "헤이즈 그레이", "타일형 강마루 325×810×7T", "#B5B3AF", "https://ezmyzip.com/shop/10010/dh-natus-grande/"],
+["floor", "동화자연마루", "동화 나투스진 그란데 (타일형)", "JG2006", "사하라 라이트", "타일형 강마루 325×810×7T", "#E3D8C6", "https://ezmyzip.com/shop/10010/dh-natus-grande/"],
+["floor", "동화자연마루", "동화 진 오리진", "JB001", "어반 화이트", "강마루 7T", "#E6DFD3", "https://www.greendongwha.com/product/brand/jin/"],
+["floor", "동화자연마루", "동화 진 오리진", "JB007", "어반 내추럴", "강마루 7T", "#C59F73", "https://www.greendongwha.com/product/brand/jin/"],
+["floor", "동화자연마루", "동화 진 오리진", "JP004", "퓨어 그레이", "강마루 7T", "#A8A39B", "https://www.greendongwha.com/product/brand/jin/"],
+["floor", "동화자연마루", "동화 진 오리진", "JP010", "퓨어 브라운", "강마루 7T", "#7C5B42", "https://www.greendongwha.com/product/brand/jin/"],
+["floor", "동화자연마루", "동화 진 테라", "JE5001", "진 테라 바닐라", "강마루", "#E0CFB0", "https://www.greendongwha.com/product/detail/2100"],
+["floor", "동화자연마루", "동화 진 테라", "JE5006", "진 테라 월넛", "강마루", "#5F4331", "https://www.greendongwha.com/product/detail/2104"],
+["floor", "동화자연마루", "동화 진 테라 맥스", "JM6001", "화이트", "강마루 195×2040×7.5T", "#E4DACA", "https://www.greendongwha.com/product/brand/jin/"],
+["floor", "동화자연마루", "동화 진 테라 맥스", "JM6003", "내추럴", "강마루 195×2040×7.5T", "#C49E72", "https://www.greendongwha.com/product/brand/jin/"],
+["floor", "동화자연마루", "동화 진 테라 맥스", "JM6006", "브라운", "강마루 195×2040×7.5T", "#7B5A40", "https://www.greendongwha.com/product/brand/jin/"],
+["paint", "던에드워드", "Dunn-Edwards", "DE5151", "Cinnamon Stick", "도장(무광/저광 선택)", "#D2806C", "https://www.dunnedwards.com/colors/browser/de5151/"],
+["paint", "던에드워드", "Dunn-Edwards", "DE6136", "Terracotta Sand", "도장(무광/저광 선택)", "#D6BA9B", "https://www.dunnedwards.com/colors/browser/de6136/"],
+["paint", "던에드워드", "Dunn-Edwards", "DE6218", "Antique Paper", "도장(무광/저광 선택)", "#F4F0E8", "https://www.dunnedwards.com/colors/browser/de6218"],
+["paint", "던에드워드", "Dunn-Edwards", "DE6228", "Play on Gray", "도장(무광/저광 선택)", "#BAB6A9", "https://www.dunnedwards.com/colors/browser/de6228"],
+["paint", "던에드워드", "Dunn-Edwards", "DE6233", "Limestone", "도장(무광/저광 선택)", "#DCD8C7", "https://paintdb.com/blog/dunn-edwards-paint-colors-guide"],
+["paint", "던에드워드", "Dunn-Edwards", "DE6242", "Wells Gray", "도장(무광/저광 선택)", "#B9B5A4", "https://www.dunnedwards.com/colors/browser/de6242"],
+["paint", "던에드워드", "Dunn-Edwards", "DE6263", "Pistachio Shell", "도장(무광/저광 선택)", "#B1B6A3", "https://www.dunnedwards.com/colors/browser/de6263"],
+["paint", "던에드워드", "Dunn-Edwards", "DE6283", "Granite", "도장(무광/저광 선택)", "#C8D1C4", "https://www.dunnedwards.com/colors/browser/de6283"],
+["paint", "던에드워드", "Dunn-Edwards", "DEC760", "Desert Gray", "도장(무광/저광 선택)", "#B8A487", "https://www.dunnedwards.com/colors/browser/dec760/"],
+["paint", "던에드워드", "Dunn-Edwards", "DEC791", "Cloud", "도장(무광/저광 선택)", "#D8D7D3", "https://paintdb.com/blog/dunn-edwards-paint-colors-guide"],
+["paint", "던에드워드", "Dunn-Edwards", "DET603", "Church Mouse", "도장(무광/저광 선택)", "#B3B5AF", "https://paintdb.com/blog/dunn-edwards-paint-colors-guide"],
+["paint", "던에드워드", "Dunn-Edwards", "DET614", "So Chic!", "도장(무광/저광 선택)", "#CECDC5", "https://paintdb.com/blog/dunn-edwards-paint-colors-guide"],
+["paint", "던에드워드", "Dunn-Edwards", "DET628", "Charcoal Sketch", "도장(무광/저광 선택)", "#5D5B56", "https://www.dunnedwards.com/colors/browser/det628"],
+["paint", "던에드워드", "Dunn-Edwards", "DET648", "White Picket Fence", "도장(무광/저광 선택)", "#F0EFEB", "https://paintdb.com/blog/dunn-edwards-paint-colors-guide"],
+["paint", "던에드워드", "Dunn-Edwards", "DET653", "Historic White", "도장(무광/저광 선택)", "#EBE6D7", "https://paintdb.com/blog/dunn-edwards-paint-colors-guide"],
+["paint", "던에드워드", "Dunn-Edwards Cool Neutrals", "DE6221", "Flintstone", "도장(무광/저광 선택)", "#BBB3A2", "https://www.dunnedwards.com/colors/browser/de6221"],
+["paint", "던에드워드", "Dunn-Edwards Cool Neutrals", "DE6225", "Fossil", "도장(무광/저광 선택)", "#F4F1EB", "https://www.dunnedwards.com/colors/browser/de6225"],
+["paint", "던에드워드", "Dunn-Edwards Cool Neutrals", "DE6255", "Wishing Well", "도장(무광/저광 선택)", "#D0D1C1", "https://www.dunnedwards.com/colors/browser/de6255"],
+["paint", "던에드워드", "Dunn-Edwards Cool Neutrals", "DE6321", "Soot", "도장(무광/저광 선택)", "#555E5F", "https://www.dunnedwards.com/colors/browser/de6321"],
+["paint", "던에드워드", "Dunn-Edwards Cool Neutrals", "DE6333", "Hamilton Blue", "도장(무광/저광 선택)", "#8A99A4", "https://www.dunnedwards.com/colors/browser/de6333"],
+["paint", "던에드워드", "Dunn-Edwards New Neutrals Collection", "DEGR45", "Throwing Shade", "도장(무광/저광 선택)", "#B4B0A9", "https://www.dunnedwards.com/colors/browser/degr45/"],
+["paint", "던에드워드", "Dunn-Edwards Perfect Palette", "DE6240", "Watermist", "도장(무광/저광 선택)", "#E6E3D8", "https://www.dunnedwards.com/colors/browser/de6240"],
+["paint", "던에드워드", "Dunn-Edwards Perfect Palette (Cool Neutrals)", "DE6239", "Latte Froth", "도장(무광/저광 선택)", "#F3F0E8", "https://www.dunnedwards.com/colors/browser/de6239"],
+["paint", "던에드워드", "Dunn-Edwards Perfect Palette (Warm Neutrals)", "DE6211", "Light Beige", "도장(무광/저광 선택)", "#F5EFE8", "https://www.dunnedwards.com/colors/browser/de6211"],
+["paint", "던에드워드", "Dunn-Edwards Perfect Palette (Warm Neutrals)", "DE6212", "Crisp Muslin", "도장(무광/저광 선택)", "#E9E2D7", "https://www.dunnedwards.com/colors/browser/de6212"],
+["paint", "던에드워드", "Dunn-Edwards Perfect Palette (Warm Neutrals)", "DE6214", "Pigeon Gray", "도장(무광/저광 선택)", "#C1B4A0", "https://www.dunnedwards.com/colors/browser/de6214"],
+["paint", "던에드워드", "Dunn-Edwards Perfect Palette (Whites)", "DEW357", "White Crest", "도장(무광/저광 선택)", "#F9F8EF", "https://www.dunnedwards.com/colors/browser/dew357"],
+["paint", "던에드워드", "Dunn-Edwards Then, Now & Forever", "DET522", "Sonoma Sage", "도장(무광/저광 선택)", "#90A58A", "https://www.dunnedwards.com/colors/browser/det522/"],
+["paint", "던에드워드", "Dunn-Edwards Warm Neutrals", "DE6204", "Trite White", "도장(무광/저광 선택)", "#F4F0E3", "https://www.dunnedwards.com/colors/browser/de6204"],
+["paint", "던에드워드", "Dunn-Edwards Whites", "DEW337", "Gardenia", "도장(무광/저광 선택)", "#FFFDF2", "https://www.dunnedwards.com/colors/browser/dew337"],
+["paint", "던에드워드", "Dunn-Edwards Whites", "DEW341", "Swiss Coffee", "도장(무광/저광 선택)", "#F8F5E9", "https://www.dunnedwards.com/colors/browser/dew341"],
+["paint", "던에드워드", "Dunn-Edwards Whites", "DEW358", "Milk Glass", "도장(무광/저광 선택)", "#FAF7F0", "https://www.dunnedwards.com/colors/browser/dew358"],
+["paint", "던에드워드", "Dunn-Edwards Whites", "DEW380", "Warm White", "도장(무광/저광 선택)", "#FFFFFF", "https://www.dunnedwards.com/colors/browser/dew380"],
+["paint", "던에드워드", "Dunn-Edwards Whites Collection", "DEW336", "White Sand", "도장(무광/저광 선택)", "#F5EBD8", "https://www.dunnedwards.com/colors/browser/dew336/"],
+["paint", "벤자민무어", "Benjamin Moore Classics", "1495", "October Mist", "도장(무광/저광 선택)", "#B6B8A5", "https://test-dev-www.benjaminmoore.com/en-ca/paint-colours/colour/1495/october-mist"],
+["paint", "벤자민무어", "Benjamin Moore Classics", "1562", "Healing Aloe", "도장(무광/저광 선택)", "#D5DBD2", "https://www.benjaminmoore.com/en-us/paint-colors/color/1562/healing-aloe"],
+["paint", "벤자민무어", "Benjamin Moore Color Preview", "2124-10", "Wrought Iron", "도장(무광/저광 선택)", "#494A4B", "https://www.benjaminmoore.com/en-ca/paint-colours/colour/2124-10/wrought-iron"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-114", "Saybrook Sage", "도장(무광/저광 선택)", "#B1B7A2", "https://housepaint.ai/explore-colors/benjamin-moore/hc-114"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-144", "Palladian Blue", "도장(무광/저광 선택)", "#C1D1C9", "https://www.benjaminmoore.com/en-us/paint-colors/color/hc-144/palladian-blue"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-154", "Hale Navy", "도장(무광/저광 선택)", "#434B56", "https://www.benjaminmoore.com/en-us/paint-colors/color/HC-154/hale-navy"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-165", "Boothbay Gray", "도장(무광/저광 선택)", "#AAB2B0", "https://www.benjaminmoore.com/en-us/paint-colors/color/hc-165/boothbay-gray"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-166", "Kendall Charcoal", "도장(무광/저광 선택)", "#676662", "https://housepaint.ai/explore-colors/benjamin-moore/hc-166"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-170", "Stonington Gray", "도장(무광/저광 선택)", "#CACBC5", "https://www.benjaminmoore.com/en-us/paint-colors/color/HC-170/stonington-gray"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-172", "Revere Pewter", "도장(무광/저광 선택)", "#CBC6B8", "https://paintdb.com/colors/benjamin-moore/bm-hc-172-revere-pewter"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-173", "Edgecomb Gray", "도장(무광/저광 선택)", "#D9D3C4", "https://housepaint.ai/explore-colors/benjamin-moore/hc-173"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-4", "Hawthorne Yellow", "도장(무광/저광 선택)", "#F5E1A4", "https://www.benjaminmoore.com/en-us/paint-colors/color/hc-4/hawthorne-yellow"],
+["paint", "벤자민무어", "Benjamin Moore Historical Colors", "HC-6", "Windham Cream", "도장(무광/저광 선택)", "#F5E9C7", "https://www.benjaminmoore.com/en-us/paint-colors/color/hc-6/windham-cream"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-117", "Simply White", "도장(무광/저광 선택)", "#F6F6ED", "https://paintdb.com/colors/benjamin-moore/bm-oc-117-simply-white"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-130", "Cloud White", "도장(무광/저광 선택)", "#F2F1E6", "https://www.benjaminmoore.com/en-us/paint-colors/color/oc-130/cloud-white"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-17", "White Dove", "도장(무광/저광 선택)", "#EFEEE5", "https://www.benjaminmoore.com/en-us/paint-colors/color/oc-17/white-dove"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-20", "Pale Oak", "도장(무광/저광 선택)", "#DDD9CE", "https://housepaint.ai/explore-colors/benjamin-moore/oc-20"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-23", "Classic Gray", "도장(무광/저광 선택)", "#E3E0D7", "https://housepaint.ai/explore-colors/benjamin-moore/oc-23"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-27", "Balboa Mist", "도장(무광/저광 선택)", "#DAD6CC", "https://www.benjaminmoore.com/en-us/paint-colors/color/oc-27/balboa-mist"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-45", "Swiss Coffee", "도장(무광/저광 선택)", "#EEECE1", "https://housepaint.ai/explore-colors/benjamin-moore/oc-45"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-52", "Gray Owl", "도장(무광/저광 선택)", "#D3D4CC", "https://www.benjaminmoore.com/en-us/paint-colors/color/oc-52/gray-owl"],
+["paint", "벤자민무어", "Benjamin Moore Off-White Collection", "OC-65", "Chantilly Lace", "도장(무광/저광 선택)", "#F4F6F1", "https://paintdb.com/colors/benjamin-moore/bm-oc-65-chantilly-lace"],
+["paint", "삼화페인트", "삼화페인트 SAMHWA-NCS", "SH S 1010-R", "Milk Foam", "도장(무광/저광 선택)", "#E6D8D6", "https://spsamhwa.com/color/scdintro"],
+["tile", "IS CERAMIC 판매", "HE 칼라카타", "", "HE 칼라카타 골드 포세린 타일 (마블 패턴)", "600×1200 포세린, 무광", "#EEEBE5", "https://isceramic.kr/product/he-칼라카타-골드-포세린-타일-600x1200-무광/21631/"],
+["tile", "IS CERAMIC 판매", "LC 글램", "", "LC 글램 그레이지 포세린 타일", "600×1200 포세린, 무광", "#B8B0A3", "https://isceramic.kr/product/lc-글램-그레이지-포세린-타일-600x1200-무광/21658/"],
+["tile", "IS CERAMIC 판매", "LC 마리", "", "LC 마리 그레이 포세린 타일", "600×1200 포세린, 무광", "#9E9E9B", "https://isceramic.kr/product/lc-마리-그레이-포세린-타일-600x1200-무광/21667/"],
+["tile", "IS CERAMIC 판매", "LC 몬드리", "", "LC 몬드리 베이지 포세린 타일", "600×1200 포세린, 무광", "#D6C9B4", "https://isceramic.kr/product/lc-몬드리-베이지-포세린-타일-600x1200-무광/21678/"],
+["tile", "IS CERAMIC 판매", "LC 산타", "", "LC 산타 그레이지 9.8T 포세린 타일", "600×1200 포세린, 무광", "#BDB5A8", "https://isceramic.kr/product/lc-산타-그레이지-98t-포세린-타일-600x1200-무광/21692/"],
+["tile", "IS CERAMIC 판매", "LC 스톤챗", "", "LC 스톤챗 화이트 포세린 타일", "600×1200 포세린, 무광", "#E6E3DC", "https://isceramic.kr/product/lc-스톤챗-화이트-포세린-타일-600x1200-무광/21704/"],
+["tile", "IS CERAMIC 판매", "LC 테르노", "", "LC 테르노 비안코 9.8T 포세린 타일", "600×1200 포세린, 무광", "#E8E5DE", "https://isceramic.kr/product/lc-테르노-비안코-98t-포세린-타일-600x1200-무광/21725/"],
+["tile", "IS CERAMIC 판매", "LC 테르노", "", "LC 테르노 그리지오 9.8T 포세린 타일", "600×1200 포세린, 무광", "#A9A8A3", "https://isceramic.kr/product/lc-테르노-그리지오-98t-포세린-타일-600x1200-무광/21719/"],
+["tile", "IS CERAMIC 판매", "LC 테르노", "", "LC 테르노 베이지 9.8T 포세린 타일", "600×1200 포세린, 무광", "#D8CBB5", "https://isceramic.kr/product/lc-테르노-베이지-98t-포세린-타일-600x1200-무광/21723/"],
+["tile", "IS CERAMIC 판매", "LC 힐릭스", "", "LC 힐릭스 샌드 포세린 타일", "600×600 포세린, 무광", "#CFC3AE", "https://isceramic.kr/product/lc-힐릭스-샌드-포세린-타일-600x600-무광/21737/"],
+["tile", "배스스토리 판매", "바살티나", "POR 66025", "POR 66025 (바살티나 L.GR) 포세린타일", "600×600 포세린", "#B5B4AF", "https://bath-story.co.kr/product/por-66025바살티나-lgr-포세린타일600×6004장바닥거실매장식당음식점카페/3224/"],
+["tile", "배스스토리 판매 · 수입", "P 6000M", "P 6000M", "[수입] P 6000M 백색 포세린타일", "600×600 포세린, 무광", "#F2F1EE", "https://bath-story.co.kr/product/수입p-6000m-백색-포세린타일600mmx600mm144-매장타일거실타일화이트/2844/"],
+["tile", "배스스토리 판매 · 수입", "까라라", "GP6554", "[수입] GP6554 무광 까라라 포세린 타일", "600×600 포세린, 무광 (까라라 마블 패턴)", "#E9E8E4", "https://bath-story.co.kr/product/수입gp6554-무광-까라라-포세린-타일600mmx600mm144매장타일바닥타일상업공간/2813/"],
+["tile", "배스스토리 판매 · 수입", "시멘트", "66012", "[수입] 66012 시멘트 M.GR 포세린타일", "600×600 포세린 (콘크리트 룩)", "#8F8E8A", "https://bath-story.co.kr/product/수입66012-시멘트mgr-포세린타일600mmx600mm144매장타일바닥타일/2819/"],
+["tile", "세멘토", "테라조 포세린", "PER6003", "테라조 포세린 타일 PER6003 (회색)", "600×600 포세린, 테라조 룩", "#A6A49F", "https://cemento.kr/product/%ED%85%8C%EB%9D%BC%EC%A1%B0-%ED%8F%AC%EC%84%B8%EB%A6%B0-%ED%83%80%EC%9D%BC-600x600-%EC%8A%A4%ED%86%A4-%EC%9A%95%EC%8B%A4-%ED%99%94%EC%9E%A5%EC%8B%A4-%EA%B1%B0%EC%8B%A4%EB%B0%94%EB%8B%A5-per6003-per6008/1219/"],
+["tile", "세멘토", "테라조 포세린", "PER6008", "테라조 포세린 타일 PER6008 (진회색)", "600×600 포세린, 테라조 룩", "#6B6A67", "https://cemento.kr/product/%ED%85%8C%EB%9D%BC%EC%A1%B0-%ED%8F%AC%EC%84%B8%EB%A6%B0-%ED%83%80%EC%9D%BC-600x600-%EC%8A%A4%ED%86%A4-%EC%9A%95%EC%8B%A4-%ED%99%94%EC%9E%A5%EC%8B%A4-%EA%B1%B0%EC%8B%A4%EB%B0%94%EB%8B%A5-per6003-per6008/1219/"],
+["tile", "세멘토", "포쉐린 POR 612", "POR 612-02", "포쉐린 600x1200 POR 612-02 (까라라무광)", "600×1200 포세린, 무광 (까라라 마블 패턴)", "#E8E7E3", "https://cemento.kr/product/포쉐린-600x1200-por-612-02-까라라무광/3293/category/279/display/1/"],
+["tile", "세멘토", "포쉐린 POR 612", "POR 612-23", "포쉐린 600x1200 POR 612-23 (GR)", "600×1200 포세린 (유광/무광 표기 없음)", "#9C9B97", "https://cemento.kr/product/포쉐린-600x1200-por-612-23-gr/3287/category/279/display/1/"],
+["tile", "자루 판매", "ARE", "ARE 36004", "[ST] ARE 36004 그리지오 벽 타일 300X600", "300×600 도기질 벽타일, 무광", "#A7A6A1", "https://jaru.kr/product/st-are-36004-그리지오-벽-타일-300x600/4741/category/119/display/1/"],
+["tile", "자루 판매", "ARE", "ARE 66002", "[ST] ARE 66002 아몬드 포세린 타일 600X600", "600×600 포세린", "#CDBBA1", "https://jaru.kr/product/st-are-66002-아몬드-포세린-타일-600x600/4743/category/120/display/1/"],
+["tile", "자루 판매", "ARE", "ARE 66003", "[ST] ARE 66003 비앙코 포세린 타일 600X600", "600×600 포세린", "#ECEAE4", "https://jaru.kr/product/st-are-66003-비앙코-포세린-타일-600x600/4744/category/120/display/1/"],
+["tile", "자루 판매", "ARE", "ARE 66004", "[ST] ARE 66004 그리지오 포세린 타일 600X600", "600×600 포세린, 무광", "#A7A6A1", "https://jaru.kr/product/st-are-66004-그리지오-포세린-타일-600x600/4745/category/120/display/1/"],
+["tile", "자루 판매", "TM MARS", "", "[TM] MARS 라이트 그레이 포세린 타일 6-6", "600×600 포세린, 무광", "#BEBDB8", "https://jaru.kr/product/tm-mars-라이트-그레이-포세린-타일-6-6/3844/category/120/display/1/"],
+["tile", "자루 판매", "TM 테라조", "6001D", "[TM] 6001D 그레이 테라조 포세린 타일 6-6", "600×600 포세린, 테라조 룩", "#9D9B96", "https://jaru.kr/product/tm-6001d-그레이-테라조-포세린-타일-6-6/3859/category/120/display/1/"],
+["tile", "자루 판매", "TM 테라조", "6001W", "[TM] 6001W 테라조 포세린 타일 600각", "600×600 포세린, 무광, 테라조 룩", "#E2DFD8", "https://jaru.kr/product/tm-6001w-테라조-포세린-타일-600각-600x600/2897/category/120/display/1/"],
+["tile", "자루 판매 · 국내산", "1111", "1111", "[ST] 1111 유광 무광 화이트 벽타일 300X600", "300×600 도기질 벽타일, 유광/무광 선택", "#F4F3EF", "https://jaru.kr/product/st-1111-%EC%9C%A0%EA%B4%91-%EB%AC%B4%EA%B4%91-%ED%99%94%EC%9D%B4%ED%8A%B8-%EB%B2%BD%ED%83%80%EC%9D%BC-300x600/2978/"],
+["tile", "자루 판매 · 이탈리아산", "코쿠닝코튼", "", "[ST] 코쿠닝코튼 포세린 타일 600X1200", "600×1200 포세린, 무광", "#E6DDCB", "https://jaru.kr/product/st-코쿠닝코튼-포세린-타일-600x1200/5069/category/121/display/1/"],
+["tile", "자루 판매 · 인도산", "라임", "", "[ST] 라임 그라피테 포세린 타일 600X1200", "600×1200 포세린, 무광", "#5E5D5A", "https://jaru.kr/product/st-%EB%9D%BC%EC%9E%84-%EA%B7%B8%EB%9D%BC%ED%94%BC%ED%85%8C-%ED%8F%AC%EC%84%B8%EB%A6%B0-%ED%83%80%EC%9D%BC-600x1200/3385/"],
+["tile", "중앙데코시트라인 판매", "면취타일", "75151", "면취타일 [화이트/무광/직사각/75151]", "75×150 서브웨이(면취), 무광", "#F0EFEB", "https://www.sheetline.co.kr/FrontStore/m/goods/mGoodsView.phtml?iCategoryId=1682&iGoodsId=0101_00100"],
+["tile", "중앙데코시트라인 판매", "일반75타일", "OW021", "일반75타일 [아이보리/유광/직사각/OW021]", "75×150 서브웨이, 유광", "#EFE8D6", "https://www.sheetline.co.kr/FrontStore/m/goods/mGoodsView.phtml?iGoodsId=1682_00003"],
+["tile", "케이건축자재백화점 판매", "CW", "CW 38008M", "무광 CW 38008M 도기질 타일 (크림)", "300×600 도기질, 무광", "#EDE4D0", "https://ktrademall.com/product/무광-cw-38008m-도기질-타일-크림-300x600/1404/category/1190/display/1/"],
+["tile", "케이건축자재백화점 판매", "CW", "CW 7002", "유광 CW 7002 도기질 타일 (연그레이)", "300×600 도기질, 유광", "#CFCFCC", "https://ktrademall.com/product/유광-cw-7002-도기질-타일-연그레이-300x600/882/category/1190/display/1/"],
+["tile", "케이건축자재백화점 판매", "CW", "CW 7009", "유광 CW 7009 도기질 타일 (올리브그린)", "300×600 도기질, 유광 (컬러)", "#8A8C5C", "https://ktrademall.com/product/유광-cw-7009-도기질-타일-올리브그린-300x600/888/category/1190/display/1/"],
+["tile", "케이건축자재백화점 판매", "CW", "CW 7012", "유광 CW 7012 도기질 타일 (블루그린)", "300×600 도기질, 유광 (컬러)", "#5E9C93", "https://ktrademall.com/product/유광-cw-7012-도기질-타일-블루그린-300x600/889/category/1190/display/1/"],
+["tile", "케이건축자재백화점 판매", "CW", "CW 7021M", "무광 CW 7021M 도기질 타일 (화이트)", "300×600 도기질, 무광", "#F1F0EC", "https://ktrademall.com/product/무광-cw-7021m-도기질-타일-화이트-300x600/892/category/1190/display/1/"],
+["tile", "케이건축자재백화점 판매", "CW", "CW 7024M", "무광 CW 7024M 도기질 타일 (연회색)", "300×600 도기질, 무광", "#C9C9C6", "https://ktrademall.com/product/무광-cw-7024m-도기질-타일-연회색-300x600/1398/category/1190/display/1/"],
+["tile", "케이건축자재백화점 판매", "CW", "CW7001", "유광 CW7001 도기질 타일 (화이트)", "300×600 도기질, 유광", "#F6F6F3", "https://ktrademall.com/product/유광-cw7001-도기질-타일-화이트-300x600/881/category/1190/display/1/"],
+["tile", "케이건축자재백화점 판매", "MARLOW", "51-097", "유광 MARLOW CLOUD (화이트) 75x300", "75×300 쪽타일, 유광", "#F3F1EC", "https://ktrademall.com/product/유광-marlow-cloud-화이트-75x300-51-097/123/category/1976/display/1/"],
+["tile", "케이건축자재백화점 판매", "MARLOW", "51-100", "유광 MARLOW DESERT (오트밀) 75x300", "75×300 쪽타일, 유광", "#D9CDB8", "https://ktrademall.com/product/유광-marlow-desert-오트밀-75x300-51-100/451/category/1976/display/1/"],
+["tile", "케이건축자재백화점 판매", "마블", "K36025", "무광 마블 타일 화이트 300x600 (K36025)", "300×600 도기질, 무광 (마블 패턴)", "#ECEBE7", "https://ktrademall.com/product/%EB%AC%B4%EA%B4%91-%EB%A7%88%EB%B8%94-%ED%83%80%EC%9D%BC-%ED%99%94%EC%9D%B4%ED%8A%B8-300x600-k36025/143/"],
+["tile", "케이건축자재백화점 판매", "면취 타일", "SJ703", "유광 면취 타일 그레이 75x150 (SJ703)", "75×150 서브웨이(면취), 유광", "#9FA09E", "https://ktrademall.com/product/유광-면취-타일-그레이-75x150-sj703/411/category/1976/display/1/"],
+["tile", "케이건축자재백화점 판매", "면취 타일", "SJ707", "유광 면취 타일 차콜 75x150 (SJ707)", "75×150 서브웨이(면취), 유광", "#3F4040", "https://ktrademall.com/product/%EC%9C%A0%EA%B4%91-%EB%A9%B4%EC%B7%A8-%ED%83%80%EC%9D%BC-%EC%B0%A8%EC%BD%9C-75x150-sj707/127/"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-01", "회벽/화이트", "실크 (회벽 텍스처)", "#F3F1EC", "https://www.lxzin.com/zin/product/11441"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-02", "회벽/베이지", "실크 (회벽 텍스처)", "#E2D6C3", "https://www.lxzin.com/zin/product/11445"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-03", "회벽/라이트그레이", "실크 (회벽 텍스처)", "#DCDBD7", "https://www.lxzin.com/zin/product/11446"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-07", "회벽 딥그레이", "실크 (회벽 텍스처)", "#7E7D7A", "https://prod.danawa.com/info/?pcode=16498424"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-10", "회벽/퓨어화이트", "실크 (회벽 텍스처)", "#F7F7F4", "https://www.lxzin.com/zin/product/100709"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-11", "회벽/크림", "실크 (회벽 텍스처)", "#EDE5D3", "https://www.lxzin.com/zin/product/100708"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-12", "회벽/크림 화이트", "실크 (회벽 텍스처)", "#F4EFE4", "https://www.lxzin.com/zin/product/102540"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR002-13", "회벽/블랑 그레이", "실크 (회벽 텍스처)", "#E6E4DF", "https://www.lxzin.com/zin/product/102541"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR014-01", "내추럴 린넨/화이트", "실크 (린넨 텍스처)", "#F1EEE7", "https://www.lxzin.com/zin/product/11494"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR018-01", "핸디코트/화이트", "실크 (핸디코트·플라스터 텍스처)", "#F2F0EB", "https://www.lxzin.com/zin/product/13008"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR018-03", "핸디코트/그레이지", "실크 (핸디코트·플라스터 텍스처)", "#D3CCC1", "https://www.lxzin.com/zin/product/13010"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR028-01", "모던회벽/화이트", "실크 (회벽 텍스처)", "#F1F0EC", "https://www.lxzin.com/zin/product/13396"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR028-02", "모던회벽/라이트 그레이", "실크 (회벽 텍스처)", "#D8D7D3", "https://www.lxzin.com/zin/product/13397"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR029-02", "프레스코/샌드 아이보리", "실크 (프레스코 텍스처)", "#E9DFCC", "https://www.lxzin.com/zin/product/100682"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR031-02", "내추럴회벽/크림 화이트", "실크 (회벽 텍스처)", "#F3EEE3", "https://www.lxzin.com/zin/product/100691"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR043-07", "마띠에르/블랑 그레이지", "실크 (마띠에르 텍스처)", "#DDD7CD", "https://www.lxzin.com/zin/product/102548"],
+["wallpaper", "LX하우시스", "LX 디아망", "PR046-03", "브러쉬드월/그레이지", "실크 (브러시 페인트 텍스처)", "#CFC7BB", "https://www.lxzin.com/zin/product/102562"],
+["wallpaper", "LX하우시스", "LX 디아망 포티스", "DF001-01", "유러피안 플라스터/샌디 크림", "실크 (플라스터 텍스처)", "#E8DDC9", "https://www.lxzin.com/zin/product/101940"],
+["wallpaper", "LX하우시스", "LX 디아망 포티스", "DF002-02", "프렌치 워시/샌드 그레이", "실크 (워시 페인트 텍스처)", "#C9C4BA", "https://www.lxzin.com/zin/product/101943"],
+["wallpaper", "LX하우시스", "LX 디아망 포티스", "DF004-03", "스웨이드 페인트/샌드 그레이지", "실크 (스웨이드 페인트 텍스처)", "#CDC4B6", "https://www.lxzin.com/zin/product/101955"],
+["wallpaper", "LX하우시스", "LX 디아망 포티스", "DF006-01", "샌드스톤/클라우드 화이트", "실크 (샌드스톤 텍스처)", "#F0EEE8", "https://www.lxzin.com/zin/product/101963"],
+["wallpaper", "LX하우시스", "LX 디아망 포티스", "DF007-02", "브러쉬드페인트/페일 그레이", "실크 (브러시 페인트 텍스처)", "#D9D9D6", "https://www.lxzin.com/zin/product/101967"],
+["wallpaper", "LX하우시스", "LX 디아망 포티스", "DF008-02", "스타코/미스트 그레이지", "실크 (스타코 텍스처)", "#D6D0C6", "https://www.lxzin.com/zin/product/101973"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82526-01", "테라코타/화이트", "실크 (테라코타 텍스처)", "#F1EEE8", "https://www.lxzin.com/zin/product/13854"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82526-07", "테라코타/핑크 베이지", "실크 (테라코타 텍스처)", "#E3CFC2", "https://www.lxzin.com/zin/product/13860"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82538-01", "리얼 매트 페인트/유백색", "실크 (매트 페인트)", "#F4F2EC", "https://www.lxzin.com/zin/product/100470"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82538-02", "리얼 매트 페인트/샌드 아이보리", "실크 (매트 페인트)", "#ECE3D2", "https://www.lxzin.com/zin/product/100471"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82539-04", "더 리얼 페인트/어도어 그레이지", "실크 (페인트 텍스처)", "#CFC8BC", "https://www.lxzin.com/zin/product/100480"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82560-01", "회벽 직물/오프 화이트", "실크 (회벽·직물 텍스처)", "#EFECE4", "https://www.lxzin.com/zin/product/101335"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82562-05", "텍스쳐 페인트/스페이스 블루", "실크 (페인트 텍스처)", "#8E9EAE", "https://www.lxzin.com/zin/product/101377"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82576-02", "프레스코 회벽/미스티 그레이", "실크 (회벽 텍스처)", "#CBCBC8", "https://www.lxzin.com/zin/product/102173"],
+["wallpaper", "LX하우시스", "LX 베스띠", "82578-02", "크랙 스톤/피치 베이지", "실크 (크랙 스톤 텍스처)", "#E2CDB9", "https://www.lxzin.com/zin/product/102179"],
+["wallpaper", "LX하우시스", "LX 휘앙세 93", "49527-01", "콘크리트 블록/그레이", "합지 (콘크리트 텍스처)", "#A9A8A4", "https://www.lxzin.com/zin/product/11771"],
+["wallpaper", "LX하우시스", "LX 휘앙세 93", "49581-03", "베이직/베이지", "합지 (무지)", "#E0D4BF", "https://www.lxzin.com/zin/product/13808"],
+["wallpaper", "LX하우시스", "LX 휘앙세 93", "49603-01", "내추럴 린넨/오트밀", "합지 (린넨 텍스처)", "#E3D9C8", "https://www.lxzin.com/zin/product/101013"],
+["wallpaper", "LX하우시스", "LX 휘앙세 93", "49605-01", "페인팅/화이트 크림", "합지 (페인트 텍스처)", "#F3EEE2", "https://www.lxzin.com/zin/product/101019"],
+["wallpaper", "LX하우시스", "LX 휘앙세 93", "49620-03", "회벽 직물/라이트 모스그린", "합지 (회벽·직물 텍스처)", "#B9BFA6", "https://www.lxzin.com/zin/product/102740"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87450-1", "클레이페인트 화이트", "실크 (클레이 페인트 텍스처)", "#F1EFE9", "https://daumdeco.com/category/gni-%EB%A1%9C%ED%95%98%EC%8A%A4/435/"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87454-4", "페스토 스프링 민트", "실크", "#C3D3C2", "https://daumdeco.com/category/gni-%EB%A1%9C%ED%95%98%EC%8A%A4/435/"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87456-1", "매트회벽 매트 화이트", "실크 (매트 회벽)", "#F2F1EC", "https://www.decomoa.com/goods/goods_view.php?goodsNo=1000054281"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87456-2", "매트회벽 퓨어 그레이", "실크 (매트 회벽)", "#C8C8C6", "https://daumdeco.com/category/gni-%EB%A1%9C%ED%95%98%EC%8A%A4/435/"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87459-3", "코티지 웜그레이", "실크", "#BFB8AD", "https://daumdeco.com/category/gni-%EB%A1%9C%ED%95%98%EC%8A%A4/435/"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87461-5", "누브 아이보리", "실크", "#EEE6D4", "https://www.decomoa.com/goods/goods_view.php?goodsNo=1000054310"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87469-3", "뉴코튼 내추럴 웜", "실크 (코튼 텍스처)", "#E3D8C6", "https://daumdeco.com/category/gni-%EB%A1%9C%ED%95%98%EC%8A%A4/435/"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87471-5", "트라버틴 회벽 워시드 스톤 블루", "실크 (트라버틴 회벽 텍스처)", "#A3B1BA", "https://daumdeco.com/category/gni-%EB%A1%9C%ED%95%98%EC%8A%A4/435/"],
+["wallpaper", "개나리벽지", "개나리 로하스", "87476-4", "클레이회벽 라이트 웜그레이", "실크 (회벽 텍스처)", "#D3CEC6", "https://daumdeco.com/category/gni-%EB%A1%9C%ED%95%98%EC%8A%A4/435/"],
+["wallpaper", "개나리벽지", "개나리 프리모", "99126-2", "크래프트회벽 밀크화이트", "실크 (회벽 텍스처)", "#F3F0E8", "https://www.decomoa.com/goods/goods_view.php?goodsNo=1000057537"],
+["wallpaper", "신한벽지", "신한 스케치", "15053-1", "조용한 사색 화이트", "실크", "#F2F0EB", "http://www.paperchunguk.co.kr/shop/shopdetail.html?branduid=1170291&special=5&GfDT=Z2V1"],
+["wallpaper", "신한벽지", "신한 스케치", "15080-2", "도시밤하늘 라이트그레이", "실크", "#D7D7D4", "https://daumdeco.com/category/%EC%8B%A0%ED%95%9C-%EC%8A%A4%EC%BC%80%EC%B9%98/431/"],
+["wallpaper", "신한벽지", "신한 스케치", "15096-2", "별의속삭임 아이보리", "실크", "#EFE8D8", "https://gochim.co.kr/product/%EC%8B%A0%ED%95%9C%EB%B2%BD%EC%A7%80-%EC%8A%A4%EC%BC%80%EC%B9%98-15096-2-%EB%B3%84%EC%9D%98%EC%86%8D%EC%82%AD%EC%9E%84-%EC%95%84%EC%9D%B4%EB%B3%B4%EB%A6%AC/10151/"],
+["wallpaper", "신한벽지", "신한 스케치", "15110-1", "아침햇살 화이트", "실크", "#F4F1EA", "https://gochim.co.kr/product/%EC%8B%A0%ED%95%9C%EB%B2%BD%EC%A7%80-%EC%8A%A4%EC%BC%80%EC%B9%98-15110-1-%EC%95%84%EC%B9%A8%ED%96%87%EC%82%B4-%ED%99%94%EC%9D%B4%ED%8A%B8/11098/"],
+["wallpaper", "신한벽지", "신한 스케치", "15118-4", "규조토 샌드", "실크 (규조토 텍스처)", "#DCCFB9", "https://daumdeco.com/category/%EC%8B%A0%ED%95%9C-%EC%8A%A4%EC%BC%80%EC%B9%98/431/"],
+["wallpaper", "신한벽지", "신한 스케치", "15119-3", "소중한시간 그레이", "실크", "#BDBCB8", "https://gochim.co.kr/product/%EC%8B%A0%ED%95%9C%EB%B2%BD%EC%A7%80-%EC%8A%A4%EC%BC%80%EC%B9%98-15119-3-%EC%86%8C%EC%A4%91%ED%95%9C%EC%8B%9C%EA%B0%84-%EA%B7%B8%EB%A0%88%EC%9D%B4/11146/"],
+["wallpaper", "신한벽지", "신한 파사드", "2005-2", "샤르댕 딥그레이", "실크 (프리미엄)", "#6F6E6B", "https://www.wallplan.co.kr/goods/goods_view.php?goodsNo=1000022252"],
+["wallpaper", "신한벽지", "신한 파사드", "2017-1", "라파엘로 화이트", "실크 (프리미엄)", "#F2F0EA", "https://wallplan.co.kr/goods/goods_view.php?goodsNo=1000022294"],
+["window", "KCC글라스", "PVC 창호 ASA 외부 컬러", "", "Polaris Grey", "ASA 외부", "#9A9C9C", "https://www.kccworld.co.kr/eng/materials/window/general.do"],
+["window", "KCC글라스", "PVC 창호 ASA 외부 컬러", "", "Charcoal Grey", "ASA 외부", "#45484A", "https://www.kccworld.co.kr/eng/materials/window/general.do"],
+["window", "KCC글라스", "PVC 창호 ASA 외부 컬러", "", "Black", "ASA 외부", "#222222", "https://www.kccworld.co.kr/eng/materials/window/general.do"],
+["window", "KCC글라스", "PVC 창호 ASA 외부 컬러", "", "Light Brown", "ASA 외부", "#8A6A4C", "https://www.kccworld.co.kr/eng/materials/window/general.do"],
+["window", "KCC글라스", "PVC 창호 ASA 외부 컬러", "", "Dark Brown", "ASA 외부", "#4A3426", "https://www.kccworld.co.kr/eng/materials/window/general.do"],
+["window", "KCC글라스", "PVC 창호 표준색 (외부/내부)", "", "White", "PVC 표준", "#F3F3F0", "https://www.kccworld.co.kr/eng/materials/window/general.do"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "AJ104", "워시 베이지", "PVC 프레임 실내 래핑", "#D9CCB6", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "KAEC4", "어반 그레이", "PVC 프레임 실내 래핑", "#4F5254", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "KAFM8", "모던 그레이", "PVC 프레임 실내 래핑", "#8E8E8B", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "KDB86", "모던 블랙", "PVC 프레임 실내 래핑", "#2A2A2A", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "N0901", "내추럴 오크", "PVC 프레임 실내 래핑 (우드무늬)", "#B98E5E", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "N0903", "크레마", "PVC 프레임 실내 래핑 (우드톤)", "#CDB38E", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "N0904", "크리미", "PVC 프레임 실내 래핑", "#E8DFCC", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "NCBS2", "라이트 베이지", "PVC 프레임 실내 래핑", "#D8C7AA", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "WAP97", "퓨어 화이트", "PVC 프레임 실내 래핑", "#F4F4F1", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "WAQ76", "스노우 화이트", "PVC 프레임 실내 래핑", "#F2F1EC", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "WAR89", "크림 화이트", "PVC 프레임 실내 래핑", "#EFEADF", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 (구 수퍼세이브) 내부 컬러", "WAU51", "모노 화이트", "PVC 프레임 실내 래핑", "#E9E9E6", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "뷰프레임 외부 컬러 (ASA 옵션)", "", "D/Brown (다크브라운)", "ASA 외부", "#4A3426", "https://www.lxzin.com/zin/product/101603"],
+["window", "LX하우시스", "시스템창호 E9 (PTT85/PTT200 등) 내부 컬러", "FW503-62G", "밀크 초콜렛", "PVC 프레임 실내 래핑 (우드톤)", "#6E4B36", "https://www.lxzin.com/zin/product/13056"],
+["window", "LX하우시스", "시스템창호 E9 (PTT85/PTT200 등) 내부 컬러", "GA804-T1", "에스프레소", "PVC 프레임 실내 래핑 (우드톤)", "#3E2A20", "https://www.lxzin.com/zin/product/13056"],
+["window", "LX하우시스", "시스템창호 E9 (PTT85/PTT200 등) 내부 컬러", "GE504-G8", "시나몬", "PVC 프레임 실내 래핑 (우드톤)", "#9A6A45", "https://www.lxzin.com/zin/product/13056"],
+["window", "LX하우시스", "시스템창호 E9 (PTT85/PTT200 등) 내부 컬러", "YEK61-G9", "라이트 그레이", "PVC 프레임 실내 래핑", "#C4C5C3", "https://www.lxzin.com/zin/product/13056"],
+["window", "LX하우시스", "인테리어필름 솔리드 (샷시 전용 표기 없음)", "ES180", "Solid 스노우 화이트", "솔리드", "#F3F2EE", "https://www.lxzin.com/zin/product/100825"],
+["window", "LX하우시스", "인테리어필름 솔리드 (샷시 전용 표기 없음)", "RS130", "Solid Posh White", "솔리드", "#F0EEE8", "https://www.lxzin.com/zin/product/10867"],
+["window", "LX하우시스", "인테리어필름 솔리드 (샷시 전용 표기 없음)", "RS158", "Solid Ash Black", "솔리드", "#2B2B2B", "https://www.lxzin.com/zin/product/100904"],
+["window", "LX하우시스", "인테리어필름 솔리드 (샷시 전용 표기 없음)", "RS171", "Solid Cream", "솔리드", "#E9DFC9", "https://www.lxzin.com/zin/product/13418"],
+["window", "LX하우시스", "인테리어필름 솔리드 (샷시 전용 표기 없음)", "RS51", "Solid Graphite", "솔리드", "#4A4B4C", "https://www.lxzin.com/zin/product/5765"],
+["window", "LX하우시스", "인테리어필름 솔리드 (샷시 전용 표기 없음)", "RS57", "Solid Modern Gray", "솔리드", "#9A9A97", "https://www.lxzin.com/zin/product/5769"],
+["window", "LX하우시스", "인테리어필름 솔리드 (샷시 전용 표기 없음)", "RS69", "Solid Light Ivory", "솔리드", "#EDE6D4", "https://www.lxzin.com/zin/product/5258"],
+["window", "LX하우시스", "인테리어필름 아웃도어 (외장용 필름, 샷시 전용 표기 없음)", "UP002", "아웃도어 머지 오크", "외장용 필름 (우드)", "#A47B52", "https://www.lxzin.com/zin/product/102417"],
+["window", "LX하우시스", "인테리어필름 아웃도어 (외장용 필름, 샷시 전용 표기 없음)", "US001", "아웃도어 옵티컬 화이트", "외장용 필름 0.2mm", "#F5F5F2", "https://www.lxzin.com/zin/product/102414"],
+["window", "LX하우시스", "인테리어필름 아웃도어 (외장용 필름, 샷시 전용 표기 없음)", "US002", "아웃도어 블랙 브라운", "외장용 필름", "#2F2824", "https://www.lxzin.com/zin/product/102533"],
+["window", "LX하우시스", "인테리어필름 아웃도어 (외장용 필름, 샷시 전용 표기 없음)", "US005", "아웃도어 애쉴라 그레이", "외장용 필름", "#8C8D8B", "https://www.lxzin.com/zin/product/102415"],
+["window", "LX하우시스", "인테리어필름 아웃도어 (외장용 필름, 샷시 전용 표기 없음)", "US007", "아웃도어 스티플 그레이", "외장용 필름", "#5E605F", "https://www.lxzin.com/zin/product/102416"],
+["window", "LX하우시스", "인테리어필름 클래식 우드 (샷시 전용 표기 없음)", "PW118", "뉴캐슬 오크", "우드무늬", "#B48A60", "https://www.lxzin.com/zin/product/12530"],
+["window", "LX하우시스", "인테리어필름 클래식 우드 (샷시 전용 표기 없음)", "PW125", "브라이튼 월넛", "우드무늬", "#5E4130", "https://www.lxzin.com/zin/product/13565"]
+];
+// ══ 실제 제품 카탈로그 매칭 (2026-10-07 요청: "마감재에 제조사·컬러 품번이 나오면 신뢰도가 좋겠다") ══════════════
+// CONSULT_CATALOG는 제조사·공식 카탈로그·대형 판매처 페이지에서 실제로 확인한 제품만 담음(품번을 지어내지 않음).
+// AI가 품번을 만들지 않고, 마감재 종류(필름/벽지/페인트/마루/창호/타일) + 색(hex) + 무늬(우드·대리석·테라조…)로
+// 카탈로그 안에서 가장 비슷한 제품을 고름 → "유사 추천 제품"으로 표시. hex는 대부분 대표색 추정치라 참고용.
+function _cHexLab(h){
+  h=String(h||'#888888').replace('#',''); if(h.length!==6) h='888888';
+  var r=parseInt(h.slice(0,2),16)/255, g=parseInt(h.slice(2,4),16)/255, b=parseInt(h.slice(4,6),16)/255;
+  function lin(c){ return c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4); }
+  r=lin(r); g=lin(g); b=lin(b);
+  var X=(r*0.4124+g*0.3576+b*0.1805)/0.95047, Y=(r*0.2126+g*0.7152+b*0.0722), Z=(r*0.0193+g*0.1192+b*0.9505)/1.08883;
+  function f(t){ return t>0.008856?Math.cbrt(t):(7.787*t+16/116); }
+  var fx=f(X), fy=f(Y), fz=f(Z);
+  return [116*fy-16, 500*(fx-fy), 200*(fy-fz)];
+}
+function _cDeltaE(a,b){ var A=_cHexLab(a), B=_cHexLab(b); return Math.sqrt(Math.pow(A[0]-B[0],2)+Math.pow(A[1]-B[1],2)+Math.pow(A[2]-B[2],2)); }
+function _consultProdCats(id, ko){
+  ko=String(ko||'');
+  var isPaint=/도장|페인트|도료|미장|플라스터|석회/.test(ko), isPaper=/벽지|실크|합지|도배/.test(ko), isTile=/타일|포세린|도기/.test(ko), isPanel=/판넬|패널|루버|우드 ?월|V그루브/i.test(ko);
+  switch(id){
+    case 'floor': case 'kfloor': return isTile?['tile']:['floor'];
+    case 'wall': case 'ceiling': case 'accent': return isPaint?['paint']:isPaper?['wallpaper']:isTile?['tile']:isPanel?['film','paint']:['wallpaper','paint'];
+    case 'door': case 'kcab': case 'storage': case 'cfurn': return isPaint?['paint']:['film'];
+    case 'window': return ['window'];
+    case 'ktile': case 'bwall': case 'bfloor': case 'etile': case 'ctile': return isPanel?(isPaint?['paint']:['paint','film']):(isPaint?['paint']:['tile']);
+    default: return [];
+  }
+}
+function _cPattern(t){
+  t=String(t||'').toLowerCase();
+  if(/대리석|마블|marble|칼라카타|까라라|carrara/.test(t)) return 'marble';
+  if(/테라조|terrazzo/.test(t)) return 'terrazzo';
+  if(/콘크리트|concrete|시멘트/.test(t)) return 'concrete';
+  if(/헤링본|herringbone/.test(t)) return 'herringbone';
+  if(/오크|월넛|애쉬|우드|원목|마루|oak|walnut|ash|wood|티크|체리/.test(t)) return 'wood';
+  if(/메탈|metal|브러시드 실버|골드/.test(t)) return 'metal';
+  return 'solid';
+}
+function _cTileSize(t){ t=String(t||''); if(/1200/.test(t)) return 'big'; if(/600\s*[x×X]\s*600|600각/.test(t)) return 'sq600'; if(/300\s*[x×X]\s*600/.test(t)) return 'wall'; if(/75\s*[x×X]\s*(150|300)|서브웨이|면취|쪽타일/.test(t)) return 'subway'; return ''; }
+// 후보 n개(가까운 순) — [{brand,line,code,name,finish,hex,src,cat,score}]
+function _consultProdCands(id, it, n){
+  if(!it || !it.ko || typeof CONSULT_CATALOG==='undefined') return [];
+  var cats=_consultProdCats(id, it.ko); if(!cats.length) return [];
+  var want=_cPattern(it.ko+' '+(it.en||'')), wantSize=_cTileSize(it.ko+' '+(it.en||''));
+  if(want==='wood' && /판넬|패널|루버|V그루브/i.test(it.ko) && !/오크|월넛|애쉬|원목|티크/.test(it.ko)) want='solid'; // 도장 마감 우드 판넬(화이트 등)은 단색
+  var mattWant=/무광|매트|matte/i.test(it.ko+' '+(it.en||'')), glossWant=/유광|하이그로시|gloss/i.test(it.ko+' '+(it.en||''));
+  var out=[];
+  CONSULT_CATALOG.forEach(function(r){
+    if(cats.indexOf(r[0])<0) return;
+    var txt=r[2]+' '+r[4]+' '+r[5], pat=(r[0]==='paint')?'solid':_cPattern(r[0]==='wallpaper'?r[5]:txt); // 페인트는 항상 단색(색 이름 "Pale Oak" 등에 속지 않게)
+    var sc=_cDeltaE(it.hex, r[6]);
+    if(pat!==want){ sc+= (want==='solid'&&pat==='wood')||(want==='wood'&&pat==='solid') ? 40 : 22; }
+    if(r[0]==='tile' && wantSize){ var ts=_cTileSize(txt); if(ts && ts!==wantSize) sc+=12; }
+    if(mattWant && /유광|gloss/i.test(txt)) sc+=6; if(glossWant && /무광|matte/i.test(txt)) sc+=6;
+    if(id==='window' && /외부|ASA/.test(txt)) sc+=15; // 실내 쪽 색이 기준
+    out.push({cat:r[0], brand:r[1], line:r[2], code:r[3], name:r[4], finish:r[5], hex:r[6], src:r[7], score:sc});
+  });
+  out.sort(function(a,b){ return a.score-b.score; });
+  // 같은 브랜드만 몰리지 않게: 1등 + 다른 브랜드 우선으로 n개
+  var res=[], seen={};
+  out.forEach(function(o){ if(res.length>=n) return; var k=o.brand; if(res.length && seen[k] && out.length>n*2) return; res.push(o); seen[k]=1; });
+  if(res.length<n) out.forEach(function(o){ if(res.length<n && res.indexOf(o)<0) res.push(o); });
+  return res;
+}
+function _consultProd(id, it){
+  if(!it) return null;
+  if(it.prodFix) return it.prodFix; // 사용자가 직접 고른 제품
+  var key=id+'|'+it.ko+'|'+it.hex;
+  if(it._pk===key) return it._p||null;
+  var c=_consultProdCands(id, it, 1)[0]||null;
+  if(c && c.score>45) c=null; // 너무 다르면 추천 안 함
+  try{ Object.defineProperty(it,'_p',{value:c, writable:true, enumerable:false, configurable:true}); Object.defineProperty(it,'_pk',{value:key, writable:true, enumerable:false, configurable:true}); }catch(e){}
+  return c;
+}
+function _consultProdShort(p){
+  if(!p) return '';
+  var line=String(p.line||'').replace(/\s*\([^)]*\)\s*/g,' ').replace(/^LX Z:IN\s*/,'').replace(/^LX\s+/,'').replace(/\s+/g,' ').trim();
+  var brand=String(p.brand||'').replace(/\s*판매.*$/,'');
+  if(line===brand || brand.indexOf(line)>=0) line='';
+  if(/^(Dunn-Edwards|Benjamin Moore)/.test(line)) line='';
+  if(line.length>14) line=line.slice(0,14)+'…';
+  var nm=String(p.name||'').replace(/^\[[A-Z]+\]\s*/,''); if(nm.length>22) nm=nm.slice(0,22)+'…';
+  return brand+(line?' '+line:'')+(p.code?' '+p.code:'')+(nm?' · '+nm:'');
+}
+
 var CONSULT_SCHED_HOME=[
   ['floor','바닥재','거실·방·주방 바닥','Floor of all living areas (living room, bedrooms, kitchen, hallway)'],
   ['wall','벽 마감','도배·도장','Walls'],
@@ -29024,7 +29427,7 @@ var CONSULT_SCHED_HOME=[
   ['kfloor','주방 바닥','주방·식당 바닥','Kitchen and dining floor'],
   ['kcab','주방 가구 도어','상·하부장','Kitchen cabinet doors (upper and lower)'],
   ['kcounter','주방 상판','상판·아일랜드','Kitchen countertop'],
-  ['ktile','주방 벽 타일','싱크대 벽면','Kitchen backsplash wall'],
+  ['ktile','주방 벽면','싱크대 벽(타일·판넬 등)','Kitchen backsplash wall'],
   ['bwall','욕실 벽 타일','욕실 벽','Bathroom wall tile'],
   ['bfloor','욕실 바닥 타일','욕실 바닥','Bathroom floor tile'],
   ['bceil','욕실 천장재','욕실 천장','Bathroom ceiling'],
@@ -29096,7 +29499,7 @@ function _consultSchedLabel(st, id){ var d=_consultSchedDefs(st).filter(function
 function _consultSpaceMats(st, v, spName){
   if(!v) return [];
   if(!v.sched || !v.sched.items) return (v.materials||[]).filter(function(m){return m&&m.v;}).map(function(m){ return {k:m.k, v:m.v, img:m.img}; });
-  return _consultSpaceSchedIds(st, spName).map(function(id){ var it=v.sched.items[id]; if(!it || !it.ko) return null; return {id:id, k:_consultSchedLabel(st,id), v:it.ko, hex:it.hex, img:it.img}; }).filter(Boolean);
+  return _consultSpaceSchedIds(st, spName).map(function(id){ var it=v.sched.items[id]; if(!it || !it.ko) return null; return {id:id, k:_consultSchedLabel(st,id), v:it.ko, hex:it.hex, img:it.img, prod:_consultProd(id, it)}; }).filter(Boolean);
 }
 // 시안 전체 보드(스케줄 순서대로)
 function _consultBoardMats(st, v){
@@ -29106,7 +29509,7 @@ function _consultBoardMats(st, v){
   var used={}; _consultSp(st).forEach(function(s){ _consultSpaceSchedIds(st, s.name).forEach(function(id){ used[id]=1; }); });
   if(st.type==='home' && !_consultIsPart(st)){ ['floor','wall','ceiling','door','window','light'].forEach(function(id){ used[id]=1; }); }
   if(v.sched.items.kfloor && v.sched.items.floor && v.sched.items.kfloor.ko===v.sched.items.floor.ko) delete used.kfloor; // 같으면 한 번만
-  return _consultSchedDefs(st).filter(function(d){ return used[d[0]] && v.sched.items[d[0]] && v.sched.items[d[0]].ko; }).map(function(d){ var it=v.sched.items[d[0]]; return {id:d[0], k:d[1], area:d[2], v:it.ko, hex:it.hex, img:it.img}; });
+  return _consultSchedDefs(st).filter(function(d){ return used[d[0]] && v.sched.items[d[0]] && v.sched.items[d[0]].ko; }).map(function(d){ var it=v.sched.items[d[0]]; return {id:d[0], k:d[1], area:d[2], v:it.ko, hex:it.hex, img:it.img, prod:_consultProd(d[0], it)}; });
 }
 
 // ── 스타일 사진 ↔ 공간 매칭 (2026-10-07: "주방 참고이미지랑 우리가 만든 주방이 완전히 다르면 참고이미지 넣는 의미가 없다") ──
@@ -29180,7 +29583,7 @@ function _consultSchedPrompt(st, v, fromResults){
   var tl=(CONSULT_TYPES.filter(function(t){return t.k===st.type;})[0]||{}).l||'';
   var lines=[
     '[인테리어 마감재 스케줄 작성 — JSON 하나만 답할 것, 설명·인사말·코드블록 금지]',
-    fromResults ? '첨부 이미지는 이 시안의 완성 디자인 이미지들이야. 이미지에 실제로 보이는 마감재를 읽어서 정리해. 안 보이는 항목은 보이는 마감과 어울리게 정해.'
+    fromResults ? '첨부 이미지는 이 시안의 완성 디자인(렌더링) 이미지들이야(각 이미지 앞에 공간 이름이 있음). 이미지에 실제로 보이는 마감재를 정확히 읽어서 적어 — 주방 항목(kfloor·kcab·kcounter·ktile)은 주방 이미지에서, 욕실 항목은 욕실 이미지에서, floor·wall은 거실·방 이미지에서. 예: 싱크대 문이 크림색 무광 평판이면 "크림 무광 평판 도어", 벽이 흰 세로 우드 판넬이면 "화이트 V그루브 우드 판넬". 기본값처럼 흔한 이름으로 바꾸지 말고 보이는 그대로. 이미지에 없는 항목만 보이는 마감과 어울리게 정해.'
                 : (v.refImgs ? '첨부 이미지는 고객이 원하는 스타일 사진이야(공간별 참고사진일 수 있음: '+(st.refTags||[]).filter(Boolean).join(', ')+'). '+(v.plan.faithful?'사진에 보이는 마감재·색을 최대한 그대로 옮긴':'이 사진들을 바탕으로 아래 시안 방향으로 변주한')+' 마감재 스케줄을 정해. 주방 사진이 있으면 주방 항목은 그 사진 그대로, 욕실 사진이 없으면 다른 사진들과 어울리게.' : '첨부 이미지 없이, 아래 시안 방향에 맞는 마감재 스케줄을 정해.'),
     '공사: '+tl.replace(/^[^\s]+\s/,'')+(st.type==='home'?' ('+(st.houseKind||'아파트')+')':'')+(st.biz?' / 업종 '+st.biz:'')+(_consultIsPart(st)?' / 일부 공사':' / 전체 공사'),
     '시안 방향: '+v.plan.name+' — '+v.plan.ko,
@@ -29213,9 +29616,12 @@ function _consultEnsureSched(st, v, cb, opt){
   opt=opt||{};
   if(_consultIsBuild(st)){ cb&&cb(); return; }
   if(v.sched && !opt.force){ cb&&cb(); return; }
-  var imgs=[];
+  var imgs=[], labels=[];
   if(opt.fromResults){
-    _consultSp(st).forEach(function(s){ var r=v.spaces[s.id]; if(r && r.result && imgs.length<4) imgs.push(r.result); });
+    // 주방·욕실·현관처럼 전용 마감이 많은 공간을 먼저(최대 5장), 이미지마다 공간 이름을 붙여서 보냄
+    var sp=_consultSp(st).filter(function(s){ var r=v.spaces[s.id]; return r && r.result; });
+    var pr=function(n){ return /주방|부엌/.test(n)?0:/욕실|화장실/.test(n)?1:/현관/.test(n)?2:/거실/.test(n)?3:4; };
+    sp.sort(function(a,b){ return pr(a.name)-pr(b.name); }).slice(0,5).forEach(function(s){ imgs.push(v.spaces[s.id].result); labels.push(s.name); });
   } else {
     imgs=(st.refs||[]).filter(Boolean).slice(0,3);
   }
@@ -29224,7 +29630,9 @@ function _consultEnsureSched(st, v, cb, opt){
   var prompt=_consultSchedPrompt(st, v, !!opt.fromResults);
   var left=imgs.length, blocks=[];
   function send(){
-    var content=blocks.filter(Boolean).concat([{type:'text', text:prompt}]);
+    var content=[];
+    blocks.forEach(function(b,i){ if(!b) return; if(labels[i]) content.push({type:'text', text:'이미지 '+(i+1)+' = '+labels[i]}); content.push(b); });
+    content.push({type:'text', text:prompt});
     var tries=0;
     (function attempt(){
       try{
@@ -29238,7 +29646,11 @@ function _consultEnsureSched(st, v, cb, opt){
   }
   function done(s){
     var old=v.sched;
+    if(!s && opt.fromResults && old){ v.schedStatus='done'; v.schedReadErr=true; _consultSave(); _consultRefresh(); cb&&cb(); return; } // 다시 읽기 실패 → 기존 유지
     v.sched=s||_consultSchedDefault(st);
+    if(s && opt.fromResults){ v.sched.fromRender=true; v.schedReadErr=false; }
+    // 사용자가 직접 바꾼 자재는 그대로 유지
+    if(old && old.items) Object.keys(old.items).forEach(function(k){ if(old.items[k] && old.items[k].edited) v.sched.items[k]=old.items[k]; });
     // 이미 만든 재질 사진은 같은 항목이면 유지
     if(old && old.items) Object.keys(v.sched.items).forEach(function(k){ if(old.items[k] && old.items[k].img && old.items[k].ko===v.sched.items[k].ko) v.sched.items[k].img=old.items[k].img; });
     v.schedStatus='done'; v.dirty=true;
@@ -29264,6 +29676,7 @@ function _consultSchedText(st, v, spName, onlyFrames){
 }
 // 재질 사진(평평한 텍스처) — 스케줄 항목을 4×4 보드 한 장(20cr)으로 만들고 잘라서 각 항목에 넣음
 function _consultSchedTextures(st, v, srcUrl, cb, manual){
+  var srcs=Array.isArray(srcUrl)?srcUrl.filter(Boolean).slice(0,3):[srcUrl];
   if(!v.sched || !v.sched.items || v.texBusy) return;
   var defs=_consultSchedDefs(st).filter(function(d){ return d[0]!=='light' && v.sched.items[d[0]]; }).slice(0,16);
   if(!defs.length) return;
@@ -29273,12 +29686,15 @@ function _consultSchedTextures(st, v, srcUrl, cb, manual){
     'Separate the cells with thin pure-white gaps (about 1.5% of the image width) and a thin pure-white outer margin. NO text, NO labels, NO numbers anywhere.\n'+
     'Each cell is ONE finishing material shown as a clean, flat, seamless texture swatch (orthographic, straight-on, edge to edge, like a scanned material sample; tiles/planks/joints at realistic scale with several repeats; even diffuse light, no shadows, no objects):\n'+list+'\n'+
     (defs.length<cols*rows?'Any remaining cell(s) are plain pure white.\n':'')+
-    'Match the materials as they appear in the attached design image as closely as possible (same color, grain, pattern, sheen). Photorealistic material photography quality.';
+    'Match the materials as they appear in the attached design image'+(srcs.length>1?'s':'')+' as closely as possible (same color, grain, pattern, sheen) — kitchen items from the kitchen image, bathroom items from the bathroom image. Photorealistic material photography quality.';
   v.texBusy=true; _consultRefresh();
   function fail(msg){ v.texBusy=false; console.warn('[상담패키지] 재질 사진 실패', msg); _consultRefresh(); if(manual) alert('재질 사진 만들기 실패: '+(msg||'')+'\n(크레딧은 결과가 나와야 차감돼요)'); cb&&cb(false); }
-  _consultUrl(srcUrl, function(u){
+  var ups=[], left2=srcs.length;
+  srcs.forEach(function(su,i){ _consultUrl(su, function(u){ ups[i]=u; if(--left2===0) go2(); }); });
+  function go2(){
+    var us=ups.filter(Boolean); var u=us[0];
     if(!u){ fail('이미지 업로드 실패'); return; }
-    falRun('fal-ai/nano-banana-2/edit', {prompt:prompt, image_urls:[u], num_images:1, aspect_ratio: rows===cols?'1:1':(rows===3?'4:3':'2:1')}, function(d){
+    falRun('fal-ai/nano-banana-2/edit', {prompt:prompt, image_urls:us, num_images:1, aspect_ratio: rows===cols?'1:1':(rows===3?'4:3':'2:1')}, function(d){
       var url=falExtractImageUrl(d); if(!url){ fail('AI가 이미지를 돌려주지 않았어요'); return; }
       var im=new Image(); im.crossOrigin='anonymous';
       im.onload=function(){
@@ -29286,9 +29702,10 @@ function _consultSchedTextures(st, v, srcUrl, cb, manual){
           var W=im.naturalWidth, H=im.naturalHeight, cw=W/cols, ch=H/rows, ins=0.08;
           defs.forEach(function(dd,i){
             var cx=(i%cols)*cw, cy=Math.floor(i/cols)*ch;
-            var c=document.createElement('canvas'); c.width=c.height=240;
-            c.getContext('2d').drawImage(im, cx+cw*ins, cy+ch*ins, cw*(1-2*ins), ch*(1-2*ins), 0, 0, 240, 240);
-            v.sched.items[dd[0]].img=c.toDataURL('image/jpeg',0.86);
+            var side=Math.max(240, Math.min(512, Math.round(Math.min(cw,ch)*(1-2*ins)))); // 확대해서 볼 수 있게 원본 해상도 그대로(최대 512)
+            var c=document.createElement('canvas'); c.width=c.height=side;
+            c.getContext('2d').drawImage(im, cx+cw*ins, cy+ch*ins, cw*(1-2*ins), ch*(1-2*ins), 0, 0, side, side);
+            v.sched.items[dd[0]].img=c.toDataURL('image/jpeg',0.9);
           });
           v.texBusy=false; v.texDone=true; v.dirty=true; _consultSave(); _consultRefresh(); cb&&cb(true);
         }catch(e){ fail('이미지 자르기 실패'); }
@@ -29296,12 +29713,32 @@ function _consultSchedTextures(st, v, srcUrl, cb, manual){
       im.onerror=function(){ fail('결과 이미지를 불러오지 못했어요'); };
       im.src=url;
     }, function(e){ fail(e); }, {wf:'edit', resolution:'1K'});
-  });
+  }
+}
+// 렌더링된 이미지들(주방·욕실 우선) — 재질 사진 만들 때 원본으로
+function _consultResultSrcs(st, v){
+  var sp=_consultSp(st).filter(function(s){ var r=v.spaces[s.id]; return r && r.result; });
+  var pr=function(n){ return /주방|부엌/.test(n)?0:/욕실|화장실/.test(n)?1:/거실/.test(n)?2:3; };
+  return sp.sort(function(a,b){ return pr(a.name)-pr(b.name); }).slice(0,3).map(function(s){ return v.spaces[s.id].result; });
+}
+// 마감재를 렌더링 이미지 기준으로 다시 읽기(무료) → 필요하면 재질 사진
+function _consultRereadSched(st, v, makeTex){
+  if(v._rrBusy){ v._rrAgain=true; v._rrTex=v._rrTex||makeTex; return; } // 동시에 두 번 돌지 않게(재질 사진 중복 차감 방지)
+  v._rrBusy=true; v._autoRR=true;
+  _consultEnsureSched(st, v, function(){
+    v._rrBusy=false;
+    if(v._rrAgain){ var t2=v._rrTex; v._rrAgain=false; v._rrTex=false; setTimeout(function(){ _consultRereadSched(st, v, t2||makeTex); }, 50); return; }
+    // 재질 사진이 없는(=새로 읽혀서 이름이 바뀐) 항목이 있으면 자동으로 재질 사진까지
+    if(makeTex && (st.makeTex || v.autoTex) && v.sched && v.sched.fromRender && !v.texBusy){
+      var need=_consultSchedDefs(st).some(function(d){ var it=v.sched.items[d[0]]; return d[0]!=='light' && it && !it.img; });
+      if(need){ v.texDone=false; _consultSchedTextures(st, v, _consultResultSrcs(st, v)); }
+    }
+  }, {force:true, fromResults:true});
 }
 function _consultTexManual(vi){
   var st=_consultState(), v=st.variants[vi]; if(!v || !v.sched) return;
-  var src=null; _consultSp(st).forEach(function(s){ var r=v.spaces[s.id]; if(!src && r && r.result) src=r.result; });
-  if(!src){ alert('먼저 공간 이미지를 1장 이상 넣어주세요.'); return; }
+  var src=_consultResultSrcs(st, v);
+  if(!src.length){ alert('먼저 공간 이미지를 1장 이상 넣어주세요.'); return; }
   var isAdmin=(G.supaRole==='admin'||G.plan==='admin');
   if(!isAdmin && (G.cr||0)<PROPOSAL_TEX_COST){ alert('크레딧이 부족해요. ('+PROPOSAL_TEX_COST+'cr 필요)'); return; }
   if(!confirm('이 시안의 마감재를 실제 재질 사진(평평한 텍스처)으로 만들까요?\n마감재 전체를 한 장에 묶어서 만들어요 = '+PROPOSAL_TEX_COST+'cr')) return;
@@ -29349,6 +29786,7 @@ function _consultSwapMaterial(vi, id){
     (ids.length>1?'<div style="font-size:11.5px;color:var(--ac);margin-top:8px">✓ 거실·방·주방 바닥이 모두 이 자재로 통일돼요</div>':'')+
     '<div style="font-size:12px;font-weight:700;margin-top:14px">바꿀 자재 고르기</div>'+
     '<div class="sw-pre" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">'+pres.map(function(x){ return '<button type="button" data-v="'+_cEsc(x)+'" style="padding:6px 10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit">'+_cEsc(x)+'</button>'; }).join('')+'</div>'+
+    (function(){ var cands=_consultProdCands(id, it, 8); if(!cands.length) return ''; return '<div style="font-size:12px;font-weight:700;margin-top:12px">실제 제품에서 고르기 <span style="font-weight:400;color:var(--m2)">(제조사 카탈로그 · 지금 색과 가까운 순)</span></div><div class="sw-prod" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">'+cands.map(function(c,ci){ return '<button type="button" data-ci="'+ci+'" style="display:flex;gap:7px;align-items:center;text-align:left;padding:6px 8px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit;line-height:1.3"><span style="width:22px;height:22px;border-radius:5px;flex-shrink:0;background:'+_cEsc(c.hex)+';box-shadow:inset 0 0 0 1px rgba(128,128,128,.4)"></span><span><b>'+_cEsc(c.brand)+' '+_cEsc(c.code||'')+'</b><br>'+_cEsc(c.name)+'</span></button>'; }).join('')+'</div>'; })()+
     '<input class="sw-in" placeholder="또는 직접 입력 (예: 화이트 대리석 패턴 포세린 타일 600×1200)" style="width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:13px;font-family:inherit;box-sizing:border-box">'+
     '<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><button type="button" class="sw-ph" style="padding:7px 12px;border-radius:8px;border:1px dashed var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit">📷 자재 사진 넣기 (선택)</button><span class="sw-phv"></span></div>'+
     '<div style="margin-top:14px;background:rgba(245,181,68,.1);border:1px solid rgba(245,181,68,.5);border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.7">'+
@@ -29359,14 +29797,18 @@ function _consultSwapMaterial(vi, id){
     (targets.length?'<button type="button" class="sw-go" style="flex:2;padding:11px;border-radius:10px;border:none;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000;font-weight:900;cursor:pointer;font-family:inherit">🎨 바꾸고 렌더링 ('+total+'cr)</button>':'')+'</div>';
   ov.appendChild(m); document.body.appendChild(ov);
   var _dn=false; ov.onmousedown=function(e){ _dn=(e.target===ov); }; ov.onclick=function(e){ if(e.target===ov && _dn) ov.remove(); };
-  var inp=m.querySelector('.sw-in'), stEl=m.querySelector('.sw-st'), photo=null;
+  var inp=m.querySelector('.sw-in'), stEl=m.querySelector('.sw-st'), photo=null, pickedProd=null;
+  var _cands=_consultProdCands(id, it, 8);
+  Array.prototype.forEach.call(m.querySelectorAll('.sw-prod button'), function(b){ b.onclick=function(){ var c=_cands[parseInt(b.getAttribute('data-ci'),10)]; if(!c) return; pickedProd=c; inp.value=(c.brand+' '+(c.code?c.code+' ':'')+c.name).trim(); Array.prototype.forEach.call(m.querySelectorAll('.sw-prod button, .sw-pre button'), function(x){ x.style.borderColor='var(--bd2)'; }); b.style.borderColor='var(--ac)'; }; });
   Array.prototype.forEach.call(m.querySelectorAll('.sw-pre button'), function(b){ b.onclick=function(){ inp.value=b.getAttribute('data-v'); Array.prototype.forEach.call(m.querySelectorAll('.sw-pre button'), function(x){ x.style.borderColor='var(--bd2)'; x.style.color='var(--t2)'; }); b.style.borderColor='var(--ac)'; b.style.color='var(--ac)'; }; });
   m.querySelector('.sw-ph').onclick=function(){ _consultPick(false, function(d){ photo=d; m.querySelector('.sw-phv').innerHTML='<img src="'+d+'" style="width:36px;height:36px;object-fit:cover;border-radius:6px;vertical-align:middle"> <span style="font-size:11px;color:var(--m2)">이 사진의 재질로 바꿔요</span>'; if(!inp.value.trim()) inp.value=label+' (사진 참고)'; }); };
   m.querySelector('.sw-x').onclick=function(){ ov.remove(); };
   function apply(){
     var nv=inp.value.trim(); if(!nv){ stEl.textContent='바꿀 자재를 고르거나 입력해주세요.'; return null; }
-    it.ko=nv.slice(0,30); it.en=nv+(photo?' (exactly like the attached material sample photo)':''); it.edited=true;
-    ids.slice(1).forEach(function(k2){ var o2=v.sched.items[k2]; if(o2){ o2.ko=it.ko; o2.en=it.en; o2.hex=it.hex; o2.edited=true; o2.img=null; } });
+    if(pickedProd && nv!==(pickedProd.brand+' '+(pickedProd.code?pickedProd.code+' ':'')+pickedProd.name).trim()) pickedProd=null; // 고른 뒤 글자를 바꿨으면 직접 입력으로
+    it.ko=nv.slice(0,30); it.en=nv+(pickedProd?' — '+pickedProd.finish+', color '+pickedProd.hex:'')+(photo?' (exactly like the attached material sample photo)':''); it.edited=true;
+    if(pickedProd){ it.prodFix=pickedProd; it.hex=pickedProd.hex; } else { delete it.prodFix; }
+    ids.slice(1).forEach(function(k2){ var o2=v.sched.items[k2]; if(o2){ o2.ko=it.ko; o2.en=it.en; o2.hex=it.hex; o2.edited=true; o2.img=null; if(it.prodFix) o2.prodFix=it.prodFix; else delete o2.prodFix; } });
     if(photo){ try{ var c=document.createElement('canvas'), im=new Image(); im.onload=function(){ var s2=Math.min(im.width,im.height); c.width=c.height=240; c.getContext('2d').drawImage(im,(im.width-s2)/2,(im.height-s2)/2,s2,s2,0,0,240,240); it.img=c.toDataURL('image/jpeg',0.86); ids.slice(1).forEach(function(k2){ if(v.sched.items[k2]) v.sched.items[k2].img=it.img; }); _consultSave(); _consultRefresh(); }; im.src=photo; }catch(e){ it.img=null; } } else it.img=null;
     v.dirty=true; if(!(v.estimate&&v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); }
     _consultSave(); return nv;
@@ -29856,7 +30298,7 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor, v, roomRef){
   }
   if(nRefs && !build){
     var _faith=!!vp.faithful;
-    if(roomRef) lines.push('ROOM REFERENCE (MOST IMPORTANT): image 2 is the client\'s reference photo for exactly this kind of room. '+(_faith?'Recreate image 2\'s design INSIDE the real room of image 1 as literally as possible':'Use image 2 as the base design for this room, varied only as the design option says')+': the same finish materials and colors (cabinet doors, wall finish such as panelling or plaster, floor, countertop, tiles), the SAME furniture pieces with the same shapes and colors (e.g. the same dining table and the same chairs, the same sofa, the same bed), the SAME lighting fixtures (same pendant / floor lamp / wall-light designs), the same decor objects, plants and props, and the same color palette and mood. It must look like the designer of image 2 remodeled the room of image 1. Only adapt sizes, quantities and placement to fit the real walls, windows and doors of image 1 (those never change).'+(nRefs>1?' Images 3'+(nRefs>2?' to '+(nRefs+1):'')+' are the client\'s references for OTHER rooms of this same home — use them only to keep the whole home consistent.':''));
+    if(roomRef) lines.push('ROOM REFERENCE (MOST IMPORTANT): image 2 is the client\'s reference photo for exactly this kind of room. '+(_faith?'Recreate image 2\'s design INSIDE the real room of image 1 as literally as possible':'Use image 2 as the base design for this room, varied only as the design option says')+': the same finish materials and colors (cabinet doors, wall finish such as panelling or plaster, floor, countertop, tiles), the SAME furniture pieces with the same shapes and colors (e.g. the same dining table and the same chairs, the same sofa, the same bed), the SAME lighting fixtures (same pendant / floor lamp / wall-light designs), the same decor objects, plants and props, and the same color palette and mood. It must look like the designer of image 2 remodeled the room of image 1. Only adapt sizes, quantities and placement to fit the real walls, windows, doors AND the existing built-in cabinet layout of image 1 (those never change — image 2\'s windows, doors and cabinet layout are NOT copied).'+(nRefs>1?' Images 3'+(nRefs>2?' to '+(nRefs+1):'')+' are the client\'s references for OTHER rooms of this same home — use them only to keep the whole home consistent.':''));
     else lines.push('CLIENT REFERENCE IMAGES: images 2'+(nRefs>1?' to '+(nRefs+1):'')+' are the client\'s reference photos for other rooms of this same home. There is no reference for this exact room, so design it in the SAME style family'+(_faith?' as literally as possible':'')+': the same materials, colors, furniture style, lighting fixture style, decor and props vibe, so it clearly belongs to the same home.');
     lines.push('BUDGET REALISM: if a reference shows expensive materials (e.g. natural marble), render the cost-appropriate scheduled substitute (e.g. marble-look large porcelain tile) that looks visually the same.');
   } else if(nRefs) lines.push('CLIENT REFERENCE IMAGES: images 2'+(nRefs>1?' to '+(nRefs+1):'')+' are the style/material references the client brought — use them for style, colors and materials only, never copy their site, layout or camera.');
@@ -29876,6 +30318,8 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor, v, roomRef){
       'compare with image 1 element by element. Keep EXACTLY the same: (1) every wall, corner, partition, column and beam — no wall added, removed, moved or opened up; '+
       '(2) every door and doorway — same number, same position, same size; NEVER add a new door, doorway, opening, pass-through or glass door anywhere (if image 1 shows a plain wall, it stays a plain wall); '+
       '(3) every window — same number, position, size, frame profile and divisions; never add, enlarge, move, replace or remove a window'+(st.type==='home'?' (in this home only the window frame color may change, to the scheduled film color)':'')+'; '+
+      '(3b) every BUILT-IN that exists in image 1 — upper wall cabinets, base cabinets, tall cabinet columns, built-in refrigerator / appliance housing, range hood, built-in wardrobes and shoe cabinets — keeps its position, footprint, height and number of modules; only its door style, color, handles and countertop may change. NEVER remove an upper cabinet, tall unit or built-in fridge column, and never replace a cabinet wall with open shelves, a window or an empty wall; '+
+      '(3c) PLUMBING & GAS FIXTURES — the sink bowl, faucet, cooktop/gas range and (in bathrooms) toilet, basin, bathtub/shower and floor drain stay at exactly the same positions and in exactly the same number as in image 1: ONE faucet per existing sink only, a faucet only where image 1 has a sink, never a second faucet, pot-filler or extra sink copied from a reference image, never a faucet next to the cooktop; the faucet/sink design may be restyled; '+
       '(4) the air conditioner (wall-mounted or ceiling cassette), ventilation grilles, sprinkler heads, smoke detectors, gas meter/boiler, electrical panel and pipes — same type and same position (they may only get the same finish refreshed); '+
       '(5) the ceiling height, floor level, camera position and perspective. '+
       'Only change the FINISHES and FIXTURES that are actually being remodeled: wall/floor/ceiling surface materials, door/frame/window-frame film color, cabinetry and countertops in their existing positions and footprint, light fixtures, furniture and decor'+(_consultExtApplies(st, sp.name)?' (plus the balcony extension described above)':'')+'. '+
@@ -29885,7 +30329,9 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor, v, roomRef){
     lines.push('⚠⚠⚠ FINAL OVERRIDE: keep the real surroundings, site boundaries, roads, neighboring buildings and camera exactly as in image 1; '+(st.type==='build_remodel'?'keep the existing building footprint, structure grid and window rhythm unless the design option explicitly changes the facade openings; do not add storeys beyond what is specified. ':'')+'The client reference images are for style only — never copy their site, layout or camera.');
   }
   if(roomRef && !build){
-    lines.push('⚠⚠⚠ REFERENCE FIDELITY CHECK (as important as the structure rule): take EVERYTHING you can see in image 2 — every finish, color, fixture, piece of furniture, lamp, accessory and prop — and put it into this room; this room must look like a 90-100% copy of image 2 placed into image 1\'s architecture (door and window-frame colors also follow image 2). Before finishing, compare with image 2 item by item and fix anything that differs: (a) FLOOR — same material type and color as image 2 (tile stays tile, wood stays wood, same tone and size); (b) WALL FINISH — same as image 2, including any wood panelling, V-groove boards, wainscoting, plaster or paint color; (c) CABINETS — same door style (flat slab / shaker / grooved, handle-less or same handles), same color and finish, same upper-cabinet presence or absence, open shelves like image 2; (d) COUNTERTOP and BACKSPLASH — same material and color as image 2; (e) LIGHTING FIXTURES — same pendant / wall lights / lamps design; (f) FURNITURE — same table and chairs (shape, color, material); (g) DECOR and PROPS — same objects and style; (h) overall COLOR PALETTE and mood of image 2. Do NOT replace any of these with generic or default Korean-apartment finishes. Only walls, windows, doors, ceiling height and camera come from image 1.');
+    lines.push('⚠⚠⚠ REFERENCE FIDELITY CHECK (as important as the structure rule): take EVERYTHING you can see in image 2 — every finish, color, fixture, piece of furniture, lamp, accessory and prop — and put it into this room; this room must look like a 90-100% copy of image 2 placed into image 1\'s architecture (door and window-frame colors also follow image 2). Before finishing, compare with image 2 item by item and fix anything that differs: (a) FLOOR — same material type and color as image 2 (tile stays tile, wood stays wood, same tone and size); (b) WALL FINISH — same as image 2, including any wood panelling, V-groove boards, wainscoting, plaster or paint color; (c) CABINETS — same door style (flat slab / shaker / grooved, handle-less or same handles), same color and finish, same upper-cabinet presence or absence, open shelves like image 2; (d) COUNTERTOP and BACKSPLASH — same material and color as image 2; (e) LIGHTING FIXTURES — same pendant / wall lights / lamps design; (f) FURNITURE — same table and chairs (shape, color, material); (g) DECOR and PROPS — same objects and style; (h) overall COLOR PALETTE and mood of image 2. Do NOT replace any of these with generic or default Korean-apartment finishes. Only walls, windows, doors, built-in cabinet layout, ceiling height and camera come from image 1.');
+    // 2026-10-07 버그 신고("참고사진에 있는 창문을 우측에 새로 만들고, 상부장·빌트인 냉장고를 지웠다") → 구조 잠금을 맨 마지막(가장 강한 자리)에 한 번 더
+    lines.push('🔒 LAST AND HIGHEST-PRIORITY RULE — STRUCTURE LOCK (overrides the reference): image 2 is a DIFFERENT room with different windows and doors. NEVER copy image 2\'s windows, doors, openings, wall layout or cabinet layout. Count the windows and doors in image 1 and in your result — they must be identical in number, position and size; a wall that is plain in image 1 stays a plain wall (it may get image 2\'s wall finish, e.g. panelling, but NO new window or door). Every upper cabinet, tall cabinet, built-in refrigerator column and hood visible in image 1 must still be there in the same place with the same size — restyled to image 2\'s door style and color, never deleted. The sink, faucet and cooktop stay where image 1 has them, with exactly ONE faucet at the existing sink (image 2 may show two faucets or a different sink position — do NOT copy that); in bathrooms the toilet, basin, tub/shower and drain stay in place. If you added a window/door, an extra faucet or sink, or removed a built-in, undo it.');
   }
   return lines.join('\n');
 }
@@ -29953,9 +30399,13 @@ function _consultRunVariant(st, vi, onlySpaceId){
     var allDone=spaces.every(function(s){ var r=v.spaces[s.id]; return r && r.status!=='run' && r.status!=='wait'; });
     if(!allDone) return;
     if(build) _consultMaterials(st, v, function(){ _consultEstimate(st, v); });
-    else if(!v.estimate) _consultEstimate(st, v);
+    else {
+      if(!v.estimate) _consultEstimate(st, v);
+      // 2026-10-07: "마감재 보드가 렌더링 전에 만들어져서 실제 이미지와 다르다" → 다 그린 뒤 렌더링 이미지 기준으로 다시 읽고 재질 사진 만들기
+      if(!v._rereadBusy){ v._rereadBusy=true; _consultRereadSched(st, v, true); setTimeout(function(){ v._rereadBusy=false; }, 4000); }
+    }
   }
-  function tex(url){ if(!build && url && st.makeTex && !v.texDone && !v.texBusy && v.sched) _consultSchedTextures(st, v, url); }
+  function tex(url){ /* 재질 사진은 모든 공간 렌더 후(after)에 렌더 이미지 기준으로 */ }
   if(onlySpaceId){
     var sp=spaces.filter(function(s){return s.id===onlySpaceId;})[0]; if(!sp) return;
     var anc = sp.id===spaces[0].id ? null : anchorOf();
@@ -30010,10 +30460,12 @@ function _consultStartImport(){
   }
   var plan=_consultEnsurePlan(st);
   st.importMode=true;
+  // 2026-10-07 요청: "갤러리·외부 사진을 가져와서 마감재 부분만 렌더링" — 공간 렌더링 없이 마감재 재질 사진만 만들지 선택
+  var texOk=!_consultIsBuild(st) && confirm('가져온 이미지에서 마감재를 읽어서 "마감재 보드"를 만들어요.\n\n재질 사진(실제 텍스처 이미지)까지 자동으로 만들까요?\n· 확인 = 재질 사진까지 (시안 1개당 '+PROPOSAL_TEX_COST+'cr, 이미지는 렌더링 안 함)\n· 취소 = 자재 이름·색만 (무료)');
   st.variants=plan.map(function(p,i){
     var pp=JSON.parse(JSON.stringify(p));
     if(!(st.refs||[]).length){ pp.name='디자인 시안'; pp.ko='준비된 디자인 이미지로 구성한 안'; }
-    return {key:_consultLetter(i), plan:pp, spaces:{}, imported:true, materials:null, matStatus:null, estimate:null, estStatus:null};
+    return {key:_consultLetter(i), plan:pp, spaces:{}, imported:true, autoTex:texOk, materials:null, matStatus:null, estimate:null, estStatus:null};
   });
   st.pdfPages=null; st._pdf=null;
   st.variants.forEach(function(v){ if(_consultIsBuild(st)) _consultEstimate(st, v); else { v.sched=_consultSchedDefault(st); _consultEstimate(st, v); } });
@@ -30032,7 +30484,7 @@ function _consultSetResult(vi, spId, url, origUrl){
   v.dirty=true;
   // 가져온 이미지 기준으로 마감재 다시 읽기(무료) — 여러 장 넣는 중일 수 있어 잠깐 기다렸다가
   if(!_consultIsBuild(st) && (v.imported || !v.sched || v.sched.def)){
-    clearTimeout(v._schT); v._schT=setTimeout(function(){ _consultEnsureSched(st, v, null, {force:true, fromResults:true}); }, 1800);
+    clearTimeout(v._schT); v._schT=setTimeout(function(){ _consultRereadSched(st, v, !!v.autoTex); }, 1800); // 이미지 넣은 뒤 마감재 읽기(+선택 시 재질 사진만 생성)
   } else if(_consultIsBuild(st)){ v.materials=null; _consultMaterials(st, v, function(){ _consultEstimate(st, v, true); }); }
   _consultSave(); _consultRefresh();
 }
@@ -30218,7 +30670,7 @@ function _consultEditSpace(vi, spId){
         if(url){ rec.prev=(rec.prev||[]); rec.prev.unshift(rec.result); rec.prev=rec.prev.slice(0,3); rec.result=url; rec.edits=(rec.edits||[]).concat([txt.trim()]); v.dirty=true; if(!(v.estimate&&v.estimate.edited)){ v.estimate=null; v.estStatus=null; } }
         if(url){ var _spn=(st.spaces.filter(function(x){return x.id===spId;})[0]||{}).name||''; _consultToGallery(url, null, v.key+'안 · '+_spn+' (수정)', '1K'); }
         rec.status='done'; _consultSave(); _consultRefresh();
-        if(url) _consultEstimate(st, v);
+        if(url){ _consultEstimate(st, v); if(!_consultIsBuild(st)) _consultRereadSched(st, v, true); }
       }, function(e){ rec.status='done'; alert('수정 실패: '+e); _consultRefresh(); }, {wf:'edit', resolution:'1K'});
     }, 'auto');
   });
@@ -30389,6 +30841,7 @@ function _consultDrawVariantPage(data, st, v, vi, loaded, pageIndex, total, logo
       if(sw2) _proposalCoverDrawRounded(ctx, sw2, mx, my, tw2, tileH, 4); else { ctx.fillStyle=m.hex||t.divider; ctx.fillRect(mx,my,tw2,tileH); }
       ctx.fillStyle=t.muted; ctx.font='700 11px '+PROPOSAL_FONT; _propEdLS(ctx,1); ctx.fillText(String(m.k||''), mx, my+tileH+8); _propEdLS(ctx,0);
       ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '700', 14, 10, tw2); ctx.fillText(String(m.v), mx, my+tileH+26);
+      if(m.prod){ var pc=(m.prod.brand.replace('하우시스','').replace(/\s.*$/,'')+' '+(m.prod.code||m.prod.name)).trim(); ctx.fillStyle=t.accent; _propEdFitFont(ctx, '≈ '+pc, '600', 11, 8, tw2); ctx.fillText('≈ '+pc, mx, my+tileH+46); }
     });
     y+=rowsN*(tileH+62)+20;
   } else { y+=20; }
@@ -30464,7 +30917,7 @@ function _consultDrawSpacePage(data, st, v, vi, sp, rec, loaded, num, pageIndex,
   function matList(x, yy, w, maxY){
     ctx.fillStyle=t.accent; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('MATERIALS', x, yy); _propEdLS(ctx,0);
     ctx.fillStyle=t.divider; ctx.fillRect(x, yy+26, w, 1); yy+=42;
-    var SW=52, rowH=66;
+    var SW=52, rowH=mats.some(function(m){return m.prod;})?80:66;
     mats.forEach(function(m){
       if(yy+SW>maxY) return;
       var im=m.id?loaded['sv'+vi+'_'+m.id]:null;
@@ -30472,6 +30925,7 @@ function _consultDrawSpacePage(data, st, v, vi, sp, rec, loaded, num, pageIndex,
       else { ctx.fillStyle=m.hex||t.divider; if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(x,yy,SW,SW,6); ctx.fill(); } else ctx.fillRect(x,yy,SW,SW); ctx.strokeStyle='rgba(0,0,0,.08)'; ctx.lineWidth=1; ctx.strokeRect(x+.5,yy+.5,SW-1,SW-1); }
       ctx.fillStyle=t.muted; ctx.font='700 12px '+PROPOSAL_FONT; _propEdLS(ctx,1); ctx.fillText(String(m.k||''), x+SW+14, yy+5); _propEdLS(ctx,0);
       ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v||''), '700', 18, 12, w-SW-16); ctx.fillText(String(m.v||''), x+SW+14, yy+25);
+      if(m.prod){ ctx.fillStyle=t.accent; _propEdFitFont(ctx, '≈ '+_consultProdShort(m.prod), '600', 13, 9, w-SW-16); ctx.fillText('≈ '+_consultProdShort(m.prod), x+SW+14, yy+50); }
       yy+=rowH;
     });
     return yy;
@@ -30504,7 +30958,8 @@ function _consultDrawSpacePage(data, st, v, vi, sp, rec, loaded, num, pageIndex,
   ctx.fillStyle=t.desc; ctx.font='400 18px '+PROPOSAL_FONT;
   var desc=v.plan.ko+(rec&&rec.edits&&rec.edits.length?' (수정 반영: '+rec.edits.slice(-2).join(', ')+')':'');
   var ly=ny+16; _wrapCanvasText(ctx, desc, innerW).slice(0,2).forEach(function(l){ ctx.fillText(l, pad, ly); ly+=28; });
-  if(!_consultIsBuild(st)){ ctx.fillStyle=t.muted; ctx.font='400 14px '+PROPOSAL_FONT; ctx.fillText('※ 이미지 속 가구·소품·장식 조명(펜던트·스탠드 등)은 연출용이며 견적에서 제외됩니다.', pad, ly+4); }
+  if(!_consultIsBuild(st)){ ctx.fillStyle=t.muted; ctx.font='400 14px '+PROPOSAL_FONT; ctx.fillText('※ 이미지 속 가구·소품·장식 조명(펜던트·스탠드 등)은 연출용이며 견적에서 제외됩니다.', pad, ly+4);
+    if(mats.some(function(m){return m.prod;})) ctx.fillText('※ ≈ 표시는 제조사 카탈로그 기준 색·질감이 가장 가까운 유사 추천 제품이며, 시공 전 실물 샘플 확인이 필요합니다.', pad, ly+26); }
   _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
   return cv;
 }
@@ -30584,7 +31039,7 @@ function sbConsult(p){
   var running=st.variants.some(function(v){ return Object.keys(v.spaces).some(function(k){ var s=v.spaces[k]; return s.status==='run'||s.status==='wait'; }); });
   var IS='width:100%;padding:10px;border-radius:9px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:13px;font-family:inherit;box-sizing:border-box';
   function step(n, title, sub){ var w=dv('ss'); w.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="width:22px;height:22px;border-radius:50%;background:var(--ac);color:#000;font-weight:900;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+n+'</span><b style="font-size:14px;color:var(--t)">'+title+'</b>'+(sub?'<span style="font-size:11px;color:var(--m2)">'+sub+'</span>':'')+'</div>'; p.appendChild(w); return w; }
-  function inp(val, ph, on, rerender){ var i=mk('input',''); i.value=val||''; i.placeholder=ph||''; i.style.cssText=IS; i.oninput=function(){ on(i.value); _consultSave(); }; if(rerender) i.onchange=function(){ renderSB(); renderMain('consult', true); }; return i; }
+  function inp(val, ph, on, rerender){ var i=mk('input',''); i.value=val||''; i.placeholder=ph||''; i.style.cssText=IS; i.setAttribute('autocomplete','off'); i.setAttribute('data-lpignore','true'); i.oninput=function(){ on(i.value); _consultSave(); }; if(rerender) i.onchange=function(){ renderSB(); renderMain('consult', true); }; return i; }
   function sel(val, opts, on){ var s=mk('select',''); s.style.cssText=IS+';color-scheme:dark'; opts.forEach(function(o){ var op=mk('option',''); op.value=o; op.textContent=o||'선택하세요'; op.style.color='#111'; op.style.background='#fff'; if(o===val) op.selected=true; s.appendChild(op); }); s.onchange=function(){ on(s.value); _consultSave(); renderSB(); renderMain('consult', true); }; return s; }
   function seg(cur, list, on){ var w=dv(''); w.style.cssText='display:flex;gap:6px'; list.forEach(function(it){ var b=mk('button',''); b.type='button'; b.innerHTML=it.l; var a=(it.k===cur); b.style.cssText='flex:1;padding:11px 4px;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;border:1.5px solid '+(a?'var(--ac)':'var(--bd2)')+';background:'+(a?'var(--acg)':'var(--c2)')+';color:'+(a?'var(--ac)':'var(--t2)'); b.onclick=function(){ if(running) return; on(it.k); _consultSave(); renderSB(); renderMain('consult', true); }; w.appendChild(b); }); return w; }
   function grid2(){ var r=dv(''); r.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px'; return r; }
@@ -30661,9 +31116,14 @@ function sbConsult(p){
     c.appendChild(im); if(!running) im.appendChild(x); c.appendChild(nm); pg.appendChild(c);
   });
   if(st.spaces.length<8 && !running){
-    var add=dv(''); add.style.cssText='height:62px;border-radius:8px;border:1.5px dashed var(--ac);background:var(--acg);color:var(--ac);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:11px;font-weight:800;gap:2px';
-    add.innerHTML='<span style="font-size:20px;line-height:1">＋</span>사진 추가';
-    add.onclick=function(){ _consultPick(true, function(d){ if(st.spaces.length>=8) return; var sp={id:'s'+Math.random().toString(36).slice(2,8), name:_consultNextSpaceName(st), photo:null}; st.spaces.push(sp); _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); }); };
+    // 2026-10-07 요청: 사진 추가를 내 PC뿐 아니라 갤러리 탭에서도
+    var add=dv(''); add.style.cssText='height:62px;border-radius:8px;border:1.5px dashed var(--ac);background:var(--acg);display:flex;flex-direction:column;overflow:hidden';
+    var addPc=dv(''); addPc.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;gap:3px;cursor:pointer;font-size:11px;font-weight:800;color:var(--ac);border-bottom:1px dashed rgba(0,229,204,.4)'; addPc.innerHTML='＋ 내 PC';
+    var addGal=dv(''); addGal.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;gap:3px;cursor:pointer;font-size:11px;font-weight:800;color:var(--ac)'; addGal.innerHTML='🖼 갤러리';
+    function _addSite(d, isUrl){ if(st.spaces.length>=8) return; var sp={id:'s'+Math.random().toString(36).slice(2,8), name:_consultNextSpaceName(st), photo:null}; st.spaces.push(sp); if(isUrl) sp.photo=d; else _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); }
+    addPc.onclick=function(){ _consultPick(true, function(d){ _addSite(d, false); }); };
+    addGal.onclick=function(){ _openGalleryPickerForAnchor(function(src){ _addSite(src, /^https?:/.test(src)); }); };
+    add.appendChild(addPc); add.appendChild(addGal);
     pg.appendChild(add);
   }
   s2.appendChild(pg);
@@ -30689,10 +31149,14 @@ function sbConsult(p){
     wrapR.appendChild(tsel); rg.appendChild(wrapR);
   });
   if(st.refs.length<4){
-    var ra=dv(''); ra.style.cssText='height:62px;border-radius:8px;border:1px dashed var(--bd2);background:var(--c2);color:var(--m2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px';
-    ra.textContent='＋';
+    var raw=dv(''); raw.style.cssText='height:62px;border-radius:8px;border:1px dashed var(--bd2);background:var(--c2);display:flex;flex-direction:column;overflow:hidden';
+    var rag=dv(''); rag.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:10.5px;font-weight:800;color:var(--m2)'; rag.textContent='🖼 갤러리';
+    rag.onclick=function(){ _openGalleryPickerForAnchor(function(src){ if(st.refs.length>=4) return; st.refs.push(src); st.refTags=st.refTags||[]; var ix=st.refs.length-1; st.refTags[ix]='…'; _consultClassifyRef(st, ix); if(!/^https?:/.test(src)) _doUpload(src, function(url){ var k=st.refs.indexOf(src); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); renderMain('consult', true); }); };
+    var ra=dv(''); ra.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:10.5px;font-weight:800;color:var(--m2);border-bottom:1px dashed var(--bd2)';
+    ra.textContent='＋ 내 PC';
     ra.onclick=function(){ _consultPick(true, function(d){ if(st.refs.length>=4) return; st.refs.push(d); st.refTags=st.refTags||[]; var ix=st.refs.length-1; st.refTags[ix]='…'; _consultClassifyRef(st, ix); _doUpload(d, function(url){ var k=st.refs.indexOf(d); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); }); };
-    rg.appendChild(ra);
+    raw.appendChild(ra); raw.appendChild(rag);
+    rg.appendChild(raw);
   }
   s2.appendChild(rg);
 
@@ -30727,12 +31191,12 @@ function sbConsult(p){
   bw.appendChild(hint);
   // 렌더링 없이(무료): 갤러리·내 PC 이미지로 제안서
   var imp=mk('button',''); imp.type='button';
-  imp.innerHTML='🖼️ 렌더링 없이 — 이미 만든 이미지로 제안서 만들기 <span style="font-size:11px;font-weight:700;opacity:.8">(무료)</span>';
+  imp.innerHTML='🖼️ 렌더링 없이 — 이미 만든 이미지로 제안서 만들기 <span style="font-size:11px;font-weight:700;opacity:.8">(무료 · 마감재 재질 사진만 선택)</span>';
   imp.style.cssText='width:100%;margin-top:8px;padding:11px;border-radius:10px;border:1.5px solid var(--ac);background:var(--acg);color:var(--ac);font-weight:800;font-size:12.5px;cursor:pointer;font-family:inherit';
   if(running){ imp.disabled=true; imp.style.opacity='.5'; }
   imp.onclick=_consultStartImport;
   bw.appendChild(imp);
-  var ih=dv(''); ih.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:4px;line-height:1.5'; ih.textContent='갤러리(다른 탭에서 만든 결과)나 외부 이미지를 공간마다 넣으면 마감재·견적·PDF까지 만들어줘요';
+  var ih=dv(''); ih.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:4px;line-height:1.5'; ih.textContent='갤러리(다른 탭에서 만든 결과)나 외부 이미지를 공간마다 넣으면, 공간은 렌더링하지 않고 마감재 보드·견적·PDF만 만들어줘요';
   bw.appendChild(ih);
   p.appendChild(bw);
 
@@ -30778,7 +31242,7 @@ function sbConsult(p){
   lgw.appendChild(lgp); lgw.appendChild(lgb);
   if(co.logo){ var lgx=mk('button',''); lgx.type='button'; lgx.textContent='삭제'; lgx.style.cssText='padding:8px 10px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:11.5px;cursor:pointer;font-family:inherit'; lgx.onclick=function(){ delete co.logo; _consultCoSave(); renderSB(); }; lgw.appendChild(lgx); }
   cb2.appendChild(lbl('로고 (PNG 투명 배경 추천)')); cb2.appendChild(lgw);
-  function cin(key, label, ph){ cb2.appendChild(lbl(label)); var i=mk('input',''); i.value=co[key]||''; i.placeholder=ph; i.style.cssText=IS; i.oninput=function(){ co[key]=i.value.trim(); _consultCoSave(); }; i.onchange=function(){ st.pdfPages=null; renderSB(); }; cb2.appendChild(i); }
+  function cin(key, label, ph){ cb2.appendChild(lbl(label)); var i=mk('input',''); i.value=co[key]||''; i.placeholder=ph; i.style.cssText=IS; i.setAttribute('autocomplete','off'); i.oninput=function(){ co[key]=i.value.trim(); _consultCoSave(); }; i.onchange=function(){ st.pdfPages=null; renderSB(); }; cb2.appendChild(i); }
   cin('name','회사명','예: 스냅 디자인');
   var cg=grid2(); cg.style.marginTop='0';
   [['ceo','대표자명','예: 홍길동'],['phone','연락처','010-0000-0000']].forEach(function(f){ var w=dv(''); var l=lbl(f[1]); l.style.marginBottom='3px'; w.appendChild(l); var i=mk('input',''); i.value=co[f[0]]||''; i.placeholder=f[2]; i.style.cssText=IS; i.oninput=function(){ co[f[0]]=i.value.trim(); _consultCoSave(); }; w.appendChild(i); cg.appendChild(w); });
@@ -30900,6 +31364,27 @@ function _consultViewer(vi, spId, mode){
   }
   draw();
 }
+// 마감재 크게 보기(2026-10-07 요청: "작아서 텍스처가 안 보이고 색만 보인다") — 큰 재질 이미지 + 이름, ←→로 넘기기
+function _consultMatZoom(mats, idx){
+  var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
+  document.body.appendChild(ov);
+  function shut(){ ov.remove(); document.removeEventListener('keydown',k); }
+  function k(e){ if(e.key==='Escape') shut(); else if(e.key==='ArrowRight'){ idx=(idx+1)%mats.length; draw(); } else if(e.key==='ArrowLeft'){ idx=(idx-1+mats.length)%mats.length; draw(); } }
+  document.addEventListener('keydown',k);
+  var _dn=false; ov.onmousedown=function(e){ _dn=(e.target===ov); }; ov.onclick=function(e){ if(e.target===ov && _dn) shut(); };
+  function draw(){
+    var m=mats[idx]; var sz='min(72vh,72vw)';
+    ov.innerHTML='<div style="display:flex;flex-direction:column;align-items:center;gap:14px">'+
+      (m.img?'<div style="width:'+sz+';height:'+sz+';border-radius:12px;background:#222 center/cover no-repeat url(&quot;'+_cEsc(m.img)+'&quot;);box-shadow:0 10px 40px rgba(0,0,0,.6)"></div>'
+            :'<div style="width:'+sz+';height:'+sz+';border-radius:12px;background:'+_cEsc(m.hex||'#888')+'"></div>')+
+      '<div style="text-align:center;color:#fff"><div style="font-size:12px;color:#aaa;font-weight:700">'+_cEsc(m.k||'')+(m.area?' · '+_cEsc(m.area):'')+'</div><div style="font-size:20px;font-weight:900;margin-top:3px">'+_cEsc(m.v||'')+'</div>'+(m.img?'':'<div style="font-size:11.5px;color:#aaa;margin-top:4px">재질 사진이 아직 없어서 색만 보여요 — 보드 위 "🎨 재질 사진으로 만들기"를 누르면 실제 재질 이미지가 생겨요</div>')+'</div></div>'+
+      (mats.length>1?'<button type="button" data-d="-1" style="position:absolute;left:14px;top:50%;transform:translateY(-50%);width:46px;height:66px;border-radius:10px;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:30px;cursor:pointer">‹</button><button type="button" data-d="1" style="position:absolute;right:14px;top:50%;transform:translateY(-50%);width:46px;height:66px;border-radius:10px;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:30px;cursor:pointer">›</button>':'')+
+      '<button type="button" data-x="1" style="position:absolute;top:14px;right:14px;padding:8px 14px;border-radius:9px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.08);color:#fff;font-weight:800;cursor:pointer;font-family:inherit">✕ 닫기</button>';
+    Array.prototype.forEach.call(ov.querySelectorAll('[data-d]'), function(b){ b.onclick=function(e){ e.stopPropagation(); idx=(idx+parseInt(b.getAttribute('data-d'),10)+mats.length)%mats.length; draw(); }; });
+    ov.querySelector('[data-x]').onclick=shut;
+  }
+  draw();
+}
 // 사이드바 사진 크게 보기(한 장)
 function _consultZoomOne(u, title){
   var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;cursor:zoom-out';
@@ -31007,6 +31492,14 @@ function _consultRenderCanvas(ub){
       wrap.appendChild(cmp);
     }
 
+    // 이미 렌더링된 시안인데 마감재가 아직 이미지 기준이 아니면 → 자동으로 다시 읽기(+재질 사진)
+    if(!_consultIsBuild(st)) st.variants.forEach(function(v){
+      if(v._autoRR || !v.sched || v.sched.fromRender || v.schedStatus==='run') return;
+      var sp=_consultSp(st), anyRes=false, busy2=false;
+      sp.forEach(function(s){ var r=v.spaces[s.id]; if(r && r.result) anyRes=true; if(r && (r.status==='run'||r.status==='wait')) busy2=true; });
+      if(!anyRes || busy2) return;
+      v._autoRR=true; setTimeout(function(){ _consultRereadSched(st, v, !v.imported || !!v.autoTex); }, 300); // 가져오기(무료) 시안은 재질 사진(크레딧) 자동 생성 안 함
+    });
     // 시안별 카드
     var spaces=_consultSp(st);
     st.variants.forEach(function(v, vi){
@@ -31054,13 +31547,18 @@ function _consultRenderCanvas(ub){
       var mats=_consultBoardMats(st, v), hasSched=!!(v.sched&&v.sched.items);
       var anyImg=mats.some(function(m){return m.img;});
       mb.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:13px;font-weight:800;color:var(--t)">🧱 마감재 보드</span><span style="font-size:11px;color:var(--m2)">'+(hasSched?((st.refs||[]).length?'참고사진이 있는 공간은 사진 그대로 · 공간마다 다르면 ':'')+'<b style="color:#f5b544">자재를 누르면 다른 자재로 바꾸고(통일) 해당 공간 이미지도 자동으로 다시 렌더링</b>':'')+'</span>'+
-        (v.schedStatus==='run'?'<span style="font-size:11px;color:var(--ac)">마감재 정리 중…</span>':'')+(v.texBusy?'<span style="font-size:11px;color:var(--ac)">재질 사진 만드는 중…</span>':'')+
-        (hasSched && !anyImg && !v.texBusy?'<button type="button" class="cbtn ctex">🎨 재질 사진으로 만들기 ('+PROPOSAL_TEX_COST+'cr)</button>':'')+'</div>'+
-        (mats.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px">'+mats.map(function(m){ return '<div class="cmat" data-id="'+_cEsc(m.id||'')+'" style="cursor:'+(m.id?'pointer':'default')+'">'+(m.img?'<img src="'+_cEsc(m.img)+'" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block">':'<div style="aspect-ratio:1;border-radius:8px;background:'+_cEsc(m.hex||'var(--c1,#111)')+';box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)"></div>')+'<div style="font-size:10px;color:var(--m2);font-weight:700;margin-top:5px">'+_cEsc(m.k)+'</div><div style="font-size:11.5px;color:var(--t);font-weight:700;line-height:1.35">'+_cEsc(m.v)+'</div></div>'; }).join('')+'</div>'
+        (v.schedStatus==='run'?'<span style="font-size:11px;color:var(--ac)">마감재 읽는 중…</span>':(hasSched?(v.sched.fromRender?'<span style="font-size:11px;color:var(--ac)">✓ 렌더링 이미지 기준</span>':(v.sched.def?'<span style="font-size:11px;color:#f5b544">⚠ 기본값(분석 전·실패)</span>':'<span style="font-size:11px;color:var(--m2)">렌더링이 끝나면 실제 이미지 기준으로 자동 정리돼요</span>')):''))+(v.texBusy?'<span style="font-size:11px;color:var(--ac)">재질 사진 만드는 중…</span>':'')+
+
+        (hasSched && !v.texBusy && mats.some(function(m){return m.id && m.id!=='light' && !m.img;})?'<button type="button" class="cbtn ctex">🎨 재질 사진으로 '+(anyImg?'다시 ':'')+'만들기 ('+PROPOSAL_TEX_COST+'cr)</button>':'')+'</div>'+
+        (mats.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px">'+mats.map(function(m){ return '<div class="cmat" data-id="'+_cEsc(m.id||'')+'" style="position:relative;cursor:'+(m.id?'pointer':'default')+'">'+(m.img?'<img src="'+_cEsc(m.img)+'" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block">':'<div style="aspect-ratio:1;border-radius:8px;background:'+_cEsc(m.hex||'var(--c1,#111)')+';box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)"></div>')+
+          '<button type="button" class="cmz" title="크게 보기" style="position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:13px;cursor:zoom-in;padding:0">🔍</button>'+'<div style="font-size:10px;color:var(--m2);font-weight:700;margin-top:5px">'+_cEsc(m.k)+'</div><div style="font-size:11.5px;color:var(--t);font-weight:700;line-height:1.35">'+_cEsc(m.v)+'</div>'+
+          (m.prod?'<div style="font-size:10px;color:#f5b544;line-height:1.35;margin-top:2px" title="색·질감 기준 유사 추천 제품(참고용)">≈ '+_cEsc(_consultProdShort(m.prod))+(m.prod.src?' <a href="'+_cEsc(m.prod.src)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#f5b544;text-decoration:none">↗</a>':'')+'</div>':'')+'</div>'; }).join('')+'</div>'
           : '<div style="font-size:11.5px;color:var(--m2)">'+(v.matStatus==='err'?'마감재 분석에 실패했어요.':'공간 이미지가 나오면 자동으로 만들어져요.')+'</div>')+
-        (!_consultIsBuild(st)?'<div style="font-size:11px;color:var(--m2);margin-top:8px">※ 이미지 속 가구·소품·장식 조명(펜던트·스탠드 등)은 연출용이며 견적에서 제외돼요.</div>':'');
-      Array.prototype.forEach.call(mb.querySelectorAll('.cmat'), function(el){ var id=el.getAttribute('data-id'); if(id){ el.title='눌러서 자재 바꾸기'; el.onclick=function(){ _consultSwapMaterial(vi, id); }; } });
+        (!_consultIsBuild(st)?'<div style="font-size:11px;color:var(--m2);margin-top:8px">※ 이미지 속 가구·소품·장식 조명(펜던트·스탠드 등)은 연출용이며 견적에서 제외돼요.'+(mats.some(function(m){return m.prod;})?'<br>※ <span style="color:#f5b544">≈ 유사 추천 제품</span>은 제조사 공식 카탈로그에 실제로 있는 제품 중 색·질감이 가장 가까운 것을 고른 참고용이에요(↗ 제품 페이지). 시공 전 실물 샘플로 확인해주세요. 자재를 누르면 다른 제품으로 바꿀 수 있어요.':'')+'</div>':'');
+      Array.prototype.forEach.call(mb.querySelectorAll('.cmat'), function(el, mi){ var id=el.getAttribute('data-id'); if(id){ el.title='눌러서 자재 바꾸기'; el.onclick=function(){ _consultSwapMaterial(vi, id); }; }
+        var zb=el.querySelector('.cmz'); if(zb) zb.onclick=function(e){ e.stopPropagation(); _consultMatZoom(mats, mi); }; });
       var _ct=mb.querySelector('.ctex'); if(_ct) _ct.onclick=function(){ _consultTexManual(vi); };
+      var _cr=mb.querySelector('.crr'); if(_cr) _cr.onclick=function(){ _consultRereadSched(st, v, false); };
       vc.appendChild(mb);
       // 견적 상세
       if(v.estimate){
@@ -46110,7 +46608,7 @@ function _openBulkPresetApply(picked){
     sub.style.cssText='font-size:11.5px;color:var(--m2);margin-bottom:12px';
     sub.textContent='선택한 '+picked.length+'장에 똑같이 적용할 프리셋 하나를 골라주세요.';
     var searchInput=document.createElement('input');
-    searchInput.type='text'; searchInput.placeholder='프리셋 검색 (예: 미완성, 노후, 트렌드...)';
+    searchInput.type='text'; searchInput.placeholder='프리셋 검색 (예: 미완성, 노후, 트렌드...)'; _noAutofill(searchInput);
     searchInput.style.cssText='width:100%;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:9px 12px;font-size:12.5px;border-radius:8px;outline:none;box-sizing:border-box;margin-bottom:10px';
     var resultsWrap=document.createElement('div');
     resultsWrap.style.cssText='display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto';
@@ -50897,11 +51395,14 @@ function buildPricing(){
       '<div style="font-size:9px;color:var(--m2);margin:4px 0 6px">'+p.desc+'</div>'+
       '<div style="font-size:9px;color:var(--t2);margin-bottom:8px;line-height:1.7;text-align:left;padding:0 2px">'+
         ({
-          'Free':'· 레퍼런스 1개\n· 동시 렌더 1개\n· 100cr 무료 체험\n· 쇼츠·제안서 제작 무료\n· ⚠️ 렌더링 결과물에 워터마크 표시',
-          'Basic':'· 레퍼런스 2개\n· 동시 렌더 2개\n· 1K / 2K 생성\n· 쇼츠·제안서 제작 무료\n· ✅ 워터마크 없음',
-          'Pro':'· 레퍼런스 3개\n· 동시 렌더 3개\n· 우선 지원\n· 쇼츠·제안서 제작 무료',
-          'Studio':'· 레퍼런스 4개\n· 동시 렌더 4개\n· 모든 기능 사용\n· 쇼츠·제안서 제작 무료',
-          'Business':'· 레퍼런스 6개\n· 동시 렌더 6개\n· ⚡ 렌더링 우선순위 처리\n· 쇼츠·제안서 제작 무료'
+          // 2026-10-07 정리(요청: "말장난 말고, 똑같이 되는 건 다 된다고"): 실제 코드 기준으로 등급별 차이는
+          // 레퍼런스 개수·동시 렌더 개수·워터마크(Free만)뿐 — 1K/2K/4K·모든 기능·쇼츠/제안서는 전 등급 동일.
+          // (예전 문구 "1K/2K만", "우선 지원", "모든 기능 사용", "렌더링 우선순위"는 실제 차이가 없어서 뺌)
+          'Free':'· 레퍼런스 <b>1개</b>\n· 동시 렌더 <b>1개</b>\n· 1K·2K·4K 생성\n· 모든 기능 사용\n· 쇼츠·제안서 제작 무료\n· ⚠️ 다운로드 시 워터마크',
+          'Basic':'· 레퍼런스 <b>2개</b>\n· 동시 렌더 <b>2개</b>\n· 1K·2K·4K 생성\n· 모든 기능 사용\n· 쇼츠·제안서 제작 무료\n· ✅ 워터마크 없음',
+          'Pro':'· 레퍼런스 <b>3개</b>\n· 동시 렌더 <b>3개</b>\n· 1K·2K·4K 생성\n· 모든 기능 사용\n· 쇼츠·제안서 제작 무료\n· ✅ 워터마크 없음',
+          'Studio':'· 레퍼런스 <b>4개</b>\n· 동시 렌더 <b>4개</b>\n· 1K·2K·4K 생성\n· 모든 기능 사용\n· 쇼츠·제안서 제작 무료\n· ✅ 워터마크 없음',
+          'Business':'· 레퍼런스 <b>6개</b>\n· 동시 렌더 <b>6개</b>\n· 1K·2K·4K 생성\n· 모든 기능 사용\n· 쇼츠·제안서 제작 무료\n· ✅ 워터마크 없음'
         }[p.n]||'').replace(/\n/g,'<br>')+
       '</div>'+
       // ⚠️ 버그 수정(치명적, "충전 버튼 누르면 결제 시스템 준비 중이라고만 뜬다"): 이 "요금제"
