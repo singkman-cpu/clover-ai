@@ -28993,16 +28993,167 @@ function _consultSpaceTypical(name, type){ // 스탠다드 기준 공간 1곳 �
 }
 function _consultIsPart(st){ return !_consultIsBuild(st) && st.scope==='part'; }
 function _consultPartTypical(st){ return st.spaces.filter(function(s){return s.photo;}).reduce(function(a,s){ return a+_consultSpaceTypical(s.name, st.type); },0); }
-function _consultTierFromBudget(st){
-  if(_consultIsPart(st)){
-    var typ=_consultPartTypical(st), b=_consultNum(st.budget);
-    if(!typ || !b) return 1;
-    var r=b/typ, bi=0, bdd=1e9; CONSULT_TIER_MULT.forEach(function(m,i){ var d=Math.abs(m-r); if(d<bdd){ bdd=d; bi=i; } }); return bi;
+
+// ══ 상담 패키지 견적 — 실제 현장 단가표 기반 계산(2026-10-07) ══════════════════════════════════
+// 요청: "가견적이라도 실제 업체에 넘어갔을 때 차이가 많이 나면 안 되니까 실제 현장 가격을 참고해서 정확하게".
+// → AI가 금액을 지어내지 않게, 2026년 수도권 시세 자료(아파트 32평 표준 올수리 공종별 견적, 욕실 덧방/올철거,
+//   주방 자당 단가, 도배·바닥 평당 단가, 카페 평당·부대비용, 한국부동산원 용도별 건축비, 단독주택 구조별 단가,
+//   외벽 리모델링 평당 단가)를 모아 "공종 × 수량 × 단가"로 계산함. 등급은 [실속, 스탠다드, 프리미엄, 하이엔드, 럭셔리].
+// 단가는 부가세 별도·만원 단위. 실제 시세가 다르면 아래 표 숫자만 고치면 전체 견적에 반영됨.
+// 2026-10-07 2차 보정: 블로그·커뮤니티(클리앙·블라인드·보배드림·월부·Threads)·업체 단가표·정부 통계 등
+// 약 120곳의 2025~2026 공개 시세를 공종별로 모아 "중간값"으로 다시 잡음(대부분 VAT 별도 기준).
+//  · 아파트 전체 평당: 실속 ~110~140 / 표준 ~170~220 / 프리미엄 ~250~300 / 하이엔드 350~500
+//  · 철거 평당 10~12 · 도배 실크 평당 7~8 · 강마루 평당 10~11 · 광폭 13~15 · 원목 15~20 · 포세린 25~30
+//  · 욕실 덧방 ~250, 올철거 ~520, 고급 ~1,000 · 싱크대 실속 280~350, 표준 430~550, 고급 ~1,000
+//  · 목공 30평대 400~640 · 전기 190~300(간접조명 패키지 480~720 별도) · 필름 250~350 · 중문 90~100 · 방문 37/개
+//  · 붙박이 자당 12~15 · 탄성 50~60 · 줄눈 40~50 · 입주청소 40~45 · 경비 5~9% + 이윤 10~15%
+//  · 샷시 30평대 메이저 이중창 1,200~1,300, 시스템 1,600~2,000
+//  · 상업: 카페·식당·사무실 등 업종별 평당 + 철거·전기증설·급배수·소방·냉난방·간판·가구 부대비용
+//  · 건축: 단독 RC 750~900, 경량목 550~700, 근생 600~750(+간접비), 부대비용 15~25%, 수직증축 500~650
+var CONSULT_PRICE={
+  home:{ // 만원/평(공급면적) 또는 1식·개당 — [실속, 스탠다드, 프리미엄, 하이엔드, 럭셔리]
+    demo:    {n:'철거·폐기물',     per:'py', p:[10,11,13,15,18], spec:['부분 철거·폐기물','전체 철거·폐기물','전체 철거·폐기물','전체 철거·폐기물','전체 철거·폐기물']},
+    wall:    {n:'도배·도장',       per:'py', p:[5,7,12,30,45],   spec:['합지 도배','실크 도배','고급 실크+포인트 도장','전체 도장(올퍼티)','특수도장·미장']},
+    floor:   {n:'바닥',            per:'py', p:[8,11,16,27,37],  spec:['장판(2.2T)·강화마루','강마루','광폭 강마루·원목','포세린 타일(600×1200)','헤링본 원목·대리석']},
+    ceiling: {n:'목공(천장·몰딩)',  per:'py', p:[12,16,20,28,40], spec:['몰딩·걸레받이 교체','천장 평탄화·몰딩','우물천장·간접등 박스','무몰딩·히든 디테일','특수 목공·곡면']},
+    door:    {n:'문·중문·필름',     per:'py', p:[10,12,17,21,30], spec:['필름+기본 중문','필름+3연동 중문','방문 교체+슬림 중문','도장도어·히든도어','맞춤 도어 전체']},
+    elec:    {n:'전기·조명',        per:'py', p:[7,9,14,22,32],   spec:['조명 교체','매입등·스위치·콘센트','간접조명 추가','라인조명·디밍','조명 설계 전체']},
+    storage: {n:'붙박이·수납',      per:'py', p:[3,7,10,15,22],   spec:['신발장','신발장+붙박이장','맞춤 수납장','맞춤 가구 전체','비스포크 가구']},
+    tile:    {n:'현관·베란다 타일',  per:'py', p:[3,4,5,7,9],      spec:['현관 타일','현관·베란다 타일','대형 타일','포세린 타일','석재']},
+    misc:    {n:'탄성·줄눈·입주청소', per:'py', p:[4,4.5,5,6,7],   spec:['탄성코트·입주청소','탄성코트·줄눈·입주청소','탄성코트·줄눈·입주청소','탄성코트·줄눈·입주청소','탄성코트·줄눈·입주청소']},
+    etc:     {n:'설비·기타 공사',    per:'py', p:[4,4,5,6,8],      spec:['실리콘·하드웨어','설비 보수·하드웨어','설비 보수·하드웨어','설비·하드웨어 업그레이드','설비·하드웨어 업그레이드']},
+    kitchen: {n:'주방',   per:'kit', p:[380,800,1300,1700,2600], spec:['PET 도어·인조대리석','도장/하이그로시·칸스톤','무광 도장·세라믹·아일랜드','맞춤 도장·세라믹·빌트인','수입 가구·천연석']},
+    bath:    {n:'욕실',   per:'ea',  p:[260,520,800,1000,1400],  spec:['덧방 리모델링','올철거·방수·타일','대형 타일·수전 업그레이드','호텔식 욕실','최고급 욕실']},
+    window:  {n:'샷시(창호)', per:'py', p:[24,38,50,60,75], spec:['비메이커 이중창','메이저 이중창(로이)','시스템창호','시스템창호(고단열)','수입 시스템창호']},
+    managePct:[0.18,0.18,0.20,0.20,0.22] // 현장관리(경비 5~9%) + 업체 이윤(10~15%)
+  },
+  commercial:{
+    // 업종별 기본 공사(바닥·벽·천장·기본 전기조명) 평당 — 스탠다드 기준. 등급 배율은 mult
+    base:{'카페':130,'식당':150,'주점':170,'베이커리':160,'사무실':120,'소매':130,'미용':160,'학원':100,'병원':170,'숙박':150,'기타':130},
+    mult:[0.65,1,1.4,1.9,2.6],
+    demo:{n:'철거·원상복구', per:'py', p:[8,10,12,14,16]},
+    power:{n:'전기 증설(승압)', per:'area20', p:[150,250,350,450,600]},
+    plumb:{n:'급배수·가스 설비', per:'area20', p:[250,350,450,600,800], foodOnly:true},
+    duct:{n:'주방 덕트·후드', per:'area20', p:[250,400,550,700,900], restOnly:true},
+    fire:{n:'소방·방염', per:'fix', p:[100,150,250,350,500]},
+    hvac:{n:'냉난방(시스템에어컨)', per:'area20', p:[250,400,500,650,900]},
+    sign:{n:'간판·파사드', per:'fix', p:[120,250,400,600,900]},
+    furn:{n:'가구·집기', per:'area20', p:[250,450,650,900,1300]},
+    toilet:{n:'화장실', per:'fix', p:[250,400,600,800,1100]},
+    designPct:[0.05,0.08,0.10,0.12,0.15]
+  },
+  build_new:{ perPy:[600,750,900,1100,1400], // 연면적 평당 직접 공사비
+    split:[['기초공사',.12],['골조공사',.30],['외장·단열·창호',.18],['설비·전기',.17],['내부 마감',.23]],
+    softPct:[0.15,0.18,0.20,0.22,0.25] }, // 설계·인허가·감리·측량·인입 등 부대비용
+  build_remodel:{ facade:[20,35,55,80,120], window:[12,22,32,45,60], scaffold:6, addPerPy:[500,600,700,850,1050] }
+};
+function _consultBizKey(biz){
+  biz=String(biz||'');
+  if(/카페/.test(biz)) return '카페'; if(/식당|음식/.test(biz)) return '식당'; if(/주점|바/.test(biz)) return '주점';
+  if(/베이커리|제과/.test(biz)) return '베이커리'; if(/사무/.test(biz)) return '사무실'; if(/소매|매장/.test(biz)) return '소매';
+  if(/미용|네일|뷰티/.test(biz)) return '미용'; if(/학원|교습/.test(biz)) return '학원'; if(/병원|의원/.test(biz)) return '병원';
+  if(/숙박|게스트/.test(biz)) return '숙박'; return '기타';
+}
+// 공간별 바닥면적(평) 추정 — 부분 공사 견적용
+function _consultSpacePy(name){
+  name=String(name||'');
+  if(/거실/.test(name)) return 9; if(/주방|부엌/.test(name)) return 4; if(/안방|침실/.test(name)) return 5;
+  if(/욕실|화장실/.test(name)) return 1.5; if(/현관/.test(name)) return 1.5; if(/드레스/.test(name)) return 2.5;
+  if(/발코니|베란다/.test(name)) return 3; if(/서재|작은방|아이방/.test(name)) return 3.5;
+  return 4;
+}
+function _consultBathCount(st){
+  var bs=st.spaces.filter(function(s){ return s.photo && /욕실|화장실/.test(s.name); }).length;
+  if(_consultIsPart(st)) return bs;
+  var a=_consultNum(st.area)||30; return Math.max(bs, a<22?1:a<45?2:3);
+}
+// 등급(ti)로 견적 계산 → {items:[{space,work,spec,amount}], total, note}
+function _consultCalcEstimate(st, ti, opt){
+  opt=opt||{}; ti=Math.max(0,Math.min(4,ti==null?1:ti));
+  var items=[], P, area=_consultNum(st.area);
+  function add(space, work, spec, amt){ amt=Math.round(amt/10)*10; if(amt>0) items.push({space:space, work:work, spec:spec||'', amount:amt}); }
+  function sum(){ return items.reduce(function(a,x){return a+x.amount;},0); }
+  if(st.type==='home'){
+    P=CONSULT_PRICE.home;
+    var part=_consultIsPart(st);
+    var kitF=Math.max(0.75, Math.min(1.3, (area||30)/32));
+    if(!part){
+      var py=area||30;
+      ['demo','wall','floor','ceiling','door','elec','storage','tile','misc','etc'].forEach(function(k){ var it=P[k]; add('공통', it.n, it.spec[ti], it.p[ti]*py); });
+      add('주방', P.kitchen.n, P.kitchen.spec[ti], P.kitchen.p[ti]*kitF);
+      var nb=_consultBathCount(st); if(nb) add('욕실', P.bath.n+' '+nb+'개', P.bath.spec[ti], P.bath.p[ti]*nb);
+      if(opt.windows) add('공통', P.window.n, P.window.spec[ti], P.window.p[ti]*py);
+    } else {
+      st.spaces.filter(function(s){return s.photo;}).forEach(function(s){
+        var nm=s.name, spy=_consultSpacePy(nm);
+        if(/욕실|화장실/.test(nm)){ add(nm, P.bath.n, P.bath.spec[ti], P.bath.p[ti]); return; }
+        if(/주방|부엌/.test(nm)) add(nm, P.kitchen.n, P.kitchen.spec[ti], P.kitchen.p[ti]*kitF);
+        ['demo','wall','floor','ceiling','elec'].forEach(function(k){ var it=P[k]; add(nm, it.n, it.spec[ti], it.p[ti]*spy); });
+        if(/현관/.test(nm)) add(nm, '중문', ['기본 중문','3연동 중문','슬림 원슬라이딩 중문','히든 중문','맞춤 중문'][ti], [70,95,120,150,220][ti]);
+        if(/드레스|안방|침실/.test(nm)) add(nm, P.storage.n, P.storage.spec[ti], [60,150,250,380,550][ti]);
+      });
+    }
+    // 부분 공사(욕실·주방 단독 견적)는 업체 견적에 이윤이 이미 섞여 있는 경우가 많아 보양·폐기물·관리 8%만
+    var _mp=part?0.08:P.managePct[ti];
+    add('공통', part?'보양·폐기물·현장관리':'현장관리·업체 이윤', (part?'약 ':'경비·이윤 약 ')+Math.round(_mp*100)+'%', sum()*_mp);
+  } else if(st.type==='commercial'){
+    P=CONSULT_PRICE.commercial; var cpy=area||20, bk=_consultBizKey(st.biz), food=/카페|식당|주점|베이커리/.test(bk), rest=/식당|주점/.test(bk);
+    var f20=Math.max(0.6, Math.min(2.5, cpy/20)), m=P.mult[ti];
+    var cpart=_consultIsPart(st);
+    if(cpart){
+      st.spaces.filter(function(s){return s.photo;}).forEach(function(s){
+        if(/화장실/.test(s.name)){ add(s.name, P.toilet.n, '', P.toilet.p[ti]); return; }
+        var spy=Math.max(3, Math.min(cpy, 8));
+        add(s.name, '인테리어 공사', bk+' 기준', P.base[bk]*m*spy);
+        if(/파사드|입구|외관/.test(s.name)) add(s.name, P.sign.n, '', P.sign.p[ti]);
+      });
+    } else {
+      add('공통', '인테리어 공사(바닥·벽·천장·기본 전기)', bk+' 기준 평당 '+Math.round(P.base[bk]*m)+'만원', P.base[bk]*m*cpy);
+      add('공통', P.demo.n, '', P.demo.p[ti]*cpy);
+      add('공통', P.power.n, '필요 시', P.power.p[ti]*f20);
+      if(food) add('공통', P.plumb.n, '', P.plumb.p[ti]*f20);
+      if(rest) add('공통', P.duct.n, '', P.duct.p[ti]*f20);
+      if(bk==='미용') add('공통', '급배수(샴푸대)', '', [150,280,350,450,600][ti]);
+      add('공통', P.hvac.n, '', P.hvac.p[ti]*f20);
+      add('공통', P.fire.n, '다중이용업소 해당 시 증가', P.fire.p[ti]);
+      add('공통', P.sign.n, '', P.sign.p[ti]);
+      add('공통', P.furn.n, '', P.furn.p[ti]*f20);
+      if(st.spaces.some(function(s){return s.photo && /화장실/.test(s.name);})) add('화장실', P.toilet.n, '', P.toilet.p[ti]);
+    }
+    add('공통','설계·현장관리','공사비의 약 '+Math.round(P.designPct[ti]*100)+'%', sum()*P.designPct[ti]);
+  } else if(st.type==='build_new'){
+    P=CONSULT_PRICE.build_new; var lc=_consultLegalCalc(st);
+    var gpy=area || (lc? lc.maxGFA/3.3058*0.9 : 40);
+    var base=P.perPy[ti]*gpy;
+    P.split.forEach(function(x){ add('건물', x[0], '', base*x[1]); });
+    add('별도', '부대비용', '설계·인허가·감리·측량·인입 등 약 '+Math.round(P.softPct[ti]*100)+'%', base*P.softPct[ti]);
+  } else {
+    P=CONSULT_PRICE.build_remodel; var L=st.legal||{};
+    var gfaPy=(_consultNum(L.gfa)? _consultNum(L.gfa)/3.3058 : (area||60));
+    var footPy=(_consultNum(L.foot)? _consultNum(L.foot)/3.3058 : gfaPy/Math.max(1,_consultNum(L.floors)||3));
+    add('외관', '외장 마감', ['도장·부분 보수','스타코플렉스·세라믹 사이딩','석재·금속 패널 부분','석재·금속 패널 전체','고급 석재·커튼월'][ti], P.facade[ti]*gfaPy);
+    add('외관', '창호 교체', '', P.window[ti]*gfaPy);
+    add('외관', '비계·안전', '', P.scaffold*gfaPy);
+    var addF=parseInt(L.addFloors,10)||0;
+    if(addF>0){
+      add('증축', addF+'개 층 증축', '같은 면적 '+footPy.toFixed(0)+'평 × '+addF+'층', P.addPerPy[ti]*footPy*addF);
+      add('증축', '구조 보강·구조 검토', '', P.addPerPy[ti]*footPy*addF*0.15);
+      add('별도', '설계·인허가', '', P.addPerPy[ti]*footPy*addF*0.08);
+    }
   }
-  var unit=CONSULT_UNIT[st.type]||CONSULT_UNIT.home, area=_consultNum(st.area), bud=_consultNum(st.budget);
-  if(!area || !bud) return 1;
-  var per=bud/area, best=0, bd=1e9;
-  unit.forEach(function(u,i){ var d=Math.abs(u-per); if(d<bd){ bd=d; best=i; } });
+  return {items:items, total:sum(), ti:ti};
+}
+
+function _consultTierFromBudget(st){
+  // 예산이 있으면: 단가표로 등급별 총액을 계산해서 예산에 가장 가까운 등급(넘지 않는 쪽 우선)
+  var b=_consultNum(st.budget);
+  if(!b) return 1;
+  var best=0, bd=1e9;
+  for(var t=0;t<5;t++){
+    var tot=_consultCalcEstimate(st, t, {windows:/샷시|창호|창문/.test(st.memo||'')}).total; if(!tot) continue;
+    var d=Math.abs(tot-b)*(tot>b?1.3:1); // 예산 초과는 조금 더 불리하게
+    if(d<bd){ bd=d; best=t; }
+  }
   return best;
 }
 function _consultBuildPlan(st){
@@ -29386,50 +29537,22 @@ function _consultFallbackEstimate(st, v){
 }
 function _consultEstimate(st, v, force){
   if(v.estimate && !force) return;
-  if(v.estStatus==='run') return;
-  var spaces=st.spaces.filter(function(s){ return s.photo && v.spaces[s.id] && v.spaces[s.id].result; });
-  if(!spaces.length) return;
-  v.estStatus='run'; _consultRefresh();
-  var tier=CONSULT_TIERS[v.plan.tier==null?1:v.plan.tier];
-  var area=_consultNum(st.area), bud=_consultNum(st.budget);
-  var unit=(CONSULT_UNIT[st.type]||CONSULT_UNIT.home)[v.plan.tier==null?1:v.plan.tier];
-  var target = area ? Math.round(unit*area) : 0;
-  var _part=_consultIsPart(st);
-  if(_part){ target=Math.round(_consultPartTypical(st)*CONSULT_TIER_MULT[v.plan.tier==null?1:v.plan.tier]); }
-  var mats=(v.materials||[]).map(function(m){return m.k+': '+m.v;}).join(', ');
-  var kind={home:'주거 인테리어('+(st.houseKind||'아파트')+')', commercial:'상업 인테리어('+(st.biz||'매장')+')', build_new:'건축 신축('+(st.biz||'건물')+')', build_remodel:'건물 리모델링'+((st.legal&&st.legal.addFloors>0)?'+'+st.legal.addFloors+'개층 증축':'')}[st.type];
-  var lc=_consultLegalCalc(st);
-  var prompt='[한국 인테리어/건축 참고 견적 — JSON만 출력, 설명·인사말 금지]\n'+
-    '첨부 이미지는 "'+v.key+'안 · '+v.plan.name+'" 디자인 시안이에요(공간: '+spaces.map(function(s){return s.name;}).join(', ')+').\n'+
-    '공사 종류: '+kind+'\n'+
-    (_part ? '공사 범위: 부분 공사 — '+spaces.map(function(s){return s.name;}).join(', ')+'만 공사해요(다른 공간·전체 철거·전체 설비는 포함하지 말 것). 공간별로 항목을 나눠줘.\n'+(area?'(참고: 집 전체 면적 '+area+'평)\n':'')
-           : '면적: '+(area?area+'평':'모름(이미지로 추정)')+(st.rooms?' · 방 '+st.rooms+'개':'')+'\n')+
-    (lc && st.type==='build_new' ? '대지 '+Math.round(lc.site)+'㎡, 법정 최대 연면적 약 '+Math.round(lc.maxGFA)+'㎡\n' : '')+
-    '마감 등급: '+tier.name+' — '+tier.ko+'\n'+
-    (mats?'주요 마감재: '+mats+'\n':'')+
-    (target?'이 등급의 2026년 수도권 평균 단가로는 총 약 '+target+'만원 전후가 일반적(±25% 범위에서 이미지에 보이는 사양에 맞게 조정).\n':'')+
-    (bud?'고객 예산은 '+bud+'만원이에요 — 이 시안은 그 예산에 맞춰 설계된 안이니, 이미지 사양 기준으로 총액이 예산의 85~105% 범위에 들어가도록 항목을 구성해줘(예산을 크게 넘는 사양이 보이면 note에 한 줄로 알려줘).\n':'')+
-    '이미지에 실제로 보이는 사양(마감재·가구·조명·설비)을 기준으로 공종별 참고 견적을 만들어줘. 금액 단위는 만원, 정수.\n'+
-    '형식: {"items":[{"space":"공간명 또는 공통","work":"공종(예: 철거, 목공, 바닥, 도장, 타일, 욕실, 주방가구, 전기·조명, 설비, 외장, 창호, 구조)","spec":"사양 요약 20자 이내","amount":숫자}],"total":숫자,"note":"한 줄 메모"}\n'+
-    '항목은 6~14개. total은 items 합계와 같게.';
-  var imgs=spaces.slice(0,3).map(function(s){ return v.spaces[s.id].result; });
-  var blocks=[], left=imgs.length;
-  imgs.forEach(function(u,i){ _proposalImgToB64(u, function(b64){ blocks[i]= b64 ? {type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}} : {type:'image', source:{type:'url', url:u}}; if(--left===0) send(); }); });
-  function finish(est){
-    if(est){ est.items=(est.items||[]).filter(function(x){return x && x.work;}).map(function(x){ return {space:String(x.space||'공통'), work:String(x.work), spec:String(x.spec||''), amount:Math.max(0,Math.round(_consultNum(x.amount)))}; });
-      var sum=est.items.reduce(function(a,x){return a+x.amount;},0); est.total=sum||Math.round(_consultNum(est.total)); }
-    if(!est || !est.items || !est.items.length || !est.total) est=_consultFallbackEstimate(st, v);
-    v.estimate=est; v.estStatus='done'; v.dirty=true; _consultSave(); _consultRefresh();
-  }
-  function send(){
-    try{
-      _falProxyCall('chat-assistant', {messages:[{role:'user', content:blocks.filter(Boolean).concat([{type:'text', text:prompt}])}]}, function(res){
-        var j=_consultParseJson(res); if(!j) console.warn('[상담패키지 견적] 응답 해석 실패', res); finish(j);
-      }, function(err){ console.warn('[상담패키지 견적] 실패', err); finish(null); });
-    }catch(e){ finish(null); }
-  }
+  var ti=v.plan.tier==null?1:v.plan.tier;
+  var est=_consultCalcEstimate(st, ti, {windows:/샷시|창호|창문/.test(st.memo||'')});
+  // 시안 이미지에서 읽은 마감재 이름이 있으면 바닥·벽 사양에 그대로 표시(금액은 등급 단가 그대로)
+  (v.materials||[]).forEach(function(m){
+    if(!m || !m.v) return;
+    est.items.forEach(function(it){ if((/바닥/.test(m.k) && it.work==='바닥') || (/벽/.test(m.k) && it.work==='벽 마감')) it.spec=it.spec+' (시안: '+m.v+')'; });
+  });
+  var bud=_consultNum(st.budget), note='2026년 수도권 평균 시공 단가 기준(부가세 별도). 현장 실측·자재 확정 후 ±10~15% 달라질 수 있어요.';
+  if(bud){ var diff=Math.round((est.total-bud)/bud*100); note+=' 고객 예산 '+_consultFmtMan(bud)+' 대비 '+(diff>=0?'+':'')+diff+'%.'; }
+  if(st.type==='home' && !_consultIsPart(st) && !/샷시|창호|창문/.test(st.memo||'')) note+=' 샷시(창호) 교체는 미포함 — 요청사항에 "샷시"를 적으면 포함돼요.';
+  est.note=note;
+  v.estimate=est; v.estStatus='done'; v.dirty=true; _consultSave(); _consultRefresh();
 }
 function _consultVariantTotal(v){ return v.estimate ? v.estimate.total : 0; }
+// 실제 업체 견적은 현장 상태·자재 선택에 따라 달라서 범위로도 보여줌(-10% ~ +15%)
+function _consultRange(tot){ if(!tot) return ''; var lo=Math.round(tot*0.9/10)*10, hi=Math.round(tot*1.15/10)*10; return _consultFmtMan(lo).replace(/^약\s*/,'')+' ~ '+_consultFmtMan(hi).replace(/^약\s*/,''); }
 function _consultSpaceAmt(v, spName){
   if(!v.estimate) return null;
   var s=0; v.estimate.items.forEach(function(x){ if(x.space===spName) s+=x.amount; }); return s||null;
@@ -29551,7 +29674,9 @@ function _consultDrawComparePage(data, st, loaded, pageIndex, total, logo){
     _wrapCanvasText(ctx, v.plan.ko, tw).slice(0, Math.max(1, Math.floor((rowH-150)/25))).forEach(function(l){ ctx.fillText(l, tx, ly); ly+=25; });
     var tot=_consultVariantTotal(v);
     ctx.fillStyle=t.ink; ctx.font='800 26px '+PROPOSAL_FONT; ctx.textAlign='right';
-    ctx.fillText(tot?'참고 견적 '+_consultFmtMan(tot):'', pad+innerW, cy+rowH-50); ctx.textAlign='left';
+    ctx.fillText(tot?'참고 견적 '+_consultFmtMan(tot):'', pad+innerW, cy+rowH-58);
+    if(tot){ ctx.fillStyle=t.muted; ctx.font='500 15px '+PROPOSAL_FONT; ctx.fillText('예상 범위 '+_consultRange(tot), pad+innerW, cy+rowH-26); }
+    ctx.textAlign='left';
   });
   _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
   return cv;
@@ -29596,7 +29721,8 @@ function _consultDrawVariantPage(data, st, v, vi, loaded, pageIndex, total, logo
   if(tot){
     ctx.fillStyle=t.ink; ctx.fillRect(pad, y, innerW, 2);
     ctx.fillStyle=t.muted; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,2.5); ctx.fillText('ESTIMATED TOTAL', pad, y+22); _propEdLS(ctx,0);
-    ctx.fillStyle=t.ink; ctx.font='800 40px '+PROPOSAL_FONT; ctx.textAlign='right'; ctx.fillText(_consultFmtMan(tot), pad+innerW, y+16); ctx.textAlign='left';
+    ctx.fillStyle=t.ink; ctx.font='800 40px '+PROPOSAL_FONT; ctx.textAlign='right'; ctx.fillText(_consultFmtMan(tot), pad+innerW, y+16);
+    ctx.fillStyle=t.muted; ctx.font='500 15px '+PROPOSAL_FONT; ctx.fillText('예상 범위 '+_consultRange(tot)+' · 부가세 별도', pad+innerW, y+66); ctx.textAlign='left';
   }
   _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
   return cv;
@@ -29627,10 +29753,11 @@ function _consultDrawEstimatePage(data, st, v, pageIndex, total, logo){
   if(est.items.length>items.length){ ctx.fillStyle=t.muted; ctx.font='400 15px '+PROPOSAL_FONT; ctx.fillText('외 '+(est.items.length-items.length)+'개 항목', pad, y); y+=30; }
   y+=10; ctx.fillStyle=t.ink; ctx.fillRect(pad, y, innerW, 2); y+=22;
   ctx.font='800 22px '+PROPOSAL_FONT; ctx.fillText('합계 (부가세 별도)', pad, y+8);
-  ctx.font='800 40px '+PROPOSAL_FONT; ctx.textAlign='right'; ctx.fillText(_consultFmtMan(est.total), pad+innerW, y); ctx.textAlign='left';
-  y+=80;
+  ctx.font='800 40px '+PROPOSAL_FONT; ctx.textAlign='right'; ctx.fillText(_consultFmtMan(est.total), pad+innerW, y);
+  ctx.fillStyle=t.muted; ctx.font='500 16px '+PROPOSAL_FONT; ctx.fillText('예상 범위 '+_consultRange(est.total), pad+innerW, y+52); ctx.textAlign='left';
+  y+=96;
   ctx.fillStyle=t.muted; ctx.font='400 15px '+PROPOSAL_FONT;
-  var note=(est.note?est.note+' ':'')+'※ 시안 이미지 기준 참고용 개산 견적이며, 현장 실측·자재 확정 후 최종 견적이 달라질 수 있습니다.';
+  var note=(est.note?est.note+' ':'')+'※ 참고용 개산 견적이며 최종 금액은 시공사 현장 실측 후 확정됩니다.';
   _wrapCanvasText(ctx, note, innerW).slice(0,3).forEach(function(l){ ctx.fillText(l, pad, y); y+=24; });
   _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
   return cv;
@@ -29836,25 +29963,34 @@ function sbConsult(p){
   bw.appendChild(hint);
   p.appendChild(bw);
 
-  // 상세 설정(접힘)
-  var det=mk('details',''); det.style.cssText='margin-top:6px;border-top:1px solid var(--bd2);padding-top:10px';
-  if(st._detOpen) det.open=true;
+  // 📝 고객 정보 입력(기본 펼침) + ⚙️ 고급 설정(접힘) — 2026-10-07 요청("상세설정보다는 고객정보 및 입력으로")
+  var det=mk('details',''); det.style.cssText='margin-top:6px;border:1px solid var(--bd2);border-radius:10px;padding:8px 10px;background:var(--c2)';
+  det.open = st._detOpen!==false;
   det.ontoggle=function(){ st._detOpen=det.open; };
-  var sm=mk('summary',''); sm.style.cssText='cursor:pointer;font-size:12.5px;font-weight:800;color:var(--t2);padding:4px 0';
-  sm.textContent='⚙️ 상세 설정 (선택)'; det.appendChild(sm);
+  var sm=mk('summary',''); sm.style.cssText='cursor:pointer;font-size:13px;font-weight:800;color:var(--t);padding:2px 0';
+  sm.innerHTML='📝 고객 정보 입력 <span style="font-size:11px;font-weight:600;color:var(--m2)">(제안서에 들어가요)</span>'; det.appendChild(sm);
   var db=dv(''); db.style.cssText='display:flex;flex-direction:column;gap:8px;margin-top:8px';
   function lbl(t){ var l=dv(''); l.style.cssText='font-size:11.5px;color:var(--m2);font-weight:700;margin-bottom:-4px'; l.textContent=t; return l; }
-  db.appendChild(lbl('고객명 / 프로젝트명 (제안서 표지)'));
-  db.appendChild(inp(st.client, '예: 김○○ 고객님 34평', function(v){ st.client=v; }, true));
-  db.appendChild(lbl('고객 요청사항'));
+  db.appendChild(lbl('고객명 (제안서 표지에 들어가요)'));
+  db.appendChild(inp(st.client, '예: 김○○ 고객님', function(v){ st.client=v; }, true));
+  db.appendChild(lbl('고객 요청사항 (시안에 반영돼요)'));
   var memo=mk('textarea',''); memo.value=st.memo||''; memo.placeholder='예: 아이 있어서 수납 많이, 주방은 화이트 대리석';
   memo.style.cssText=IS+';min-height:56px;resize:vertical'; memo.oninput=function(){ st.memo=memo.value; _consultSave(); };
   db.appendChild(memo);
   if(st.type==='home'){ db.appendChild(lbl('주택 종류')); db.appendChild(sel(st.houseKind, ['아파트','빌라·다세대','단독주택','오피스텔'], function(v){ st.houseKind=v; })); }
   if(st.type==='commercial'){ db.appendChild(lbl('매장 위치(층)')); db.appendChild(sel(st.floorLoc, ['1층','2층 이상','지하'], function(v){ st.floorLoc=v; })); }
+  if(st.type==='build_new'){ db.appendChild(lbl('건물 용도')); db.appendChild(inp(st.biz, '예: 단독주택, 근린생활시설+주택', function(v){ st.biz=v; })); }
+  det.appendChild(db); p.appendChild(det);
+  // ⚙️ 고급 설정(접힘): 법규 직접 입력·화질·마감재 사진·시안 이름
+  var det2=mk('details',''); det2.style.cssText='margin-top:8px;padding-top:4px';
+  if(st._det2Open) det2.open=true;
+  det2.ontoggle=function(){ st._det2Open=det2.open; };
+  var sm2=mk('summary',''); sm2.style.cssText='cursor:pointer;font-size:12px;font-weight:700;color:var(--m2);padding:4px 0';
+  sm2.textContent='⚙️ 고급 설정 (화질·시안 이름'+(_consultIsBuild(st)?'·법규 직접 입력':'')+')'; det2.appendChild(sm2);
+  db=dv(''); db.style.cssText='display:flex;flex-direction:column;gap:8px;margin-top:8px';
+  det=det2;
   if(_consultIsBuild(st)){
     var L=st.legal;
-    if(st.type==='build_new'){ db.appendChild(lbl('건물 용도')); db.appendChild(inp(st.biz, '예: 단독주택, 근린생활시설+주택', function(v){ st.biz=v; })); }
     db.appendChild(lbl('법규 정보 (주소 조회가 안 될 때 직접 입력)'));
     db.appendChild(sel(L.zone, [''].concat(CONSULT_ZONES.map(function(z){return z[0];})), function(v){ L.zone=v; }));
     var r6=grid2(); r6.style.marginTop='0'; r6.appendChild(inp(L.site, '대지면적(㎡)', function(v){ L.site=v; }, true));
@@ -29970,7 +30106,7 @@ function _consultRenderCanvas(ub){
     // 시안 비교 요약
     if(st.variants.length>1){
       var cmp=document.createElement('div'); cmp.className='cc';
-      cmp.innerHTML='<div class="ct">💰 시안 비교</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">'+st.variants.map(function(v){ var tot=_consultVariantTotal(v); return '<div style="background:var(--c1,#111);border-radius:10px;padding:12px"><div style="font-size:12px;color:var(--ac);font-weight:900">'+v.key+'안</div><div style="font-size:14px;font-weight:800;color:var(--t);margin-top:2px">'+_cEsc(v.plan.name)+'</div><div style="font-size:18px;font-weight:900;color:var(--t);margin-top:8px">'+(tot?_consultFmtMan(tot):(v.estStatus==='run'?'계산 중…':'-'))+'</div></div>'; }).join('')+'</div>';
+      cmp.innerHTML='<div class="ct">💰 시안 비교</div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px">'+st.variants.map(function(v){ var tot=_consultVariantTotal(v); return '<div style="background:var(--c1,#111);border-radius:10px;padding:12px"><div style="font-size:12px;color:var(--ac);font-weight:900">'+v.key+'안</div><div style="font-size:14px;font-weight:800;color:var(--t);margin-top:2px">'+_cEsc(v.plan.name)+'</div><div style="font-size:18px;font-weight:900;color:var(--t);margin-top:8px">'+(tot?_consultFmtMan(tot):(v.estStatus==='run'?'계산 중…':'-'))+'</div>'+(tot?'<div style="font-size:10.5px;color:var(--m2);margin-top:2px">범위 '+_consultRange(tot)+'</div>':'')+'</div>'; }).join('')+'</div>';
       wrap.appendChild(cmp);
     }
 
@@ -29979,7 +30115,7 @@ function _consultRenderCanvas(ub){
     st.variants.forEach(function(v, vi){
       var vc=document.createElement('div'); vc.className='cc';
       var tot=_consultVariantTotal(v);
-      vc.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap"><div><div style="font-size:12px;color:var(--ac);font-weight:900">'+v.key+'안</div><div style="font-size:19px;font-weight:900;color:var(--t)">'+_cEsc(v.plan.name)+'</div><div style="font-size:12px;color:var(--m2);margin-top:3px;line-height:1.5;max-width:640px">'+_cEsc(v.plan.ko)+'</div></div><div style="text-align:right"><div style="font-size:10.5px;color:var(--m2);font-weight:700">참고 견적</div><div style="font-size:22px;font-weight:900;color:var(--t)">'+(tot?_consultFmtMan(tot):(v.estStatus==='run'?'<span style="font-size:13px">계산 중…</span>':'-'))+'</div></div></div>';
+      vc.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap"><div><div style="font-size:12px;color:var(--ac);font-weight:900">'+v.key+'안</div><div style="font-size:19px;font-weight:900;color:var(--t)">'+_cEsc(v.plan.name)+'</div><div style="font-size:12px;color:var(--m2);margin-top:3px;line-height:1.5;max-width:640px">'+_cEsc(v.plan.ko)+'</div></div><div style="text-align:right"><div style="font-size:10.5px;color:var(--m2);font-weight:700">참고 견적</div><div style="font-size:22px;font-weight:900;color:var(--t)">'+(tot?_consultFmtMan(tot):(v.estStatus==='run'?'<span style="font-size:13px">계산 중…</span>':'-'))+'</div>'+(tot?'<div style="font-size:10.5px;color:var(--m2)">예상 범위 '+_consultRange(tot)+'</div>':'')+'</div></div>';
       var grid=document.createElement('div'); grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:12px';
       spaces.forEach(function(s){
         var r=v.spaces[s.id]||{};
