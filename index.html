@@ -9987,14 +9987,67 @@ function _wirePasteTarget(el, onImageFile){
     var stEl=gE('stl'); if(stEl) stEl.textContent='클립보드에 이미지가 없어요. 이미지를 먼저 복사한 뒤 붙여넣어주세요.';
   };
 }
+// ── 레퍼런스 "부분 지정"(2026-10-08 요청: 상담 패키지처럼 현장사진 디자인·공간 컨셉 디자인에도) ──
+// 슬롯마다 "이 사진에서 무엇만 가져올지"(전체 느낌/아트월/천장·조명/가구…)를 고를 수 있음. 모두 "전체 느낌"이면
+// 프롬프트에 아무것도 추가하지 않아서 기존 결과와 완전히 같음.
+function _refPartEnGeneric(k, t){
+  if(!k) return null;
+  if(k==='custom'){ t=String(t||'').trim(); return t?'ONLY this element: '+t+' (as shown in this image)':null; }
+  var d=(typeof CONSULT_REF_PARTS!=='undefined'?CONSULT_REF_PARTS:[]).filter(function(x){return x[0]===k;})[0]; return d?d[2]:null;
+}
+function _refPartKoGeneric(k, t){
+  if(!k) return '전체 느낌'; if(k==='custom') return String(t||'직접 입력');
+  var d=(typeof CONSULT_REF_PARTS!=='undefined'?CONSULT_REF_PARTS:[]).filter(function(x){return x[0]===k;})[0]; return d?d[1]:'전체 느낌';
+}
+// 실제로 보내는 순서(빈 칸 제외, 요금제 개수 제한)대로 "이미지 N = 어느 부분" 지시문. startN = 첫 레퍼런스의 이미지 번호
+function _refRolesText(wf, startN, refsOverride, partsOverride, txtOverride){
+  var tab=getTab(wf); if(!tab && !refsOverride) return '';
+  var refs=refsOverride||tab.refs||[], parts=partsOverride||(tab&&tab.refParts)||[], txt=txtOverride||(tab&&tab.refPartTxt)||[];
+  var lst=[], n=startN, max=refsOverride?99:getMaxRefs();
+  for(var i=0;i<refs.length && lst.length<max;i++){ if(!refs[i]) continue; lst.push({n:n, en:_refPartEnGeneric(parts[i], txt[i])}); n++; }
+  if(!lst.some(function(x){return x.en;})) return '';
+  return ' ⚠️ REFERENCE IMAGE ROLES (the user assigned a specific part to some reference images — follow strictly): '+
+    lst.map(function(x){ return 'Image '+x.n+': '+(x.en ? x.en+' — take nothing else from this image' : 'overall style, colors, materials and mood (for everything not assigned to another reference)'); }).join('; ')+
+    '. Each reference controls only its assigned part; if references disagree, each one wins only for its own part. Recreate each referenced part as literally as possible (same design, shape, material, color). Never copy windows, doors, openings or the room layout from any reference.';
+}
+// 채워진 슬롯 아래쪽 "가져올 부분" 칩 → 눌러서 고르기
+function _refPartChip(sl, wf, i){
+  var tab=getTab(wf); tab.refParts=tab.refParts||[]; tab.refPartTxt=tab.refPartTxt||[];
+  var k=tab.refParts[i]||'';
+  var chip=document.createElement('button'); chip.type='button'; chip.className='rs-part';
+  chip.textContent=(k?'🎯 ':'')+_refPartKoGeneric(k, tab.refPartTxt[i])+' ▾';
+  chip.title='이 사진에서 무엇을 가져올지 (전체 느낌 / 아트월 / 천장·조명 / 가구 …)';
+  chip.style.cssText='position:absolute;left:2px;right:2px;bottom:2px;height:16px;padding:0 3px;border:none;border-radius:4px;font-size:8.5px;font-weight:800;line-height:16px;cursor:pointer;font-family:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'+(k?'background:var(--ac);color:#000':'background:rgba(0,0,0,.62);color:#fff');
+  chip.onclick=function(e){
+    e.stopPropagation();
+    var old=document.getElementById('ref-part-menu'); if(old) old.remove();
+    var m=document.createElement('div'); m.id='ref-part-menu';
+    var r=chip.getBoundingClientRect();
+    m.style.cssText='position:fixed;z-index:100003;left:'+Math.min(window.innerWidth-190, r.left)+'px;top:'+Math.min(window.innerHeight-340, r.bottom+4)+'px;width:180px;background:var(--card,#141518);border:1px solid var(--bd2);border-radius:10px;padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.5)';
+    m.innerHTML='<div style="font-size:10.5px;color:var(--m2);font-weight:700;padding:4px 6px">레퍼런스 '+(i+1)+' — 가져올 부분</div>';
+    CONSULT_REF_PARTS.forEach(function(pp){
+      var b=document.createElement('button'); b.type='button'; b.textContent=(pp[0]===k?'✓ ':'')+pp[1];
+      b.style.cssText='display:block;width:100%;text-align:left;padding:6px 8px;border:none;border-radius:6px;background:'+(pp[0]===k?'var(--acg)':'transparent')+';color:'+(pp[0]===k?'var(--ac)':'var(--t2)')+';font-size:12px;cursor:pointer;font-family:inherit';
+      b.onclick=function(ev){ ev.stopPropagation();
+        if(pp[0]==='custom'){ var t=prompt('이 사진에서 무엇만 가져올까요? (예: 아치형 벽 디자인, 원목 선반)', tab.refPartTxt[i]||''); if(t==null||!t.trim()){ m.remove(); return; } tab.refPartTxt[i]=t.trim(); }
+        tab.refParts[i]=pp[0]; m.remove(); try{ _saveMainTabImagesDraft(); }catch(e2){} rSlot(sl,i); };
+      m.appendChild(b);
+    });
+    document.body.appendChild(m);
+    setTimeout(function(){ document.addEventListener('mousedown', function cl(ev){ if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('mousedown', cl); } }); }, 0);
+  };
+  sl.style.position='relative';
+  sl.appendChild(chip);
+}
 function rSlot(sl,i){
   var _refs=getTab(G.wf).refs||[];
   sl.tabIndex=0; // 포커스 가능하게 만들어야 그 슬롯에 붙여넣기(Ctrl+V)가 먹힘
   sl.style.outline='none';
   if(_refs[i]){
     sl.innerHTML='<img src="'+_refs[i]+'"><button class="rs-del" type="button">&#10005;</button>';
+    if(G.wf==='space'||G.wf==='render'||G.wf==='edit') _refPartChip(sl, G.wf, i);
     sl.onclick=function(e){
-      if(e.target.closest('.rs-del')) return;
+      if(e.target.closest('.rs-del')||e.target.closest('.rs-part')) return;
       G.refIdx=i; sl.focus(); // 포커스도 잡아서 바로 Ctrl+V로 교체 가능하게 해둠
       _previewImageInMain(_refs[i], G.wf); // 클릭: 메인화면에 보기 (앱 전체 공통 규칙)
     };
@@ -10002,7 +10055,7 @@ function rSlot(sl,i){
       if(e.target.closest('.rs-del')) return;
       _openImageLightbox(_refs[i]); // 더블클릭: 크게 보기 (앱 전체 공통 규칙)
     };
-    sl.querySelector('.rs-del').onclick=function(e){e.stopPropagation();var _r2=getTab(G.wf).refs||[];_r2[i]=null;rSlot(sl,i);_saveMainTabImagesDraft();};
+    sl.querySelector('.rs-del').onclick=function(e){e.stopPropagation();var _t2=getTab(G.wf),_r2=_t2.refs||[];_r2[i]=null;if(_t2.refParts)_t2.refParts[i]='';if(_t2.refPartTxt)_t2.refPartTxt[i]='';rSlot(sl,i);_saveMainTabImagesDraft();};
     // ⚠️ 요청 반영("참고이미지 6개슬롯 왼쪽마우스 누른상태로 위치이동하게 해줘"): 채워진 슬롯은
     // 마우스로 눌러서 다른 슬롯 위로 끌어다 놓으면 두 슬롯의 이미지가 서로 자리를 바꾸도록
     // (드래그앤드롭 기반) 순서 변경 기능을 추가함. 슬롯이 1개만 쓰이는 회원(Free 플랜 등)은
@@ -10040,6 +10093,7 @@ function rSlot(sl,i){
       window._refReorderSrcIdx=null;
       var arr=getTab(G.wf).refs||[];
       var tmp=arr[i]; arr[i]=arr[srcIdx]; arr[srcIdx]=tmp;
+      var _tt=getTab(G.wf); ['refParts','refPartTxt'].forEach(function(kk){ var a2=_tt[kk]=_tt[kk]||[]; var t3=a2[i]; a2[i]=a2[srcIdx]; a2[srcIdx]=t3; });
       _saveMainTabImagesDraft();
       var slI=gE('rs-'+i), slSrc=gE('rs-'+srcIdx);
       if(slI) rSlot(slI,i);
@@ -15969,6 +16023,7 @@ function mkBudgetTier(p){
     // 읽으므로(다른 기능들과 동일한 패턴) 여기서도 잠깐 옮겨줬다가 복원해서 렌더링에도 반영되게 함.
     var _budgetOrigSpaceRefs = getTab('space').refs;
     getTab('space').refs = (tab.refs && tab.refs.length) ? tab.refs : undefined;
+    _task.noRefRoles=true;
     procImgWithTask(_task, function(resultUrl){
       getTab('space').refs = _budgetOrigSpaceRefs;
       renderFromBudgetBtn.disabled=false; renderFromBudgetBtn.innerHTML='🎨 이 견적 구성 그대로 렌더링해보기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">20cr</span>';
@@ -17987,48 +18042,73 @@ function mkMultiRoomSpace(p){
     var refCol=dv('');refCol.style.cssText='display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;min-width:0';
     var refSlot=dv('');refSlot.style.cssText='width:100%;aspect-ratio:1;max-width:88px;border-radius:8px;position:relative;cursor:pointer;overflow:hidden;border:1.5px dashed var(--bd2);background:var(--card)';
     var refFileInp=document.createElement('input');refFileInp.type='file';refFileInp.accept='image/*';refFileInp.style.display='none';
-    function renderRoomRefSlot(){
-      refSlot.innerHTML='';
-      if(room.refImg){
-        refSlot.style.border='1.5px solid var(--acb)';
-        var rImgEl=document.createElement('img');rImgEl.src=room.refImg;rImgEl.style.cssText='width:100%;height:100%;object-fit:cover';
-        refSlot.appendChild(rImgEl);
-        var rDelBtn=document.createElement('button');rDelBtn.type='button';rDelBtn.textContent='✕';
-        rDelBtn.style.cssText='position:absolute;top:-4px;right:-4px;width:17px;height:17px;border-radius:50%;background:rgba(0,0,0,.75);color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0';
-        rDelBtn.onclick=function(e){ e.stopPropagation(); room.refImg=null; renderRoomRefSlot(); };
-        refSlot.appendChild(rDelBtn);
-        _wireImgPreview(rImgEl, room.refImg, 'spaceset');
-      } else {
-        refSlot.style.border='1.5px dashed var(--bd2)';
-        refSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--m2)">+</div>';
-      }
+    var _rsBaseCss=refSlot.style.cssText;
+    refFileInp.multiple=true;
+    function _mrAddRoomRef(src){
+      var rr=_mrRoomRefs(room); if(rr.length>=MR_ROOM_MAX_REFS) return;
+      rr.push(src); room.refParts[rr.length-1]=''; room.refPartTxt[rr.length-1]='';
+      _mrRoomRefs(room); renderSB();
     }
-    refSlot.onclick=function(e){ if(!room.refImg){ e.stopPropagation(); refFileInp.click(); } };
-    refFileInp.onchange=function(){
-      var f=refFileInp.files&&refFileInp.files[0]; if(!f) return;
-      var reader=new FileReader();
-      reader.onload=function(){
-        _downscaleForMemorySafety(reader.result, function(resized){ room.refImg=resized; renderRoomRefSlot(); });
-      };
-      reader.readAsDataURL(f);
-    };
-    _wirePasteTarget(refSlot, function(f){
-      var reader=new FileReader();
-      reader.onload=function(){
-        _downscaleForMemorySafety(reader.result, function(resized){ room.refImg=resized; renderRoomRefSlot(); });
-      };
-      reader.readAsDataURL(f);
-    });
+    function _mrReadFiles(files){
+      var arr=[].slice.call(files||[]).slice(0, Math.max(0, MR_ROOM_MAX_REFS-_mrRoomRefs(room).length));
+      arr.forEach(function(f){
+        var reader=new FileReader();
+        reader.onload=function(){ _downscaleForMemorySafety(reader.result, function(resized){ _mrAddRoomRef(resized); }); };
+        reader.readAsDataURL(f);
+      });
+    }
+    function renderRoomRefSlot(){
+      var rr=_mrRoomRefs(room);
+      refSlot.innerHTML='';
+      if(!rr.length){
+        refSlot.style.cssText=_rsBaseCss;
+        refSlot.innerHTML='<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--m2)">+</div>';
+        return;
+      }
+      refSlot.style.cssText='width:100%;position:relative';
+      var g=document.createElement('div'); g.style.cssText='display:grid;grid-template-columns:repeat(2,1fr);gap:4px;width:100%';
+      rr.forEach(function(src,i){
+        var t=document.createElement('div'); t.style.cssText='position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;border:1.5px solid var(--acb);background:var(--card)';
+        var im=document.createElement('img'); im.src=src; im.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
+        t.appendChild(im); _wireImgPreview(im, src, 'spaceset');
+        var del=document.createElement('button'); del.type='button'; del.textContent='✕'; del.title='이 참고 사진 빼기';
+        del.style.cssText='position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,.75);color:#fff;border:none;font-size:9px;cursor:pointer;line-height:1;padding:0';
+        del.onclick=function(e){ e.stopPropagation(); room.refImgs.splice(i,1); room.refParts.splice(i,1); room.refPartTxt.splice(i,1); _mrRoomRefs(room); renderSB(); };
+        t.appendChild(del);
+        var k=room.refParts[i]||'';
+        var chip=document.createElement('button'); chip.type='button'; chip.className='rs-part';
+        chip.textContent=_refPartKoGeneric(k, room.refPartTxt[i]).replace(/·.*$/,'')+'▾';
+        chip.title='이 사진에서 무엇을 가져올지 (전체 느낌 / 아트월 / 천장·조명 / 가구 …)';
+        chip.style.cssText='position:absolute;left:2px;right:2px;bottom:2px;height:16px;padding:0 3px;border:none;border-radius:4px;font-size:8.5px;font-weight:800;line-height:16px;cursor:pointer;font-family:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'+(k?'background:var(--ac);color:#000':'background:rgba(0,0,0,.62);color:#fff');
+        chip.onclick=function(e){ e.stopPropagation();
+          _refPartMenuOpen(chip, (room.label||'이 방')+' 참고 '+(i+1)+' — 가져올 부분', k, room.refPartTxt[i], function(nk, nt){ room.refParts[i]=nk; if(nk==='custom') room.refPartTxt[i]=nt; renderSB(); });
+        };
+        t.appendChild(chip);
+        g.appendChild(t);
+      });
+      if(rr.length<MR_ROOM_MAX_REFS){
+        var add=document.createElement('div'); add.title='이 방 참고 사진 추가 (예: 아트월은 이 사진, 조명은 저 사진)';
+        add.style.cssText='aspect-ratio:1;border-radius:6px;border:1.5px dashed var(--bd2);display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--m2);cursor:pointer;background:var(--card)';
+        add.textContent='+';
+        add.onclick=function(e){ e.stopPropagation(); refFileInp.click(); };
+        g.appendChild(add);
+      }
+      refSlot.appendChild(g);
+    }
+    refSlot.onclick=function(e){ if(!_mrRoomRefs(room).length){ e.stopPropagation(); refFileInp.click(); } };
+    refFileInp.onchange=function(){ _mrReadFiles(refFileInp.files); refFileInp.value=''; };
+    _wirePasteTarget(refSlot, function(f){ _mrReadFiles([f]); });
     renderRoomRefSlot();
     refCol.appendChild(refSlot);refCol.appendChild(refFileInp);
-    var refLbl=dv('');refLbl.style.cssText='font-size:9px;color:var(--t2);font-weight:700;white-space:nowrap';refLbl.textContent='🎨 이 방 전용 참고(선택)';
+    var refLbl=dv('');refLbl.style.cssText='font-size:9px;color:var(--t2);font-weight:700;white-space:nowrap';refLbl.textContent='🎨 이 방 참고(최대 '+MR_ROOM_MAX_REFS+'장)';
     refCol.appendChild(refLbl);
     pairRow.appendChild(refCol);
 
     cardWrap.appendChild(pairRow);
 
     var refHintEl=dv('');refHintEl.style.cssText='font-size:9.5px;color:var(--m2);line-height:1.4;margin:-2px 0 8px;text-align:center';
-    refHintEl.textContent=room.refImg ? '✅ 전체 공통 참고 + 이 방 전용 참고, 둘 다 보고 만들어져요' : '비워두면 전체 공통 참고 이미지로만 만들어져요';
+    var _rrN=_mrRoomRefs(room).length;
+    refHintEl.textContent=_rrN>1 ? '✅ 사진마다 ▾ 눌러서 "아트월만·조명만"처럼 가져올 부분을 정할 수 있어요' : (_rrN ? '✅ 전체 공통 참고 + 이 방 전용 참고, 둘 다 보고 만들어져요 · ＋로 부분별 참고 추가' : '비워두면 전체 공통 참고 이미지로만 만들어져요');
     cardWrap.appendChild(refHintEl);
 
     var row=dv('');row.style.cssText='display:flex;align-items:center;gap:8px';
@@ -18368,7 +18448,7 @@ function mkMultiRoomSpace(p){
   // 따로 넣을 수 있는 기능이 있는데도, 공통 참고가 없으면 방별 전용 참고가 있어도 소용없이
   // 막혀있었음. 이제 "공통 참고가 있거나, 등록된 방 전부가 각자 전용 참고를 갖고 있으면"
   // 생성 가능하게 완화함 — 방마다 다른 스타일 참고를 따로 넣는 방식만으로도 쓸 수 있게 됨.
-  var _allRoomsHaveOwnRef = n>0 && spTab.multiRoomImages.every(function(r){ return !!r.refImg; });
+  var _allRoomsHaveOwnRef = n>0 && spTab.multiRoomImages.every(function(r){ return _mrRoomRefs(r).length>0; });
   var missingRef = !spTab.multiRoomRefDesignImg && !_allRoomsHaveOwnRef;
   goBtn.disabled=!!isRunning || n<1 || missingRef;
   goBtn.innerHTML=isRunning?'생성 중...':'🏠 세트로 생성 시작 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+totalCost+'cr</span>';
@@ -18437,7 +18517,7 @@ function _multiRoomRun(){
   // 등록된 방 전부가 각자 "이 방 전용 참고 이미지"를 갖고 있으면 그걸로 충분히 "어떤 느낌으로"
   // 통일할지 기준이 서므로 실행을 막지 않음 — 공통 참고도 없고 방별 전용 참고도 없는 방이
   // 하나라도 있을 때만 막음.
-  var _allRoomsHaveOwnRef1 = n>0 && spTab.multiRoomImages.every(function(r){ return !!r.refImg; });
+  var _allRoomsHaveOwnRef1 = n>0 && spTab.multiRoomImages.every(function(r){ return _mrRoomRefs(r).length>0; });
   if(!spTab.multiRoomRefDesignImg && !_allRoomsHaveOwnRef1){
     alert('공통 참고 디자인 이미지를 올리거나, 아래 방마다 전용 참고 이미지를 각각 넣어주세요.');
     return;
@@ -18559,6 +18639,52 @@ function _multiRoomBuildExteriorPrompt(userStyle, viewLabel, hasRoomRef){
 // 참고 디자인 이미지 하나만 보고 이 공간을 다시 디자인하도록 지시하는 프롬프트를 만듦 —
 // 색감, 천장 디자인, 창호 프레임(있는 경우), 문 형태, 소품, 가구 느낌·톤까지 전부 참고
 // 이미지를 따라가게 하고, 벽·창문 위치 같은 이 공간 고유의 구조는 그대로 유지하게 함.
+// ── 공간 컨셉 디자인(현장사진 세트): 방마다 참고 사진 여러 장 + 사진별 "가져올 부분" (2026-10-08) ──
+var MR_ROOM_MAX_REFS=4;
+function _mrRoomRefs(room){
+  if(!room) return [];
+  if(!Array.isArray(room.refImgs)) room.refImgs = room.refImg ? [room.refImg] : [];
+  room.refParts=room.refParts||[]; room.refPartTxt=room.refPartTxt||[];
+  for(var i=room.refImgs.length-1;i>=0;i--){ if(!room.refImgs[i]){ room.refImgs.splice(i,1); room.refParts.splice(i,1); room.refPartTxt.splice(i,1); } }
+  room.refImg = room.refImgs[0]||null; // 예전 코드·저장본 호환
+  return room.refImgs;
+}
+// 실제로 보내는 순서대로 "이미지 N = 역할". 이미지 1 = 원본 사진. 부분 지정이 없고 방 참고가 1장 이하면 기존 프롬프트 그대로('')
+function _mrRolesText(refsToUse, common, room, extImg, anchor){
+  var rr=_mrRoomRefs(room);
+  var anyPart=rr.some(function(_,i){ return !!room.refParts[i]; });
+  if(!anyPart && rr.length<=1) return '';
+  var lines=[];
+  (refsToUse||[]).filter(Boolean).slice(0, getMaxRefs()).forEach(function(src,i){
+    var d, k=rr.indexOf(src);
+    if(src===common) d='common style reference for the whole house (overall colors, tone, mood — lower priority than this room\'s own references)';
+    else if(k>=0){ var en=_refPartEnGeneric(room.refParts[k], room.refPartTxt[k]); d = en ? 'this room\'s own reference — '+en+' — take nothing else from this image' : 'this room\'s own reference — overall design for everything not assigned to another reference'; }
+    else if(src===anchor) d='window-frame anchor — window frame color/material only';
+    else if(src===extImg) d='this building\'s exterior — only for its own facade seen through the windows';
+    else d='additional reference';
+    lines.push('Image '+(i+2)+': '+d);
+  });
+  if(!lines.length) return '';
+  return ' ⚠️ REFERENCE IMAGE ROLES (this overrides any reference-image count or order stated above — follow strictly; Image 1 is the site photo to edit): '+lines.join('; ')+'. Each of this room\'s references controls only its assigned part; if references disagree, each one wins only for its own part. Recreate each referenced part as literally as possible (same design, shape, material, color). Never copy windows, doors, openings or the room layout from any reference.';
+}
+// "가져올 부분" 고르는 작은 메뉴(공용)
+function _refPartMenuOpen(anchor, title, k, curTxt, onPick){
+  var old=document.getElementById('ref-part-menu'); if(old) old.remove();
+  var m=document.createElement('div'); m.id='ref-part-menu';
+  var r=anchor.getBoundingClientRect();
+  m.style.cssText='position:fixed;z-index:100003;left:'+Math.max(4,Math.min(window.innerWidth-190, r.left))+'px;top:'+Math.max(4,Math.min(window.innerHeight-340, r.bottom+4))+'px;width:180px;background:var(--card,#141518);border:1px solid var(--bd2);border-radius:10px;padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.5)';
+  var h=document.createElement('div'); h.style.cssText='font-size:10.5px;color:var(--m2);font-weight:700;padding:4px 6px'; h.textContent=title; m.appendChild(h);
+  CONSULT_REF_PARTS.forEach(function(pp){
+    var b=document.createElement('button'); b.type='button'; b.textContent=(pp[0]===k?'✓ ':'')+pp[1];
+    b.style.cssText='display:block;width:100%;text-align:left;padding:6px 8px;border:none;border-radius:6px;background:'+(pp[0]===k?'var(--acg)':'transparent')+';color:'+(pp[0]===k?'var(--ac)':'var(--t2)')+';font-size:12px;cursor:pointer;font-family:inherit';
+    b.onclick=function(ev){ ev.stopPropagation(); var t='';
+      if(pp[0]==='custom'){ t=prompt('이 사진에서 무엇만 가져올까요? (예: 아치형 벽 디자인, 원목 선반)', curTxt||''); if(t==null||!t.trim()){ m.remove(); return; } t=t.trim(); }
+      m.remove(); onPick(pp[0], t); };
+    m.appendChild(b);
+  });
+  document.body.appendChild(m);
+  setTimeout(function(){ document.addEventListener('mousedown', function cl(ev){ if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('mousedown', cl); } }); }, 0);
+}
 function _multiRoomBuildPrompt(userStyle, roomLabel, hasRoomRef){
   // ⚠️ 건축 외관 뷰(SPACE_CATEGORIES.exterior)는 완전히 다른 규칙(카메라 앵글 중심)을 쓰므로
   // 별도 함수로 분기 — 아래 실내 공간용 로직(벽·문·창문 100% 보존 등)을 타면 안 됨.
@@ -18689,9 +18815,9 @@ function _multiRoomGenerateStep(pos){
   st.step=pos; st.running=true;
   renderSB();
   var room=rooms[idx];
-  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label, !!room.refImg);
+  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label, _mrRoomRefs(room).length>0);
   var origRefs = getTab('space').refs;
-  var refsToUse = [spTab.multiRoomRefDesignImg, room.refImg].filter(Boolean); // 공통 참고 없이 방 전용 참고만 있는 경우도 지원(null 제거)
+  var refsToUse = [spTab.multiRoomRefDesignImg].concat(_mrRoomRefs(room)).filter(Boolean); // 공통 참고 없이 방 전용 참고만 있는 경우도 지원(null 제거)
   // ⚠️ 버그 수정("실내에서 창밖으로 이 건물 자신의 외벽이 보이는데 건축 외관 참고 사진이랑 마감재가
   // 다르다"): 방금 프롬프트에 "이 건물 자신의 외벽이 보이면 건축 외관 참고 사진의 마감재를
   // 적용하라"는 지시를 추가했는데, 정작 그 건축 외관 사진 자체가 실내 공간을 생성할 때 참고
@@ -18718,6 +18844,7 @@ function _multiRoomGenerateStep(pos){
     refsToUse = refsToUse.concat([spTab.multiRoomWindowAnchor]);
     prompt += ' ⚠️⚠️ 창호(창틀) 색상·형태 통일(매우 중요, 다른 스타일 지시보다 창호에 관해서는 우선): 마지막으로 첨부된 참고 이미지는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에 실제로 보이는 창호(창틀)의 색상·소재·형태를 이 공간의 창문·발코니 창호에도 정확히 동일하게 적용하세요. 세트 안의 모든 공간은 안팎이 같은 창호를 쓰는 하나의 건물이어야 합니다. ⚠️ 단, 사용자가 위쪽 설명(전체 공통 스타일 등)에서 창문 프레임 색상을 직접 지정했다면(예: "창문 프레임 블랙으로 해줘"), 그 사용자 지정 색상이 이 규칙보다 항상 우선합니다 — 참고 이미지에서 뽑은 색을 무시하고 사용자가 말한 색을 쓰세요.';
   }
+  prompt += _mrRolesText(refsToUse, spTab.multiRoomRefDesignImg, room, _extRefImg||null, spTab.multiRoomWindowAnchor);
   getTab('space').refs = refsToUse;
   // ⚠️ 버그 수정("공간 컨셉 디자인 렌더링 걸었는데 왜 메인화면에 안 뜨는거야?"): 생성은 몇 초~
   // 몇십 초 걸리는 비동기 작업인데, 그 사이에 사용자가 "아파트 평형 템플릿"↔"공간 컨셉 디자인"
@@ -18747,6 +18874,7 @@ function _multiRoomGenerateStep(pos){
     (function(_mrCi){
       var task={id:Date.now()+idx*10+_mrCi+Math.random(), img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.multiRoomResolution||'1K'};
       var _candTag = (_mrCandN>1) ? (room.label+' (후보'+(_mrCi+1)+'/'+_mrCandN+')') : room.label;
+      task.noRefRoles=true;
       procImgWithTask(task, function(resultUrl){
         if(_mrCi===0){
           st.results[idx]={url:resultUrl};
@@ -18771,7 +18899,7 @@ function _multiRoomRetryOne(idx){
   var st=spTab.multiRoomState;
   if(!st) return;
   var _room1ForRetry = spTab.multiRoomImages[idx];
-  if(!spTab.multiRoomRefDesignImg && !(_room1ForRetry && _room1ForRetry.refImg)){
+  if(!spTab.multiRoomRefDesignImg && !(_room1ForRetry && _mrRoomRefs(_room1ForRetry).length)){
     alert('공통 참고 디자인 이미지가 없어요. 위에서 다시 올리거나, 이 방에 전용 참고 이미지를 넣어주세요.');
     return;
   }
@@ -18783,9 +18911,9 @@ function _multiRoomRetryOne(idx){
   renderSB();
   var rooms=spTab.multiRoomImages;
   var room=rooms[idx];
-  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label, !!room.refImg);
+  var prompt = _multiRoomBuildPrompt(spTab.multiRoomPrompt, room.label, _mrRoomRefs(room).length>0);
   var origRefs=getTab('space').refs;
-  var refsToUse = [spTab.multiRoomRefDesignImg, room.refImg].filter(Boolean); // 공통 참고 없이 방 전용 참고만 있는 경우도 지원(null 제거)
+  var refsToUse = [spTab.multiRoomRefDesignImg].concat(_mrRoomRefs(room)).filter(Boolean); // 공통 참고 없이 방 전용 참고만 있는 경우도 지원(null 제거)
   // ⚠️ _multiRoomGenerateStep과 동일한 이유로: 이 방이 실내 공간이면, 이 세트의 건축 외관 사진도
   // 같이 첨부해서 "창밖으로 이 건물 자신의 외벽이 보이면 그 마감재를 적용하라"는 지시가 실제로
   // 작동하게 함.
@@ -18807,11 +18935,12 @@ function _multiRoomRetryOne(idx){
     refsToUse = refsToUse.concat([spTab.multiRoomWindowAnchor]);
     prompt += ' ⚠️⚠️ 창호(창틀) 색상·형태 통일(매우 중요): 마지막으로 첨부된 참고 이미지는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에 실제로 보이는 창호(창틀)의 색상·소재·형태를 이 공간의 창문·발코니 창호에도 정확히 동일하게 적용하세요. ⚠️ 단, 사용자가 위쪽 설명(전체 공통 스타일 등)에서 창문 프레임 색상을 직접 지정했다면(예: "창문 프레임 블랙으로 해줘"), 그 사용자 지정 색상이 이 규칙보다 항상 우선합니다 — 참고 이미지에서 뽑은 색을 무시하고 사용자가 말한 색을 쓰세요.';
   }
+  prompt += _mrRolesText(refsToUse, spTab.multiRoomRefDesignImg, room, _extRefImg2||null, spTab.multiRoomWindowAnchor);
   getTab('space').refs = refsToUse;
   // ⚠️ 버그 수정(위 _multiRoomGenerateStep과 동일한 이유): 재생성 중에 모드가 바뀌어도 결과
   // 태그가 틀어지지 않도록, 시작 시점의 isAptSimpleMode 값을 미리 캡처해둠.
   var _isAptForThisRetry = !!spTab.isAptSimpleMode;
-  var task={id:Date.now()+idx, img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.multiRoomResolution||'1K'};
+  var task={id:Date.now()+idx, img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.multiRoomResolution||'1K', noRefRoles:true};
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs=origRefs;
     st.results[idx]={url:resultUrl, prevUrl:prevResult&&prevResult.url};
@@ -22122,6 +22251,7 @@ function _padExteriorTo916WithBlur(url, cb){
   for(var _arCi2=0; _arCi2<_arCandN2; _arCi2++){
     (function(_arCi2){
       var _taskN = (_arCi2===0) ? task : Object.assign({}, task, {id: Date.now()+idx*10+_arCi2+Math.random()});
+      _taskN.noRefRoles=true;
       procImgWithTask(_taskN, function(resultUrl){
         var _tagLabel1 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
         if(_arCi2===0){
@@ -22419,6 +22549,7 @@ function _autoRoomRetryOne(idx){
       : chainedRefs2.slice(0,1);
   }
   getTab('space').refs = chainedRefs2;
+  task.noRefRoles=true;
   procImgWithTask(task, function(resultUrl){
     getTab('space').refs = origRefs;
     st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
@@ -24479,6 +24610,7 @@ function _agentRun(){
         // (_multiRoomGenerateStep 등 다른 기능들과 동일한 패턴) 호출 직전에 잠깐 옮겨줬다가 복원함.
         var _agentOrigSpaceRefs = getTab('space').refs;
         getTab('space').refs = (tab.refs && tab.refs.length) ? tab.refs : undefined;
+        task.noRefRoles=true;
         procImgWithTask(task, function(url){ getTab('space').refs=_agentOrigSpaceRefs; onVariantDone(url); }, function(err){ getTab('space').refs=_agentOrigSpaceRefs; onVariantErr(err); });
       } else {
         _agentGenerateTextOnly(tab.prompt.trim(), onVariantDone, onVariantErr, agentRes);
@@ -25284,7 +25416,7 @@ function _saveMainTabImagesDraft(){
     var snap={};
     _MAIN_IMG_PERSIST_WFS.forEach(function(wf){
       var t=G.tabs[wf];
-      if(t && t.inputImg) snap[wf]={inputImg:t.inputImg, inputImgName:t.inputImgName||'', endImg:t.endImg||null, refs:t.refs||null};
+      if(t && t.inputImg) snap[wf]={inputImg:t.inputImg, inputImgName:t.inputImgName||'', endImg:t.endImg||null, refs:t.refs||null, refParts:t.refParts||null, refPartTxt:t.refPartTxt||null};
     });
     idbSaveDraft(_mainImgDraftKey(), snap).catch(function(){});
   }, 600);
@@ -25302,6 +25434,7 @@ function _restoreMainTabImagesDraft(){
         t.inputImgName=saved.inputImgName||'';
         if(saved.endImg) t.endImg=saved.endImg;
         if(saved.refs) t.refs=saved.refs;
+        if(saved.refParts) t.refParts=saved.refParts; if(saved.refPartTxt) t.refPartTxt=saved.refPartTxt;
         // ⚠️ 버그 수정("AI편집탭 수정할 이미지 클릭하면 메인화면에 떠야하는데 안 뜨네, 렌더링
         // 되고있다고 화면에도 안 뜨네"): 새로고침 후 이 함수로 이미지를 복원하면 사이드바
         // 썸네일(tab.inputImg 기준)엔 바로 보이는데, 가운데 메인화면(renderMain)은 오직
@@ -29523,9 +29656,41 @@ function _consultRoomKey(name){
   if(/안방|침실|방|드레스|서재|룸/.test(name)) return 'bed'; return 'other';
 }
 function _consultRefForSpace(st, spName){
-  var key=_consultRoomKey(spName), tags=st.refTags||[], refs=st.refs||[];
-  for(var i=0;i<refs.length;i++){ if(refs[i] && tags[i] && tags[i]!=='전체 스타일' && _consultRoomKey(tags[i])===key) return i; }
-  return -1;
+  var a=(typeof _consultRefsForSpace==='function')?_consultRefsForSpace(st, spName):[];
+  return a.length?a[0]:-1;
+}
+// 사진마다 "어느 부분만" 가져올지 (2026-10-08 요청: 아트월은 이 사진, 천장 조명은 저 사진, 소파·테이블은 또 다른 사진)
+var CONSULT_MAX_REFS=8;
+var CONSULT_REF_PARTS=[
+  ['', '전체 느낌', null],
+  ['wall','아트월·포인트벽','ONLY the feature / art wall design (its material, pattern, panelling, built-in or indirect lighting) — apply it to the most suitable main wall of image 1 (usually the TV wall or the wall behind the sofa/bed)'],
+  ['ceiling','천장·조명','ONLY the ceiling design and lighting (ceiling shape and steps, cove / indirect lighting, downlights, pendant or chandelier design and placement style)'],
+  ['furniture','소파·테이블 등 가구','ONLY the loose furniture pieces (sofa, coffee table, dining table, chairs, bed, side tables, etc.) — the same designs, colors and materials, arranged sensibly in image 1'],
+  ['floor','바닥','ONLY the floor material, color, size and laying pattern'],
+  ['kitchen','주방 가구','ONLY the kitchen cabinetry design (door style, color, handles), countertop and backsplash — applied to the existing kitchen layout of image 1'],
+  ['storage','수납·붙박이','ONLY the built-in storage / wardrobe / shelving design (door style, color, handles) — applied to the existing built-in positions of image 1'],
+  ['lightfix','조명 기구','ONLY the light fixtures (pendants, wall lights, floor and table lamps) — the same designs'],
+  ['decor','소품·데코','ONLY the decor objects, artwork, plants and props'],
+  ['fabric','커튼·러그·패브릭','ONLY the curtains, rugs, cushions and fabrics'],
+  ['bath','욕실 마감·도기','ONLY the bathroom finishes and fixtures (tiles, vanity, basin, faucets, mirror, shower)'],
+  ['custom','직접 입력…', null]
+];
+function _consultRefPartEn(st, i){
+  var k=(st.refParts||[])[i]||'';
+  if(!k) return null;
+  if(k==='custom'){ var t=((st.refPartTxt||[])[i]||'').trim(); return t ? 'ONLY this element: '+t+' (as shown in this image)' : null; }
+  var d=CONSULT_REF_PARTS.filter(function(x){return x[0]===k;})[0]; return d?d[2]:null;
+}
+function _consultRefPartKo(st, i){
+  var k=(st.refParts||[])[i]||''; if(k==='custom') return ((st.refPartTxt||[])[i]||'직접 입력');
+  var d=CONSULT_REF_PARTS.filter(function(x){return x[0]===k;})[0]; return d?d[1]:'전체 느낌';
+}
+// 이 공간에 맞는 참고사진 전부(전체 느낌 먼저, 부분 사진은 그다음)
+function _consultRefsForSpace(st, spName){
+  var key=_consultRoomKey(spName), tags=st.refTags||[], refs=st.refs||[], out=[];
+  for(var i=0;i<refs.length;i++){ if(refs[i] && tags[i] && tags[i]!=='전체 스타일' && tags[i]!=='…' && _consultRoomKey(tags[i])===key) out.push(i); }
+  out.sort(function(a,b){ return (_consultRefPartEn(st,a)?1:0)-(_consultRefPartEn(st,b)?1:0); });
+  return out;
 }
 // 스타일 사진이 어떤 공간인지 자동 분류(무료 AI)
 function _consultClassifyRef(st, idx){
@@ -29623,7 +29788,7 @@ function _consultEnsureSched(st, v, cb, opt){
     var pr=function(n){ return /주방|부엌/.test(n)?0:/욕실|화장실/.test(n)?1:/현관/.test(n)?2:/거실/.test(n)?3:4; };
     sp.sort(function(a,b){ return pr(a.name)-pr(b.name); }).slice(0,5).forEach(function(s){ imgs.push(v.spaces[s.id].result); labels.push(s.name); });
   } else {
-    imgs=(st.refs||[]).filter(Boolean).slice(0,3);
+    (st.refs||[]).forEach(function(u,i){ if(u && imgs.length<6){ imgs.push(u); labels.push(((st.refTags||[])[i]||'전체 스타일')+((st.refParts||[])[i]?' · '+_consultRefPartKo(st,i)+'만 참고':'')+' (참고사진)'); } });
   }
   v.refImgs=imgs.length>0;
   v.schedStatus='run'; _consultRefresh();
@@ -30298,7 +30463,16 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor, v, roomRef){
   }
   if(nRefs && !build){
     var _faith=!!vp.faithful;
-    if(roomRef) lines.push('ROOM REFERENCE (MOST IMPORTANT): image 2 is the client\'s reference photo for exactly this kind of room. '+(_faith?'Recreate image 2\'s design INSIDE the real room of image 1 as literally as possible':'Use image 2 as the base design for this room, varied only as the design option says')+': the same finish materials and colors (cabinet doors, wall finish such as panelling or plaster, floor, countertop, tiles), the SAME furniture pieces with the same shapes and colors (e.g. the same dining table and the same chairs, the same sofa, the same bed), the SAME lighting fixtures (same pendant / floor lamp / wall-light designs), the same decor objects, plants and props, and the same color palette and mood. It must look like the designer of image 2 remodeled the room of image 1. Only adapt sizes, quantities and placement to fit the real walls, windows, doors AND the existing built-in cabinet layout of image 1 (those never change — image 2\'s windows, doors and cabinet layout are NOT copied).'+(nRefs>1?' Images 3'+(nRefs>2?' to '+(nRefs+1):'')+' are the client\'s references for OTHER rooms of this same home — use them only to keep the whole home consistent.':''));
+    if(roomRef){
+      // 2026-10-08 요청: "거실이면 아트월은 이 사진, 천장 조명은 저 사진, 소파·테이블은 또 다른 사진" — 사진마다 맡은 부분만
+      var _rl=(roomRef.roles||[]).filter(function(r){return r.own;}), _ot=(roomRef.roles||[]).filter(function(r){return !r.own;});
+      var _hasWhole=_rl.some(function(r){return !r.partEn;});
+      lines.push('ROOM REFERENCES (MOST IMPORTANT): the client gave '+(_rl.length>1?'several reference images':'a reference image')+' for THIS room. Each image controls ONLY its assigned part:\n'+
+        _rl.map(function(r){ return '- Image '+r.n+': '+(r.partEn ? r.partEn+'. Take nothing else from this image.' : 'the overall design of this room — finishes, colors, cabinetry, furniture, lighting fixtures, decor, props and mood (everything that is not assigned to another image comes from here).'); }).join('\n')+'\n'+
+        (_faith?'Recreate each referenced element INSIDE the real room of image 1 as literally as possible':'Use these references as the base design, varied only as the design option says')+' — same designs, shapes, materials, colors and finishes as in the reference. Only adapt sizes, quantities and placement to fit the real walls, windows, doors AND the existing built-in cabinet layout of image 1 (those never change — the references\' windows, doors and layouts are NOT copied). If two images disagree, each image wins only for its own assigned part.'+
+        (_hasWhole?'':' No image is given for the overall room, so design every unassigned part in a style that matches the referenced parts.')+
+        (_ot.length?' Images '+_ot.map(function(r){return r.n;}).join(', ')+' are the client\'s references for OTHER rooms of this same home — use them only to keep the whole home consistent.':''));
+    }
     else lines.push('CLIENT REFERENCE IMAGES: images 2'+(nRefs>1?' to '+(nRefs+1):'')+' are the client\'s reference photos for other rooms of this same home. There is no reference for this exact room, so design it in the SAME style family'+(_faith?' as literally as possible':'')+': the same materials, colors, furniture style, lighting fixture style, decor and props vibe, so it clearly belongs to the same home.');
     lines.push('BUDGET REALISM: if a reference shows expensive materials (e.g. natural marble), render the cost-appropriate scheduled substitute (e.g. marble-look large porcelain tile) that looks visually the same.');
   } else if(nRefs) lines.push('CLIENT REFERENCE IMAGES: images 2'+(nRefs>1?' to '+(nRefs+1):'')+' are the style/material references the client brought — use them for style, colors and materials only, never copy their site, layout or camera.');
@@ -30306,7 +30480,7 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor, v, roomRef){
   // 2026-10-07 요청: "공간마다 참고이미지를 넣으면 참고이미지에 있는 모든 걸 가져와라 — 바닥이 달라도 나중에 통일하면 된다"
   // → 공간 전용 참고사진이 있는 공간은 마감재 스케줄(통일 목록)을 아예 안 보냄. 문·창호 색까지 참고사진 그대로.
   var _sch=roomRef ? '' : _consultSchedText(st, v, sp.name);
-  if(_sch && roomRef) _sch=_sch.replace('apply EXACTLY these materials and colors','these were read from the client references — but for THIS room the ROOM REFERENCE (image 2) ALWAYS WINS: wherever image 2 shows a different floor, wall finish, cabinet style/color, countertop or tile, copy image 2 instead; use this schedule only for door/frame/window-film colors and for anything image 2 does not show');
+  if(_sch && roomRef) _sch=_sch.replace('apply EXACTLY these materials and colors','these were read from the client references — but for THIS room the ROOM REFERENCES ALWAYS WIN: wherever they show a different floor, wall finish, cabinet style/color, countertop or tile, copy image 2 instead; use this schedule only for door/frame/window-film colors and for anything the references do not show');
   if(_sch) lines.push(_sch);
   if(hasAnchor) lines.push('PROJECT CONSISTENCY (very important): the LAST image is the already-approved rendering of another space in this SAME design option. Use exactly the same finish materials, door and frame color, window film color, wood tone, stone/tile, metal finish, color palette and lighting mood so that every space of this option clearly belongs to one consistent project — but keep the room/camera of image 1.');
   if(st.memo) lines.push('CLIENT REQUESTS: '+st.memo);
@@ -30329,9 +30503,9 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor, v, roomRef){
     lines.push('⚠⚠⚠ FINAL OVERRIDE: keep the real surroundings, site boundaries, roads, neighboring buildings and camera exactly as in image 1; '+(st.type==='build_remodel'?'keep the existing building footprint, structure grid and window rhythm unless the design option explicitly changes the facade openings; do not add storeys beyond what is specified. ':'')+'The client reference images are for style only — never copy their site, layout or camera.');
   }
   if(roomRef && !build){
-    lines.push('⚠⚠⚠ REFERENCE FIDELITY CHECK (as important as the structure rule): take EVERYTHING you can see in image 2 — every finish, color, fixture, piece of furniture, lamp, accessory and prop — and put it into this room; this room must look like a 90-100% copy of image 2 placed into image 1\'s architecture (door and window-frame colors also follow image 2). Before finishing, compare with image 2 item by item and fix anything that differs: (a) FLOOR — same material type and color as image 2 (tile stays tile, wood stays wood, same tone and size); (b) WALL FINISH — same as image 2, including any wood panelling, V-groove boards, wainscoting, plaster or paint color; (c) CABINETS — same door style (flat slab / shaker / grooved, handle-less or same handles), same color and finish, same upper-cabinet presence or absence, open shelves like image 2; (d) COUNTERTOP and BACKSPLASH — same material and color as image 2; (e) LIGHTING FIXTURES — same pendant / wall lights / lamps design; (f) FURNITURE — same table and chairs (shape, color, material); (g) DECOR and PROPS — same objects and style; (h) overall COLOR PALETTE and mood of image 2. Do NOT replace any of these with generic or default Korean-apartment finishes. Only walls, windows, doors, built-in cabinet layout, ceiling height and camera come from image 1.');
+    lines.push('⚠⚠⚠ REFERENCE FIDELITY CHECK (as important as the structure rule): compare your result with each room reference image for the part it is assigned (listed above) and fix anything that differs — for an "overall design" image: floor material and color (tile stays tile, wood stays wood), wall finish (incl. panelling, V-groove boards, wainscoting, plaster, paint color), cabinet door style and color, countertop and backsplash, lighting fixtures, furniture (shape, color, material), decor and props, and the overall color palette; for a part image: that part must look like a 90-100% copy (e.g. the same art-wall design, the same pendant, the same sofa and coffee table). Do NOT replace any of these with generic or default Korean-apartment finishes. Only walls, windows, doors, built-in cabinet layout, ceiling height and camera come from image 1.');
     // 2026-10-07 버그 신고("참고사진에 있는 창문을 우측에 새로 만들고, 상부장·빌트인 냉장고를 지웠다") → 구조 잠금을 맨 마지막(가장 강한 자리)에 한 번 더
-    lines.push('🔒 LAST AND HIGHEST-PRIORITY RULE — STRUCTURE LOCK (overrides the reference): image 2 is a DIFFERENT room with different windows and doors. NEVER copy image 2\'s windows, doors, openings, wall layout or cabinet layout. Count the windows and doors in image 1 and in your result — they must be identical in number, position and size; a wall that is plain in image 1 stays a plain wall (it may get image 2\'s wall finish, e.g. panelling, but NO new window or door). Every upper cabinet, tall cabinet, built-in refrigerator column and hood visible in image 1 must still be there in the same place with the same size — restyled to image 2\'s door style and color, never deleted. The sink, faucet and cooktop stay where image 1 has them, with exactly ONE faucet at the existing sink (image 2 may show two faucets or a different sink position — do NOT copy that); in bathrooms the toilet, basin, tub/shower and drain stay in place. If you added a window/door, an extra faucet or sink, or removed a built-in, undo it.');
+    lines.push('🔒 LAST AND HIGHEST-PRIORITY RULE — STRUCTURE LOCK (overrides the reference): the reference images show DIFFERENT rooms with different windows and doors. NEVER copy their windows, doors, openings, wall layout or cabinet layout. Count the windows and doors in image 1 and in your result — they must be identical in number, position and size; a wall that is plain in image 1 stays a plain wall (it may get image 2\'s wall finish, e.g. panelling, but NO new window or door). Every upper cabinet, tall cabinet, built-in refrigerator column and hood visible in image 1 must still be there in the same place with the same size — restyled to the referenced door style and color, never deleted. The sink, faucet and cooktop stay where image 1 has them, with exactly ONE faucet at the existing sink (a reference may show two faucets or a different sink position — do NOT copy that); in bathrooms the toilet, basin, tub/shower and drain stay in place. If you added a window/door, an extra faucet or sink, or removed a built-in, undo it.');
   }
   return lines.join('\n');
 }
@@ -30363,17 +30537,21 @@ function _consultUrl(u, cb){ if(!u){ cb(null); return; } if(/^https?:/.test(u)){
 function _consultRunSpace(st, v, vp, sp, anchorUrl, done){
   var rec=v.spaces[sp.id]||(v.spaces[sp.id]={});
   rec.status='run'; rec.err=null; _consultRefresh();
-  var refs=(st.refs||[]).filter(Boolean).slice(0,4);
+  var refs=(st.refs||[]).slice(0,CONSULT_MAX_REFS);
   var urls=[], left=1+refs.length;
   function fail(msg){ rec.status='err'; rec.err=String(msg||'실패'); _consultSave(); _consultRefresh(); done(null); }
   function go(){
     if(!urls[0]){ fail('현장 사진 업로드 실패'); return; }
-    var mi=_consultRefForSpace(st, sp.name), refU=urls.slice(1);
-    var ordered = (mi>=0 && refU[mi]) ? [refU[mi]].concat(refU.filter(function(x,i){ return i!==mi; })) : refU;
-    var list=[urls[0]].concat(ordered.filter(Boolean)).slice(0,5); var nRefs=list.length-1;
-    var useAnchor = anchorUrl && !(mi>=0 && refU[mi]); // 이 공간 전용 참고사진이 있으면 그 사진이 우선(통일은 마감재 스케줄로)
+    // 이 공간 참고사진(전체 느낌 + 부분별) 먼저, 다른 공간 사진은 통일감용으로 뒤에(전체 최대 10장)
+    var refU=urls.slice(1), mine=_consultRefsForSpace(st, sp.name).filter(function(i){ return refU[i]; });
+    var others=[]; refU.forEach(function(u,i){ if(u && mine.indexOf(i)<0) others.push(i); });
+    var order=mine.concat(others).slice(0, 9-(anchorUrl?1:0));
+    var list=[urls[0]], roles=[];
+    order.forEach(function(i){ list.push(refU[i]); roles.push({n:list.length, own:mine.indexOf(i)>=0, partEn:_consultRefPartEn(st,i)}); });
+    var nRefs=list.length-1, hasOwn=roles.some(function(r){return r.own;});
+    var useAnchor = anchorUrl && !hasOwn; // 이 공간 전용 참고사진이 있으면 그 사진들이 우선(통일은 마감재 스케줄로)
     if(useAnchor) list.push(anchorUrl);
-    var prompt=_consultPrompt(st, vp, sp, nRefs, !!useAnchor, v, (mi>=0 && !!refU[mi]));
+    var prompt=_consultPrompt(st, vp, sp, nRefs, !!useAnchor, v, hasOwn?{roles:roles}:false);
     _withExplicitAspect(urls[0], function(asp){
       falRun('google/nano-banana-2.1/edit', {prompt:prompt, image_urls:list, num_images:1, resolution:({'1K':'1K','2K':'2K','4K':'4K'})[st.res]||'1K', aspect_ratio:asp}, function(d){
         var url=falExtractImageUrl(d);
@@ -30386,7 +30564,7 @@ function _consultRunSpace(st, v, vp, sp, anchorUrl, done){
     }, st.aspect||'auto'); // 2026-10-07: 기본은 원본 사진 비율, 직접 고를 수도 있음
   }
   _consultUrl(sp.photo, function(u){ urls[0]=u; if(--left===0) go(); });
-  refs.forEach(function(r,i){ _consultUrl(r, function(u){ urls[i+1]=u; if(--left===0) go(); }); });
+  refs.forEach(function(r,i){ if(!r){ if(--left===0) go(); return; } _consultUrl(r, function(u){ urls[i+1]=u; if(--left===0) go(); }); });
 }
 // 시안 하나: 마감재 스케줄(무료) → 첫 공간 → (기준 이미지로) 나머지 공간 → 재질 사진 → 견적
 function _consultRunVariant(st, vi, onlySpaceId){
@@ -31073,7 +31251,7 @@ function sbConsult(p){
     b.onclick=function(){
       if(running || st.type===t.k) return;
       if(st.variants.length && !confirm('종류를 바꾸면 지금 시안이 초기화돼요. 계속할까요?')) return;
-      var n=_consultDefault(t.k); n.spaces=[]; n.refs=st.refs; n.refTags=st.refTags; n.client=st.client; n.area=st.area; n.budget=st.budget; n.memo=st.memo; n.addr=st.addr; n.count=st.count; n.res=st.res;
+      var n=_consultDefault(t.k); n.spaces=[]; n.refs=st.refs; n.refTags=st.refTags; n.refParts=st.refParts; n.refPartTxt=st.refPartTxt; n.client=st.client; n.area=st.area; n.budget=st.budget; n.memo=st.memo; n.addr=st.addr; n.count=st.count; n.res=st.res;
       if(_consultIsBuild(st)===_consultIsBuild(n)) n.spaces=st.spaces;
       G_CONSULT=n; _consultSave(); renderSB(); renderMain('consult');
     };
@@ -31128,15 +31306,15 @@ function sbConsult(p){
   }
   s2.appendChild(pg);
   var lab2=dv(''); lab2.style.cssText='font-size:12px;color:var(--t2);font-weight:700;margin:12px 0 6px';
-  lab2.innerHTML='고객이 원하는 스타일 사진 <span style="font-weight:400;color:var(--m2)">(선택 · 최대 4장 · 공간을 자동으로 알아봐요)</span>';
+  lab2.innerHTML='고객이 원하는 스타일 사진 <span style="font-weight:400;color:var(--m2)">(선택 · 최대 '+CONSULT_MAX_REFS+'장 · 공간은 자동, 사진마다 "어느 부분만" 고를 수 있어요 — 예: 거실 아트월은 이 사진, 천장 조명은 저 사진)</span>';
   s2.appendChild(lab2);
-  var rg=dv(''); rg.style.cssText='display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;align-items:start';
+  var rg=dv(''); rg.style.cssText='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 6px;align-items:start';
   st.refs.forEach(function(u, ri){
     var c=dv(''); c.style.cssText='height:62px;border-radius:8px;background:var(--c2) center/cover no-repeat;position:relative;cursor:zoom-in'; c.style.backgroundImage='url("'+u+'")'; c.title='눌러서 크게 보기';
     c.onclick=function(e){ if(e.target===c) _consultZoomOne(u, '스타일 사진 '+(ri+1)); };
     var no=dv(''); no.textContent=(ri+1); no.style.cssText='position:absolute;left:3px;top:3px;min-width:16px;height:16px;border-radius:8px;background:var(--ac);color:#000;font-size:10px;font-weight:900;text-align:center;line-height:16px;padding:0 3px'; c.appendChild(no);
     var del=mk('button',''); del.type='button'; del.textContent='✕'; del.style.cssText='position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:10px;cursor:pointer;padding:0;line-height:18px';
-    del.onclick=function(){ st.refs.splice(ri,1); (st.refTags||[]).splice(ri,1); (st._refTok||[]).splice(ri,1); _consultSave(); renderSB(); renderMain('consult', true); };
+    del.onclick=function(){ st.refs.splice(ri,1); (st.refTags||[]).splice(ri,1); (st._refTok||[]).splice(ri,1); (st.refParts||[]).splice(ri,1); (st.refPartTxt||[]).splice(ri,1); _consultSave(); renderSB(); renderMain('consult', true); };
     c.appendChild(del);
     // 이 사진이 어느 공간용인지(자동 분류 → 직접 바꾸기 가능). 같은 공간에 그대로 적용됨
     var wrapR=dv(''); wrapR.appendChild(c);
@@ -31146,15 +31324,24 @@ function sbConsult(p){
     _consultRefTagList(st).forEach(function(tg){ var o=mk('option',''); o.value=tg; o.textContent=tg==='전체 스타일'?'전체 스타일':tg+'용'; o.style.cssText='color:#111;background:#fff'; if(tg===cur) o.selected=true; tsel.appendChild(o); });
     if(!cur) tsel.value='전체 스타일';
     tsel.onchange=function(){ st.refTags[ri]=tsel.value; _consultSave(); renderMain('consult', true); };
-    wrapR.appendChild(tsel); rg.appendChild(wrapR);
+    wrapR.appendChild(tsel);
+    // 이 사진에서 가져올 부분(전체 느낌 / 아트월 / 천장·조명 / 가구 …)
+    var psel=mk('select',''); psel.style.cssText=tsel.style.cssText+';margin-top:2px';
+    st.refParts=st.refParts||[]; st.refPartTxt=st.refPartTxt||[];
+    CONSULT_REF_PARTS.forEach(function(pp){ var o=mk('option',''); o.value=pp[0]; o.textContent=pp[0]==='custom'&&st.refPartTxt[ri]?('✎ '+st.refPartTxt[ri]):pp[1]; o.style.cssText='color:#111;background:#fff'; if(pp[0]===(st.refParts[ri]||'')) o.selected=true; psel.appendChild(o); });
+    psel.title='이 사진에서 가져올 부분';
+    psel.onchange=function(){ var k=psel.value; if(k==='custom'){ var t=prompt('이 사진에서 무엇만 가져올까요? (예: 원목 선반, 아치형 벽 디자인)', st.refPartTxt[ri]||''); if(t==null||!t.trim()){ psel.value=st.refParts[ri]||''; return; } st.refPartTxt[ri]=t.trim(); } st.refParts[ri]=k; _consultSave(); renderSB(); renderMain('consult', true); };
+    wrapR.appendChild(psel);
+    if(st.refParts[ri]){ var pb=dv(''); pb.textContent=_consultRefPartKo(st, ri)+'만'; pb.style.cssText='position:absolute;left:3px;bottom:3px;max-width:90%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;background:rgba(0,0,0,.7);color:#fff;font-size:9px;font-weight:800;padding:1px 4px;border-radius:4px'; c.appendChild(pb); }
+    rg.appendChild(wrapR);
   });
-  if(st.refs.length<4){
+  if(st.refs.length<CONSULT_MAX_REFS){
     var raw=dv(''); raw.style.cssText='height:62px;border-radius:8px;border:1px dashed var(--bd2);background:var(--c2);display:flex;flex-direction:column;overflow:hidden';
     var rag=dv(''); rag.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:10.5px;font-weight:800;color:var(--m2)'; rag.textContent='🖼 갤러리';
-    rag.onclick=function(){ _openGalleryPickerForAnchor(function(src){ if(st.refs.length>=4) return; st.refs.push(src); st.refTags=st.refTags||[]; var ix=st.refs.length-1; st.refTags[ix]='…'; _consultClassifyRef(st, ix); if(!/^https?:/.test(src)) _doUpload(src, function(url){ var k=st.refs.indexOf(src); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); renderMain('consult', true); }); };
+    rag.onclick=function(){ _openGalleryPickerForAnchor(function(src){ if(st.refs.length>=CONSULT_MAX_REFS) return; st.refs.push(src); st.refTags=st.refTags||[]; var ix=st.refs.length-1; st.refTags[ix]='…'; _consultClassifyRef(st, ix); if(!/^https?:/.test(src)) _doUpload(src, function(url){ var k=st.refs.indexOf(src); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); renderMain('consult', true); }); };
     var ra=dv(''); ra.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:10.5px;font-weight:800;color:var(--m2);border-bottom:1px dashed var(--bd2)';
     ra.textContent='＋ 내 PC';
-    ra.onclick=function(){ _consultPick(true, function(d){ if(st.refs.length>=4) return; st.refs.push(d); st.refTags=st.refTags||[]; var ix=st.refs.length-1; st.refTags[ix]='…'; _consultClassifyRef(st, ix); _doUpload(d, function(url){ var k=st.refs.indexOf(d); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); }); };
+    ra.onclick=function(){ _consultPick(true, function(d){ if(st.refs.length>=CONSULT_MAX_REFS) return; st.refs.push(d); st.refTags=st.refTags||[]; var ix=st.refs.length-1; st.refTags[ix]='…'; _consultClassifyRef(st, ix); _doUpload(d, function(url){ var k=st.refs.indexOf(d); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); }); };
     raw.appendChild(ra); raw.appendChild(rag);
     rg.appendChild(raw);
   }
@@ -31170,7 +31357,7 @@ function sbConsult(p){
   var plan=_consultEnsurePlan(st);
   var pn=dv(''); pn.style.cssText='font-size:11px;color:var(--m2);margin-top:6px;line-height:1.6';
   var _tierNm=CONSULT_TIERS[_consultTierFromBudget(st)].name;
-  var _matchTxt=''; if((st.refs||[]).length){ var _m=_consultSp(st).map(function(sp){ var ri=_consultRefForSpace(st, sp.name); return ri>=0? sp.name+'←사진'+(ri+1) : null; }).filter(Boolean); _matchTxt='<br>📌 공간별 적용: '+(_m.length?_m.join(', ')+' (나머지 공간은 같은 스타일로 통일)':'공간이 맞는 사진이 없어서 전체 스타일로 적용'); }
+  var _matchTxt=''; if((st.refs||[]).length){ var _m=_consultSp(st).map(function(sp){ var rs=_consultRefsForSpace(st, sp.name); return rs.length? sp.name+'←'+rs.map(function(ri){ return '사진'+(ri+1)+((st.refParts||[])[ri]?'('+_consultRefPartKo(st,ri)+')':''); }).join('+') : null; }).filter(Boolean); _matchTxt='<br>📌 공간별 적용: '+(_m.length?_m.join(', ')+' (나머지 공간은 같은 스타일로 통일)':'공간이 맞는 사진이 없어서 전체 스타일로 적용'); }
   pn.innerHTML=plan.map(function(v,i){ return '<b style="color:var(--t2)">'+_consultLetter(i)+'안</b> '+_cEsc(v.name); }).join(' · ')+_matchTxt+
     '<br>'+(_consultNum(st.budget)?'💰 예산 '+_consultFmtMan(_consultNum(st.budget))+'에 맞춰 <b style="color:var(--t2)">'+_tierNm+'</b> 마감으로 만들어요':'💰 예산을 넣으면 그 금액에 맞는 마감으로 만들어요 (지금: '+_tierNm+')')+
     ((st.refs||[]).length?'':'<br>🖼️ 고객 스타일 사진을 넣으면 그 스타일대로 시안이 나와요');
@@ -36669,7 +36856,7 @@ function _mkCropEditComposite(area, instrText, cb, sourceUrl, refImgForArea){
       var cropPrompt = instrText + '. Photorealistic architectural photography. This is a close-up crop of a larger interior photo — edit it naturally as a complete standalone photo; keep everything not explicitly mentioned in the instruction exactly as it is.';
       var _origRefs0 = getTab(G.wf).refs;
       getTab(G.wf).refs = refImgForArea ? [refImgForArea] : [];
-      var task = {id:Date.now(), img:cropDataUrl, wf:G.wf, prompt:cropPrompt, selK:null, eng:'nano2', resolution: getTab(G.wf).resolution||'1K'};
+      var task = {id:Date.now(), img:cropDataUrl, wf:G.wf, prompt:cropPrompt, selK:null, eng:'nano2', resolution: getTab(G.wf).resolution||'1K', noRefRoles:true};
       procImgWithTask(task, function(resultUrl){
         getTab(G.wf).refs = _origRefs0;
         var resImg = new Image();
@@ -43220,6 +43407,7 @@ function runNanoBanana(prompt, imgDataUrl, modelSlug, onDone, onErr, resKey) {
   // 전달) — 이 세 프리셋은 원래 "아무것도 안 바꾸고 사실감만 올리는" 용도라 참고 이미지가 필요 없음.
   var _isRealismOnlyForRefBlock = _curTabForRef && (_curTabForRef.selK==='hq_real' || _curTabForRef.selK==='hq_real_pro' || _curTabForRef.selK==='render_quality_boost');
   var refImgs = _isRealismOnlyForRefBlock ? [] : (getTab(G.wf) && getTab(G.wf).refs || []).filter(Boolean).slice(0, getMaxRefs());
+  if(refImgs.length && prompt.indexOf('REFERENCE IMAGE ROLES')<0){ try{ prompt += _refRolesText(G.wf, 2); }catch(e){} }
   gE('ldst').textContent = '이미지 업로드 중 (' + slug.split('/').pop() + ')...';
   var apiRes = resKey || (getResObj() ? getResObj().apiRes : '1K');
 
@@ -45180,6 +45368,9 @@ function procImgWithTask(task, onDone, onErr){
     else if(_f0<0) _sldTxt+=' Keep surfaces smoother and cleaner with less fine micro-texture (smoothness level '+(-_f0)+'/10).';
     if(_sldTxt) ap += ' ⚠️ Additional fine-tuning requested by the user (apply these on top of everything above, without breaking any of the CRITICAL rules above):' + _sldTxt;
   }
+  // 레퍼런스 부분 지정(아트월만·천장 조명만 …) — 실사화 전용 프리셋은 레퍼런스를 아예 안 보내므로 제외
+  try{ var _rtTab=getTab(wf); var _rtNoRef=_rtTab && (_rtTab.selK==='hq_real'||_rtTab.selK==='hq_real_pro'||_rtTab.selK==='render_quality_boost');
+    if((wf==='space'||wf==='render') && !_rtNoRef && !(task&&task.noRefRoles)) ap += _refRolesText(wf, 2); }catch(e){}
   // ⚠️ 요청 반영(2026-10-06, "스케치로 투시도 뽑았는데 우측에 없던 문이 생기고 천장에 스케치에 없던 것들이
   // 생긴다 — 도면도 문이 없는데 문을 그린다"): 선 스케치·도면·흰 모델처럼 재질/디테일이 비어 보이는 입력을
   // AI가 "빈 곳"으로 보고 문·천장 루버·노출 덕트·스피커·트랙조명 등을 지어내고 있었음 → 3D 렌더 실사화 탭
@@ -46040,6 +46231,7 @@ function procImg(onDone, onErr) {
       // 마스크로 칠한 상태에서 나노바나나로 갈 땐, 어디를 칠했는지 보여주는 흑백 마스크 이미지도
       // 레퍼런스에 추가함 — 진짜 픽셀 마스크는 못 읽지만, 이 이미지를 보여주면 위치를 훨씬 정확히 짚음.
       if(isMaskedNB2 && window._maskAnnotatedRef) refImgs2 = [window._maskAnnotatedRef].concat(refImgs2);
+      try{ nb2ap += _refRolesText(G.wf, (isMaskedNB2 && window._maskAnnotatedRef) ? 3 : 2); }catch(e){}
       console.log('[API 호출]', slug2, '| 프롬프트:', nb2ap.slice(0,60)+'...', '| 레퍼런스:', refImgs2.length+'개');
       function doRun(allUrls){
         _withExplicitAspect(_inputImg, function(_asp){
