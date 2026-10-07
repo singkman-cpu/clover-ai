@@ -30262,7 +30262,7 @@ function _consultPdfData(st){
     company:co.name||o.company||'', contact:[co.phone, co.email].filter(Boolean).join(' · ')||o.contact||'', logo:co.logo||o.logo||null,
     coInfo:(co.name||co.ceo||co.phone||co.addr||co.bizNo||co.email)?co:null,
     spaceLabel: tl.replace(/^[^\s]+\s/,''),
-    styleKey:o.styleKey||'gold', customColors:o.useCustomColors?o.customColors:null, layout:'editorial'
+    styleKey:st.pdfTheme||o.styleKey||'gold', customColors:(!st.pdfTheme && o.useCustomColors)?o.customColors:null, layout:'editorial'
   };
 }
 function _consultDrawLegalPage(data, st, pageIndex, total, logo){
@@ -30316,13 +30316,14 @@ function _consultDrawComparePage(data, st, loaded, pageIndex, total, logo){
   _proposalEdHeader(ctx, data, t, pad, 'Options');
   var y=130; ctx.textAlign='left'; ctx.textBaseline='top';
   ctx.fillStyle=t.accent; ctx.font='700 15px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('DESIGN OPTIONS', pad, y); _propEdLS(ctx,0);
-  y+=40; ctx.fillStyle=t.ink; ctx.font='800 48px '+PROPOSAL_FONT; ctx.fillText(st.variants.length>1?st.variants.length+'가지 시안 한눈에 보기':'디자인 시안 한눈에 보기', pad, y); y+=90;
+  y+=40; ctx.fillStyle=t.ink; ctx.font='800 48px '+PROPOSAL_FONT; var VS=st.variants.map(function(v,i){ return {v:v,i:i}; }).filter(function(x){ return loaded['v'+x.i]; }); if(!VS.length) VS=st.variants.map(function(v,i){ return {v:v,i:i}; });
+  ctx.fillText(VS.length>1?VS.length+'가지 시안 한눈에 보기':'디자인 시안 한눈에 보기', pad, y); y+=90;
   // 2026-10-07 요청("시안 2개면 페이지 크기에 맞게 꽉, 1개면 1개가 딱 맞게"): 시안 수에 맞춰 페이지 높이를 다 씀
-  var n=st.variants.length, avail=H-70-50-y, gapV=26;
+  var n=VS.length, avail=H-70-50-y, gapV=26;
   if(n<=3){
     var cardH=(avail-gapV*(n-1))/n, txtH=n===1?150:118, imH=cardH-txtH;
-    st.variants.forEach(function(v,i){
-      var cy=y+i*(cardH+gapV), img=loaded['v'+i];
+    VS.forEach(function(xx,k){ var v=xx.v, i=xx.i;
+      var cy=y+k*(cardH+gapV), img=loaded['v'+i];
       _proposalCoverDrawRounded(ctx, img, pad, cy, innerW, imH, 8);
       var ty=cy+imH+18;
       ctx.fillStyle=t.accent; ctx.font='800 34px '+PROPOSAL_FONT; ctx.fillText(v.key+'안', pad, ty);
@@ -30336,8 +30337,8 @@ function _consultDrawComparePage(data, st, loaded, pageIndex, total, logo){
     });
   } else {
     var rowH=Math.floor(avail/n), thW=Math.round((rowH-24)*1.5);
-    st.variants.forEach(function(v,i){
-      var cy=y+i*rowH;
+    VS.forEach(function(xx,k){ var v=xx.v, i=xx.i;
+      var cy=y+k*rowH;
       ctx.fillStyle=t.divider; ctx.fillRect(pad, cy+rowH-1, innerW, 1);
       _proposalCoverDrawRounded(ctx, loaded['v'+i], pad, cy+12, thW, rowH-24, 6);
       var tx=pad+thW+30, tw=innerW-thW-30;
@@ -30978,6 +30979,20 @@ function _consultRenderCanvas(ub){
       bigBtn('📝 '+(st.round+1)+'차 수정 제안 시작', false, function(){ if(!confirm('미팅 피드백을 반영할 '+(st.round+1)+'차 제안을 시작할까요?\n지금 '+st.round+'차 PDF는 먼저 다운로드해두세요. 시안은 그대로 두고, 각 이미지의 ✏️ 프롬프트 수정 / 🔁 다시 뽑기로 고친 뒤 PDF를 다시 만들면 돼요.')) return; st.round++; st.pdfPages=null; st._pdf=null; _consultSave(); _consultRefresh(); });
     }
     pdfC.appendChild(br);
+    // 🎨 제안서 디자인(제안서 제작 탭의 테마 프리셋 그대로) — 누르면 바로 그 디자인으로 PDF 다시 만들기
+    var curTheme=st.pdfTheme||((typeof G_PROPOSAL!=='undefined' && G_PROPOSAL.opts && G_PROPOSAL.opts.styleKey)||'gold');
+    var thw=document.createElement('div'); thw.style.cssText='margin-top:12px';
+    thw.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--t2);margin-bottom:6px">🎨 제안서 디자인 <span style="font-weight:500;color:var(--m2)">— 누르면 바로 그 디자인으로 바뀌어요</span></div>';
+    var thr=document.createElement('div'); thr.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+    PROPOSAL_STYLES.forEach(function(th){
+      var b=document.createElement('button'); b.type='button'; var on=th.key===curTheme;
+      b.title=th.label;
+      b.style.cssText='display:flex;align-items:center;gap:6px;padding:5px 9px 5px 5px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11.5px;font-weight:700;border:1.5px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c1,#111)')+';color:'+(on?'var(--ac)':'var(--t2)');
+      b.innerHTML='<span style="width:26px;height:20px;border-radius:4px;background:'+th.bg+';box-shadow:inset 0 0 0 1px rgba(128,128,128,.35);position:relative;overflow:hidden;flex-shrink:0"><span style="position:absolute;left:0;bottom:0;width:100%;height:7px;background:'+th.accent+'"></span><span style="position:absolute;left:4px;top:4px;width:12px;height:3px;background:'+th.ink+'"></span></span>'+_cEsc(th.label)+(th.popular?' <span style="font-size:9px;color:#f5b544">★</span>':'');
+      b.onclick=function(){ if(st.pdfTheme===th.key && st.pdfPages) return; st.pdfTheme=th.key; _consultSave(); if(st.pdfPages && !busy){ b.innerHTML='⏳ 바꾸는 중…'; setTimeout(function(){ _consultBuildPdf(function(){ _consultRefresh(); }); }, 30); } else _consultRefresh(); };
+      thr.appendChild(b);
+    });
+    thw.appendChild(thr); pdfC.appendChild(thw);
     if(st.pdfPages){
       var strip=document.createElement('div'); strip.style.cssText='display:flex;gap:8px;overflow-x:auto;margin-top:12px;padding-bottom:6px';
       st.pdfPages.forEach(function(u,i){ var im=document.createElement('img'); im.src=u; im.style.cssText='height:180px;border-radius:5px;border:1px solid var(--bd2);cursor:zoom-in;flex-shrink:0'; im.onclick=function(){ _proposalLightbox(st.pdfPages, i); }; strip.appendChild(im); });
