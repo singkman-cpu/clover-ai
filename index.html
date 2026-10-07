@@ -35402,7 +35402,8 @@ function _openLightEditor(){
 // AI 결과에서, 그린 라인·할로겐 주변(허용 영역) "밖"인데 원본보다 눈에 띄게 밝아진 부분(=멋대로 추가된
 // 간접등·빛)을 주변 밝기 수준으로 다시 눌러줌. 색은 그대로 두고 밝기만 조절, 흐릿한(저주파) 밝기끼리
 // 비교해서 AI가 미세하게 다시 그린 질감 차이에는 반응하지 않게 함. 실패하면 원래 결과를 그대로 씀.
-function _lightAllowedMask(lm, W, H){
+// 허용 영역(흰색=빛이 생겨도 되는 곳) 캔버스 — AI에게 "빛 허용 지도"로도 같이 보냄(2026-10-07: "클릭한 곳만 확실히")
+function _lightAllowedCanvas(lm, W, H, blurFrac){
   var S=Math.max(W,H), c=document.createElement('canvas'); c.width=W; c.height=H;
   var x=c.getContext('2d'); x.fillStyle='#000'; x.fillRect(0,0,W,H);
   x.strokeStyle='#fff'; x.fillStyle='#fff'; x.lineCap='round'; x.lineJoin='round';
@@ -35425,8 +35426,12 @@ function _lightAllowedMask(lm, W, H){
     x.beginPath(); x.ellipse(cx, Math.min(H, cy+H*0.22), S*0.16, H*0.14, 0, 0, 7); x.fill(); // 아래로 떨어지는 빛(식탁 등)
   });
   var b=document.createElement('canvas'); b.width=W; b.height=H; var bx=b.getContext('2d');
-  bx.filter='blur('+Math.round(S*0.02)+'px)'; bx.drawImage(c,0,0);
-  return bx.getImageData(0,0,W,H).data;
+  bx.fillStyle='#000'; bx.fillRect(0,0,W,H);
+  bx.filter='blur('+Math.round(S*(blurFrac==null?0.02:blurFrac))+'px)'; bx.drawImage(c,0,0);
+  return b;
+}
+function _lightAllowedMask(lm, W, H){
+  return _lightAllowedCanvas(lm, W, H).getContext('2d').getImageData(0,0,W,H).data;
 }
 function _lightSuppressUnmarked(origSrc, resultUrl, lm, cb){
   var a=new Image(), r=new Image(); a.crossOrigin='anonymous'; r.crossOrigin='anonymous';
@@ -35447,7 +35452,7 @@ function _lightSuppressUnmarked(origSrc, resultUrl, lm, cb){
     var gain=document.createElement('canvas'); gain.width=w; gain.height=h; var gx=gain.getContext('2d'); var gd=gx.createImageData(w,h);
     var touched=0;
     for(var j2=0;j2<w*h;j2++){
-      var m=M[j2*4]/255, exp=Math.max(6, Lo[j2]*k)*1.10, g=1;
+      var m=M[j2*4]/255, exp=Math.max(6, Lo[j2]*k)*1.07, g=1;
       if(Lr[j2]>exp){ g=exp/Lr[j2]; }
       g = m + (1-m)*g; if(g<0.985) touched++;
       var v=Math.round(Math.max(0.25,g)*255); gd.data[j2*4]=v; gd.data[j2*4+1]=v; gd.data[j2*4+2]=v; gd.data[j2*4+3]=255;
@@ -35490,7 +35495,7 @@ function _lightRun(){
   var spotStrict = nS ? ('⚠️ HALOGEN COUNT IS EXACT: exactly '+nS+' downlight'+(nS>1?'s':'')+' may be ON in the whole image — the '+nS+' numbered yellow ring'+(nS>1?'s':'')+' (1'+(nS>1?'–'+nS:'')+'), one light per ring. The ceiling in image 1 may contain MORE recessed downlights than '+nS+' — every downlight that is NOT inside a numbered ring must stay completely OFF and dark (no glow at the fixture, no beam, no light pool on the wall below it). Do not light "the neighbouring" fixtures, do not add new ones between or beside the rings, and do not split one ring into two lights. Exactly '+nS+' lit fixture'+(nS>1?'s':'')+' (with their own soft light pool / wall scallop as described below), one per ring.\n') : '';
   var prompt='⚠️ STRICT RULE FIRST — LIGHT ONLY WHERE MARKED: the ONLY new light sources allowed are the '+nL+' marked line(s), '+nS+' marked spot(s) and '+nP+' marked pendant(s) listed below. Every other edge, surface and fixture must stay exactly as unlit as in image 1.\n'+
     (nL? '⚠️ LINE COUNT IS EXACT: exactly '+nL+' glowing indirect LED line'+(nL>1?'s':'')+' in the whole result — one per orange line, numbered 1'+(nL>1?'–'+nL:'')+'. Other ceiling steps, soffit edges, beams, cabinet bottoms, counter edges, toe-kicks and shelves that also LOOK like typical places for indirect lighting must stay completely dark if no orange line is drawn on them — do NOT "complete the design" by adding matching lines on the other side or on similar edges.\n' : '')+
-    'You receive TWO images. IMAGE 1 = the original photo/render to edit. IMAGE 2 = the SAME image with lighting GUIDE MARKS drawn on it (guide only — never copy the marks).\n'+
+    'You receive THREE images. IMAGE 1 = the original photo/render to edit. IMAGE 2 = the SAME image with lighting GUIDE MARKS drawn on it (guide only — never copy the marks). IMAGE 3 = a black-and-white LIGHT PERMISSION MAP of the same frame: new light, glow, light pools and lit fixtures may appear ONLY inside the WHITE areas; everything inside the BLACK areas must keep exactly the same lighting and brightness as image 1 (or be uniformly dimmed with the overall mood) — no new glow, no lit fixture, no LED line, no light pool there.\n'+
     (nL? '• ORANGE lines in image 2 ('+nL+' line'+(nL>1?'s':'')+') = the EXACT positions of concealed linear LED indirect lighting. For EVERY orange line, install a hidden LED strip along that exact edge/surface for its full drawn length, so a continuous '+tempTxt+' glow washes out from that edge onto the nearby surface (e.g. under a counter top, along a ceiling cove or step, under shelves/cabinets, along a wall base). The light source itself stays hidden — show the soft glowing band and its gradient falloff, not a visible tube.\n' : '')+
     (nS? '• YELLOW rings in image 2 ('+nS+' numbered ring'+(nS>1?'s':'')+', a short yellow line next to a ring, if present, shows where that light is aimed) = the EXACT positions (ring centers) of recessed halogen / downlight spotlights. For EVERY yellow ring: if a light fixture (downlight, recessed spot, pendant, sconce) ALREADY EXISTS inside or right next to that ring in image 1, simply TURN THAT EXISTING FIXTURE ON — do not add a second fixture or change its design; if no fixture is there, place one small recessed fixture at the ring center. Either way, make it emit a '+tempTxt+' light. HOW THE LIGHT LOOKS DEPENDS ON WHERE THE FIXTURE IS: (a) a downlight that sits CLOSE TO A WALL (within about half a meter) washes that wall with ONE soft, subtle scallop / arc-shaped light pattern right below it — gentle and natural, not a sharp bright cone; (b) a downlight that is AWAY FROM WALLS (in the open middle of the ceiling) shows NO scallop and NO visible cone shape on any wall or in the air — only the small glowing fixture itself and a soft, diffuse round light pool on the floor / table / furniture directly below it. Never draw visible light beams or cones in the air.\n' : '')+
     (nL? 'EXACT LINE POSITIONS (image coordinates): '+lineDesc+'.\n' : '')+
@@ -35502,7 +35507,7 @@ function _lightRun(){
     (o.mood==='dark' ? 'OVERALL MOOD: atmospheric evening/night mood — lower the general ambient light so the room is moody and ONLY the marked indirect lines and halogen pools become the main light, with soft shadows in the corners and warm reflections on surfaces. Achieve the mood ONLY by dimming the overall ambient light — NEVER by adding extra LED strips, cove lights or glowing edges that are not marked. Keep everything still readable, never pitch black.\n' : 'OVERALL MOOD: keep the overall brightness of the original — just add the marked lights naturally on top.\n')+
     (o.photoreal ? 'If IMAGE 1 is a raw 3D model screenshot (e.g. SketchUp-like flat colors/no real lighting), render it as a photorealistic high-end interior visualization with realistic materials and global illumination, keeping every object, material choice, color and position the same. If it is already a photo/realistic render, keep its style.\n' : 'Keep the rendering style of image 1 as it is.\n')+
     'KEEP IDENTICAL: camera angle, framing, composition, architecture, walls, ceiling, furniture, materials, colors, decor and their positions — only the lighting changes. ABSOLUTELY NO orange, yellow or purple guide marks, lines, rings, diamonds, dots, numbers, P-labels or arrows may appear in the output. Output one single image.\n'+
-    '⚠️ FINAL CHECK (most important): compare your result with image 2 — if there is ANY glowing LED line, cove glow, under-glow or lit fixture that does NOT sit exactly on an orange line or yellow ring, remove it and leave that spot unlit. The number of light lines in the result must be exactly '+nL+'.'+(nS?(' Count the lit downlights / light pools: there must be exactly '+nS+' — if you see more, switch the extra ones OFF.'):'');
+    '⚠️ FINAL CHECK (most important): compare your result with image 2 and image 3 — if there is ANY glowing LED line, cove glow, under-glow, lit pendant or lit fixture that does NOT sit exactly on an orange line, yellow ring or purple diamond (i.e. anything glowing inside a BLACK area of image 3), remove it and leave that spot unlit. The number of light lines in the result must be exactly '+nL+'.'+(nS?(' Count the lit downlights / light pools: there must be exactly '+nS+' — if you see more, switch the extra ones OFF.'):'');
   if(!G.HIST.edit) G.HIST.edit=[];
   var loadingId=Date.now()+Math.random();
   G.HIST.edit.unshift({ id:loadingId, orig:baseImg, result:null, origThumb:null, tags:['💡 조명 렌더링 중... (라인 '+nL+' · 할로겐 '+nS+' · 펜던트 '+nP+')'], ai:'', cx:50, fav:false, wf:'edit', preview:false, loading:true });
@@ -35517,10 +35522,12 @@ function _lightRun(){
   im.onload=function(){
     var guide;
     try{ guide=_lightGuideCanvas(im, lm).toDataURL('image/jpeg',0.92); }catch(e){ fail('안내 이미지 생성 실패(외부 이미지 보안 제한)'); return; }
+    var _ms=Math.min(1, 1024/Math.max(im.naturalWidth, im.naturalHeight)), mapImg=_lightAllowedCanvas(lm, Math.round(im.naturalWidth*_ms), Math.round(im.naturalHeight*_ms), 0.008).toDataURL('image/png');
     uploadImgToFal(baseImg, function(u1){
       uploadImgToFal(guide, function(u2){
+       uploadImgToFal(mapImg, function(u3){
         _withExplicitAspect(baseImg, function(asp){
-          falRun('fal-ai/nano-banana-2/edit', {prompt:prompt, image_urls:[u1,u2], num_images:1, resolution:({'1K':'1K','2K':'2K','4K':'4K'})[res]||'1K', aspect_ratio:asp, output_format:'jpeg'}, function(d){
+          falRun('fal-ai/nano-banana-2/edit', {prompt:prompt, image_urls:[u1,u2,u3], num_images:1, resolution:({'1K':'1K','2K':'2K','4K':'4K'})[res]||'1K', aspect_ratio:asp, output_format:'jpeg'}, function(d){
             var url0=falExtractImageUrl(d);
             if(!url0){ fail('AI가 이미지를 돌려주지 않았어요'); return; }
             _lightSuppressUnmarked(baseImg, url0, lm, function(url, fixedRatio){
@@ -35538,6 +35545,7 @@ function _lightRun(){
             });
           }, fail, {wf:'edit', resolution:res});
         });
+       }, fail);
       }, fail);
     }, fail);
   };
