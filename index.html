@@ -28992,7 +28992,303 @@ function _consultSpaceTypical(name, type){ // 스탠다드 기준 공간 1곳 �
   return 350;
 }
 function _consultIsPart(st){ return !_consultIsBuild(st) && st.scope==='part'; }
-function _consultPartTypical(st){ return st.spaces.filter(function(s){return s.photo;}).reduce(function(a,s){ return a+_consultSpaceTypical(s.name, st.type); },0); }
+function _consultPartTypical(st){ return _consultSp(st).reduce(function(a,s){ return a+_consultSpaceTypical(s.name, st.type); },0); }
+// ══ 마감재 스케줄(시안 하나 = 집 전체 같은 마감) — 2026-10-07 요청 ══════════════════════════════
+// "참고사진1 스타일인데 거실 창호는 흰색, 주방은 우드, 현관문은 진한 갈색… 다 다르면 안 된다 — 같은 시안은 무조건 통일",
+// "마감재 보드가 4가지뿐 — 공간마다 벽·바닥·시트지·타일 등 실제로 필요한 마감이 다 나와야".
+// → 시안마다 '마감재 스케줄'(바닥·벽·천장·문/문틀 필름·창호 시트지·주방·욕실 타일…)을 먼저 정하고,
+//   모든 공간 렌더 프롬프트에 똑같이 넣어서 통일. 공간별 보드/PDF에는 그 공간에 해당하는 항목만 보여줌.
+var CONSULT_SCHED_HOME=[
+  ['floor','바닥재','거실·방·주방 바닥','Floor of all living areas (living room, bedrooms, kitchen, hallway)'],
+  ['wall','벽 마감','도배·도장','Walls'],
+  ['ceiling','천장','천장·몰딩','Ceiling'],
+  ['door','문·문틀 필름','방문·문틀·걸레받이·현관문 안쪽','ALL interior doors, door frames, baseboards and moldings, and the inside face of the entrance door (one identical color in every room)'],
+  ['window','창호 시트지','기존 샷시 유지 · 프레임에 시트지','Existing window/sash frames — NOT replaced, only wrapped in film of this color (identical in every room)'],
+  ['kcab','주방 가구 도어','상·하부장','Kitchen cabinet doors (upper and lower)'],
+  ['kcounter','주방 상판','상판·아일랜드','Kitchen countertop'],
+  ['ktile','주방 벽 타일','싱크대 벽면','Kitchen backsplash wall'],
+  ['bwall','욕실 벽 타일','욕실 벽','Bathroom wall tile'],
+  ['bfloor','욕실 바닥 타일','욕실 바닥','Bathroom floor tile'],
+  ['bceil','욕실 천장재','욕실 천장','Bathroom ceiling'],
+  ['bvanity','욕실 하부장·수전','세면대·수전·액세서리','Bathroom vanity, basin, faucets and accessories'],
+  ['etile','현관·발코니 타일','현관·발코니 바닥','Entrance and balcony floor tile'],
+  ['storage','붙박이·신발장','붙박이장·신발장 도어','Built-in wardrobe and shoe cabinet doors'],
+  ['light','조명','조명 방식·색온도','Lighting']
+];
+var CONSULT_SCHED_COMM=[
+  ['floor','바닥재','홀·좌석 바닥','Floor'],
+  ['wall','벽 마감','기본 벽','Walls'],
+  ['accent','포인트 벽','메인 포인트 월','Feature / accent wall'],
+  ['ceiling','천장','천장 마감','Ceiling'],
+  ['counter','카운터·바 상판','카운터·바','Counter / bar top and counter front'],
+  ['cfurn','가구·집기 마감','테이블·의자·선반','Furniture and fixtures finish (tables, chairs, shelving)'],
+  ['ctile','주방·화장실 타일','주방·화장실 벽/바닥','Kitchen and restroom tile'],
+  ['door','출입문·창호 프레임','출입문·창 프레임 색','Entrance door and window frame color'],
+  ['light','조명','조명 방식·색온도','Lighting']
+];
+var CONSULT_SCHED_DEF={ // 분석이 안 될 때 쓰는 기본 스케줄 [ko, en, hex]
+  floor:['라이트 오크 강마루','light natural oak engineered wood flooring, matte','#c8a47c'],
+  wall:['웜화이트 실크 벽지','warm white smooth silk wallpaper','#efe9df'],
+  ceiling:['화이트 무몰딩 천장','plain matte white flat ceiling with minimal shadow-gap molding','#f5f3ee'],
+  door:['웜화이트 무광 필름','warm white matte film','#ece6da'],
+  window:['웜화이트 무광 시트지','warm white matte film wrap','#ece6da'],
+  kcab:['웜화이트 무광 도어','warm white matte flat-panel cabinet doors, handleless','#ebe5d9'],
+  kcounter:['화이트 세라믹 상판','white ceramic slab countertop, 12mm','#f1efea'],
+  ktile:['그레이지 포세린 타일','greige large-format porcelain tile','#d8d0c4'],
+  bwall:['라이트 그레이지 포세린','light greige 600x1200 matte porcelain tile','#ddd5ca'],
+  bfloor:['웜그레이 논슬립 타일','warm grey matte non-slip 600x600 tile','#b9b0a5'],
+  bceil:['화이트 욕실 천장재','white flat bathroom ceiling panel','#f4f4f2'],
+  bvanity:['오크 하부장·니켈 수전','light oak floating vanity, brushed nickel faucet','#b48b62'],
+  etile:['웜그레이 포세린 타일','warm grey 600x600 porcelain floor tile','#a9a196'],
+  storage:['웜화이트 무광 도어','warm white matte flat cabinet doors','#ebe5d9'],
+  light:['3000K 매입등·간접조명','warm 3000K recessed downlights and indirect cove lighting','#ffd79c'],
+  accent:['오크 우드 루버','light oak vertical wood slats feature wall','#b98d60'],
+  counter:['테라조 상판·우드 전면','light terrazzo counter top with oak front panel','#d9d2c7'],
+  cfurn:['오크·블랙 메탈','light oak tables with matte black metal frames','#a07b56'],
+  ctile:['화이트 포세린 타일','white matte porcelain tile','#eeeeec']
+};
+function _consultSchedDefs(st){ return st.type==='commercial' ? CONSULT_SCHED_COMM : CONSULT_SCHED_HOME; }
+function _consultSchedDefault(st){
+  var o={}; _consultSchedDefs(st).forEach(function(d){ var x=CONSULT_SCHED_DEF[d[0]]; if(x) o[d[0]]={ko:x[0], en:x[1], hex:x[2]}; });
+  return {concept:'', items:o, def:true};
+}
+// 공간 이름 → 그 공간에 들어가는 마감 항목
+function _consultSpaceSchedIds(st, name){
+  name=String(name||'');
+  if(st.type==='commercial'){
+    if(/화장실/.test(name)) return ['ctile','wall','ceiling','door','light'];
+    if(/주방/.test(name)) return ['ctile','floor','ceiling','counter','light'];
+    var ids=['floor','wall','accent','ceiling'];
+    if(/카운터|홀|매장|바|메인/.test(name)) ids.push('counter');
+    ids.push('cfurn'); if(/입구|파사드|외관/.test(name)) ids.push('door'); ids.push('light');
+    return ids;
+  }
+  if(/욕실|화장실/.test(name)) return ['bwall','bfloor','bceil','bvanity','door','window'];
+  if(/주방|부엌/.test(name)) return ['floor','kcab','kcounter','ktile','wall','ceiling','window','light'];
+  if(/현관/.test(name)) return ['etile','storage','door','wall','ceiling','light'];
+  if(/발코니|베란다/.test(name)) return ['etile','wall','window','light'];
+  var r=['floor','wall','ceiling','door','window'];
+  if(/안방|드레스|침실/.test(name)) r.push('storage');
+  r.push('light');
+  return r;
+}
+function _consultSchedLabel(st, id){ var d=_consultSchedDefs(st).filter(function(x){return x[0]===id;})[0]; return d?d[1]:id; }
+// 공간별 마감재 목록 [{id,k,v,hex,img}] — 스케줄이 없으면(건축) 예전 4칸 마감재
+function _consultSpaceMats(st, v, spName){
+  if(!v) return [];
+  if(!v.sched || !v.sched.items) return (v.materials||[]).filter(function(m){return m&&m.v;}).map(function(m){ return {k:m.k, v:m.v, img:m.img}; });
+  return _consultSpaceSchedIds(st, spName).map(function(id){ var it=v.sched.items[id]; if(!it || !it.ko) return null; return {id:id, k:_consultSchedLabel(st,id), v:it.ko, hex:it.hex, img:it.img}; }).filter(Boolean);
+}
+// 시안 전체 보드(스케줄 순서대로)
+function _consultBoardMats(st, v){
+  if(!v) return [];
+  if(!v.sched || !v.sched.items) return (v.materials||[]).filter(function(m){return m&&m.v;}).map(function(m){ return {k:m.k, v:m.v, img:m.img}; });
+  // 이 프로젝트에 실제로 있는 공간에 쓰이는 항목만
+  var used={}; _consultSp(st).forEach(function(s){ _consultSpaceSchedIds(st, s.name).forEach(function(id){ used[id]=1; }); });
+  if(st.type==='home' && !_consultIsPart(st)){ ['floor','wall','ceiling','door','window','light'].forEach(function(id){ used[id]=1; }); }
+  return _consultSchedDefs(st).filter(function(d){ return used[d[0]] && v.sched.items[d[0]] && v.sched.items[d[0]].ko; }).map(function(d){ var it=v.sched.items[d[0]]; return {id:d[0], k:d[1], area:d[2], v:it.ko, hex:it.hex, img:it.img}; });
+}
+
+// ── 스타일 사진 ↔ 공간 매칭 (2026-10-07: "주방 참고이미지랑 우리가 만든 주방이 완전히 다르면 참고이미지 넣는 의미가 없다") ──
+var CONSULT_REF_TAGS={home:['전체 스타일','거실','주방','침실','욕실','현관'], commercial:['전체 스타일','홀·좌석','카운터','주방','화장실','입구·파사드'], build:['전체 스타일']};
+function _consultRefTagList(st){ return st.type==='commercial'?CONSULT_REF_TAGS.commercial:(_consultIsBuild(st)?CONSULT_REF_TAGS.build:CONSULT_REF_TAGS.home); }
+function _consultRoomKey(name){
+  name=String(name||'');
+  if(/욕실|화장실/.test(name)) return 'bath'; if(/주방|부엌|다이닝/.test(name)) return 'kitchen';
+  if(/현관|입구|파사드|외관/.test(name)) return 'entry'; if(/거실|홀|좌석|라운지|대기/.test(name)) return 'living';
+  if(/카운터|바$/.test(name)) return 'counter';
+  if(/안방|침실|방|드레스|서재|룸/.test(name)) return 'bed'; return 'other';
+}
+function _consultRefForSpace(st, spName){
+  var key=_consultRoomKey(spName), tags=st.refTags||[], refs=st.refs||[];
+  for(var i=0;i<refs.length;i++){ if(refs[i] && tags[i] && tags[i]!=='전체 스타일' && _consultRoomKey(tags[i])===key) return i; }
+  return -1;
+}
+// 스타일 사진이 어떤 공간인지 자동 분류(무료 AI)
+function _consultClassifyRef(st, idx){
+  var u=st.refs[idx]; if(!u) return;
+  var list=_consultRefTagList(st).slice(1); if(!list.length) return;
+  st.refTags=st.refTags||[]; st.refTags[idx]=st.refTags[idx]||'…';
+  _proposalImgToB64(u, function(b64){
+    if(!b64){ if(st.refTags[idx]==='…') st.refTags[idx]='전체 스타일'; return; }
+    try{
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:'이 인테리어 사진이 어떤 공간인지 다음 중 하나만 단어로 답해: '+list.join(', ')+'. 다른 말 금지.'}]}]}, function(res){
+        var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join('');
+        t=String(t||''); var hit=list.filter(function(x){ return t.indexOf(x)>=0 || t.indexOf(x.split('·')[0])>=0; })[0];
+        if(st.refs[idx]===u){ st.refTags[idx]=hit||'전체 스타일'; _consultSave(); try{ if(G.wf==='consult'){ renderSB(); renderMain('consult', true); } }catch(e){} }
+      }, function(){ if(st.refTags[idx]==='…') st.refTags[idx]='전체 스타일'; try{ renderSB(); }catch(e){} });
+    }catch(e){ st.refTags[idx]='전체 스타일'; }
+  });
+}
+// 이 프로젝트에서 쓰는 공간(현장 사진이 있거나, 비포 없이 결과 이미지만 넣는 공간)
+function _consultSp(st){ return (st.spaces||[]).filter(function(s){ return s.photo || s.noPhoto; }); }
+
+// 발코니 확장 — 요청: "확장 안 된 거실 베란다를 확장할지 말지 고객이 원하는 대로 반영, 확장공사 비용도 넣어줘"
+var CONSULT_EXT_OPTS=[['none','확장 안 함'],['living','거실 확장'],['living_room','거실 + 방 1개 확장'],['done','이미 확장됨']];
+function _consultExt(st){
+  if(st.type!=='home') return 'none';
+  if(st.ext) return st.ext;
+  var memo=String(st.memo||'');
+  if(/확장\s*(안|x|X|없|불)/.test(memo)) return 'none';
+  if(/확장/.test(memo)) return 'living';
+  var hk=st.houseKind||'아파트';
+  return (!_consultIsPart(st) && (hk==='아파트'||hk==='빌라·다세대')) ? 'living' : 'none';
+}
+function _consultExtApplies(st, spName){
+  var e=_consultExt(st); spName=String(spName||'');
+  if(e==='living' || e==='living_room'){ if(/거실/.test(spName)) return true; if(e==='living_room' && /안방|침실/.test(spName)) return true; }
+  return false;
+}
+
+// 스케줄 정하기(무료 AI 분석) — 참고사진(시안별 배정) 또는 가져온 결과 이미지를 보고 JSON으로 받음
+function _consultSchedPrompt(st, v, fromResults){
+  var defs=_consultSchedDefs(st), ti=v.plan.tier==null?1:v.plan.tier, P=CONSULT_PRICE.home;
+  var tierHint = st.type==='home' ? ('바닥='+P.floor.spec[ti]+', 벽='+P.wall.spec[ti]+', 주방='+P.kitchen.spec[ti]+', 욕실='+P.bath.spec[ti]) : CONSULT_TIERS[ti].ko;
+  var tl=(CONSULT_TYPES.filter(function(t){return t.k===st.type;})[0]||{}).l||'';
+  var lines=[
+    '[인테리어 마감재 스케줄 작성 — JSON 하나만 답할 것, 설명·인사말·코드블록 금지]',
+    fromResults ? '첨부 이미지는 이 시안의 완성 디자인 이미지들이야. 이미지에 실제로 보이는 마감재를 읽어서 정리해. 안 보이는 항목은 보이는 마감과 어울리게 정해.'
+                : (v.refImgs ? '첨부 이미지는 고객이 원하는 스타일 사진이야(공간별 참고사진일 수 있음: '+(st.refTags||[]).filter(Boolean).join(', ')+'). '+(v.plan.faithful?'사진에 보이는 마감재·색을 최대한 그대로 옮긴':'이 사진들을 바탕으로 아래 시안 방향으로 변주한')+' 마감재 스케줄을 정해. 주방 사진이 있으면 주방 항목은 그 사진 그대로, 욕실 사진이 없으면 다른 사진들과 어울리게.' : '첨부 이미지 없이, 아래 시안 방향에 맞는 마감재 스케줄을 정해.'),
+    '공사: '+tl.replace(/^[^\s]+\s/,'')+(st.type==='home'?' ('+(st.houseKind||'아파트')+')':'')+(st.biz?' / 업종 '+st.biz:'')+(_consultIsPart(st)?' / 일부 공사':' / 전체 공사'),
+    '시안 방향: '+v.plan.name+' — '+v.plan.ko,
+    '마감 등급: '+CONSULT_TIERS[ti].name+' ('+tierHint+')',
+    st.memo ? '고객 요청: '+st.memo : '',
+    '규칙:',
+    '1) 한 시안 안에서는 모든 공간이 같은 마감·같은 색으로 통일. 특히 문·문틀·걸레받이 필름 색과 창호 프레임 시트지 색은 집 전체에 하나만(보통 둘이 같은 색).',
+    st.type==='home' ? '2) 창호(샷시)는 교체 불가 — 기존 프레임에 시트지(필름)만 붙임. window 값은 시트지 색·질감.' : '2) 상업 공간은 브랜드 분위기가 일관되게.',
+    '3) 비싼 자재(천연 대리석 등)는 등급에 맞는 비슷한 느낌의 대체재로(예: 대리석 패턴 포세린 타일) — 보기엔 같게, 견적은 등급에 맞게.',
+    '4) ko: 18자 이내 한국어 자재명(색+재질, 예: "라이트 오크 광폭 강마루"). en: 영어로 구체적인 자재 설명(색·재질·마감·크기). hex: 대표 색 "#rrggbb".',
+    '키 목록: '+defs.map(function(d){ return d[0]+'('+d[1]+')'; }).join(', '),
+    '형식: {"concept":"한 줄 컨셉","items":{"'+defs[0][0]+'":{"ko":"…","en":"…","hex":"#……"}, …모든 키…}}'
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+function _consultSchedParse(st, res){
+  var j=_consultParseJson(res); if(!j || !j.items) return null;
+  var base=_consultSchedDefault(st), ok=0;
+  Object.keys(base.items).forEach(function(k){
+    var x=j.items[k]; if(!x || !x.ko) return;
+    ok++;
+    base.items[k]={ko:String(x.ko).slice(0,24), en:String(x.en||base.items[k].en).slice(0,220), hex:/^#[0-9a-f]{6}$/i.test(String(x.hex||''))?x.hex:base.items[k].hex};
+  });
+  if(ok<3) return null;
+  base.concept=String(j.concept||'').slice(0,80); base.def=false;
+  return base;
+}
+function _consultEnsureSched(st, v, cb, opt){
+  opt=opt||{};
+  if(_consultIsBuild(st)){ cb&&cb(); return; }
+  if(v.sched && !opt.force){ cb&&cb(); return; }
+  var imgs=[];
+  if(opt.fromResults){
+    _consultSp(st).forEach(function(s){ var r=v.spaces[s.id]; if(r && r.result && imgs.length<4) imgs.push(r.result); });
+  } else {
+    imgs=(st.refs||[]).filter(Boolean).slice(0,3);
+  }
+  v.refImgs=imgs.length>0;
+  v.schedStatus='run'; _consultRefresh();
+  var prompt=_consultSchedPrompt(st, v, !!opt.fromResults);
+  var left=imgs.length, blocks=[];
+  function send(){
+    var content=blocks.filter(Boolean).concat([{type:'text', text:prompt}]);
+    var tries=0;
+    (function attempt(){
+      try{
+        _falProxyCall('chat-assistant', {messages:[{role:'user', content:content}]}, function(res){
+          var s=_consultSchedParse(st, res);
+          if(!s && ++tries<2){ setTimeout(attempt, 1200); return; }
+          done(s);
+        }, function(err){ console.warn('[상담패키지] 마감재 스케줄 실패', err); if(++tries<2){ setTimeout(attempt,1500); return; } done(null); });
+      }catch(e){ done(null); }
+    })();
+  }
+  function done(s){
+    var old=v.sched;
+    v.sched=s||_consultSchedDefault(st);
+    // 이미 만든 재질 사진은 같은 항목이면 유지
+    if(old && old.items) Object.keys(v.sched.items).forEach(function(k){ if(old.items[k] && old.items[k].img && old.items[k].ko===v.sched.items[k].ko) v.sched.items[k].img=old.items[k].img; });
+    v.schedStatus='done'; v.dirty=true;
+    if(!(v.estimate && v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); }
+    _consultSave(); _consultRefresh(); cb&&cb();
+  }
+  if(!left){ send(); return; }
+  imgs.forEach(function(u,i){
+    _proposalImgToB64(u, function(b64){
+      blocks[i]= b64 ? {type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}} : (/^https?:/.test(u)?{type:'image', source:{type:'url', url:u}}:null);
+      if(--left===0) send();
+    });
+  });
+}
+// 렌더 프롬프트에 들어갈 스케줄(이 공간 항목 + 문/창호는 항상)
+function _consultSchedText(st, v, spName){
+  if(!v || !v.sched || !v.sched.items) return '';
+  var ids=_consultSpaceSchedIds(st, spName).slice();
+  if(st.type==='home'){ ['door','window'].forEach(function(x){ if(ids.indexOf(x)<0) ids.push(x); }); }
+  var defs=_consultSchedDefs(st), rows=[];
+  ids.forEach(function(id){ var it=v.sched.items[id], d=defs.filter(function(x){return x[0]===id;})[0]; if(it && d) rows.push('- '+d[3]+': '+it.en+' (color '+it.hex+')'); });
+  return rows.length ? 'UNIFIED FINISH SCHEDULE FOR THIS DESIGN OPTION — apply EXACTLY these materials and colors; every room of this option uses the same schedule, so doors, frames, window film, floor and walls must look identical across all rooms:\n'+rows.join('\n') : '';
+}
+// 재질 사진(평평한 텍스처) — 스케줄 항목을 4×4 보드 한 장(20cr)으로 만들고 잘라서 각 항목에 넣음
+function _consultSchedTextures(st, v, srcUrl, cb, manual){
+  if(!v.sched || !v.sched.items || v.texBusy) return;
+  var defs=_consultSchedDefs(st).filter(function(d){ return d[0]!=='light' && v.sched.items[d[0]]; }).slice(0,16);
+  if(!defs.length) return;
+  var cols=4, rows=Math.ceil(defs.length/cols);
+  var list=defs.map(function(d,i){ var it=v.sched.items[d[0]]; return 'row '+(Math.floor(i/cols)+1)+', column '+(i%cols+1)+' = '+it.en+' (color '+it.hex+')'; }).join('\n');
+  var prompt='TASK: Create a MATERIAL SAMPLE BOARD image made of exactly '+(cols*rows)+' equal square cells in a grid of '+cols+' columns × '+rows+' rows. '+
+    'Separate the cells with thin pure-white gaps (about 1.5% of the image width) and a thin pure-white outer margin. NO text, NO labels, NO numbers anywhere.\n'+
+    'Each cell is ONE finishing material shown as a clean, flat, seamless texture swatch (orthographic, straight-on, edge to edge, like a scanned material sample; tiles/planks/joints at realistic scale with several repeats; even diffuse light, no shadows, no objects):\n'+list+'\n'+
+    (defs.length<cols*rows?'Any remaining cell(s) are plain pure white.\n':'')+
+    'Match the materials as they appear in the attached design image as closely as possible (same color, grain, pattern, sheen). Photorealistic material photography quality.';
+  v.texBusy=true; _consultRefresh();
+  function fail(msg){ v.texBusy=false; console.warn('[상담패키지] 재질 사진 실패', msg); _consultRefresh(); if(manual) alert('재질 사진 만들기 실패: '+(msg||'')+'\n(크레딧은 결과가 나와야 차감돼요)'); cb&&cb(false); }
+  _consultUrl(srcUrl, function(u){
+    if(!u){ fail('이미지 업로드 실패'); return; }
+    falRun('fal-ai/nano-banana-2/edit', {prompt:prompt, image_urls:[u], num_images:1, aspect_ratio: rows===cols?'1:1':(rows===3?'4:3':'2:1')}, function(d){
+      var url=falExtractImageUrl(d); if(!url){ fail('AI가 이미지를 돌려주지 않았어요'); return; }
+      var im=new Image(); im.crossOrigin='anonymous';
+      im.onload=function(){
+        try{
+          var W=im.naturalWidth, H=im.naturalHeight, cw=W/cols, ch=H/rows, ins=0.08;
+          defs.forEach(function(dd,i){
+            var cx=(i%cols)*cw, cy=Math.floor(i/cols)*ch;
+            var c=document.createElement('canvas'); c.width=c.height=240;
+            c.getContext('2d').drawImage(im, cx+cw*ins, cy+ch*ins, cw*(1-2*ins), ch*(1-2*ins), 0, 0, 240, 240);
+            v.sched.items[dd[0]].img=c.toDataURL('image/jpeg',0.86);
+          });
+          v.texBusy=false; v.texDone=true; v.dirty=true; _consultSave(); _consultRefresh(); cb&&cb(true);
+        }catch(e){ fail('이미지 자르기 실패'); }
+      };
+      im.onerror=function(){ fail('결과 이미지를 불러오지 못했어요'); };
+      im.src=url;
+    }, function(e){ fail(e); }, {wf:'edit', resolution:'1K'});
+  });
+}
+function _consultTexManual(vi){
+  var st=_consultState(), v=st.variants[vi]; if(!v || !v.sched) return;
+  var src=null; _consultSp(st).forEach(function(s){ var r=v.spaces[s.id]; if(!src && r && r.result) src=r.result; });
+  if(!src){ alert('먼저 공간 이미지를 1장 이상 넣어주세요.'); return; }
+  var isAdmin=(G.supaRole==='admin'||G.plan==='admin');
+  if(!isAdmin && (G.cr||0)<PROPOSAL_TEX_COST){ alert('크레딧이 부족해요. ('+PROPOSAL_TEX_COST+'cr 필요)'); return; }
+  if(!confirm('이 시안의 마감재를 실제 재질 사진(평평한 텍스처)으로 만들까요?\n마감재 전체를 한 장에 묶어서 만들어요 = '+PROPOSAL_TEX_COST+'cr')) return;
+  _consultSchedTextures(st, v, src, null, true);
+}
+// 마감재 이름 직접 고치기(업체·디자이너용)
+function _consultEditSched(vi, id){
+  var st=_consultState(), v=st.variants[vi]; if(!v || !v.sched || !v.sched.items[id]) return;
+  var it=v.sched.items[id];
+  var t=prompt(_consultSchedLabel(st,id)+' — 자재명을 고쳐주세요', it.ko);
+  if(t==null || !t.trim() || t.trim()===it.ko) return;
+  it.ko=t.trim(); it.en=t.trim()+' ('+it.en+')'; it.img=null; it.edited=true; v.dirty=true;
+  if(!(v.estimate && v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); }
+  _consultSave(); _consultRefresh();
+}
+// 색 칩(재질 사진이 없을 때)
+function _consultChip(m, size){
+  if(m.img) return '<span style="display:inline-block;width:'+size+'px;height:'+size+'px;border-radius:'+Math.round(size/4)+'px;background:center/cover url(&quot;'+_cEsc(m.img)+'&quot;);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)"></span>';
+  return '<span style="display:inline-block;width:'+size+'px;height:'+size+'px;border-radius:'+Math.round(size/4)+'px;background:'+_cEsc(m.hex||'#888')+';box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)"></span>';
+}
+
 
 // ══ 상담 패키지 견적 — 실제 현장 단가표 기반 계산(2026-10-07) ══════════════════════════════════
 // 요청: "가견적이라도 실제 업체에 넘어갔을 때 차이가 많이 나면 안 되니까 실제 현장 가격을 참고해서 정확하게".
@@ -29025,6 +29321,10 @@ var CONSULT_PRICE={
     kitchen: {n:'주방',   per:'kit', p:[380,800,1300,1700,2600], spec:['PET 도어·인조대리석','도장/하이그로시·칸스톤','무광 도장·세라믹·아일랜드','맞춤 도장·세라믹·빌트인','수입 가구·천연석']},
     bath:    {n:'욕실',   per:'ea',  p:[260,520,800,1000,1400],  spec:['덧방 리모델링','올철거·방수·타일','대형 타일·수전 업그레이드','호텔식 욕실','최고급 욕실']},
     window:  {n:'샷시(창호)', per:'py', p:[24,38,50,60,75], spec:['비메이커 이중창','메이저 이중창(로이)','시스템창호','시스템창호(고단열)','수입 시스템창호']},
+    // 2026-10-07: 주거는 창호 교체 안 함(요청) — 기존 샷시 프레임에 시트지만. 30평대 샷시 필름 약 80~150만원
+    winfilm: {n:'창호 프레임 시트지', per:'py', p:[2.5,3,3.5,4,5], spec:['기존 샷시 유지 · 프레임 시트지','기존 샷시 유지 · 프레임 시트지','기존 샷시 유지 · 프레임 시트지','기존 샷시 유지 · 프레임 시트지','기존 샷시 유지 · 프레임 시트지']},
+    // 발코니 확장(거실 기준 1곳): 내측 창 철거·단열·바닥 난방 연장·마감 — 2025~26 수도권 거실 300~500, 방 200~300
+    extLiving:[300,350,400,460,520], extRoom:[180,200,230,260,300],
     managePct:[0.18,0.18,0.20,0.20,0.22] // 현장관리(경비 5~9%) + 업체 이윤(10~15%)
   },
   commercial:{
@@ -29063,7 +29363,7 @@ function _consultSpacePy(name){
   return 4;
 }
 function _consultBathCount(st){
-  var bs=st.spaces.filter(function(s){ return s.photo && /욕실|화장실/.test(s.name); }).length;
+  var bs=_consultSp(st).filter(function(s){ return /욕실|화장실/.test(s.name); }).length;
   if(_consultIsPart(st)) return bs;
   var a=_consultNum(st.area)||30; return Math.max(bs, a<22?1:a<45?2:3);
 }
@@ -29084,16 +29384,22 @@ function _consultCalcEstimate(st, ti, opt){
       ['demo','wall','floor','ceiling','door','elec','storage','tile','misc','etc'].forEach(function(k){ var it=P[k]; add('공통', it.n, it.spec[ti], it.p[ti]*py, pb(it.p[ti],py)); });
       add('주방', P.kitchen.n, P.kitchen.spec[ti], P.kitchen.p[ti]*kitF, '1식(30평대 ㄱ·ㄷ자 기준'+(kitF!==1?' × 크기 '+kitF.toFixed(2):'')+')');
       var nb=_consultBathCount(st); if(nb) add('욕실', P.bath.n+' '+nb+'개', P.bath.spec[ti], P.bath.p[ti]*nb, P.bath.p[ti]+'만원 × '+nb+'개');
-      if(opt.windows) add('공통', P.window.n, P.window.spec[ti], P.window.p[ti]*py, pb(P.window.p[ti],py));
+      add('공통', P.winfilm.n, P.winfilm.spec[ti], P.winfilm.p[ti]*py, pb(P.winfilm.p[ti],py));
     } else {
-      st.spaces.filter(function(s){return s.photo;}).forEach(function(s){
+      _consultSp(st).forEach(function(s){
         var nm=s.name, spy=_consultSpacePy(nm);
         if(/욕실|화장실/.test(nm)){ add(nm, P.bath.n, P.bath.spec[ti], P.bath.p[ti], '1칸'); return; }
         if(/주방|부엌/.test(nm)) add(nm, P.kitchen.n, P.kitchen.spec[ti], P.kitchen.p[ti]*kitF, '1식(싱크대·상판·후드·수전)');
         ['demo','wall','floor','ceiling','elec'].forEach(function(k){ var it=P[k]; add(nm, it.n, it.spec[ti], it.p[ti]*spy, pb(it.p[ti],spy,'평(공간 추정)')); });
         if(/현관/.test(nm)) add(nm, '중문', ['기본 중문','3연동 중문','슬림 원슬라이딩 중문','히든 중문','맞춤 중문'][ti], [70,95,120,150,220][ti], '1개');
         if(/드레스|안방|침실/.test(nm)) add(nm, P.storage.n, P.storage.spec[ti], [60,150,250,380,550][ti], '1식');
+        if(!/현관|드레스/.test(nm)) add(nm, P.winfilm.n, P.winfilm.spec[ti], P.winfilm.p[ti]*spy, pb(P.winfilm.p[ti],spy,'평(공간 추정)'));
       });
+    }
+    var _ex=_consultExt(st);
+    if(_ex==='living' || _ex==='living_room'){
+      add(part?'거실':'공통', '발코니 확장(거실)', '내측 창 철거·단열·바닥 난방 연장·마감', P.extLiving[ti], '거실 1곳');
+      if(_ex==='living_room') add(part?'방':'공통', '발코니 확장(방)', '내측 창 철거·단열·난방 연장', P.extRoom[ti], '방 1곳');
     }
     // 부분 공사(욕실·주방 단독 견적)는 업체 견적에 이윤이 이미 섞여 있는 경우가 많아 보양·폐기물·관리 8%만
     var _mp=part?0.08:P.managePct[ti];
@@ -29103,7 +29409,7 @@ function _consultCalcEstimate(st, ti, opt){
     var f20=Math.max(0.6, Math.min(2.5, cpy/20)), m=P.mult[ti];
     var cpart=_consultIsPart(st);
     if(cpart){
-      st.spaces.filter(function(s){return s.photo;}).forEach(function(s){
+      _consultSp(st).forEach(function(s){
         if(/화장실/.test(s.name)){ add(s.name, P.toilet.n, '', P.toilet.p[ti], '1식'); return; }
         var spy=Math.max(3, Math.min(cpy, 8));
         add(s.name, '인테리어 공사', bk+' 기준', P.base[bk]*m*spy, pb(P.base[bk]*m,spy));
@@ -29120,7 +29426,7 @@ function _consultCalcEstimate(st, ti, opt){
       add('공통', P.fire.n, '다중이용업소 해당 시 증가', P.fire.p[ti], '1식');
       add('공통', P.sign.n, '', P.sign.p[ti], '1식');
       add('공통', P.furn.n, '', P.furn.p[ti]*f20, '20평 기준 '+P.furn.p[ti]+'만원 × 면적 '+f20.toFixed(2));
-      if(st.spaces.some(function(s){return s.photo && /화장실/.test(s.name);})) add('화장실', P.toilet.n, '', P.toilet.p[ti], '1식');
+      if(_consultSp(st).some(function(s){return /화장실/.test(s.name);})) add('화장실', P.toilet.n, '', P.toilet.p[ti], '1식');
     }
     var _cs=sum(); add('공통','설계·현장관리','', _cs*P.designPct[ti], '공사비 '+_cs.toLocaleString()+'만원 × '+Math.round(P.designPct[ti]*100)+'%');
   } else if(st.type==='build_new'){
@@ -29152,7 +29458,7 @@ function _consultTierFromBudget(st){
   if(!b) return 1;
   var best=0, bd=1e9;
   for(var t=0;t<5;t++){
-    var tot=_consultCalcEstimate(st, t, {windows:/샷시|창호|창문/.test(st.memo||'')}).total; if(!tot) continue;
+    var tot=_consultCalcEstimate(st, t).total; if(!tot) continue;
     var d=Math.abs(tot-b)*(tot>b?1.3:1); // 예산 초과는 조금 더 불리하게
     if(d<bd){ bd=d; best=t; }
   }
@@ -29171,16 +29477,17 @@ function _consultBuildPlan(st){
     // 2026-10-07 요청("스타일 다르게/가격대 다르게 버튼 필요 없다 — 레퍼런스 넣으면 레퍼런스대로 다르게,
     // 예산 적으면 예산에 맞게"): 시안은 항상 고객 참고사진 기준으로 다르게, 마감 등급은 예산에서 자동.
     // 참고사진이 여러 장이면 시안마다 한 장씩 "주 참고사진"으로 배정(사진 2장·시안 3개 → 1안=사진1, 2안=사진2, 3안=두 사진 섞기).
+    // 2026-10-07 수정: 고객 스타일 사진은 "공간별 참고사진"(거실 사진·주방 사진·침실 사진…)이라 시안마다 한 장씩 나누면 안 됨.
+    // → 사진은 같은 공간에 매칭(주방 사진 → 주방)하고, A안 = 사진 그대로 최대한 똑같이, B안부터 = 같은 사진 기반 변주.
     var src=_consultIsBuild(st)?CONSULT_DESIGN_VARIANTS_BUILD:CONSULT_DESIGN_VARIANTS;
     var tier=_consultTierFromBudget(st), nr=(st.refs||[]).filter(Boolean).length;
-    var di=0;
+    var pool=nr?src:src.slice(1);
     for(var i=0;i<n;i++){
-      if(nr>=2 && i<nr){
-        out.push({name:'참고사진 '+(i+1)+' 스타일', ko:'고객이 가져온 '+(i+1)+'번 참고사진의 스타일·컬러·마감재를 이 공간에 맞게 반영한 안', en:'PRIMARY STYLE SOURCE: client reference image #'+(i+1)+' (= image '+(i+2)+' in the input list). Follow THAT reference most closely for style, color palette, finish materials and mood; the other reference images are secondary.', tier:tier, refIdx:i});
-      } else if(nr>=2 && i===nr){
-        out.push({name:'참고사진 믹스', ko:'고객 참고사진들의 좋은 점을 골고루 섞어서 정리한 안', en:'Blend all client reference images together into one balanced, cohesive design.', tier:tier});
+      if(nr && i===0){
+        out.push({name:'고객 스타일 그대로', faithful:true, ko:'고객이 가져온 스타일 사진 속 마감재·가구·조명·소품을 우리 집 구조(벽·창·문)는 그대로 둔 채 최대한 똑같이 옮긴 안',
+          en:'FAITHFUL TO THE CLIENT REFERENCES: reproduce the client reference photos as literally as possible — same materials, colors, furniture, lighting fixtures, decor and mood.', tier:tier});
       } else {
-        var d=src[(nr>=2?di+1:di)%src.length]; di++;
+        var d=pool[i%pool.length];
         out.push({name:d.name, ko:d.ko, en:d.en, tier:tier});
       }
     }
@@ -29189,7 +29496,7 @@ function _consultBuildPlan(st){
 }
 function _consultEnsurePlan(st){
   st.mode='design'; // 방식 선택 없앰(2026-10-07)
-  var sig=st.type+'|'+st.count+'|'+_consultTierFromBudget(st)+'|'+(st.refs||[]).filter(Boolean).length+'|'+(st.scope||'all');
+  var sig=st.type+'|'+st.count+'|'+_consultTierFromBudget(st)+'|'+(st.refs||[]).filter(Boolean).length+'|'+(st.scope||'all')+'|v3';
   if(!st.plan || st.plan.sig!==sig){ st.plan={sig:sig, items:_consultBuildPlan(st)}; }
   return st.plan.items;
 }
@@ -29234,13 +29541,14 @@ function _consultLegal(st){
     // 실제로 해당하는 항목만 보여줌(해당 없으면 아예 안 나옴). "일반 마감 교체 가능" 같은 당연한 항목은 뺌.
     var hk=st.houseKind||'아파트', isApt=(hk==='아파트'||hk==='빌라·다세대'||hk==='오피스텔');
     var part=_consultIsPart(st), memo=String(st.memo||'');
-    var names=st.spaces.filter(function(x){return x.photo;}).map(function(x){return x.name;}).join(' ');
+    var names=_consultSp(st).map(function(x){return x.name;}).join(' ');
     var hasKitchen=/주방|부엌/.test(names)||!part, hasBath=/욕실|화장실/.test(names)||!part;
     var wallWork=/철거|벽|확장|구조|터|오픈/.test(memo);
     var moveWork=/이동|옮기|위치\s*변경|자리/.test(memo);
     if(isApt){
       if(!part || wallWork) c('no','내력벽 철거·변경 불가','공동주택의 내력벽(구조벽) 철거·이동은 공동주택관리법상 행위허가 대상이라 사실상 불가해요. 비내력벽도 철거 전 관리주체 확인이 필요해요.','도면·관리사무소에서 구조벽 위치 확인');
-      if(/발코니|베란다|확장/.test(memo+' '+names)) c('warn','발코니 확장','발코니 확장은 가능하지만 관할 구청 신고가 필요하고, 대피공간·방화판 등 기준을 지켜야 해요.','구청 건축과 발코니 확장 신고');
+      var _ex=_consultExt(st);
+      if(_ex==='living'||_ex==='living_room') c('warn','발코니 확장','발코니 확장은 가능하지만 관할 구청 신고가 필요하고, 대피공간·방화판·외부 창호 단열 기준을 지켜야 해요.','구청 건축과 발코니 확장 신고');
       c('warn','공사 신고·공사 시간','관리사무소 공사 신고와 이웃 동의서가 필요하고, 관리규약상 보통 평일 주간에만 공사할 수 있어요.','관리사무소에 공사 기간·시간 확인');
       if((hasBath||hasKitchen) && (moveWork || !part)) c('warn','욕실·주방 배관 위치','공용 배관(수직 배관)은 옮길 수 없어요. 싱크대·변기 위치를 옮기면 배관 경사·방수 문제로 아래층 누수 책임이 생길 수 있어요.','배관 경로 사전 확인 + 방수 2회 이상');
       if(!part) c('warn','소방시설','스프링클러 헤드·화재감지기를 막거나 옮기면 안 돼요. 천장 공사 시 위치 유지·이설 확인이 필요해요.','');
@@ -29382,7 +29690,7 @@ function _consultCost(st){
 }
 
 // ── 렌더 프롬프트 ──
-function _consultPrompt(st, vp, sp, nRefs, hasAnchor){
+function _consultPrompt(st, vp, sp, nRefs, hasAnchor, v, roomRef){
   var build=_consultIsBuild(st), lines=[];
   var tier=CONSULT_TIERS[vp.tier==null?1:vp.tier];
   if(!build){
@@ -29391,7 +29699,13 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor){
     lines.push('DESIGN OPTION: '+vp.en);
     lines.push('FINISH GRADE: '+tier.en);
     lines.push('KEEP THE REAL SPACE: exact same camera position, angle, lens and framing as image 1; the same room shape, wall positions, window and door positions and sizes, ceiling height, beams and columns — this is a remodel of THIS room, not a different room. Do not add or remove windows or doors. Remove clutter, construction debris and people; built-in elements (cabinets, counters, built-in wardrobes) are redesigned only in their existing positions and footprint, and loose furniture is styled to suit the room.');
-    if(st.type==='home'){ lines.push('Load-bearing walls cannot be removed in Korean apartments — keep all existing walls in place.'); }
+    if(st.type==='home'){
+      lines.push('Load-bearing walls cannot be removed in Korean apartments — keep all existing walls in place.');
+      // 2026-10-07 요청: "주거 공간은 화장실·방·거실 창문 절대 손대지 마 — 창호는 못 바꾸고 시트지만"
+      lines.push('WINDOWS ARE NEVER REPLACED IN THIS HOME: every window and sliding sash keeps exactly the same frame profile, mullions/divisions, handles, glass, size and position as in image 1 — only the frame COLOR changes to the scheduled film color. Never turn a window into a different window type, never add or remove panes.');
+      if(_consultExtApplies(st, sp.name)) lines.push('BALCONY EXTENSION (client chose it): if image 1 shows an inner sliding door/window between this room and the balcony, remove that inner door/window and its frame, and extend this room\'s floor, walls and ceiling continuously out to the OUTER balcony windows — the outer balcony windows themselves stay exactly as they are (same frames and divisions, only film color).');
+      else lines.push('NO BALCONY EXTENSION: if there is an inner sliding door/window to a balcony, it stays exactly as it is (same frame, divisions and position — only film color).');
+    }
     if(_consultIsPart(st)) lines.push('SCOPE: this is a partial remodel of only this space — redesign everything visible in this space, but anything visible through doorways into other rooms stays as it is.');
   } else if(st.type==='build_new'){
     var lc=_consultLegalCalc(st);
@@ -29408,8 +29722,14 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor){
       lines.push('KEEP THE BUILDING SIZE: exactly the same number of storeys, height, footprint and massing as in image 1 — do not add or remove floors.');
     }
   }
-  if(nRefs) lines.push('CLIENT REFERENCE IMAGES: images 2'+(nRefs>1?' to '+(nRefs+1):'')+' are the style/material references the client brought — use them for style, colors and materials only, never copy their room layout or camera.');
-  if(hasAnchor) lines.push('PROJECT CONSISTENCY (very important): the LAST image is the already-approved rendering of another space in this SAME design option. Use exactly the same finish materials, wood tone, stone/tile, metal finish, color palette and lighting mood so that every space of this option clearly belongs to one consistent project — but keep the room/camera of image 1.');
+  if(nRefs && !build){
+    var _faith=!!vp.faithful;
+    if(roomRef) lines.push('ROOM REFERENCE (MOST IMPORTANT): image 2 is the client\'s reference photo for exactly this kind of room. '+(_faith?'Recreate image 2\'s design INSIDE the real room of image 1 as literally as possible':'Use image 2 as the base design for this room, varied only as the design option says')+': the same finish materials and colors (cabinet doors, wall finish such as panelling or plaster, floor, countertop, tiles), the SAME furniture pieces with the same shapes and colors (e.g. the same dining table and the same chairs, the same sofa, the same bed), the SAME lighting fixtures (same pendant / floor lamp / wall-light designs), the same decor objects, plants and props, and the same color palette and mood. It must look like the designer of image 2 remodeled the room of image 1. Only adapt sizes, quantities and placement to fit the real walls, windows and doors of image 1 (those never change).'+(nRefs>1?' Images 3'+(nRefs>2?' to '+(nRefs+1):'')+' are the client\'s references for OTHER rooms of this same home — use them only to keep the whole home consistent.':''));
+    else lines.push('CLIENT REFERENCE IMAGES: images 2'+(nRefs>1?' to '+(nRefs+1):'')+' are the client\'s reference photos for other rooms of this same home. There is no reference for this exact room, so design it in the SAME style family'+(_faith?' as literally as possible':'')+': the same materials, colors, furniture style, lighting fixture style, decor and props vibe, so it clearly belongs to the same home.');
+    lines.push('BUDGET REALISM: if a reference shows expensive materials (e.g. natural marble), render the cost-appropriate scheduled substitute (e.g. marble-look large porcelain tile) that looks visually the same.');
+  } else if(nRefs) lines.push('CLIENT REFERENCE IMAGES: images 2'+(nRefs>1?' to '+(nRefs+1):'')+' are the style/material references the client brought — use them for style, colors and materials only, never copy their site, layout or camera.');
+  var _sch=_consultSchedText(st, v, sp.name); if(_sch) lines.push(_sch);
+  if(hasAnchor) lines.push('PROJECT CONSISTENCY (very important): the LAST image is the already-approved rendering of another space in this SAME design option. Use exactly the same finish materials, door and frame color, window film color, wood tone, stone/tile, metal finish, color palette and lighting mood so that every space of this option clearly belongs to one consistent project — but keep the room/camera of image 1.');
   if(st.memo) lines.push('CLIENT REQUESTS: '+st.memo);
   lines.push('OUTPUT: one photorealistic professional '+(build?'architectural':'interior')+' photograph, natural daylight plus realistic artificial lighting, correct shadows and contact shadows, real material textures. No text, no labels, no watermark, no split views.');
   // 2026-10-07 요청("참고사진에 없는 문을 만들고… 벽 구조 변경, 없는 문, 창문 위치, 에어컨 위치 등 실제로 공사하지 않는 건 절대 바꾸지 마"):
@@ -29418,11 +29738,12 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor){
     lines.push('⚠⚠⚠ FINAL OVERRIDE — DO NOT CHANGE ANYTHING THAT A REAL REMODEL OF THIS ROOM WOULD NOT CHANGE: '+
       'compare with image 1 element by element. Keep EXACTLY the same: (1) every wall, corner, partition, column and beam — no wall added, removed, moved or opened up; '+
       '(2) every door and doorway — same number, same position, same size; NEVER add a new door, doorway, opening, pass-through or glass door anywhere (if image 1 shows a plain wall, it stays a plain wall); '+
-      '(3) every window — same number, position, size and divisions; never add, enlarge, move or remove a window; '+
+      '(3) every window — same number, position, size, frame profile and divisions; never add, enlarge, move, replace or remove a window'+(st.type==='home'?' (in this home only the window frame color may change, to the scheduled film color)':'')+'; '+
       '(4) the air conditioner (wall-mounted or ceiling cassette), ventilation grilles, sprinkler heads, smoke detectors, gas meter/boiler, electrical panel and pipes — same type and same position (they may only get the same finish refreshed); '+
       '(5) the ceiling height, floor level, camera position and perspective. '+
-      'Only change the FINISHES and FIXTURES that are actually being remodeled: wall/floor/ceiling surface materials, cabinetry and countertops in their existing positions and footprint, light fixtures, furniture and decor. '+
-      'The client reference images are for style, color and material only — NEVER copy their doors, windows, walls or room layout. Before finishing, count doors, windows and openings in image 1 and in your result: they must match exactly; if anything structural was added or moved, remove it.');
+      'Only change the FINISHES and FIXTURES that are actually being remodeled: wall/floor/ceiling surface materials, door/frame/window-frame film color, cabinetry and countertops in their existing positions and footprint, light fixtures, furniture and decor'+(_consultExtApplies(st, sp.name)?' (plus the balcony extension described above)':'')+'. '+
+      (_sch?'Doors, door frames, baseboards and window frames must all be the SAME scheduled color in every room of this option. ':'')+
+      'From the client reference images copy the materials, colors, furniture, light fixtures and decor — but NEVER their doors, windows, walls, room layout or camera. Before finishing, count doors, windows and openings in image 1 and in your result: they must match exactly; if anything structural was added or moved, remove it.');
   } else {
     lines.push('⚠⚠⚠ FINAL OVERRIDE: keep the real surroundings, site boundaries, roads, neighboring buildings and camera exactly as in image 1; '+(st.type==='build_remodel'?'keep the existing building footprint, structure grid and window rhythm unless the design option explicitly changes the facade openings; do not add storeys beyond what is specified. ':'')+'The client reference images are for style only — never copy their site, layout or camera.');
   }
@@ -29461,9 +29782,12 @@ function _consultRunSpace(st, v, vp, sp, anchorUrl, done){
   function fail(msg){ rec.status='err'; rec.err=String(msg||'실패'); _consultSave(); _consultRefresh(); done(null); }
   function go(){
     if(!urls[0]){ fail('현장 사진 업로드 실패'); return; }
-    var list=[urls[0]].concat(urls.slice(1).filter(Boolean)); var nRefs=list.length-1;
-    if(anchorUrl) list.push(anchorUrl);
-    var prompt=_consultPrompt(st, vp, sp, nRefs, !!anchorUrl);
+    var mi=_consultRefForSpace(st, sp.name), refU=urls.slice(1);
+    var ordered = (mi>=0 && refU[mi]) ? [refU[mi]].concat(refU.filter(function(x,i){ return i!==mi; })) : refU;
+    var list=[urls[0]].concat(ordered.filter(Boolean)).slice(0,5); var nRefs=list.length-1;
+    var useAnchor = anchorUrl && !(mi>=0 && refU[mi]); // 이 공간 전용 참고사진이 있으면 그 사진이 우선(통일은 마감재 스케줄로)
+    if(useAnchor) list.push(anchorUrl);
+    var prompt=_consultPrompt(st, vp, sp, nRefs, !!useAnchor, v, (mi>=0 && !!refU[mi]));
     _withExplicitAspect(urls[0], function(asp){
       falRun('fal-ai/nano-banana-2/edit', {prompt:prompt, image_urls:list, num_images:1, resolution:({'1K':'1K','2K':'2K','4K':'4K'})[st.res]||'1K', aspect_ratio:asp}, function(d){
         var url=falExtractImageUrl(d);
@@ -29478,34 +29802,42 @@ function _consultRunSpace(st, v, vp, sp, anchorUrl, done){
   _consultUrl(sp.photo, function(u){ urls[0]=u; if(--left===0) go(); });
   refs.forEach(function(r,i){ _consultUrl(r, function(u){ urls[i+1]=u; if(--left===0) go(); }); });
 }
-// 시안 하나: 첫 공간 → (기준 이미지로) 나머지 공간 → 마감재 → 견적
+// 시안 하나: 마감재 스케줄(무료) → 첫 공간 → (기준 이미지로) 나머지 공간 → 재질 사진 → 견적
 function _consultRunVariant(st, vi, onlySpaceId){
   var v=st.variants[vi], vp=v.plan;
   var spaces=st.spaces.filter(function(s){ return s.photo; });
   if(!spaces.length) return;
+  var build=_consultIsBuild(st);
   function anchorOf(){ var a=spaces[0], r=v.spaces[a.id]; return r && r.result ? r.result : null; }
-  function after(){ // 공간이 다 끝나면 마감재·견적
+  function after(){ // 공간이 다 끝나면 마감재(건축)·견적
     var allDone=spaces.every(function(s){ var r=v.spaces[s.id]; return r && r.status!=='run' && r.status!=='wait'; });
     if(!allDone) return;
-    _consultMaterials(st, v, function(){ _consultEstimate(st, v); });
+    if(build) _consultMaterials(st, v, function(){ _consultEstimate(st, v); });
+    else if(!v.estimate) _consultEstimate(st, v);
   }
+  function tex(url){ if(!build && url && st.makeTex && !v.texDone && !v.texBusy && v.sched) _consultSchedTextures(st, v, url); }
   if(onlySpaceId){
     var sp=spaces.filter(function(s){return s.id===onlySpaceId;})[0]; if(!sp) return;
     var anc = sp.id===spaces[0].id ? null : anchorOf();
     v.spaces[sp.id]=v.spaces[sp.id]||{}; v.spaces[sp.id].status='wait';
-    _consultEnqueue(function(next){ _consultRunSpace(st, v, vp, sp, anc, function(){ next(); v.estimate=null; v.estStatus=null; if(sp.id===spaces[0].id){ v.materials=null; v.matStatus=null; } after(); }); });
+    _consultEnsureSched(st, v, function(){
+      _consultEnqueue(function(next){ _consultRunSpace(st, v, vp, sp, anc, function(){ next(); if(!(v.estimate&&v.estimate.edited)){ v.estimate=null; v.estStatus=null; } if(build && sp.id===spaces[0].id){ v.materials=null; v.matStatus=null; } after(); }); });
+    });
     return;
   }
   spaces.forEach(function(s){ v.spaces[s.id]=v.spaces[s.id]||{}; if(!v.spaces[s.id].result) v.spaces[s.id].status='wait'; });
-  var first=spaces[0];
-  _consultEnqueue(function(next){
-    _consultRunSpace(st, v, vp, first, null, function(url){
-      next();
-      spaces.slice(1).forEach(function(s){
-        if(v.spaces[s.id].result && v.spaces[s.id].status==='done') return;
-        _consultEnqueue(function(next2){ _consultRunSpace(st, v, vp, s, url, function(){ next2(); after(); }); });
+  _consultRefresh();
+  _consultEnsureSched(st, v, function(){
+    var first=spaces[0];
+    _consultEnqueue(function(next){
+      _consultRunSpace(st, v, vp, first, null, function(url){
+        next(); tex(url);
+        spaces.slice(1).forEach(function(s){
+          if(v.spaces[s.id].result && v.spaces[s.id].status==='done') return;
+          _consultEnqueue(function(next2){ _consultRunSpace(st, v, vp, s, url, function(){ next2(); after(); }); });
+        });
+        after();
       });
-      after();
     });
   });
 }
@@ -29526,6 +29858,71 @@ function _consultStart(){
   try{ _trackAction('consult_start'); }catch(e){}
   st.variants.forEach(function(v,i){ _consultRunVariant(st, i); });
   renderSB(); renderMain('consult');
+}
+
+// ── 렌더링 없이: 갤러리·내 PC 이미지로 제안서 만들기 (2026-10-07 요청: "가장 중요한 것 — 여기서 렌더링 안 걸어도
+// 갤러리 탭이나 외부 이미지를 불러와서 쓸 수 있게") — 크레딧 0. 공간마다 결과 이미지를 넣으면 마감재 분석(무료)·견적·PDF까지.
+function _consultStartImport(){
+  var st=_consultState();
+  if(st.variants.length && !confirm('지금 시안을 지우고, 이미 만든 이미지로 새로 구성할까요?')) return;
+  if(!_consultSp(st).length){
+    (CONSULT_DEFAULT_SPACES[st.type]||['공간 1']).forEach(function(n){ st.spaces.push({id:'s'+Math.random().toString(36).slice(2,8), name:n, photo:null, noPhoto:true}); });
+  }
+  var plan=_consultEnsurePlan(st);
+  st.importMode=true;
+  st.variants=plan.map(function(p,i){
+    var pp=JSON.parse(JSON.stringify(p));
+    if(!(st.refs||[]).length){ pp.name='디자인 시안'; pp.ko='준비된 디자인 이미지로 구성한 안'; }
+    return {key:_consultLetter(i), plan:pp, spaces:{}, imported:true, materials:null, matStatus:null, estimate:null, estStatus:null};
+  });
+  st.pdfPages=null; st._pdf=null;
+  st.variants.forEach(function(v){ if(_consultIsBuild(st)) _consultEstimate(st, v); else { v.sched=_consultSchedDefault(st); _consultEstimate(st, v); } });
+  _consultSave();
+  try{ _trackAction('consult_import'); }catch(e){}
+  renderSB(); renderMain('consult');
+}
+function _consultSetResult(vi, spId, url, origUrl){
+  var st=_consultState(), v=st.variants[vi]; if(!v) return;
+  var sp=st.spaces.filter(function(x){return x.id===spId;})[0]; if(!sp) return;
+  var rec=v.spaces[spId]||(v.spaces[spId]={});
+  if(rec.result){ rec.prev=(rec.prev||[]); rec.prev.unshift(rec.result); rec.prev=rec.prev.slice(0,3); }
+  rec.result=url; rec.status='done'; rec.err=null; rec.imported=true; rec.at=Date.now();
+  if(!sp.photo && origUrl && /^https?:|^data:/.test(origUrl)){ sp.photo=origUrl; sp.noPhoto=false; }
+  if(/^data:/.test(url)) _doUpload(url, function(u){ if(rec.result===url){ rec.result=u; _consultSave(); } }, function(){});
+  v.dirty=true;
+  // 가져온 이미지 기준으로 마감재 다시 읽기(무료) — 여러 장 넣는 중일 수 있어 잠깐 기다렸다가
+  if(!_consultIsBuild(st) && (v.imported || !v.sched || v.sched.def)){
+    clearTimeout(v._schT); v._schT=setTimeout(function(){ _consultEnsureSched(st, v, null, {force:true, fromResults:true}); }, 1800);
+  } else if(_consultIsBuild(st)){ v.materials=null; _consultMaterials(st, v, function(){ _consultEstimate(st, v, true); }); }
+  _consultSave(); _consultRefresh();
+}
+function _consultImportPick(vi, spId, from){
+  if(from==='pc'){ _consultPick(false, function(d){ _consultSetResult(vi, spId, d, null); }); return; }
+  _openGalleryPickerForAnchor(function(src){
+    var orig=null;
+    Object.keys(G.HIST||{}).some(function(wf){ return (G.HIST[wf]||[]).some(function(it){ if(it.result===src){ orig=it.orig||null; return true; } return false; }); });
+    _consultSetResult(vi, spId, src, orig);
+  });
+}
+function _consultAddSpaceNoPhoto(){
+  var st=_consultState(); var n=prompt('추가할 공간 이름 (예: 작은방, 드레스룸)', _consultNextSpaceName(st));
+  if(!n || !n.trim()) return;
+  st.spaces.push({id:'s'+Math.random().toString(36).slice(2,8), name:n.trim(), photo:null, noPhoto:true});
+  st.variants.forEach(function(v){ if(!(v.estimate&&v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); } });
+  _consultSave(); renderSB(); _consultRefresh();
+}
+function _consultRemoveSpace(spId){
+  var st=_consultState(), sp=st.spaces.filter(function(x){return x.id===spId;})[0]; if(!sp) return;
+  if(!confirm('"'+sp.name+'" 공간을 제안서에서 뺄까요?')) return;
+  st.spaces=st.spaces.filter(function(x){return x.id!==spId;});
+  st.variants.forEach(function(v){ delete v.spaces[spId]; v.dirty=true; if(!(v.estimate&&v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); } });
+  _consultSave(); renderSB(); _consultRefresh();
+}
+function _consultRenameVariant(vi){
+  var st=_consultState(), v=st.variants[vi]; if(!v) return;
+  var n=prompt(v.key+'안 이름', v.plan.name); if(n==null || !n.trim()) return;
+  v.plan.name=n.trim(); var d=prompt(v.key+'안 설명(제안서에 들어가요)', v.plan.ko); if(d!=null && d.trim()) v.plan.ko=d.trim();
+  v.dirty=true; _consultSave(); _consultRefresh();
 }
 
 // ── 마감재(시안 공통) ──
@@ -29581,7 +29978,7 @@ function _consultParseJson(res){
 function _consultFallbackEstimate(st, v){
   if(_consultIsPart(st)){
     var mlt=CONSULT_TIER_MULT[v.plan.tier==null?1:v.plan.tier], items=[];
-    st.spaces.filter(function(s){return s.photo;}).forEach(function(s){ items.push({space:s.name, work:'공사 일체', spec:CONSULT_TIERS[v.plan.tier==null?1:v.plan.tier].name+' 마감', amount:Math.round(_consultSpaceTypical(s.name, st.type)*mlt/10)*10}); });
+    _consultSp(st).forEach(function(s){ items.push({space:s.name, work:'공사 일체', spec:CONSULT_TIERS[v.plan.tier==null?1:v.plan.tier].name+' 마감', amount:Math.round(_consultSpaceTypical(s.name, st.type)*mlt/10)*10}); });
     var tt=items.reduce(function(a,x){return a+x.amount;},0);
     return {items:items, total:tt, note:'AI 분석이 안 돼서 공간별 표준 공사비 기준으로 계산한 개산이에요.', fallback:true};
   }
@@ -29596,18 +29993,29 @@ function _consultFallbackEstimate(st, v){
 function _consultEstimate(st, v, force){
   if(v.estimate && !force) return;
   var ti=v.plan.tier==null?1:v.plan.tier;
-  var est=_consultCalcEstimate(st, ti, {windows:/샷시|창호|창문/.test(st.memo||'')});
-  // 시안 이미지에서 읽은 마감재 이름이 있으면 바닥·벽 사양에 그대로 표시(금액은 등급 단가 그대로)
-  (v.materials||[]).forEach(function(m){
-    if(!m || !m.v) return;
-    est.items.forEach(function(it){ if((/바닥/.test(m.k) && it.work==='바닥') || (/벽/.test(m.k) && it.work==='벽 마감')) it.spec=it.spec+' (시안: '+m.v+')'; });
-  });
+  var est=_consultCalcEstimate(st, ti);
+  // 시안 마감재 스케줄의 자재명을 사양에 표시(금액은 등급 단가 그대로) — 공종 ↔ 스케줄 항목
+  var SI=v.sched&&v.sched.items;
+  if(SI){
+    var map=[[/^바닥$/,['floor']],[/도배|도장|벽 마감/,['wall']],[/목공/,['ceiling']],[/문·중문·필름/,['door']],[/^주방/,['kcab','kcounter']],[/^욕실/,['bwall','bfloor']],[/현관·베란다 타일/,['etile']],[/붙박이/,['storage']],[/전기·조명/,['light']],[/창호 프레임 시트지/,['window']],
+             [/인테리어 공사/,['floor','wall']],[/가구·집기/,['cfurn']],[/^화장실/,['ctile']],[/간판·파사드/,['door']]];
+    est.items.forEach(function(it){
+      for(var i=0;i<map.length;i++){ if(map[i][0].test(it.work)){ var nm=map[i][1].map(function(k){ return SI[k]&&SI[k].ko; }).filter(Boolean).join(' / '); if(nm) it.spec=(it.spec?it.spec+' · ':'')+nm; break; } }
+    });
+  } else {
+    (v.materials||[]).forEach(function(m){
+      if(!m || !m.v) return;
+      est.items.forEach(function(it){ if((/바닥/.test(m.k) && it.work==='바닥') || (/벽/.test(m.k) && /도배|벽 마감/.test(it.work))) it.spec=it.spec+' (시안: '+m.v+')'; });
+    });
+  }
   var bud=_consultNum(st.budget), note='2026년 수도권 평균 시공 단가 기준(부가세 별도). 현장 실측·자재 확정 후 ±10~15% 달라질 수 있어요.';
   if(bud){ var diff=Math.round((est.total-bud)/bud*100); note+=' 고객 예산 '+_consultFmtMan(bud)+' 대비 '+(diff>=0?'+':'')+diff+'%.'; }
-  if(st.type==='home' && !_consultIsPart(st) && !/샷시|창호|창문/.test(st.memo||'')) note+=' 샷시(창호) 교체는 미포함 — 요청사항에 "샷시"를 적으면 포함돼요.';
+  if(st.type==='home') note+=' 샷시(창호)는 교체하지 않고 기존 프레임에 시트지만 시공해요.';
+  var _ex=_consultExt(st);
+  if(_ex==='living'||_ex==='living_room') note+=' 발코니 확장은 구청 신고가 필요하고, 외부 창호가 단열 기준에 못 미치면 창호 보완 비용이 따로 생길 수 있어요.';
   // 요청("소품은 포함 아닌거지? 조명은?"): 포함/미포함을 견적에 명확히 적음
   if(!_consultIsBuild(st)){
-    note+=' [포함] 철거·마감재·시공비, 붙박이 가구(주방·수납), 조명기구(매입등·기본 펜던트 등)와 전기 공사'+(st.type==='commercial'?', 집기·가구(항목에 있을 때)':'')+'. [미포함] 가전(냉장고·식기세척기·인덕션 등), 소품·데코·커튼·러그, 이동식 가구(식탁·소파·침대), 이사·보관.';
+    note+=' [포함] 철거·마감재·시공비, 붙박이 가구(주방·수납), 기본 조명(매입등·간접조명·기본 등기구)과 전기 공사'+(st.type==='commercial'?', 집기·가구(항목에 있을 때)':'')+'. [미포함] 이미지 속 가구(식탁·의자·소파·침대 등)·소품·장식 조명(펜던트·스탠드 등), 가전, 커튼·러그, 이사·보관.';
   } else {
     note+=' [미포함] 토지비, 취득세, 가구·가전, 조경·외부 부대시설(항목에 없을 때).';
   }
@@ -29617,9 +30025,39 @@ function _consultEstimate(st, v, force){
 function _consultVariantTotal(v){ return v.estimate ? v.estimate.total : 0; }
 // 실제 업체 견적은 현장 상태·자재 선택에 따라 달라서 범위로도 보여줌(-10% ~ +15%)
 function _consultRange(tot){ if(!tot) return ''; var lo=Math.round(tot*0.9/10)*10, hi=Math.round(tot*1.15/10)*10; return _consultFmtMan(lo).replace(/^약\s*/,'')+' ~ '+_consultFmtMan(hi).replace(/^약\s*/,''); }
-function _consultSpaceAmt(v, spName){
-  if(!v.estimate) return null;
-  var s=0; v.estimate.items.forEach(function(x){ if(x.space===spName) s+=x.amount; }); return s||null;
+function _consultSpaceAmt(v, spName, st){
+  // 2026-10-07 요청("주방·욕실만 금액이 나오고 나머지는 왜 안 나와"): 전체 공사는 바닥·도배·목공 등이 '공통'(평당)이라
+  // 공간별 금액이 없었음 → 공통 항목을 공간 면적(평) 비율로 나눠서 공간마다 개산 금액을 보여줌. 욕실은 욕실 항목만.
+  if(!v || !v.estimate) return null;
+  st=st||_consultState(); spName=String(spName||'');
+  var items=v.estimate.items, s=0;
+  var isBath=/욕실|화장실/.test(spName), isKit=/주방|부엌/.test(spName);
+  var nb=0; items.forEach(function(x){ var m=String(x.work).match(/욕실\s*(\d+)개/); if(m) nb=parseInt(m[1],10); });
+  items.forEach(function(x){
+    var amt=Math.round(_consultNum(x.amount))||0;
+    if(x.space===spName){ s+=amt; return; }
+    if(x.space==='주방' && isKit){ s+=amt; return; }
+    if(x.space==='욕실' && isBath){ s+=amt/Math.max(1, nb||1); return; }
+    if(x.space==='화장실' && isBath){ s+=amt; return; }
+    if(x.space==='거실' && /거실/.test(spName)){ s+=amt; return; }
+  });
+  if(!_consultIsPart(st) && !_consultIsBuild(st) && !isBath){
+    var area=_consultNum(st.area)||(st.type==='home'?30:20), spy=st.type==='home'?_consultSpacePy(spName):Math.max(3, area/Math.max(1,_consultSp(st).length));
+    var share=Math.min(1, spy/area), common=0;
+    items.forEach(function(x){ if(x.space!=='공통') return; var w=String(x.work);
+      if(/현관·베란다 타일/.test(w) && !/현관|발코니|베란다/.test(spName)) return;
+      if(/발코니 확장/.test(w)){ if(/거실/.test(spName)) s+=Math.round(_consultNum(x.amount))||0; return; }
+      if(/현장관리|설계·현장관리/.test(w)) return;
+      common+=Math.round(_consultNum(x.amount))||0; });
+    s+=common*share;
+    var mg=items.filter(function(x){ return x.space==='공통' && /현장관리/.test(String(x.work)); })[0];
+    if(mg){ var base=v.estimate.total-(Math.round(_consultNum(mg.amount))||0); if(base>0) s+=s*(_consultNum(mg.amount)/base); }
+  } else if(_consultIsPart(st)){
+    var mg2=items.filter(function(x){ return x.space==='공통' && /보양|현장관리/.test(String(x.work)); })[0];
+    if(mg2 && s){ var b2=v.estimate.total-(Math.round(_consultNum(mg2.amount))||0); if(b2>0) s+=s*(_consultNum(mg2.amount)/b2); }
+  }
+  s=Math.round(s/10)*10;
+  return s||null;
 }
 
 // ── 이미지 수정(말로 고치기) ──
@@ -29761,7 +30199,8 @@ function _consultDrawVariantPage(data, st, v, vi, loaded, pageIndex, total, logo
   _wrapCanvasText(ctx, v.plan.ko+(st.mode==='budget'?'':' · 마감 등급: '+CONSULT_TIERS[v.plan.tier==null?1:v.plan.tier].name), innerW).slice(0,3).forEach(function(l){ ctx.fillText(l, pad, y); y+=34; });
   y+=24;
   var imgs=[]; st.spaces.forEach(function(s){ var im=loaded['v'+vi+'_'+s.id]; if(im) imgs.push(im); }); imgs=imgs.slice(0,5);
-  var mh=Math.min(700, H-70-470-y), g=14, n=imgs.length;
+  var _bm=_consultBoardMats(st, v).slice(0,12), _bTile=Math.round(((W-176)-14*5)/6*0.8), _bH=_bm.length?Math.ceil(_bm.length/6)*(_bTile+62)+52:52;
+  var mh=Math.min(700, H-70-_bH-150-y), g=14, n=imgs.length;
   function cell(im,x,yy,w,h){ _proposalCoverDrawRounded(ctx, im, x, yy, w, h, 6); }
   if(n===1) cell(imgs[0], pad, y, innerW, mh);
   else if(n===2){ var hw=(innerW-g)/2; cell(imgs[0],pad,y,hw,mh); cell(imgs[1],pad+hw+g,y,hw,mh); }
@@ -29769,18 +30208,19 @@ function _consultDrawVariantPage(data, st, v, vi, loaded, pageIndex, total, logo
   else if(n>=4){ var qw=(innerW-g)/2, qh=(mh-g)/2; for(var q=0;q<4;q++) cell(imgs[q], pad+(q%2)*(qw+g), y+Math.floor(q/2)*(qh+g), qw, qh); }
   y+=mh+40;
   // 마감재 보드
-  var mats=(v.materials||[]).filter(function(m){return m&&m.v;}).slice(0,4);
+  var mats=_consultBoardMats(st, v).slice(0,12);
   ctx.fillStyle=t.accent; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('MATERIAL BOARD', pad, y); _propEdLS(ctx,0);
   y+=32;
   if(mats.length){
-    var cols=4, gap=16, tw2=(innerW-gap*3)/cols, tileH=170;
+    var cols=6, gap=14, tw2=(innerW-gap*(cols-1))/cols, tileH=Math.round(tw2*0.8), rowsN=Math.ceil(mats.length/cols);
     mats.forEach(function(m,i){
-      var mx=pad+i*(tw2+gap), sw2=loaded['vm'+vi+'_'+i];
-      if(sw2) _proposalCoverDrawRounded(ctx, sw2, mx, y, tw2, tileH, 4); else { ctx.fillStyle=t.divider; ctx.fillRect(mx,y,tw2,tileH); }
-      ctx.fillStyle=t.muted; ctx.font='700 12px '+PROPOSAL_FONT; _propEdLS(ctx,1.5); ctx.fillText(String(m.k||''), mx, y+tileH+8); _propEdLS(ctx,0);
-      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '600', 16, 11, tw2); ctx.fillText(String(m.v), mx, y+tileH+26);
+      var mx=pad+(i%cols)*(tw2+gap), my=y+Math.floor(i/cols)*(tileH+62);
+      var sw2=m.id?loaded['sv'+vi+'_'+m.id]:loaded['vm'+vi+'_'+i];
+      if(sw2) _proposalCoverDrawRounded(ctx, sw2, mx, my, tw2, tileH, 4); else { ctx.fillStyle=m.hex||t.divider; ctx.fillRect(mx,my,tw2,tileH); }
+      ctx.fillStyle=t.muted; ctx.font='700 11px '+PROPOSAL_FONT; _propEdLS(ctx,1); ctx.fillText(String(m.k||''), mx, my+tileH+8); _propEdLS(ctx,0);
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '700', 14, 10, tw2); ctx.fillText(String(m.v), mx, my+tileH+26);
     });
-    y+=tileH+70;
+    y+=rowsN*(tileH+62)+20;
   } else { y+=20; }
   var tot=_consultVariantTotal(v);
   if(tot){
@@ -29830,46 +30270,112 @@ function _consultDrawEstimatePage(data, st, v, pageIndex, total, logo){
   _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
   return cv;
 }
+// 공간 페이지 — 2026-10-07 요청("BEFORE 때문에 AFTER 우측 하단이 안 보인다 — 좌우로 두든 밖으로 빼든"):
+// BEFORE를 AFTER 위에 겹치지 않고 옆(세로 사진)이나 아래(가로 사진)에 따로 배치 + 공간별 마감재 목록.
+function _consultDrawSpacePage(data, st, v, vi, sp, rec, loaded, num, pageIndex, total, logo){
+  var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H, cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  var ctx=cv.getContext('2d'), t=_proposalEffectiveTheme(data), pad=88, innerW=W-pad*2;
+  ctx.fillStyle=t.bg; ctx.fillRect(0,0,W,H);
+  _proposalEdHeader(ctx, data, t, pad, 'Option '+v.key+'  ·  '+sp.name);
+  var y=116; ctx.textBaseline='top'; ctx.textAlign='left';
+  ctx.fillStyle=t.accent; ctx.font='800 112px '+PROPOSAL_FONT; _propEdLS(ctx,-4);
+  var ns=_propEdPad2(num); ctx.fillText(ns, pad-6, y-12); var nw=ctx.measureText(ns).width; _propEdLS(ctx,0);
+  var tx=pad+nw+28, tw=W-pad-tx;
+  ctx.fillStyle=t.muted; ctx.font='700 13px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('OPTION '+v.key+'  ·  '+_cEsc(v.plan.name).toUpperCase(), tx, y+8); _propEdLS(ctx,0);
+  ctx.fillStyle=t.ink; _propEdFitFont(ctx, v.key+'안 · '+sp.name, '800', 44, 26, tw); ctx.fillText(v.key+'안 · '+sp.name, tx, y+32);
+  var amt=_consultSpaceAmt(v, sp.name, st);
+  if(amt){ ctx.fillStyle=t.desc; ctx.font='500 18px '+PROPOSAL_FONT; ctx.fillText('예상 공사비  약 '+_consultFmtMan(amt).replace(/^약\s*/,'')+'  (공간 면적 비율 개산)', tx, y+88); }
+  y+=146;
+  var A=loaded['v'+vi+'_'+sp.id], B=loaded['bf_'+sp.id];
+  var mats=_consultSpaceMats(st, v, sp.name);
+  var bottom=H-70-40, noteH=120, bodyBot=bottom-noteH;
+  function tag(txt, x, yy, dark){ ctx.font='700 13px '+PROPOSAL_FONT; _propEdLS(ctx,2.5); var w=ctx.measureText(txt).width+26; ctx.fillStyle=dark?'rgba(0,0,0,.72)':t.accent; ctx.fillRect(x, yy, w, 30); ctx.fillStyle=dark?'#fff':_propEdOnAccent(t); ctx.textBaseline='middle'; ctx.fillText(txt, x+13, yy+15); ctx.textBaseline='top'; _propEdLS(ctx,0); }
+  function shadowBox(x,yy,w,h){ ctx.save(); ctx.shadowColor='rgba(0,0,0,.16)'; ctx.shadowBlur=22; ctx.shadowOffsetY=8; ctx.fillStyle='#000'; ctx.fillRect(x+4,yy+4,w-8,h-8); ctx.restore(); }
+  function matList(x, yy, w, maxY){
+    ctx.fillStyle=t.accent; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('MATERIALS', x, yy); _propEdLS(ctx,0);
+    ctx.fillStyle=t.divider; ctx.fillRect(x, yy+26, w, 1); yy+=42;
+    var SW=52, rowH=66;
+    mats.forEach(function(m){
+      if(yy+SW>maxY) return;
+      var im=m.id?loaded['sv'+vi+'_'+m.id]:null;
+      if(im) _proposalCoverDrawRounded(ctx, im, x, yy, SW, SW, 6);
+      else { ctx.fillStyle=m.hex||t.divider; if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(x,yy,SW,SW,6); ctx.fill(); } else ctx.fillRect(x,yy,SW,SW); ctx.strokeStyle='rgba(0,0,0,.08)'; ctx.lineWidth=1; ctx.strokeRect(x+.5,yy+.5,SW-1,SW-1); }
+      ctx.fillStyle=t.muted; ctx.font='700 12px '+PROPOSAL_FONT; _propEdLS(ctx,1); ctx.fillText(String(m.k||''), x+SW+14, yy+5); _propEdLS(ctx,0);
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v||''), '700', 18, 12, w-SW-16); ctx.fillText(String(m.v||''), x+SW+14, yy+25);
+      yy+=rowH;
+    });
+    return yy;
+  }
+  var endY=y;
+  if(A){
+    var ar=A.naturalWidth/A.naturalHeight;
+    if(ar<1.05){ // 세로·정사각 사진 → AFTER 왼쪽 크게, 오른쪽에 BEFORE + 마감재
+      var aw=Math.round(innerW*0.6), ah=aw/ar; if(ah>bodyBot-y){ ah=bodyBot-y; aw=ah*ar; }
+      shadowBox(pad,y,aw,ah); _proposalCoverDrawRounded(ctx, A, pad, y, aw, ah, 6); tag('AFTER', pad+18, y+18);
+      var rx=pad+aw+40, rw=W-pad-rx, ry=y;
+      if(B){ var br=B.naturalWidth/B.naturalHeight, bw=rw, bh=bw/br, maxBh=(ah)*0.5; if(bh>maxBh){ bh=maxBh; bw=bh*br; }
+        _proposalCoverDrawRounded(ctx, B, rx, ry, bw, bh, 6); tag('BEFORE', rx+12, ry+12, true); ry+=bh+36; }
+      var my=matList(rx, ry, rw, bodyBot);
+      endY=Math.max(y+ah, my);
+    } else { // 가로 사진 → AFTER 전체 폭, 아래에 BEFORE(왼쪽) + 마감재(오른쪽)
+      var aw2=innerW, ah2=aw2/ar, maxA=(bodyBot-y)*0.62; if(ah2>maxA){ ah2=maxA; aw2=ah2*ar; }
+      var ax=pad+(innerW-aw2)/2;
+      shadowBox(ax,y,aw2,ah2); _proposalCoverDrawRounded(ctx, A, ax, y, aw2, ah2, 6); tag('AFTER', ax+18, y+18);
+      var y2=y+ah2+36, colB=Math.round(innerW*0.42);
+      if(B){ var br2=B.naturalWidth/B.naturalHeight, bw2=colB, bh2=bw2/br2; if(bh2>bodyBot-y2){ bh2=bodyBot-y2; bw2=bh2*br2; }
+        _proposalCoverDrawRounded(ctx, B, pad, y2, bw2, bh2, 6); tag('BEFORE', pad+12, y2+12, true); }
+      var mx=B?pad+colB+40:pad, my2=matList(mx, y2, W-pad-mx, bodyBot);
+      endY=Math.max(y2+(B?Math.min(colB/(B.naturalWidth/B.naturalHeight), bodyBot-y2):0), my2);
+    }
+  }
+  // 디자인 노트 + 안내
+  var ny=Math.max(endY+30, bottom-noteH);
+  ctx.fillStyle=t.divider; ctx.fillRect(pad, ny, innerW, 1);
+  ctx.fillStyle=t.desc; ctx.font='400 18px '+PROPOSAL_FONT;
+  var desc=v.plan.ko+(rec&&rec.edits&&rec.edits.length?' (수정 반영: '+rec.edits.slice(-2).join(', ')+')':'');
+  var ly=ny+16; _wrapCanvasText(ctx, desc, innerW).slice(0,2).forEach(function(l){ ctx.fillText(l, pad, ly); ly+=28; });
+  if(!_consultIsBuild(st)){ ctx.fillStyle=t.muted; ctx.font='400 14px '+PROPOSAL_FONT; ctx.fillText('※ 이미지 속 가구·소품·장식 조명(펜던트·스탠드 등)은 연출용이며 견적에서 제외됩니다.', pad, ly+4); }
+  _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
+  return cv;
+}
 function _consultBuildPdf(onDone){
   var st=_consultState();
   var data=_consultPdfData(st);
-  var spaces=st.spaces.filter(function(s){return s.photo;});
-  // 공간 페이지용 장면 목록(시안 × 공간)
-  var scenes=[], sceneVar=[];
-  st.variants.forEach(function(v,vi){
-    spaces.forEach(function(s){
-      var r=v.spaces[s.id]; if(!r || !r.result) return;
-      var amt=_consultSpaceAmt(v, s.name);
-      scenes.push({orig:s.photo, result:r.result, label:v.key+'안 · '+s.name, desc:v.plan.ko+(r.edits&&r.edits.length?' (수정 반영: '+r.edits.slice(-2).join(', ')+')':''), materials:(v.materials||[]).map(function(m){return {k:m.k, v:m.v, img:m.img};}), priceOverride:amt});
-      sceneVar.push(vi);
-    });
-  });
-  if(!scenes.length){ alert('먼저 시안을 생성해주세요.'); return; }
+  var spaces=_consultSp(st);
+  var pages=[]; // {vi, sp, rec}
+  st.variants.forEach(function(v,vi){ spaces.forEach(function(s){ var r=v.spaces[s.id]; if(r && r.result) pages.push({vi:vi, sp:s, rec:r}); }); });
+  if(!pages.length){ alert('먼저 시안 이미지를 만들거나 넣어주세요.'); if(onDone) onDone(); return; }
   var toLoad=[], loaded={};
   if(data.logo) toLoad.push(['logo', data.logo]);
-  toLoad.push(['hero', scenes[0].result]);
-  scenes.forEach(function(sc,i){ toLoad.push(['a'+i, sc.result]); if(sc.orig) toLoad.push(['b'+i, sc.orig]); (sc.materials||[]).forEach(function(m,j){ if(m.img) toLoad.push(['m'+i+'_'+j, m.img]); }); });
+  toLoad.push(['hero', pages[0].rec.result]);
+  spaces.forEach(function(s){ if(s.photo) toLoad.push(['bf_'+s.id, s.photo]); });
   st.variants.forEach(function(v,vi){
     var firstR=null;
     spaces.forEach(function(s){ var r=v.spaces[s.id]; if(r&&r.result){ toLoad.push(['v'+vi+'_'+s.id, r.result]); if(!firstR) firstR=r.result; } });
     if(firstR) toLoad.push(['v'+vi, firstR]);
+    if(v.sched && v.sched.items) Object.keys(v.sched.items).forEach(function(k){ var it=v.sched.items[k]; if(it && it.img) toLoad.push(['sv'+vi+'_'+k, it.img]); });
     (v.materials||[]).slice(0,4).forEach(function(m,j){ if(m.img) toLoad.push(['vm'+vi+'_'+j, m.img]); });
   });
   var left=toLoad.length;
   toLoad.forEach(function(p){ var im=new Image(); im.crossOrigin='anonymous'; im.onload=function(){ loaded[p[0]]=im; if(--left===0) draw(); }; im.onerror=function(){ if(--left===0) draw(); }; im.src=p[1]; });
   function draw(){
-    var plan=[]; // 페이지 그리기 함수 목록 → 총 페이지 수를 알고 나서 그림
-    plan.push(function(pi,T){ var d=Object.assign({}, data, {scenes:spaces}); return _proposalDrawCoverPageEd(d, loaded.hero, loaded.logo); });
-    var _lgP=_consultLegal(st); if(_lgP.cards.length || _lgP.calc) plan.push(function(pi,T){ return _consultDrawLegalPage(data, st, pi, T, loaded.logo); }); // 해당 사항 있을 때만
+    var plan=[];
+    var coverScenes=spaces.map(function(s){ return {label:s.name}; });
+    plan.push(function(pi,T){ var d=Object.assign({}, data, {scenes:coverScenes}); return _proposalDrawCoverPageEd(d, loaded.hero, loaded.logo); });
+    var _lgP=_consultLegal(st); if(_lgP.cards.length || _lgP.calc) plan.push(function(pi,T){ return _consultDrawLegalPage(data, st, pi, T, loaded.logo); });
     if(st.variants.length>1) plan.push(function(pi,T){ return _consultDrawComparePage(data, st, loaded, pi, T, loaded.logo); });
+    var num=0;
     st.variants.forEach(function(v,vi){
+      if(!pages.some(function(p){return p.vi===vi;})) return;
       plan.push(function(pi,T){ return _consultDrawVariantPage(data, st, v, vi, loaded, pi, T, loaded.logo); });
-      scenes.forEach(function(sc,si){ if(sceneVar[si]!==vi) return;
-        plan.push(function(pi,T){ var d=Object.assign({}, data, {scenes:scenes}); return _proposalDrawContentPageEd([{scene:sc, idx:si}], loaded, d, pi, T, loaded.logo); });
+      pages.forEach(function(pg){ if(pg.vi!==vi) return; var n=++num;
+        plan.push(function(pi,T){ return _consultDrawSpacePage(data, st, v, vi, pg.sp, pg.rec, loaded, n, pi, T, loaded.logo); });
       });
       if(v.estimate) plan.push(function(pi,T){ return _consultDrawEstimatePage(data, st, v, pi, T, loaded.logo); });
     });
-    plan.push(function(pi,T){ var d=Object.assign({}, data, {scenes:scenes}); return _proposalDrawClosingPageEd(d, loaded, T, loaded.logo); });
+    var closingScenes=pages.map(function(p,i){ return {result:p.rec.result, label:st.variants[p.vi].key+'안 · '+p.sp.name}; });
+    pages.forEach(function(p,i){ loaded['a'+i]=loaded['v'+p.vi+'_'+p.sp.id]; });
+    plan.push(function(pi,T){ var d=Object.assign({}, data, {scenes:closingScenes}); return _proposalDrawClosingPageEd(d, loaded, T, loaded.logo); });
     if(!window.jspdf){ alert('PDF 도구를 아직 불러오지 못했어요. 잠시 후 다시 눌러주세요.'); if(onDone) onDone(); return; }
     var T=plan.length, canvases=plan.map(function(fn,i){ return fn(i,T); });
     var pdf=new window.jspdf.jsPDF({unit:'mm', format:'a4', orientation:'portrait'});
@@ -29902,12 +30408,14 @@ function _consultNextSpaceName(st){
 function sbConsult(p){
   var st=_consultState();
   // 예전 구조(사진 없는 빈 공간 칸)를 정리 — 사진 있는 공간만 남김
-  if(st.spaces.some(function(s){return !s.photo;}) && !st.variants.length){ st.spaces=st.spaces.filter(function(s){return s.photo;}); }
+  if(st.spaces.some(function(s){return !s.photo && !s.noPhoto;}) && !st.variants.length){ st.spaces=_consultSp(st); }
+  // 예전에 넣은 스타일 사진은 공간 분류가 없음 → 한 번 자동 분류
+  st.refTags=st.refTags||[]; (st.refs||[]).forEach(function(u,i){ if(u && !st.refTags[i] && /^https?:/.test(u)){ st.refTags[i]='…'; _consultClassifyRef(st, i); } });
   var running=st.variants.some(function(v){ return Object.keys(v.spaces).some(function(k){ var s=v.spaces[k]; return s.status==='run'||s.status==='wait'; }); });
   var IS='width:100%;padding:10px;border-radius:9px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:13px;font-family:inherit;box-sizing:border-box';
   function step(n, title, sub){ var w=dv('ss'); w.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="width:22px;height:22px;border-radius:50%;background:var(--ac);color:#000;font-weight:900;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+n+'</span><b style="font-size:14px;color:var(--t)">'+title+'</b>'+(sub?'<span style="font-size:11px;color:var(--m2)">'+sub+'</span>':'')+'</div>'; p.appendChild(w); return w; }
   function inp(val, ph, on, rerender){ var i=mk('input',''); i.value=val||''; i.placeholder=ph||''; i.style.cssText=IS; i.oninput=function(){ on(i.value); _consultSave(); }; if(rerender) i.onchange=function(){ renderSB(); renderMain('consult', true); }; return i; }
-  function sel(val, opts, on){ var s=mk('select',''); s.style.cssText=IS; opts.forEach(function(o){ var op=mk('option',''); op.value=o; op.textContent=o||'선택하세요'; op.style.color='#111'; if(o===val) op.selected=true; s.appendChild(op); }); s.onchange=function(){ on(s.value); _consultSave(); renderSB(); renderMain('consult', true); }; return s; }
+  function sel(val, opts, on){ var s=mk('select',''); s.style.cssText=IS+';color-scheme:dark'; opts.forEach(function(o){ var op=mk('option',''); op.value=o; op.textContent=o||'선택하세요'; op.style.color='#111'; op.style.background='#fff'; if(o===val) op.selected=true; s.appendChild(op); }); s.onchange=function(){ on(s.value); _consultSave(); renderSB(); renderMain('consult', true); }; return s; }
   function seg(cur, list, on){ var w=dv(''); w.style.cssText='display:flex;gap:6px'; list.forEach(function(it){ var b=mk('button',''); b.type='button'; b.innerHTML=it.l; var a=(it.k===cur); b.style.cssText='flex:1;padding:11px 4px;border-radius:9px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;border:1.5px solid '+(a?'var(--ac)':'var(--bd2)')+';background:'+(a?'var(--acg)':'var(--c2)')+';color:'+(a?'var(--ac)':'var(--t2)'); b.onclick=function(){ if(running) return; on(it.k); _consultSave(); renderSB(); renderMain('consult', true); }; w.appendChild(b); }); return w; }
   function grid2(){ var r=dv(''); r.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px'; return r; }
   function addrRow(box){
@@ -29940,7 +30448,7 @@ function sbConsult(p){
     b.onclick=function(){
       if(running || st.type===t.k) return;
       if(st.variants.length && !confirm('종류를 바꾸면 지금 시안이 초기화돼요. 계속할까요?')) return;
-      var n=_consultDefault(t.k); n.spaces=[]; n.refs=st.refs; n.client=st.client; n.area=st.area; n.budget=st.budget; n.memo=st.memo; n.addr=st.addr; n.count=st.count; n.res=st.res;
+      var n=_consultDefault(t.k); n.spaces=[]; n.refs=st.refs; n.refTags=st.refTags; n.client=st.client; n.area=st.area; n.budget=st.budget; n.memo=st.memo; n.addr=st.addr; n.count=st.count; n.res=st.res;
       if(_consultIsBuild(st)===_consultIsBuild(n)) n.spaces=st.spaces;
       G_CONSULT=n; _consultSave(); renderSB(); renderMain('consult');
     };
@@ -29964,11 +30472,11 @@ function sbConsult(p){
   var lab1=dv(''); lab1.style.cssText='font-size:12px;color:var(--t2);font-weight:700;margin-bottom:6px';
   lab1.textContent=_consultIsBuild(st)?'현장 사진 (대지·건물)':'현장 사진 (공간마다 1장씩, 여러 장 한 번에 가능)';
   s2.appendChild(lab1);
-  var pg=dv(''); pg.style.cssText='display:grid;grid-template-columns:repeat(3,1fr);gap:6px';
+  var pg=dv(''); pg.style.cssText='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 6px;align-items:start'; // 고정 높이 — 세로 사진이 아래 칸을 침범하지 않게
   st.spaces.forEach(function(sp, si){
     var c=dv(''); c.style.cssText='position:relative';
-    var im=dv(''); im.style.cssText='aspect-ratio:4/3;border-radius:8px;background:var(--c2) center/cover no-repeat;cursor:pointer;position:relative';
-    if(sp.photo) im.style.backgroundImage='url("'+sp.photo+'")';
+    var im=dv(''); im.style.cssText='width:100%;height:62px;border-radius:8px;background:var(--c2) center/cover no-repeat;cursor:pointer;position:relative;overflow:hidden';
+    if(sp.photo) im.style.backgroundImage='url("'+sp.photo+'")'; else im.innerHTML='<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--m2)">비포 없음</span>';
     if(sp.photoUp) im.innerHTML='<span style="position:absolute;left:4px;bottom:4px;font-size:9px;background:rgba(0,0,0,.65);color:#fff;padding:1px 5px;border-radius:4px">올리는 중</span>';
     im.title='눌러서 사진 바꾸기';
     im.onclick=function(){ if(running) return; _consultPick(false, function(d){ _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); }); };
@@ -29977,30 +30485,40 @@ function sbConsult(p){
     x.onclick=function(e){ e.stopPropagation(); if(running) return; st.spaces.splice(si,1); _consultSave(); renderSB(); renderMain('consult', true); };
     var nm=mk('input',''); nm.value=sp.name; nm.title='공간 이름 (눌러서 고치기)';
     nm.style.cssText='width:100%;margin-top:3px;padding:3px 4px;border:none;border-bottom:1px dashed var(--bd2);background:transparent;color:var(--t);font-size:11.5px;font-weight:700;font-family:inherit;text-align:center;box-sizing:border-box';
-    nm.oninput=function(){ sp.name=nm.value; _consultSave(); };
+    nm.oninput=function(){ sp.name=nm.value; _consultSave(); clearTimeout(window._cNmT); window._cNmT=setTimeout(function(){ renderMain('consult', true); }, 250); }; // 메인 화면에도 바로 반영
     c.appendChild(im); if(!running) im.appendChild(x); c.appendChild(nm); pg.appendChild(c);
   });
   if(st.spaces.length<8 && !running){
-    var add=dv(''); add.style.cssText='aspect-ratio:4/3;border-radius:8px;border:1.5px dashed var(--ac);background:var(--acg);color:var(--ac);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:11px;font-weight:800;gap:2px';
+    var add=dv(''); add.style.cssText='height:62px;border-radius:8px;border:1.5px dashed var(--ac);background:var(--acg);color:var(--ac);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:11px;font-weight:800;gap:2px';
     add.innerHTML='<span style="font-size:20px;line-height:1">＋</span>사진 추가';
     add.onclick=function(){ _consultPick(true, function(d){ if(st.spaces.length>=8) return; var sp={id:'s'+Math.random().toString(36).slice(2,8), name:_consultNextSpaceName(st), photo:null}; st.spaces.push(sp); _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); }); };
     pg.appendChild(add);
   }
   s2.appendChild(pg);
   var lab2=dv(''); lab2.style.cssText='font-size:12px;color:var(--t2);font-weight:700;margin:12px 0 6px';
-  lab2.innerHTML='고객이 원하는 스타일 사진 <span style="font-weight:400;color:var(--m2)">(선택 · 최대 4장)</span>';
+  lab2.innerHTML='고객이 원하는 스타일 사진 <span style="font-weight:400;color:var(--m2)">(선택 · 최대 4장 · 공간을 자동으로 알아봐요)</span>';
   s2.appendChild(lab2);
-  var rg=dv(''); rg.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:6px';
+  var rg=dv(''); rg.style.cssText='display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;align-items:start';
   st.refs.forEach(function(u, ri){
-    var c=dv(''); c.style.cssText='aspect-ratio:1;border-radius:8px;background:var(--c2) center/cover no-repeat;position:relative'; c.style.backgroundImage='url("'+u+'")';
+    var c=dv(''); c.style.cssText='height:62px;border-radius:8px;background:var(--c2) center/cover no-repeat;position:relative'; c.style.backgroundImage='url("'+u+'")';
+    var no=dv(''); no.textContent=(ri+1); no.style.cssText='position:absolute;left:3px;top:3px;min-width:16px;height:16px;border-radius:8px;background:var(--ac);color:#000;font-size:10px;font-weight:900;text-align:center;line-height:16px;padding:0 3px'; c.appendChild(no);
     var del=mk('button',''); del.type='button'; del.textContent='✕'; del.style.cssText='position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:10px;cursor:pointer;padding:0;line-height:18px';
-    del.onclick=function(){ st.refs.splice(ri,1); _consultSave(); renderSB(); };
-    c.appendChild(del); rg.appendChild(c);
+    del.onclick=function(){ st.refs.splice(ri,1); (st.refTags||[]).splice(ri,1); _consultSave(); renderSB(); renderMain('consult', true); };
+    c.appendChild(del);
+    // 이 사진이 어느 공간용인지(자동 분류 → 직접 바꾸기 가능). 같은 공간에 그대로 적용됨
+    var wrapR=dv(''); wrapR.appendChild(c);
+    var tsel=mk('select',''); tsel.style.cssText='width:100%;margin-top:3px;padding:2px 2px;border-radius:5px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:10.5px;font-family:inherit;color-scheme:dark';
+    st.refTags=st.refTags||[]; var cur=st.refTags[ri]||'';
+    if(cur==='…'){ var o0=mk('option',''); o0.textContent='분석 중…'; o0.value='…'; o0.style.cssText='color:#111;background:#fff'; tsel.appendChild(o0); }
+    _consultRefTagList(st).forEach(function(tg){ var o=mk('option',''); o.value=tg; o.textContent=tg==='전체 스타일'?'전체 스타일':tg+'용'; o.style.cssText='color:#111;background:#fff'; if(tg===cur) o.selected=true; tsel.appendChild(o); });
+    if(!cur) tsel.value='전체 스타일';
+    tsel.onchange=function(){ st.refTags[ri]=tsel.value; _consultSave(); renderMain('consult', true); };
+    wrapR.appendChild(tsel); rg.appendChild(wrapR);
   });
   if(st.refs.length<4){
-    var ra=dv(''); ra.style.cssText='aspect-ratio:1;border-radius:8px;border:1px dashed var(--bd2);background:var(--c2);color:var(--m2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px';
+    var ra=dv(''); ra.style.cssText='height:62px;border-radius:8px;border:1px dashed var(--bd2);background:var(--c2);color:var(--m2);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px';
     ra.textContent='＋';
-    ra.onclick=function(){ _consultPick(true, function(d){ if(st.refs.length>=4) return; st.refs.push(d); _doUpload(d, function(url){ var k=st.refs.indexOf(d); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); }); };
+    ra.onclick=function(){ _consultPick(true, function(d){ if(st.refs.length>=4) return; st.refs.push(d); st.refTags=st.refTags||[]; var ix=st.refs.length-1; st.refTags[ix]='…'; _consultClassifyRef(st, ix); _doUpload(d, function(url){ var k=st.refs.indexOf(d); if(k>=0) st.refs[k]=url; _consultSave(); }, function(){}); _consultSave(); renderSB(); }); };
     rg.appendChild(ra);
   }
   s2.appendChild(rg);
@@ -30011,7 +30529,8 @@ function sbConsult(p){
   var plan=_consultEnsurePlan(st);
   var pn=dv(''); pn.style.cssText='font-size:11px;color:var(--m2);margin-top:6px;line-height:1.6';
   var _tierNm=CONSULT_TIERS[_consultTierFromBudget(st)].name;
-  pn.innerHTML=plan.map(function(v,i){ return '<b style="color:var(--t2)">'+_consultLetter(i)+'안</b> '+_cEsc(v.name); }).join(' · ')+
+  var _matchTxt=''; if((st.refs||[]).length){ var _m=_consultSp(st).map(function(sp){ var ri=_consultRefForSpace(st, sp.name); return ri>=0? sp.name+'←사진'+(ri+1) : null; }).filter(Boolean); _matchTxt='<br>📌 공간별 적용: '+(_m.length?_m.join(', ')+' (나머지 공간은 같은 스타일로 통일)':'공간이 맞는 사진이 없어서 전체 스타일로 적용'); }
+  pn.innerHTML=plan.map(function(v,i){ return '<b style="color:var(--t2)">'+_consultLetter(i)+'안</b> '+_cEsc(v.name); }).join(' · ')+_matchTxt+
     '<br>'+(_consultNum(st.budget)?'💰 예산 '+_consultFmtMan(_consultNum(st.budget))+'에 맞춰 <b style="color:var(--t2)">'+_tierNm+'</b> 마감으로 만들어요':'💰 예산을 넣으면 그 금액에 맞는 마감으로 만들어요 (지금: '+_tierNm+')')+
     ((st.refs||[]).length?'':'<br>🖼️ 고객 스타일 사진을 넣으면 그 스타일대로 시안이 나와요');
   s3.appendChild(pn);
@@ -30029,6 +30548,15 @@ function sbConsult(p){
   var hint=dv(''); hint.style.cssText='font-size:11px;color:var(--m2);text-align:center;margin-top:6px;line-height:1.5';
   hint.innerHTML=noPhoto?'② 에서 현장 사진을 먼저 넣어주세요':('이미지 '+cost.images+'장 × '+cost.per+'cr'+(cost.tex?' + 마감재 '+cost.tex+'cr':'')+' · 견적·법규·PDF는 무료');
   bw.appendChild(hint);
+  // 렌더링 없이(무료): 갤러리·내 PC 이미지로 제안서
+  var imp=mk('button',''); imp.type='button';
+  imp.innerHTML='🖼️ 렌더링 없이 — 이미 만든 이미지로 제안서 만들기 <span style="font-size:11px;font-weight:700;opacity:.8">(무료)</span>';
+  imp.style.cssText='width:100%;margin-top:8px;padding:11px;border-radius:10px;border:1.5px solid var(--ac);background:var(--acg);color:var(--ac);font-weight:800;font-size:12.5px;cursor:pointer;font-family:inherit';
+  if(running){ imp.disabled=true; imp.style.opacity='.5'; }
+  imp.onclick=_consultStartImport;
+  bw.appendChild(imp);
+  var ih=dv(''); ih.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:4px;line-height:1.5'; ih.textContent='갤러리(다른 탭에서 만든 결과)나 외부 이미지를 공간마다 넣으면 마감재·견적·PDF까지 만들어줘요';
+  bw.appendChild(ih);
   p.appendChild(bw);
 
   // 📝 고객 정보 입력(기본 펼침) + ⚙️ 고급 설정(접힘) — 2026-10-07 요청("상세설정보다는 고객정보 및 입력으로")
@@ -30046,6 +30574,13 @@ function sbConsult(p){
   memo.style.cssText=IS+';min-height:56px;resize:vertical'; memo.oninput=function(){ st.memo=memo.value; _consultSave(); };
   db.appendChild(memo);
   if(st.type==='home'){ db.appendChild(lbl('주택 종류')); db.appendChild(sel(st.houseKind, ['아파트','빌라·다세대','단독주택','오피스텔'], function(v){ st.houseKind=v; })); }
+  if(st.type==='home'){
+    db.appendChild(lbl('발코니 확장 (견적·시안에 반영)'));
+    var es=mk('select',''); es.style.cssText=IS+';color-scheme:dark'; var ce=_consultExt(st);
+    CONSULT_EXT_OPTS.forEach(function(o){ var op=mk('option',''); op.value=o[0]; op.textContent=o[1]; op.style.cssText='color:#111;background:#fff'; if(o[0]===ce) op.selected=true; es.appendChild(op); });
+    es.onchange=function(){ st.ext=es.value; st.variants.forEach(function(v){ if(!(v.estimate&&v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); } }); _consultSave(); renderSB(); renderMain('consult', true); };
+    db.appendChild(es);
+  }
   if(st.type==='commercial'){ db.appendChild(lbl('매장 위치(층)')); db.appendChild(sel(st.floorLoc, ['1층','2층 이상','지하'], function(v){ st.floorLoc=v; })); }
   if(st.type==='build_new'){ db.appendChild(lbl('건물 용도')); db.appendChild(inp(st.biz, '예: 단독주택, 근린생활시설+주택', function(v){ st.biz=v; })); }
   det.appendChild(db); p.appendChild(det);
@@ -30146,7 +30681,7 @@ function _consultRenderCanvas(ub){
   var _sumTxt=lg.cards.length+'가지 확인사항'+(_cnt.no?' (불가 '+_cnt.no+')':'');
   lc.innerHTML='<div class="ct">공사 전 확인사항 <span style="font-size:11px;color:var(--m2);font-weight:600">이 공사에 해당하는 법규·관리규약만 골라서 보여줘요</span></div>'+calcHtml+
     '<details'+(st._legalOpen?' open':'')+'><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--t2);padding:4px 0">'+_sumTxt+' <span style="color:var(--ac);font-size:12px">— 눌러서 자세히 보기</span></summary><div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">'+lg.cards.map(function(cd){ return '<div style="border-left:4px solid '+col[cd.s]+';background:var(--c1,#111);border-radius:0 9px 9px 0;padding:9px 12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-size:10.5px;font-weight:800;color:'+(cd.s==='no'?'#f87171':'var(--m2)')+';border:1px solid '+(cd.s==='no'?'rgba(248,113,113,.4)':'var(--bd2)')+';border-radius:5px;padding:1px 6px">'+lab[cd.s]+'</span><b style="font-size:13px;color:var(--t)">'+_cEsc(cd.t)+'</b></div><div style="font-size:12px;color:var(--t2);margin-top:4px;line-height:1.6">'+_cEsc(cd.d)+'</div>'+(cd.step?'<div style="font-size:11.5px;color:var(--t2);margin-top:3px;font-weight:600">→ '+_cEsc(cd.step)+'</div>':'')+'</div>'; }).join('')+'</div>'+
-    '</details><div style="font-size:10.5px;color:var(--m2);margin-top:10px;line-height:1.6">※ 법정 기준에 따른 참고용 사전 검토예요. 실제 건폐율·용적률은 지자체 조례로 더 낮을 수 있고, 최종 판단은 건축사·관할 관청 확인이 필요해요.</div>';
+    '</details><div style="font-size:10.5px;color:var(--m2);margin-top:10px;line-height:1.6">'+(_consultIsBuild(st)?'※ 법정 기준에 따른 참고용 사전 검토예요. 실제 건폐율·용적률은 지자체 조례로 더 낮을 수 있고, 최종 판단은 건축사·관할 관청 확인이 필요해요.':'※ 참고용이에요. 단지 관리규약과 관할 기관에 따라 달라질 수 있어요.')+'</div>';
 
   if(st.variants.length){
     // PDF 영역
@@ -30161,7 +30696,7 @@ function _consultRenderCanvas(ub){
     if(st.pdfPages){
       bigBtn('⬇️ PDF 다운로드', false, function(){ _consultDownloadPdf(); });
       bigBtn('🔍 크게 보기', false, function(){ _proposalLightbox(st.pdfPages, 0); });
-      bigBtn('🏗️ 시공 상담 받기', false, function(){ var us=[]; st.variants.forEach(function(v){ Object.keys(v.spaces).forEach(function(k){ if(v.spaces[k].result && us.length<6) us.push(v.spaces[k].result); }); }); _openBuildLead(us, (st.client?st.client+' · ':'')+(st.area?st.area+'평 · ':'')+(st.memo||'')); });
+      bigBtn('🏗️ 시공 상담 받기', false, function(){ var us=[]; st.variants.forEach(function(v){ Object.keys(v.spaces).forEach(function(k){ if(v.spaces[k].result && us.length<6) us.push(v.spaces[k].result); }); }); var le=_consultLeadEstimate(st); _openBuildLead(us, (st.client?st.client+' · ':'')+(st.area?st.area+'평 · ':'')+(st.memo||''), {kind:(CONSULT_TYPES.filter(function(t){return t.k===st.type;})[0]||{l:''}).l.replace(/^[^\s]+\s/,'').replace('리모델링·증축','리모델링·증축'), size:st.area, budget:st.budget, estText:le.text, estHtml:le.html}); });
       bigBtn('📝 '+(st.round+1)+'차 수정 제안 시작', false, function(){ if(!confirm('미팅 피드백을 반영할 '+(st.round+1)+'차 제안을 시작할까요?\n지금 '+st.round+'차 PDF는 먼저 다운로드해두세요. 시안은 그대로 두고, 각 이미지의 ✏️ 수정 / 🔁 다시 뽑기로 고친 뒤 PDF를 다시 만들면 돼요.')) return; st.round++; st.pdfPages=null; st._pdf=null; _consultSave(); _consultRefresh(); });
     }
     pdfC.appendChild(br);
@@ -30180,11 +30715,12 @@ function _consultRenderCanvas(ub){
     }
 
     // 시안별 카드
-    var spaces=st.spaces.filter(function(s){return s.photo;});
+    var spaces=_consultSp(st);
     st.variants.forEach(function(v, vi){
       var vc=document.createElement('div'); vc.className='cc';
       var tot=_consultVariantTotal(v);
-      vc.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap"><div><div style="font-size:12px;color:var(--ac);font-weight:900">'+v.key+'안</div><div style="font-size:19px;font-weight:900;color:var(--t)">'+_cEsc(v.plan.name)+'</div><div style="font-size:12px;color:var(--m2);margin-top:3px;line-height:1.5;max-width:640px">'+_cEsc(v.plan.ko)+'</div></div><div style="text-align:right"><div style="font-size:10.5px;color:var(--m2);font-weight:700">참고 견적</div><div style="font-size:22px;font-weight:900;color:var(--t)">'+(tot?_consultFmtMan(tot):(v.estStatus==='run'?'<span style="font-size:13px">계산 중…</span>':'-'))+'</div>'+(tot?'<div style="font-size:10.5px;color:var(--m2)">예상 범위 '+_consultRange(tot)+'</div>':'')+'</div></div>';
+      vc.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap"><div><div style="font-size:12px;color:var(--ac);font-weight:900">'+v.key+'안</div><div class="cvname" title="눌러서 이름·설명 고치기" style="font-size:19px;font-weight:900;color:var(--t);cursor:pointer">'+_cEsc(v.plan.name)+' <span style="font-size:12px;color:var(--m2)">✏️</span></div><div style="font-size:12px;color:var(--m2);margin-top:3px;line-height:1.5;max-width:640px">'+_cEsc(v.plan.ko)+'</div>'+(v.sched&&v.sched.concept?'<div style="font-size:11.5px;color:var(--t2);margin-top:3px">🎨 '+_cEsc(v.sched.concept)+'</div>':'')+'</div><div style="text-align:right"><div style="font-size:10.5px;color:var(--m2);font-weight:700">참고 견적</div><div style="font-size:22px;font-weight:900;color:var(--t)">'+(tot?_consultFmtMan(tot):(v.estStatus==='run'?'<span style="font-size:13px">계산 중…</span>':'-'))+'</div>'+(tot?'<div style="font-size:10.5px;color:var(--m2)">예상 범위 '+_consultRange(tot)+'</div>':'')+'</div></div>';
+      var _vn=vc.querySelector('.cvname'); if(_vn) _vn.onclick=function(){ _consultRenameVariant(vi); };
       var grid=document.createElement('div'); grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;margin-top:12px';
       spaces.forEach(function(s){
         var r=v.spaces[s.id]||{};
@@ -30194,15 +30730,23 @@ function _consultRenderCanvas(ub){
           imgHtml='<div style="aspect-ratio:4/3;border-radius:9px;background:var(--c1,#111);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--m2);font-size:12px;'+(r.result?'background:center/cover url(&quot;'+_cEsc(r.result)+'&quot;);':'')+'"><div style="width:26px;height:26px;border:3px solid var(--bd2);border-top-color:var(--ac);border-radius:50%;animation:cspin 1s linear infinite"></div><span style="background:rgba(0,0,0,.55);color:#fff;padding:2px 8px;border-radius:6px">'+(r.status==='wait'?'대기 중':'만드는 중…')+'</span></div>';
         } else if(r.result){
           imgHtml='<img src="'+_cEsc(r.result)+'" data-zoom="1" style="width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:9px;display:block;cursor:zoom-in">';
+        } else if(r.err){
+          imgHtml='<div style="aspect-ratio:4/3;border-radius:9px;background:var(--c1,#111);display:flex;align-items:center;justify-content:center;color:#f87171;font-size:11.5px;padding:10px;text-align:center;line-height:1.5">'+_cEsc(r.err)+'</div>';
         } else {
-          imgHtml='<div style="aspect-ratio:4/3;border-radius:9px;background:var(--c1,#111);display:flex;align-items:center;justify-content:center;color:#f87171;font-size:11.5px;padding:10px;text-align:center;line-height:1.5">'+_cEsc(r.err||'아직 없음')+'</div>';
+          // 비어 있는 칸 — 갤러리/내 PC 이미지 넣기(렌더링 없이)
+          imgHtml='<div class="cimp" style="aspect-ratio:4/3;border-radius:9px;border:1.5px dashed var(--bd2);background:var(--c1,#111);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--m2);font-size:11.5px">'+(s.photo?'<img src="'+_cEsc(s.photo)+'" style="width:54px;height:40px;object-fit:cover;border-radius:5px;opacity:.6">':'')+'<span>이 공간 결과 이미지 넣기</span><div style="display:flex;gap:6px"><button type="button" class="cbtn" data-imp="gal">🖼 갤러리에서</button><button type="button" class="cbtn" data-imp="pc">📁 내 PC에서</button></div></div>';
         }
-        var amt=_consultSpaceAmt(v, s.name);
-        cell.innerHTML=imgHtml+'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:6px"><b style="font-size:12.5px;color:var(--t)">'+_cEsc(s.name)+'</b><span style="font-size:11.5px;color:var(--t2);font-weight:700">'+(amt?_consultFmtMan(amt):'')+'</span></div>';
+        var amt=_consultSpaceAmt(v, s.name, st);
+        var _sm=_consultSpaceMats(st, v, s.name);
+        cell.innerHTML=imgHtml+'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:6px"><b style="font-size:12.5px;color:var(--t)">'+_cEsc(s.name)+(s.photo?'':' <span style="font-size:10px;color:var(--m2);font-weight:600">비포 없음</span>')+'</b><span style="font-size:11.5px;color:var(--t2);font-weight:700" title="공통 공사비를 공간 면적 비율로 나눈 개산">'+(amt?_consultFmtMan(amt):'')+'</span></div>'+
+          (_sm.length?'<div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap">'+_sm.map(function(m){ return '<span title="'+_cEsc(m.k+': '+m.v)+'">'+_consultChip(m,18)+'</span>'; }).join('')+'</div>':'');
+        Array.prototype.forEach.call(cell.querySelectorAll('[data-imp]'), function(b){ b.onclick=function(){ _consultImportPick(vi, s.id, b.getAttribute('data-imp')); }; });
         var bt=document.createElement('div'); bt.style.cssText='display:flex;gap:4px;margin-top:5px;flex-wrap:wrap';
         if(r.status!=='run' && r.status!=='wait'){
           if(r.result){ var e1=document.createElement('button'); e1.type='button'; e1.className='cbtn'; e1.textContent='✏️ 말로 수정'; e1.onclick=function(){ _consultEditSpace(vi, s.id); }; bt.appendChild(e1); }
-          var e2=document.createElement('button'); e2.type='button'; e2.className='cbtn'; e2.textContent='🔁 다시 뽑기'; e2.onclick=function(){ _consultRedoSpace(vi, s.id); }; bt.appendChild(e2);
+          if(s.photo && (r.result || r.err)){ var e2=document.createElement('button'); e2.type='button'; e2.className='cbtn'; e2.textContent='🔁 다시 뽑기'; e2.onclick=function(){ _consultRedoSpace(vi, s.id); }; bt.appendChild(e2); }
+          if(r.result){ var e4=document.createElement('button'); e4.type='button'; e4.className='cbtn'; e4.textContent='🖼 바꾸기'; e4.title='갤러리 이미지로 바꾸기'; e4.onclick=function(){ _consultImportPick(vi, s.id, 'gal'); }; bt.appendChild(e4); }
+          if(st.importMode){ var e5=document.createElement('button'); e5.type='button'; e5.className='cbtn'; e5.textContent='✕'; e5.title='이 공간 빼기'; e5.onclick=function(){ _consultRemoveSpace(s.id); }; bt.appendChild(e5); }
           if(r.prev && r.prev.length){ var e3=document.createElement('button'); e3.type='button'; e3.className='cbtn'; e3.textContent='↩ 이전'; e3.onclick=function(){ _consultUndoSpace(vi, s.id); }; bt.appendChild(e3); }
         }
         cell.appendChild(bt);
@@ -30210,12 +30754,19 @@ function _consultRenderCanvas(ub){
         grid.appendChild(cell);
       });
       vc.appendChild(grid);
+      if(st.importMode){ var asb=document.createElement('button'); asb.type='button'; asb.className='cbtn'; asb.style.marginTop='8px'; asb.textContent='＋ 공간 추가'; asb.onclick=_consultAddSpaceNoPhoto; vc.appendChild(asb); }
       // 마감재 보드
-      var mb=document.createElement('div'); mb.style.cssText='margin-top:14px';
-      var mats=(v.materials||[]).filter(function(m){return m&&m.v;});
-      mb.innerHTML='<div style="font-size:12.5px;font-weight:800;color:var(--t);margin-bottom:6px">🧱 마감재 보드 '+(v.matStatus==='run'?'<span style="font-size:11px;color:var(--m2)">분석 중…</span>':'')+'</div>'+
-        (mats.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">'+mats.map(function(m){ return '<div>'+(m.img?'<img src="'+_cEsc(m.img)+'" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:7px;display:block">':'<div style="aspect-ratio:1;border-radius:7px;background:var(--c1,#111)"></div>')+'<div style="font-size:10px;color:var(--m2);font-weight:700;margin-top:4px">'+_cEsc(m.k)+'</div><div style="font-size:11.5px;color:var(--t);font-weight:700">'+_cEsc(m.v)+'</div></div>'; }).join('')+'</div>'
-          : '<div style="font-size:11.5px;color:var(--m2)">'+(v.matStatus==='err'?'마감재 분석에 실패했어요.':'공간 이미지가 나오면 자동으로 만들어져요.')+'</div>');
+      var mb=document.createElement('div'); mb.style.cssText='margin-top:16px';
+      var mats=_consultBoardMats(st, v), hasSched=!!(v.sched&&v.sched.items);
+      var anyImg=mats.some(function(m){return m.img;});
+      mb.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:13px;font-weight:800;color:var(--t)">🧱 마감재 보드</span><span style="font-size:11px;color:var(--m2)">'+(hasSched?'이 시안은 모든 공간이 같은 마감으로 통일돼요 · 자재명을 누르면 고칠 수 있어요':'')+'</span>'+
+        (v.schedStatus==='run'?'<span style="font-size:11px;color:var(--ac)">마감재 정리 중…</span>':'')+(v.texBusy?'<span style="font-size:11px;color:var(--ac)">재질 사진 만드는 중…</span>':'')+
+        (hasSched && !anyImg && !v.texBusy?'<button type="button" class="cbtn ctex">🎨 재질 사진으로 만들기 ('+PROPOSAL_TEX_COST+'cr)</button>':'')+'</div>'+
+        (mats.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px">'+mats.map(function(m){ return '<div class="cmat" data-id="'+_cEsc(m.id||'')+'" style="cursor:'+(m.id?'pointer':'default')+'">'+(m.img?'<img src="'+_cEsc(m.img)+'" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block">':'<div style="aspect-ratio:1;border-radius:8px;background:'+_cEsc(m.hex||'var(--c1,#111)')+';box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)"></div>')+'<div style="font-size:10px;color:var(--m2);font-weight:700;margin-top:5px">'+_cEsc(m.k)+'</div><div style="font-size:11.5px;color:var(--t);font-weight:700;line-height:1.35">'+_cEsc(m.v)+'</div></div>'; }).join('')+'</div>'
+          : '<div style="font-size:11.5px;color:var(--m2)">'+(v.matStatus==='err'?'마감재 분석에 실패했어요.':'공간 이미지가 나오면 자동으로 만들어져요.')+'</div>')+
+        (!_consultIsBuild(st)?'<div style="font-size:11px;color:var(--m2);margin-top:8px">※ 이미지 속 가구·소품·장식 조명(펜던트·스탠드 등)은 연출용이며 견적에서 제외돼요.</div>':'');
+      Array.prototype.forEach.call(mb.querySelectorAll('.cmat'), function(el){ var id=el.getAttribute('data-id'); if(id) el.onclick=function(){ _consultEditSched(vi, id); }; });
+      var _ct=mb.querySelector('.ctex'); if(_ct) _ct.onclick=function(){ _consultTexManual(vi); };
       vc.appendChild(mb);
       // 견적 상세
       if(v.estimate){
@@ -30225,8 +30776,9 @@ function _consultRenderCanvas(ub){
         if(v._estOpen) det.open=true;
         det.ontoggle=function(){ v._estOpen=det.open; };
         var est=v.estimate;
-        var sm=document.createElement('summary'); sm.style.cssText='cursor:pointer;font-size:12.5px;font-weight:800;color:var(--t)';
-        sm.textContent='📋 견적 상세 ('+est.items.length+'개 항목)'+(est.edited?' · 직접 수정됨':'')+' — 금액을 눌러서 고칠 수 있어요';
+        // 요청: "금액을 눌러서 고칠 수 있다는 걸 크게, 색 바꿔서 눈에 띄게"
+        var sm=document.createElement('summary'); sm.style.cssText='cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;border-radius:10px;border:1.5px solid #f5b544;background:rgba(245,181,68,.12);color:#f5b544;font-size:14px;font-weight:900';
+        sm.innerHTML='<span>📋 견적 상세 ('+est.items.length+'개 항목)'+(est.edited?' · 직접 수정됨':'')+'</span><span style="background:#f5b544;color:#111;border-radius:7px;padding:4px 10px;font-size:12.5px">✏️ 금액·사양 직접 수정 가능 → 합계·PDF에 바로 반영</span><span style="margin-left:auto;font-size:12px;opacity:.85">'+(det.open?'접기 ▲':'눌러서 열기 ▼')+'</span>';
         det.appendChild(sm);
         var tb=document.createElement('table'); tb.style.cssText='width:100%;border-collapse:collapse;margin-top:8px;font-size:12px';
         tb.innerHTML='<tr style="color:var(--m2);font-size:10.5px;text-align:left"><th style="padding:4px">공간</th><th style="padding:4px">공종</th><th style="padding:4px">사양</th><th style="padding:4px">산출 근거</th><th style="padding:4px;text-align:right">금액(만원)</th><th></th></tr>';
@@ -30275,7 +30827,20 @@ function _consultRenderCanvas(ub){
 // 요청: "제휴업체 목록 공개 대신, 고객이 시공 상담을 신청하면 관리자(나)에게만 오고 내가 아는 업체에 연결".
 // 신청 내용은 관리자 이메일로만 전송(공개 목록 없음). 연락처를 받으므로 개인정보 수집·이용 동의를 필수로 받음.
 var BUILD_LEAD_EMAIL='cloverai.design@gmail.com';
-function _openBuildLead(imgUrls, ctxText){
+// 상담 신청 메일에 시안별 참고 견적(합계·범위·항목)을 같이 보냄 — 요청 2026-10-07
+function _consultLeadEstimate(st){
+  var text=[], html='';
+  st.variants.forEach(function(v){
+    var e=v.estimate; if(!e) return;
+    text.push(v.key+'안 '+v.plan.name+': '+_consultFmtMan(e.total)+' (범위 '+_consultRange(e.total)+')');
+    html+='<h3 style="font-family:sans-serif;margin:18px 0 6px">'+_cEsc(v.key+'안 · '+v.plan.name)+' — 참고 견적 '+_cEsc(_consultFmtMan(e.total))+' <span style="font-weight:400;color:#888;font-size:13px">(범위 '+_cEsc(_consultRange(e.total))+', 부가세 별도'+(e.edited?', 직접 수정됨':'')+')</span></h3>'+
+      '<table style="border-collapse:collapse;font-family:sans-serif;font-size:13px">'+e.items.map(function(it){ return '<tr><td style="padding:4px 8px;color:#666">'+_cEsc(it.space)+'</td><td style="padding:4px 8px;font-weight:700">'+_cEsc(it.work)+'</td><td style="padding:4px 8px;color:#555">'+_cEsc(it.spec||'')+'</td><td style="padding:4px 8px;color:#888;font-size:12px">'+_cEsc(it.basis||'')+'</td><td style="padding:4px 8px;text-align:right;font-weight:700">'+_cEsc(_consultFmtMan(it.amount))+'</td></tr>'; }).join('')+'</table>';
+  });
+  if(html) html='<h2 style="font-family:sans-serif">📋 참고 견적</h2>'+html+'<p style="font-family:sans-serif;color:#888;font-size:12px">가구·소품·장식 조명은 견적 제외</p>';
+  return {text:text.join('\n'), html:html};
+}
+function _openBuildLead(imgUrls, ctxText, opt){
+  opt=opt||{};
   imgUrls=(imgUrls||[]).filter(function(u){ return u && /^https?:/.test(u); }).slice(0,6);
   var old=document.getElementById('build-lead-modal'); if(old) old.remove();
   var ov=document.createElement('div'); ov.id='build-lead-modal';
@@ -30291,7 +30856,7 @@ function _openBuildLead(imgUrls, ctxText){
     '<label style="font-size:12px;font-weight:700">이름<input id="bl-name" style="'+fs+'" placeholder="홍길동"></label>'+
     '<label style="font-size:12px;font-weight:700">연락처 *<input id="bl-phone" style="'+fs+'" placeholder="010-0000-0000"></label>'+
     '<label style="font-size:12px;font-weight:700">공사 지역 *<input id="bl-area" style="'+fs+'" placeholder="예: 경기 파주시 / 서울 성북구"></label>'+
-    '<label style="font-size:12px;font-weight:700">공사 종류<select id="bl-kind" style="'+fs+'">'+['주거 인테리어','상업 인테리어','건축 신축','리모델링·증축','아직 모르겠어요'].map(function(k){return '<option style="color:#111">'+k+'</option>';}).join('')+'</select></label>'+
+    '<label style="font-size:12px;font-weight:700">공사 종류<select id="bl-kind" style="'+fs+';color-scheme:dark">'+['주거 인테리어','상업 인테리어','건축 신축','리모델링·증축','아직 모르겠어요'].map(function(k){return '<option style="color:#111;background:#fff"'+(opt.kind===k?' selected':'')+'>'+k+'</option>';}).join('')+'</select></label>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label style="font-size:12px;font-weight:700">면적(평)<input id="bl-size" style="'+fs+'" placeholder="34"></label><label style="font-size:12px;font-weight:700">예산(만원)<input id="bl-budget" style="'+fs+'" placeholder="5000"></label></div>'+
     '<label style="font-size:12px;font-weight:700">희망 시기<input id="bl-when" style="'+fs+'" placeholder="예: 12월 중 착공"></label>'+
     '<label style="font-size:12px;font-weight:700">요청사항<textarea id="bl-memo" style="'+fs+';min-height:70px;resize:vertical" placeholder="원하는 내용을 자유롭게 적어주세요"></textarea></label>'+
@@ -30301,8 +30866,13 @@ function _openBuildLead(imgUrls, ctxText){
   ov.appendChild(m); document.body.appendChild(ov);
   function q(id){ return m.querySelector('#'+id); }
   if(ctxText) q('bl-memo').value=ctxText;
+  if(opt.size) q('bl-size').value=opt.size; if(opt.budget) q('bl-budget').value=opt.budget;
+  if(opt.estText){ var _en=document.createElement('div'); _en.style.cssText='font-size:12px;color:var(--t2);background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.6'; _en.innerHTML='<b>📋 함께 전달되는 참고 견적</b><br>'+_cEsc(opt.estText).replace(/\n/g,'<br>'); m.insertBefore(_en, m.children[3]||null); }
   function shut(){ ov.remove(); }
-  q('bl-cancel').onclick=shut; ov.onclick=function(e){ if(e.target===ov) shut(); };
+  // 버그 수정(요청: "입력칸에서 마우스를 누른 채 왼쪽으로 끌면 창이 꺼진다"): 바깥에서 눌렀다 뗀 경우에만 닫힘
+  var _downOnOv=false;
+  ov.onmousedown=function(e){ _downOnOv=(e.target===ov); };
+  q('bl-cancel').onclick=shut; ov.onclick=function(e){ if(e.target===ov && _downOnOv) shut(); _downOnOv=false; };
   q('bl-send').onclick=function(){
     var phone=q('bl-phone').value.trim(), area=q('bl-area').value.trim(), stEl=q('bl-st');
     if(!phone || phone.replace(/[^0-9]/g,'').length<9){ stEl.style.color='#f87171'; stEl.textContent='연락처를 정확히 입력해주세요.'; return; }
@@ -30311,6 +30881,7 @@ function _openBuildLead(imgUrls, ctxText){
     var f={이름:q('bl-name').value.trim(), 연락처:phone, 지역:area, 종류:q('bl-kind').value, 면적:q('bl-size').value.trim(), 예산:q('bl-budget').value.trim(), 시기:q('bl-when').value.trim(), 요청:q('bl-memo').value.trim(), 회원:(u&&u.email)||'비로그인'};
     var rows=Object.keys(f).map(function(k){ return '<tr><td style="padding:6px 10px;background:#f4f4f4;font-weight:700;white-space:nowrap">'+k+'</td><td style="padding:6px 10px">'+_cEsc(f[k]||'-').replace(/\n/g,'<br>')+'</td></tr>'; }).join('');
     var html='<h2 style="font-family:sans-serif">🏗️ 새 시공 상담 신청</h2><table style="border-collapse:collapse;font-family:sans-serif;font-size:14px">'+rows+'</table>'+
+      (opt.estHtml||'')+
       (imgUrls.length?'<p style="font-family:sans-serif"><b>디자인 이미지</b></p>'+imgUrls.map(function(x){ return '<p><a href="'+_cEsc(x)+'"><img src="'+_cEsc(x)+'" style="max-width:420px;border-radius:6px"></a></p>'; }).join(''):'')+
       '<p style="font-family:sans-serif;color:#888;font-size:12px">개인정보 수집·이용 동의 완료 · '+new Date().toLocaleString('ko-KR')+'</p>';
     var btn=q('bl-send'); btn.disabled=true; btn.textContent='보내는 중…';
@@ -34611,7 +35182,7 @@ function _lightAllowedMask(lm, W, H){
   x.strokeStyle='#fff'; x.fillStyle='#fff'; x.lineCap='round'; x.lineJoin='round';
   lm.lines.forEach(function(ln){
     if(ln.length<2) return;
-    x.lineWidth=S*0.12; x.beginPath(); ln.forEach(function(pt,i){ if(i) x.lineTo(pt.x*W,pt.y*H); else x.moveTo(pt.x*W,pt.y*H); }); x.stroke();
+    x.lineWidth=S*0.075; x.beginPath(); ln.forEach(function(pt,i){ if(i) x.lineTo(pt.x*W,pt.y*H); else x.moveTo(pt.x*W,pt.y*H); }); x.stroke();
   });
   lm.spots.forEach(function(sp){
     var cx=sp.x*W, cy=sp.y*H, dx=sp.dir?(sp.dx||0)*W:0, dy=sp.dir?(sp.dy||0.08)*H:H*0.08;
@@ -34622,7 +35193,7 @@ function _lightAllowedMask(lm, W, H){
     x.beginPath(); x.arc(cx,cy,S*0.06,0,7); x.fill();
   });
   var b=document.createElement('canvas'); b.width=W; b.height=H; var bx=b.getContext('2d');
-  bx.filter='blur('+Math.round(S*0.03)+'px)'; bx.drawImage(c,0,0);
+  bx.filter='blur('+Math.round(S*0.02)+'px)'; bx.drawImage(c,0,0);
   return bx.getImageData(0,0,W,H).data;
 }
 function _lightSuppressUnmarked(origSrc, resultUrl, lm, cb){
@@ -34631,8 +35202,10 @@ function _lightSuppressUnmarked(origSrc, resultUrl, lm, cb){
   a.onload=ready; r.onload=ready; a.onerror=function(){ cb(resultUrl,0); }; r.onerror=function(){ cb(resultUrl,0); };
   a.src=origSrc; r.src=resultUrl;
   function go(){
-    var RW=r.naturalWidth, RH=r.naturalHeight, sc=Math.min(1, 480/Math.max(RW,RH));
-    var w=Math.max(8,Math.round(RW*sc)), h=Math.max(8,Math.round(RH*sc)), blurPx=Math.max(2,Math.round(Math.max(w,h)*0.012));
+    // 2026-10-07 강화(요청: "간접등 라인 2개 그렸는데 4개 나옴 — 그린 곳에만"): 얇은 LED 띠도 잡히게 더 촘촘한 해상도·작은 블러로 비교,
+    // 허용 영역 폭을 좁히고, 원본 대비 밝아짐 허용치도 낮춤(1.22 → 1.10)
+    var RW=r.naturalWidth, RH=r.naturalHeight, sc=Math.min(1, 900/Math.max(RW,RH));
+    var w=Math.max(8,Math.round(RW*sc)), h=Math.max(8,Math.round(RH*sc)), blurPx=Math.max(1,Math.round(Math.max(w,h)*0.004));
     function lumOf(img){ var c=document.createElement('canvas'); c.width=w; c.height=h; var x=c.getContext('2d'); x.filter='blur('+blurPx+'px)'; x.drawImage(img,0,0,w,h); var d=x.getImageData(0,0,w,h).data, L=new Float32Array(w*h); for(var i=0,j=0;i<d.length;i+=4,j++) L[j]=d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114; return L; }
     var Lo=lumOf(a), Lr=lumOf(r), M=_lightAllowedMask(lm, w, h);
     // 허용 영역 밖에서 전체 밝기 변화 비율(어둡게 무드면 1보다 작음)을 중앙값으로 추정
@@ -34642,15 +35215,15 @@ function _lightSuppressUnmarked(origSrc, resultUrl, lm, cb){
     var gain=document.createElement('canvas'); gain.width=w; gain.height=h; var gx=gain.getContext('2d'); var gd=gx.createImageData(w,h);
     var touched=0;
     for(var j2=0;j2<w*h;j2++){
-      var m=M[j2*4]/255, exp=Math.max(6, Lo[j2]*k)*1.22, g=1;
+      var m=M[j2*4]/255, exp=Math.max(6, Lo[j2]*k)*1.10, g=1;
       if(Lr[j2]>exp){ g=exp/Lr[j2]; }
       g = m + (1-m)*g; if(g<0.985) touched++;
       var v=Math.round(Math.max(0.25,g)*255); gd.data[j2*4]=v; gd.data[j2*4+1]=v; gd.data[j2*4+2]=v; gd.data[j2*4+3]=255;
     }
-    if(touched < w*h*0.002){ cb(resultUrl, 0); return; } // 고칠 게 거의 없으면 원본 결과 그대로
+    if(touched < w*h*0.0008){ cb(resultUrl, 0); return; } // 고칠 게 거의 없으면 원본 결과 그대로
     gx.putImageData(gd,0,0);
     var gb=document.createElement('canvas'); gb.width=RW; gb.height=RH; var gbx=gb.getContext('2d');
-    gbx.filter='blur('+Math.round(Math.max(RW,RH)*0.01)+'px)'; gbx.drawImage(gain,0,0,RW,RH);
+    gbx.filter='blur('+Math.round(Math.max(RW,RH)*0.004)+'px)'; gbx.drawImage(gain,0,0,RW,RH);
     var out=document.createElement('canvas'); out.width=RW; out.height=RH; var ox=out.getContext('2d');
     ox.drawImage(r,0,0); ox.globalCompositeOperation='multiply'; ox.drawImage(gb,0,0);
     cb(out.toDataURL('image/jpeg',0.93), touched/(w*h));
@@ -34678,6 +35251,7 @@ function _lightRun(){
   var spotDesc=lm.spots.map(function(sp,i){ return 'SPOT '+(i+1)+' at ('+_pc(sp.x)+' from left, '+_pc(sp.y)+' from top)'; }).join('; ');
   var spotStrict = nS ? ('⚠️ HALOGEN COUNT IS EXACT: exactly '+nS+' downlight'+(nS>1?'s':'')+' may be ON in the whole image — the '+nS+' numbered yellow ring'+(nS>1?'s':'')+' (1'+(nS>1?'–'+nS:'')+'), one light per ring. The ceiling in image 1 may contain MORE recessed downlights than '+nS+' — every downlight that is NOT inside a numbered ring must stay completely OFF and dark (no glow at the fixture, no beam, no light pool on the wall below it). Do not light "the neighbouring" fixtures, do not add new ones between or beside the rings, and do not split one ring into two lights. Exactly '+nS+' lit fixture'+(nS>1?'s':'')+' (with their own soft light pool / wall scallop as described below), one per ring.\n') : '';
   var prompt='⚠️ STRICT RULE FIRST — LIGHT ONLY WHERE MARKED: the ONLY new light sources allowed are the '+nL+' marked line(s) and '+nS+' marked spot(s) listed below. Every other edge, surface and fixture must stay exactly as unlit as in image 1.\n'+
+    (nL? '⚠️ LINE COUNT IS EXACT: exactly '+nL+' glowing indirect LED line'+(nL>1?'s':'')+' in the whole result — one per orange line, numbered 1'+(nL>1?'–'+nL:'')+'. Other ceiling steps, soffit edges, beams, cabinet bottoms, counter edges, toe-kicks and shelves that also LOOK like typical places for indirect lighting must stay completely dark if no orange line is drawn on them — do NOT "complete the design" by adding matching lines on the other side or on similar edges.\n' : '')+
     'You receive TWO images. IMAGE 1 = the original photo/render to edit. IMAGE 2 = the SAME image with lighting GUIDE MARKS drawn on it (guide only — never copy the marks).\n'+
     (nL? '• ORANGE lines in image 2 ('+nL+' line'+(nL>1?'s':'')+') = the EXACT positions of concealed linear LED indirect lighting. For EVERY orange line, install a hidden LED strip along that exact edge/surface for its full drawn length, so a continuous '+tempTxt+' glow washes out from that edge onto the nearby surface (e.g. under a counter top, along a ceiling cove or step, under shelves/cabinets, along a wall base). The light source itself stays hidden — show the soft glowing band and its gradient falloff, not a visible tube.\n' : '')+
     (nS? '• YELLOW rings in image 2 ('+nS+' numbered ring'+(nS>1?'s':'')+', a short yellow line next to a ring, if present, shows where that light is aimed) = the EXACT positions (ring centers) of recessed halogen / downlight spotlights. For EVERY yellow ring: if a light fixture (downlight, recessed spot, pendant, sconce) ALREADY EXISTS inside or right next to that ring in image 1, simply TURN THAT EXISTING FIXTURE ON — do not add a second fixture or change its design; if no fixture is there, place one small recessed fixture at the ring center. Either way, make it emit a '+tempTxt+' light. HOW THE LIGHT LOOKS DEPENDS ON WHERE THE FIXTURE IS: (a) a downlight that sits CLOSE TO A WALL (within about half a meter) washes that wall with ONE soft, subtle scallop / arc-shaped light pattern right below it — gentle and natural, not a sharp bright cone; (b) a downlight that is AWAY FROM WALLS (in the open middle of the ceiling) shows NO scallop and NO visible cone shape on any wall or in the air — only the small glowing fixture itself and a soft, diffuse round light pool on the floor / table / furniture directly below it. Never draw visible light beams or cones in the air.\n' : '')+
