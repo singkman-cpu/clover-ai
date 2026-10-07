@@ -35063,7 +35063,7 @@ function mkChatEdit(p){
 // 같이 보내고, 안내 표시는 결과에 절대 남기지 말고 그 위치에만 조명을 넣으라고 지시함.
 // 좌표는 0~1 비율로 저장(이미지 크기가 달라도 그대로 유효).
 // ══════════════════════════════════════════════════════════════════════════
-var LIGHT_LINE_COLOR='#FF6A00', LIGHT_SPOT_COLOR='#FFE000';
+var LIGHT_LINE_COLOR='#FF6A00', LIGHT_SPOT_COLOR='#FFE000', LIGHT_PEND_COLOR='#C05CFF'; // 2026-10-07: 펜던트 조명 추가(보라)
 // ⚠️ 요청 반영(2026-10-06, "렌더 걸고 다시 수정하려고 조명연출 누르면 완전 리셋돼 있다 — 기록에 남게 해줘"):
 // 예전엔 수정할 이미지가 바뀌면(결과 이미지로 바뀌는 등) 그린 조명을 지워버렸음 → 이제 지우지 않고 그대로 유지
 // (지우고 싶으면 '전체 지우기'). 새로고침해도 남도록 브라우저에 저장하고, 렌더 결과마다 그때의 조명 설정을
@@ -35071,21 +35071,23 @@ var LIGHT_LINE_COLOR='#FF6A00', LIGHT_SPOT_COLOR='#FFE000';
 function _lightState(){
   var tab=getTab('edit');
   if(!tab.lightMarks){
-    try{ var saved=JSON.parse(localStorage.getItem('clover_light_marks')||'null'); if(saved && saved.lines){ tab.lightMarks={lines:saved.lines, spots:saved.spots||[]}; if(saved.opts) tab.lightOpts=saved.opts; } }catch(e){}
+    try{ var saved=JSON.parse(localStorage.getItem('clover_light_marks')||'null'); if(saved && saved.lines){ tab.lightMarks={lines:saved.lines, spots:saved.spots||[], pendants:saved.pendants||[]}; if(saved.opts) tab.lightOpts=saved.opts; } }catch(e){}
   }
-  if(!tab.lightMarks) tab.lightMarks={lines:[], spots:[]};
+  if(!tab.lightMarks) tab.lightMarks={lines:[], spots:[], pendants:[]};
+  if(!tab.lightMarks.pendants) tab.lightMarks.pendants=[];
   if(!tab.lightOpts) tab.lightOpts={temp:'3000', mood:'dark', power:'mid', photoreal:true};
   return tab;
 }
 function _lightSave(){
-  try{ var t=getTab('edit'); localStorage.setItem('clover_light_marks', JSON.stringify({lines:t.lightMarks.lines, spots:t.lightMarks.spots, opts:t.lightOpts})); }catch(e){}
+  try{ var t=getTab('edit'); localStorage.setItem('clover_light_marks', JSON.stringify({lines:t.lightMarks.lines, spots:t.lightMarks.spots, pendants:t.lightMarks.pendants||[], opts:t.lightOpts})); }catch(e){}
 }
 function mkLightEdit(p){
   var tab=_lightState();
   var note=dv('ss');
   note.innerHTML='<strong style="color:var(--ac)">💡 조명 연출</strong><br>'+
     '<b>〰 간접등 라인</b>: 빛이 숨어 나올 곳(카운터 상판 아래, 천장 단차, 선반 아래 등)을 따라 드래그<br>'+
-    '<b>● 할로겐·매입등</b>: 천장에 클릭하면 그 자리에 할로겐이 켜져요. <b>이미 있는 매입등(불 꺼진 것) 위를 찍으면 그 등이 켜져요</b>. 클릭한 채 끌면 빛 방향(벽 쪽)을 정해요<br>'+
+    '<b>● 할로겐·매입등</b>: 천장에 클릭하면 그 자리에 할로겐이 켜져요. <b>이미 있는 매입등(불 꺼진 것) 위를 찍으면 그 등이 켜져요</b>. <b>🎯 타겟라이트</b>: 클릭한 채 비출 대상(그림·벽·식탁 등)까지 끌면 그곳에 집중 조명이 떨어져요<br>'+
+    '<b>◆ 펜던트 조명</b>: 조명이 달릴 위치(갓 위치)를 클릭 — 이미 있는 펜던트를 찍으면 그 펜던트가 켜지고, 없으면 그 자리에 펜던트가 달려서 켜져요<br>'+
     '<span style="color:var(--m2);font-size:10.5px">원하는 만큼 다 그린 뒤 <b>렌더 1번</b>에 전부 반영돼요. 한 번에 라인 6개·할로겐 10개 정도까지가 가장 정확해요.</span>';
   p.appendChild(note);
   if(!tab.inputImg){
@@ -35100,12 +35102,12 @@ function mkLightEdit(p){
     hw.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:5px">🕘 이전 조명 렌더 불러오기 <span style="font-weight:400;color:var(--m2)">(누르면 그때 그린 조명 그대로 → 고쳐서 다시 렌더)</span></div>';
     var hr=dv('');hr.style.cssText='display:flex;gap:6px;overflow-x:auto;padding-bottom:4px';
     lightHist.forEach(function(it){
-      var b=mk('button','');b.type='button';b.title='원본 사진과 그때 그린 조명(라인 '+it.lightMarks.lines.length+' · 할로겐 '+it.lightMarks.spots.length+')을 불러와요';
+      var b=mk('button','');b.type='button';b.title='원본 사진과 그때 그린 조명(라인 '+it.lightMarks.lines.length+' · 할로겐 '+it.lightMarks.spots.length+' · 펜던트 '+((it.lightMarks.pendants||[]).length)+')을 불러와요';
       b.style.cssText='flex-shrink:0;width:64px;padding:0;border-radius:7px;overflow:hidden;border:1px solid var(--bd2);background:var(--c2);cursor:pointer;font-family:inherit';
-      b.innerHTML='<img src="'+it.result+'" style="width:64px;height:48px;object-fit:cover;display:block"><div style="font-size:9.5px;color:var(--t2);padding:2px 0">라인'+it.lightMarks.lines.length+'·등'+it.lightMarks.spots.length+'</div>';
+      b.innerHTML='<img src="'+it.result+'" style="width:64px;height:48px;object-fit:cover;display:block"><div style="font-size:9.5px;color:var(--t2);padding:2px 0">라인'+it.lightMarks.lines.length+'·등'+it.lightMarks.spots.length+((it.lightMarks.pendants||[]).length?'·펜'+it.lightMarks.pendants.length:'')+'</div>';
       b.onclick=function(){
         tab.inputImg=it.orig || tab.inputImg;
-        tab.lightMarks=JSON.parse(JSON.stringify(it.lightMarks));
+        tab.lightMarks=JSON.parse(JSON.stringify(it.lightMarks)); if(!tab.lightMarks.pendants) tab.lightMarks.pendants=[];
         if(it.lightOpts) tab.lightOpts=JSON.parse(JSON.stringify(it.lightOpts));
         _lightSave(); renderSB(); if(G.wf==='edit') renderMain('edit');
         setTimeout(_openLightEditor, 50);
@@ -35115,7 +35117,7 @@ function mkLightEdit(p){
     hw.appendChild(hr); p.appendChild(hw);
   }
   var openBtn=mk('button','');openBtn.type='button';
-  openBtn.innerHTML='✏️ 조명 위치 그리기 <span style="font-size:11px;opacity:.8">(라인 '+lm.lines.length+'개 · 할로겐 '+lm.spots.length+'개)</span>';
+  openBtn.innerHTML='✏️ 조명 위치 그리기 <span style="font-size:11px;opacity:.8">(라인 '+lm.lines.length+'개 · 할로겐 '+lm.spots.length+'개 · 펜던트 '+(lm.pendants||[]).length+'개)</span>';
   openBtn.style.cssText='width:100%;padding:12px;border-radius:10px;border:1.5px solid var(--ac);background:var(--acg);color:var(--ac);font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;margin-bottom:10px';
   openBtn.onclick=function(){ _openLightEditor(); };
   p.appendChild(openBtn);
@@ -35123,13 +35125,13 @@ function mkLightEdit(p){
   mkResolution(p);
   var cost=getBaseCost('edit');
   var go=mk('button','actbtn ok');go.type='button';go.id='light-go-btn';
-  var total=lm.lines.length+lm.spots.length;
+  var total=lm.lines.length+lm.spots.length+(lm.pendants||[]).length;
   go.disabled=!total || !!tab.lightRunning;
   go.style.cssText='width:100%;padding:12px;font-size:13.5px;font-weight:800;margin-top:6px';
   go.innerHTML=_lightGoLabel(tab);
   go.onclick=function(){ _lightRun(); };
   p.appendChild(go);
-  if(!total){ var t2=dv('');t2.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';t2.textContent='먼저 "조명 위치 그리기"에서 라인이나 할로겐을 1개 이상 그려주세요'; p.appendChild(t2); }
+  if(!total){ var t2=dv('');t2.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:6px';t2.textContent='먼저 "조명 위치 그리기"에서 라인·할로겐·펜던트를 1개 이상 그려주세요'; p.appendChild(t2); }
   if(tab.lightError){ var er=dv('');er.style.cssText='margin-top:8px;font-size:11.5px;color:#f87171;background:rgba(248,113,113,.08);border-radius:7px;padding:8px 10px';er.textContent='⚠️ '+tab.lightError; p.appendChild(er); }
 }
 function _lightGoLabel(tab){
@@ -35176,6 +35178,14 @@ function _lightGuideCanvas(img, lm){
     // 속이 빈 고리 — 원래 있던 매입등이 가려지지 않고 고리 안에 그대로 보이게(그 등을 켜는 경우)
     x.strokeStyle='#000'; x.lineWidth=S*0.006; x.beginPath(); x.arc(cx,cy,r*1.25,0,7); x.stroke();
     x.strokeStyle=LIGHT_SPOT_COLOR; x.lineWidth=S*0.0038; x.beginPath(); x.arc(cx,cy,r*1.25,0,7); x.stroke();
+  });
+  // 펜던트: 보라색 마름모 + P1, P2… (갓이 달릴 위치)
+  (lm.pendants||[]).forEach(function(pd, i){
+    var cx=pd.x*W, cy=pd.y*H, r=S*0.016;
+    x.beginPath(); x.moveTo(cx,cy-r); x.lineTo(cx+r,cy); x.lineTo(cx,cy+r); x.lineTo(cx-r,cy); x.closePath();
+    x.strokeStyle='#000'; x.lineWidth=S*0.006; x.stroke(); x.strokeStyle=LIGHT_PEND_COLOR; x.lineWidth=S*0.0038; x.stroke();
+    x.font='bold '+Math.round(S*0.018)+'px sans-serif'; x.textBaseline='bottom';
+    x.lineWidth=S*0.004; x.strokeStyle='#000'; x.strokeText('P'+(i+1), cx+r*1.2, cy-r*0.4); x.fillStyle=LIGHT_PEND_COLOR; x.fillText('P'+(i+1), cx+r*1.2, cy-r*0.4);
   });
   // 할로겐 번호(1,2,3…) — AI가 개수를 정확히 세도록 각 고리 옆에 번호 표시
   x.font='bold '+Math.round(S*0.018)+'px sans-serif'; x.textBaseline='bottom';
@@ -35225,6 +35235,15 @@ function _lightDrawPreview(ctx, img, lm, opts, W, H, showMarks, showGlow){
       var dg=ctx.createRadialGradient(cx,cy,0,cx,cy,S*0.02); dg.addColorStop(0,'rgba(255,250,235,0.95)'); dg.addColorStop(1,'rgba('+col+',0)');
       ctx.fillStyle=dg; ctx.beginPath(); ctx.arc(cx,cy,S*0.02,0,7); ctx.fill();
     });
+    (lm.pendants||[]).forEach(function(pd){
+      var cx=pd.x*W, cy=pd.y*H;
+      var hg=ctx.createRadialGradient(cx,cy,0,cx,cy,S*0.09); hg.addColorStop(0,'rgba('+col+','+(0.5*pw)+')'); hg.addColorStop(1,'rgba('+col+',0)');
+      ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,cy,S*0.09,0,7); ctx.fill();
+      var pg=ctx.createRadialGradient(cx,cy+S*0.12,0,cx,cy+S*0.12,S*0.1); pg.addColorStop(0,'rgba('+col+','+(0.3*pw)+')'); pg.addColorStop(1,'rgba('+col+',0)');
+      ctx.fillStyle=pg; ctx.beginPath(); ctx.ellipse(cx,cy+S*0.12,S*0.1,S*0.05,0,0,7); ctx.fill();
+      var dg=ctx.createRadialGradient(cx,cy,0,cx,cy,S*0.025); dg.addColorStop(0,'rgba(255,250,235,0.95)'); dg.addColorStop(1,'rgba('+col+',0)');
+      ctx.fillStyle=dg; ctx.beginPath(); ctx.arc(cx,cy,S*0.025,0,7); ctx.fill();
+    });
     ctx.restore();
   }
   if(showMarks){
@@ -35239,6 +35258,12 @@ function _lightDrawPreview(ctx, img, lm, opts, W, H, showMarks, showGlow){
     ctx.setLineDash([]);
     lm.spots.forEach(function(sp){
       ctx.strokeStyle=LIGHT_SPOT_COLOR; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(sp.x*W,sp.y*H,S*0.009,0,7); ctx.stroke();
+    });
+    (lm.pendants||[]).forEach(function(pd,i){
+      var cx=pd.x*W, cy=pd.y*H, r=S*0.013;
+      ctx.strokeStyle=LIGHT_PEND_COLOR; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(cx,cy-r); ctx.lineTo(cx+r,cy); ctx.lineTo(cx,cy+r); ctx.lineTo(cx-r,cy); ctx.closePath(); ctx.stroke();
+      ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(cx,cy-r); ctx.lineTo(cx,Math.max(0,cy-S*0.08)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=LIGHT_PEND_COLOR; ctx.font='bold '+Math.round(S*0.016)+'px sans-serif'; ctx.fillText('P'+(i+1), cx+r+3, cy-3);
     });
     ctx.restore();
   }
@@ -35279,9 +35304,10 @@ function _openLightEditor(){
   function endChain(){ activeLine=null; anchorPt=null; }
   // 되돌리기(Ctrl+Z) / 다시 실행(Ctrl+Y, Ctrl+Shift+Z) — 그리기 동작마다 직전 상태를 저장
   var undoStack=[], redoStack=[];
-  function _snapStr(){ return JSON.stringify({lines:lm.lines, spots:lm.spots}); }
+  if(!lm.pendants) lm.pendants=[];
+  function _snapStr(){ return JSON.stringify({lines:lm.lines, spots:lm.spots, pendants:lm.pendants}); }
   function snap(){ undoStack.push(_snapStr()); if(undoStack.length>200) undoStack.shift(); redoStack=[]; }
-  function _restore(str){ var o=JSON.parse(str); lm.lines=o.lines; lm.spots=o.spots; }
+  function _restore(str){ var o=JSON.parse(str); lm.lines=o.lines; lm.spots=o.spots; lm.pendants=o.pendants||[]; }
   function undo(){ if(!undoStack.length) return; redoStack.push(_snapStr()); _restore(undoStack.pop()); endChain(); draw(); renderSide(); }
   function redo(){ if(!redoStack.length) return; undoStack.push(_snapStr()); _restore(redoStack.pop()); endChain(); draw(); renderSide(); }
   function btn(txt, on, fn, css){ var b=document.createElement('button'); b.type='button'; b.textContent=txt;
@@ -35290,24 +35316,25 @@ function _openLightEditor(){
   function renderBar(){
     bar.innerHTML='';
     bar.appendChild(btn('〰 간접등 라인', tool==='line', function(){ tool='line'; renderBar(); draw(); }));
-    bar.appendChild(btn('● 할로겐·매입등 켜기', tool==='spot', function(){ tool='spot'; endChain(); renderBar(); draw(); }));
+    bar.appendChild(btn('● 할로겐·타겟라이트', tool==='spot', function(){ tool='spot'; endChain(); renderBar(); draw(); }));
+    bar.appendChild(btn('◆ 펜던트 조명', tool==='pendant', function(){ tool='pendant'; endChain(); renderBar(); renderSide(); draw(); }, tool==='pendant'?'':';color:#d9a6ff'));
     if(tool==='line'){
       bar.appendChild(btn(straightMode?'📏 직선 모드 켜짐':'📏 직선 모드', straightMode, function(){ straightMode=!straightMode; renderBar(); renderSide(); }));
       if(activeLine||anchorPt) bar.appendChild(btn('⏹ 이 라인 끝내기', false, function(){ endChain(); renderBar(); draw(); }));
     }
     bar.appendChild(btn('↶ 되돌리기 (Ctrl+Z)', false, function(){ undo(); }, undoStack.length?'':';opacity:.45'));
     bar.appendChild(btn('↷ 다시 (Ctrl+Y)', false, function(){ redo(); }, redoStack.length?'':';opacity:.45'));
-    bar.appendChild(btn('🗑 전체 지우기', false, function(){ if(!confirm('그린 조명을 모두 지울까요?')) return; snap(); lm.lines=[]; lm.spots=[]; endChain(); draw(); renderSide(); }));
+    bar.appendChild(btn('🗑 전체 지우기', false, function(){ if(!confirm('그린 조명을 모두 지울까요?')) return; snap(); lm.lines=[]; lm.spots=[]; lm.pendants=[]; endChain(); draw(); renderSide(); }));
     bar.appendChild(btn(showGlow?'✨ 빛 미리보기 켜짐':'✨ 빛 미리보기 꺼짐', showGlow, function(){ showGlow=!showGlow; renderBar(); draw(); }));
     var sp=document.createElement('div'); sp.style.cssText='flex:1'; bar.appendChild(sp);
-    var cnt=document.createElement('div'); cnt.style.cssText='font-size:12px;color:#aaa;margin-right:6px'; cnt.textContent='라인 '+lm.lines.length+'개 · 할로겐 '+lm.spots.length+'개'; bar.appendChild(cnt);
+    var cnt=document.createElement('div'); cnt.style.cssText='font-size:12px;color:#aaa;margin-right:6px'; cnt.textContent='라인 '+lm.lines.length+'개 · 할로겐 '+lm.spots.length+'개 · 펜던트 '+lm.pendants.length+'개'; bar.appendChild(cnt);
     bar.appendChild(btn('✓ 완료', false, function(){ ov.remove(); renderSB(); }));
-    bar.appendChild(btn('💡 이대로 렌더링 ('+getBaseCost('edit', null, tab.resolution||'1K')+'cr)', true, function(){ if(!(lm.lines.length+lm.spots.length)){ alert('먼저 라인이나 할로겐을 그려주세요.'); return; } ov.remove(); _lightRun(); }, ';background:#00e5cc;color:#000'));
+    bar.appendChild(btn('💡 이대로 렌더링 ('+getBaseCost('edit', null, tab.resolution||'1K')+'cr)', true, function(){ if(!(lm.lines.length+lm.spots.length+lm.pendants.length)){ alert('먼저 라인·할로겐·펜던트를 그려주세요.'); return; } ov.remove(); _lightRun(); }, ';background:#00e5cc;color:#000'));
   }
   function renderSide(){
     _lightSave();
     side.innerHTML='<div style="font-size:13px;font-weight:800;margin-bottom:8px">💡 조명 옵션</div>'+
-      '<div style="font-size:11px;color:#999;line-height:1.6;margin-bottom:12px">'+(tool==='line'?'<b style="color:#FF8A30">간접등 라인</b>: 빛이 나올 모서리를 따라 드래그하세요. 여러 개 그려도 렌더 1번에 다 들어가요.<br><b style="color:#FF8A30">📏 직선(포토샵식)</b>: 시작점을 클릭 → <b>Shift</b>를 누른 채 다음 점 클릭 → 직선으로 이어져요(가로·세로·대각선 모두). 계속 Shift+클릭하면 꺾인 라인도 돼요. Shift 없이 클릭하면 새 라인 시작, <b>Esc</b>로 끝내기. Shift를 누른 채 드래그해도 직선이에요.'+(straightMode?'<br><span style="color:#00e5cc">직선 모드 켜짐 — Shift 없이 클릭만 해도 이어져요(터치용)</span>':''):'<b style="color:#FFE000">할로겐·매입등</b>: 천장 위치를 클릭. 이미 있는 불 꺼진 매입등 위를 찍으면 그 등이 켜져요. 클릭한 채로 끌면 빛이 향할 방향(벽 쪽)을 정해요.')+'<br>화면의 빛은 대략적인 미리보기예요(크레딧 없음).</div>';
+      '<div style="font-size:11px;color:#999;line-height:1.6;margin-bottom:12px">'+(tool==='line'?'<b style="color:#FF8A30">간접등 라인</b>: 빛이 나올 모서리를 따라 드래그하세요. 여러 개 그려도 렌더 1번에 다 들어가요.<br><b style="color:#FF8A30">📏 직선(포토샵식)</b>: 시작점을 클릭 → <b>Shift</b>를 누른 채 다음 점 클릭 → 직선으로 이어져요(가로·세로·대각선 모두). 계속 Shift+클릭하면 꺾인 라인도 돼요. Shift 없이 클릭하면 새 라인 시작, <b>Esc</b>로 끝내기. Shift를 누른 채 드래그해도 직선이에요.'+(straightMode?'<br><span style="color:#00e5cc">직선 모드 켜짐 — Shift 없이 클릭만 해도 이어져요(터치용)</span>':''):(tool==='pendant'?'<b style="color:#C05CFF">펜던트 조명</b>: 조명(갓)이 달릴 위치를 클릭하세요. 이미 펜던트가 있으면 그 펜던트 위를 찍으면 켜지고, 없으면 그 자리에 천장에서 내려오는 펜던트가 달려서 켜져요. 식탁·아일랜드 위 2~3개도 각각 찍으면 돼요.':'<b style="color:#FFE000">할로겐·매입등</b>: 천장 위치를 클릭. 이미 있는 불 꺼진 매입등 위를 찍으면 그 등이 켜져요.<br><b style="color:#FFE000">🎯 타겟라이트</b>: 클릭한 채로 비출 대상(그림·벽·식탁·화분 등)까지 끌면, 그 자리에 집중된 빛이 떨어지는 타겟라이트가 돼요.'))+'<br>화면의 빛은 대략적인 미리보기예요(크레딧 없음).</div>';
     _mkLightOpts(side, tab, function(){ renderSide(); draw(); }, true);
     renderBar();
   }
@@ -35324,6 +35351,7 @@ function _openLightEditor(){
       if(chain && anchorPt){ var nl=[anchorPt, p0]; lm.lines.push(nl); activeLine=nl; anchorPt=null; drawing={kind:'seg'}; lastKind='line'; draw(); renderSide(); return; }
       drawing={kind:'line', pts:[p0], start:p0}; lm.lines.push(drawing.pts);
     }
+    else if(tool==='pendant'){ lm.pendants.push({x:p0.x, y:p0.y}); drawing=null; draw(); renderSide(); return; }
     else { drawing={kind:'spot', sp:{x:p0.x,y:p0.y,dx:0,dy:0.08}}; lm.spots.push(drawing.sp); }
     draw();
   });
@@ -35390,6 +35418,12 @@ function _lightAllowedMask(lm, W, H){
     x.restore();
     x.beginPath(); x.arc(cx,cy,S*0.06,0,7); x.fill();
   });
+  (lm.pendants||[]).forEach(function(pd){
+    var cx=pd.x*W, cy=pd.y*H;
+    x.beginPath(); x.arc(cx,cy,S*0.09,0,7); x.fill();
+    x.fillRect(cx-S*0.015, 0, S*0.03, cy); // 천장에서 내려오는 줄
+    x.beginPath(); x.ellipse(cx, Math.min(H, cy+H*0.22), S*0.16, H*0.14, 0, 0, 7); x.fill(); // 아래로 떨어지는 빛(식탁 등)
+  });
   var b=document.createElement('canvas'); b.width=W; b.height=H; var bx=b.getContext('2d');
   bx.filter='blur('+Math.round(S*0.02)+'px)'; bx.drawImage(c,0,0);
   return bx.getImageData(0,0,W,H).data;
@@ -35429,8 +35463,9 @@ function _lightSuppressUnmarked(origSrc, resultUrl, lm, cb){
 }
 function _lightRun(){
   var tab=_lightState(), lm=tab.lightMarks, o=tab.lightOpts;
-  var nL=lm.lines.length, nS=lm.spots.length;
-  if(!(nL+nS)){ alert('먼저 조명 위치를 그려주세요.'); return; }
+  if(!lm.pendants) lm.pendants=[];
+  var nL=lm.lines.length, nS=lm.spots.length, nP=lm.pendants.length;
+  if(!(nL+nS+nP)){ alert('먼저 조명 위치를 그려주세요.'); return; }
   if(!_supaUser){ openMd('account'); return; }
   var res=tab.resolution||'1K', cost=getBaseCost('edit', null, res);
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<cost){ alert('크레딧이 부족합니다. 필요: '+cost+'cr, 현재: '+G.cr+'cr'); openMd('credits'); return; }
@@ -35446,25 +35481,31 @@ function _lightRun(){
     var pts=idxs.map(function(k){ return '('+_pc(ln[k].x)+' from left, '+_pc(ln[k].y)+' from top)'; });
     return 'LINE '+(i+1)+' ('+_dirTxt(ln[0], ln[ln.length-1])+', one continuous line): '+pts.join(' → ');
   }).join('; ');
-  var spotDesc=lm.spots.map(function(sp,i){ return 'SPOT '+(i+1)+' at ('+_pc(sp.x)+' from left, '+_pc(sp.y)+' from top)'; }).join('; ');
+  // 2026-10-07: 끌어서 방향을 정한 할로겐 = 타겟라이트(그림·벽·식탁 등 특정 대상을 비추는 집중 조명)
+  var spotDesc=lm.spots.map(function(sp,i){ var t='SPOT '+(i+1)+' at ('+_pc(sp.x)+' from left, '+_pc(sp.y)+' from top)'; if(sp.dir){ var tx=Math.max(0,Math.min(1,sp.x+(sp.dx||0))), ty=Math.max(0,Math.min(1,sp.y+(sp.dy||0))); t+=' = TARGET LIGHT aimed at ('+_pc(tx)+' from left, '+_pc(ty)+' from top)'; } return t; }).join('; ');
+  var nT=lm.spots.filter(function(sp){return sp.dir;}).length;
+  var tgtTxt = nT ? ('• TARGET LIGHTS ('+nT+' of the yellow rings have a yellow aiming line): these are adjustable accent spotlights (gimbal / directional recessed spots). Aim each one exactly along its yellow line and make it cast a FOCUSED, clearly defined oval pool of '+tempTxt+' light on the surface/object at the END of that line (e.g. artwork, a wall feature, a plant, a table or counter), noticeably brighter than its surroundings with a soft edge — like gallery accent lighting. No visible beam in the air.\n') : '';
+  var pendDesc=lm.pendants.map(function(pd,i){ return 'PENDANT P'+(i+1)+' shade at ('+_pc(pd.x)+' from left, '+_pc(pd.y)+' from top)'; }).join('; ');
+  var pendTxt = nP ? ('• PURPLE diamonds in image 2 (labelled P1'+(nP>1?'–P'+nP:'')+', '+nP+' in total) = the EXACT positions of PENDANT lights (the position of the lamp shade). For EVERY purple diamond: if a pendant / hanging lamp ALREADY EXISTS at or right next to that diamond in image 1, simply TURN THAT EXISTING PENDANT ON — keep its exact design, size, height and cord. If there is no pendant there, hang ONE new pendant light whose shade sits exactly at the diamond, suspended by a thin vertical cord/rod straight up to the ceiling directly above it, in a design, material and scale that suit this room\'s style (several pendants in a row must be identical and evenly matched). Every marked pendant is switched ON with '+tempTxt+' light: the shade glows softly, light falls downward onto the table/counter/floor below it as a soft warm pool, with a gentle halo on the nearby ceiling/wall. Exactly '+nP+' pendant'+(nP>1?'s':'')+' — do not add other pendants anywhere else.\n') : '';
   var spotStrict = nS ? ('⚠️ HALOGEN COUNT IS EXACT: exactly '+nS+' downlight'+(nS>1?'s':'')+' may be ON in the whole image — the '+nS+' numbered yellow ring'+(nS>1?'s':'')+' (1'+(nS>1?'–'+nS:'')+'), one light per ring. The ceiling in image 1 may contain MORE recessed downlights than '+nS+' — every downlight that is NOT inside a numbered ring must stay completely OFF and dark (no glow at the fixture, no beam, no light pool on the wall below it). Do not light "the neighbouring" fixtures, do not add new ones between or beside the rings, and do not split one ring into two lights. Exactly '+nS+' lit fixture'+(nS>1?'s':'')+' (with their own soft light pool / wall scallop as described below), one per ring.\n') : '';
-  var prompt='⚠️ STRICT RULE FIRST — LIGHT ONLY WHERE MARKED: the ONLY new light sources allowed are the '+nL+' marked line(s) and '+nS+' marked spot(s) listed below. Every other edge, surface and fixture must stay exactly as unlit as in image 1.\n'+
+  var prompt='⚠️ STRICT RULE FIRST — LIGHT ONLY WHERE MARKED: the ONLY new light sources allowed are the '+nL+' marked line(s), '+nS+' marked spot(s) and '+nP+' marked pendant(s) listed below. Every other edge, surface and fixture must stay exactly as unlit as in image 1.\n'+
     (nL? '⚠️ LINE COUNT IS EXACT: exactly '+nL+' glowing indirect LED line'+(nL>1?'s':'')+' in the whole result — one per orange line, numbered 1'+(nL>1?'–'+nL:'')+'. Other ceiling steps, soffit edges, beams, cabinet bottoms, counter edges, toe-kicks and shelves that also LOOK like typical places for indirect lighting must stay completely dark if no orange line is drawn on them — do NOT "complete the design" by adding matching lines on the other side or on similar edges.\n' : '')+
     'You receive TWO images. IMAGE 1 = the original photo/render to edit. IMAGE 2 = the SAME image with lighting GUIDE MARKS drawn on it (guide only — never copy the marks).\n'+
     (nL? '• ORANGE lines in image 2 ('+nL+' line'+(nL>1?'s':'')+') = the EXACT positions of concealed linear LED indirect lighting. For EVERY orange line, install a hidden LED strip along that exact edge/surface for its full drawn length, so a continuous '+tempTxt+' glow washes out from that edge onto the nearby surface (e.g. under a counter top, along a ceiling cove or step, under shelves/cabinets, along a wall base). The light source itself stays hidden — show the soft glowing band and its gradient falloff, not a visible tube.\n' : '')+
     (nS? '• YELLOW rings in image 2 ('+nS+' numbered ring'+(nS>1?'s':'')+', a short yellow line next to a ring, if present, shows where that light is aimed) = the EXACT positions (ring centers) of recessed halogen / downlight spotlights. For EVERY yellow ring: if a light fixture (downlight, recessed spot, pendant, sconce) ALREADY EXISTS inside or right next to that ring in image 1, simply TURN THAT EXISTING FIXTURE ON — do not add a second fixture or change its design; if no fixture is there, place one small recessed fixture at the ring center. Either way, make it emit a '+tempTxt+' light. HOW THE LIGHT LOOKS DEPENDS ON WHERE THE FIXTURE IS: (a) a downlight that sits CLOSE TO A WALL (within about half a meter) washes that wall with ONE soft, subtle scallop / arc-shaped light pattern right below it — gentle and natural, not a sharp bright cone; (b) a downlight that is AWAY FROM WALLS (in the open middle of the ceiling) shows NO scallop and NO visible cone shape on any wall or in the air — only the small glowing fixture itself and a soft, diffuse round light pool on the floor / table / furniture directly below it. Never draw visible light beams or cones in the air.\n' : '')+
     (nL? 'EXACT LINE POSITIONS (image coordinates): '+lineDesc+'.\n' : '')+
-    (nS? 'EXACT SPOT POSITIONS: '+spotDesc+'.\n' : '')+ spotStrict +
-    'COUNT CHECK: the result must contain exactly '+nL+' indirect light line(s) and '+nS+' halogen spot(s) at the marked places — none missing, and do NOT add extra light fixtures anywhere else.\n'+
+    (nS? 'EXACT SPOT POSITIONS: '+spotDesc+'.\n' : '')+ spotStrict + tgtTxt + pendTxt +
+    (nP? 'EXACT PENDANT POSITIONS: '+pendDesc+'.\n' : '')+
+    'COUNT CHECK: the result must contain exactly '+nL+' indirect light line(s), '+nS+' halogen spot(s) and '+nP+' lit pendant(s) at the marked places — none missing, and do NOT add extra light fixtures anywhere else.\n'+
     'DO NOT ADD LED / INDIRECT GLOW ANYWHERE THAT IS NOT MARKED — in particular NOT under ceiling beams or soffits, NOT along ceiling edges or coves, NOT around signage frames, niches, artwork or wall panels, NOT along the floor / base / kick of counters or furniture, NOT under shelves, hoods or cabinets, NOT around windows — unless an orange line is drawn exactly there. Unmarked recessed downlights and other existing fixtures stay OFF (as in image 1) unless a yellow ring marks them.\n'+
     'Light intensity: '+powTxt+'. '+
     (o.mood==='dark' ? 'OVERALL MOOD: atmospheric evening/night mood — lower the general ambient light so the room is moody and ONLY the marked indirect lines and halogen pools become the main light, with soft shadows in the corners and warm reflections on surfaces. Achieve the mood ONLY by dimming the overall ambient light — NEVER by adding extra LED strips, cove lights or glowing edges that are not marked. Keep everything still readable, never pitch black.\n' : 'OVERALL MOOD: keep the overall brightness of the original — just add the marked lights naturally on top.\n')+
     (o.photoreal ? 'If IMAGE 1 is a raw 3D model screenshot (e.g. SketchUp-like flat colors/no real lighting), render it as a photorealistic high-end interior visualization with realistic materials and global illumination, keeping every object, material choice, color and position the same. If it is already a photo/realistic render, keep its style.\n' : 'Keep the rendering style of image 1 as it is.\n')+
-    'KEEP IDENTICAL: camera angle, framing, composition, architecture, walls, ceiling, furniture, materials, colors, decor and their positions — only the lighting changes. ABSOLUTELY NO orange or yellow guide marks, lines, rings, dots, numbers or arrows may appear in the output. Output one single image.\n'+
+    'KEEP IDENTICAL: camera angle, framing, composition, architecture, walls, ceiling, furniture, materials, colors, decor and their positions — only the lighting changes. ABSOLUTELY NO orange, yellow or purple guide marks, lines, rings, diamonds, dots, numbers, P-labels or arrows may appear in the output. Output one single image.\n'+
     '⚠️ FINAL CHECK (most important): compare your result with image 2 — if there is ANY glowing LED line, cove glow, under-glow or lit fixture that does NOT sit exactly on an orange line or yellow ring, remove it and leave that spot unlit. The number of light lines in the result must be exactly '+nL+'.'+(nS?(' Count the lit downlights / light pools: there must be exactly '+nS+' — if you see more, switch the extra ones OFF.'):'');
   if(!G.HIST.edit) G.HIST.edit=[];
   var loadingId=Date.now()+Math.random();
-  G.HIST.edit.unshift({ id:loadingId, orig:baseImg, result:null, origThumb:null, tags:['💡 조명 렌더링 중... (라인 '+nL+' · 할로겐 '+nS+')'], ai:'', cx:50, fav:false, wf:'edit', preview:false, loading:true });
+  G.HIST.edit.unshift({ id:loadingId, orig:baseImg, result:null, origThumb:null, tags:['💡 조명 렌더링 중... (라인 '+nL+' · 할로겐 '+nS+' · 펜던트 '+nP+')'], ai:'', cx:50, fav:false, wf:'edit', preview:false, loading:true });
   tab.lightRunning=true; tab.lightError=null;
   if(G.wf==='edit'){ renderMain('edit'); renderSB(); }
   function fail(err){
@@ -35487,8 +35528,8 @@ function _lightRun(){
             tab.lightRunning=false;
             G.HIST.edit=G.HIST.edit.filter(function(x){return x.id!==loadingId;});
             var newId=Date.now()+Math.random();
-            G.HIST.edit.unshift({ id:newId, orig:baseImg, result:url, origThumb:null, tags:['💡 조명 연출','라인 '+nL+' · 할로겐 '+nS, cost+'cr'], ai:'', cx:50, fav:false, wf:'edit', preview:false,
-              lightMarks:JSON.parse(JSON.stringify({lines:lm.lines, spots:lm.spots})), lightOpts:JSON.parse(JSON.stringify(o)) });
+            G.HIST.edit.unshift({ id:newId, orig:baseImg, result:url, origThumb:null, tags:['💡 조명 연출','라인 '+nL+' · 할로겐 '+nS+(nP?' · 펜던트 '+nP:''), cost+'cr'], ai:'', cx:50, fav:false, wf:'edit', preview:false,
+              lightMarks:JSON.parse(JSON.stringify({lines:lm.lines, spots:lm.spots, pendants:lm.pendants})), lightOpts:JSON.parse(JSON.stringify(o)) });
             _lightSave();
             tab.resultImg=url;
             try{ _saveResultToCloudGallery('edit', newId, url, baseImg, 'nano2', res); }catch(e){}
