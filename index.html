@@ -28979,7 +28979,26 @@ function _consultFmtMan(m){ m=Math.round(m||0); if(!m) return '-'; try{ return _
 function _consultLetter(i){ return String.fromCharCode(65+i); }
 
 // ── 시안 구성(이름·설명·마감 등급) 만들기 — 생성 전에 사이드바에서 이름/설명을 고칠 수 있음 ──
+// 부분 공사(예: 주방만·화장실만) — 2026-10-07 요청("주방만/화장실만 할 때 평수는 어떻게 적나"):
+// 공사 범위를 "집 전체 / 사진 넣은 공간만" 중에 고르게 하고, 부분 공사면 평수 대신 공간별 표준 공사비로 등급·견적을 잡음.
+var CONSULT_TIER_MULT=[0.65,1,1.4,1.95,2.8]; // 스탠다드=1 기준 등급 배율
+function _consultSpaceTypical(name, type){ // 스탠다드 기준 공간 1곳 공사비(만원, 참고 개산)
+  name=String(name||'');
+  if(type==='commercial'){
+    if(/주방/.test(name)) return 1500; if(/화장실/.test(name)) return 600; if(/카운터/.test(name)) return 700; if(/파사드|입구|외관/.test(name)) return 1200; return 1000;
+  }
+  if(/주방|부엌/.test(name)) return 900; if(/욕실|화장실/.test(name)) return 700; if(/거실/.test(name)) return 700;
+  if(/안방|침실/.test(name)) return 500; if(/현관/.test(name)) return 200; if(/발코니|베란다/.test(name)) return 250; if(/드레스/.test(name)) return 350;
+  return 350;
+}
+function _consultIsPart(st){ return !_consultIsBuild(st) && st.scope==='part'; }
+function _consultPartTypical(st){ return st.spaces.filter(function(s){return s.photo;}).reduce(function(a,s){ return a+_consultSpaceTypical(s.name, st.type); },0); }
 function _consultTierFromBudget(st){
+  if(_consultIsPart(st)){
+    var typ=_consultPartTypical(st), b=_consultNum(st.budget);
+    if(!typ || !b) return 1;
+    var r=b/typ, bi=0, bdd=1e9; CONSULT_TIER_MULT.forEach(function(m,i){ var d=Math.abs(m-r); if(d<bdd){ bdd=d; bi=i; } }); return bi;
+  }
   var unit=CONSULT_UNIT[st.type]||CONSULT_UNIT.home, area=_consultNum(st.area), bud=_consultNum(st.budget);
   if(!area || !bud) return 1;
   var per=bud/area, best=0, bd=1e9;
@@ -28996,14 +29015,28 @@ function _consultBuildPlan(st){
     var idx=[]; for(var ti=0; ti<n; ti++) idx.push(start+ti);
     idx.forEach(function(ti){ var t=CONSULT_TIERS[ti]; out.push({name:t.name, ko:t.ko, en:'Same overall style as the references. '+t.en, tier:ti}); });
   } else {
+    // 2026-10-07 요청("스타일 다르게/가격대 다르게 버튼 필요 없다 — 레퍼런스 넣으면 레퍼런스대로 다르게,
+    // 예산 적으면 예산에 맞게"): 시안은 항상 고객 참고사진 기준으로 다르게, 마감 등급은 예산에서 자동.
+    // 참고사진이 여러 장이면 시안마다 한 장씩 "주 참고사진"으로 배정(사진 2장·시안 3개 → 1안=사진1, 2안=사진2, 3안=두 사진 섞기).
     var src=_consultIsBuild(st)?CONSULT_DESIGN_VARIANTS_BUILD:CONSULT_DESIGN_VARIANTS;
-    var tier=_consultTierFromBudget(st);
-    for(var i=0;i<n;i++){ var d=src[i%src.length]; out.push({name:d.name, ko:d.ko, en:d.en, tier:tier}); }
+    var tier=_consultTierFromBudget(st), nr=(st.refs||[]).filter(Boolean).length;
+    var di=0;
+    for(var i=0;i<n;i++){
+      if(nr>=2 && i<nr){
+        out.push({name:'참고사진 '+(i+1)+' 스타일', ko:'고객이 가져온 '+(i+1)+'번 참고사진의 스타일·컬러·마감재를 이 공간에 맞게 반영한 안', en:'PRIMARY STYLE SOURCE: client reference image #'+(i+1)+' (= image '+(i+2)+' in the input list). Follow THAT reference most closely for style, color palette, finish materials and mood; the other reference images are secondary.', tier:tier, refIdx:i});
+      } else if(nr>=2 && i===nr){
+        out.push({name:'참고사진 믹스', ko:'고객 참고사진들의 좋은 점을 골고루 섞어서 정리한 안', en:'Blend all client reference images together into one balanced, cohesive design.', tier:tier});
+      } else {
+        var d=src[(nr>=2?di+1:di)%src.length]; di++;
+        out.push({name:d.name, ko:d.ko, en:d.en, tier:tier});
+      }
+    }
   }
   return out;
 }
 function _consultEnsurePlan(st){
-  var sig=st.type+'|'+st.mode+'|'+st.count+'|'+(st.mode==='budget'?(_consultTierFromBudget(st)):'');
+  st.mode='design'; // 방식 선택 없앰(2026-10-07)
+  var sig=st.type+'|'+st.count+'|'+_consultTierFromBudget(st)+'|'+(st.refs||[]).filter(Boolean).length+'|'+(st.scope||'all');
   if(!st.plan || st.plan.sig!==sig){ st.plan={sig:sig, items:_consultBuildPlan(st)}; }
   return st.plan.items;
 }
@@ -29200,6 +29233,7 @@ function _consultPrompt(st, vp, sp, nRefs, hasAnchor){
     lines.push('FINISH GRADE: '+tier.en);
     lines.push('KEEP THE REAL SPACE: exact same camera position, angle, lens and framing as image 1; the same room shape, wall positions, window and door positions and sizes, ceiling height, beams and columns — this is a remodel of THIS room, not a different room. Do not add or remove windows or doors. Remove old furniture, clutter, construction debris and people, and furnish the room appropriately for its use.');
     if(st.type==='home'){ lines.push('Load-bearing walls cannot be removed in Korean apartments — keep all existing walls in place.'); }
+    if(_consultIsPart(st)) lines.push('SCOPE: this is a partial remodel of only this space — redesign everything visible in this space, but anything visible through doorways into other rooms stays as it is.');
   } else if(st.type==='build_new'){
     var lc=_consultLegalCalc(st);
     lines.push('TASK: Image 1 is a real photo of an empty building site. Design a NEW '+(st.biz?st.biz.replace(/\(.*\)/,'')+' ':'')+'building standing on this exact site and render it as a photorealistic architectural photograph from the same camera position, angle and framing as image 1. Keep the real surroundings (roads, neighboring buildings, trees, sky) exactly as they are.');
@@ -29336,6 +29370,12 @@ function _consultParseJson(res){
   try{ return JSON.parse(t.slice(a,b+1)); }catch(e){ return null; }
 }
 function _consultFallbackEstimate(st, v){
+  if(_consultIsPart(st)){
+    var mlt=CONSULT_TIER_MULT[v.plan.tier==null?1:v.plan.tier], items=[];
+    st.spaces.filter(function(s){return s.photo;}).forEach(function(s){ items.push({space:s.name, work:'공사 일체', spec:CONSULT_TIERS[v.plan.tier==null?1:v.plan.tier].name+' 마감', amount:Math.round(_consultSpaceTypical(s.name, st.type)*mlt/10)*10}); });
+    var tt=items.reduce(function(a,x){return a+x.amount;},0);
+    return {items:items, total:tt, note:'AI 분석이 안 돼서 공간별 표준 공사비 기준으로 계산한 개산이에요.', fallback:true};
+  }
   var unit=(CONSULT_UNIT[st.type]||CONSULT_UNIT.home)[v.plan.tier==null?1:v.plan.tier];
   var area=_consultNum(st.area)||(st.type==='home'?30:20);
   var total=Math.round(unit*area/10)*10;
@@ -29354,18 +29394,21 @@ function _consultEstimate(st, v, force){
   var area=_consultNum(st.area), bud=_consultNum(st.budget);
   var unit=(CONSULT_UNIT[st.type]||CONSULT_UNIT.home)[v.plan.tier==null?1:v.plan.tier];
   var target = area ? Math.round(unit*area) : 0;
+  var _part=_consultIsPart(st);
+  if(_part){ target=Math.round(_consultPartTypical(st)*CONSULT_TIER_MULT[v.plan.tier==null?1:v.plan.tier]); }
   var mats=(v.materials||[]).map(function(m){return m.k+': '+m.v;}).join(', ');
   var kind={home:'주거 인테리어('+(st.houseKind||'아파트')+')', commercial:'상업 인테리어('+(st.biz||'매장')+')', build_new:'건축 신축('+(st.biz||'건물')+')', build_remodel:'건물 리모델링'+((st.legal&&st.legal.addFloors>0)?'+'+st.legal.addFloors+'개층 증축':'')}[st.type];
   var lc=_consultLegalCalc(st);
   var prompt='[한국 인테리어/건축 참고 견적 — JSON만 출력, 설명·인사말 금지]\n'+
     '첨부 이미지는 "'+v.key+'안 · '+v.plan.name+'" 디자인 시안이에요(공간: '+spaces.map(function(s){return s.name;}).join(', ')+').\n'+
     '공사 종류: '+kind+'\n'+
-    '면적: '+(area?area+'평':'모름(이미지로 추정)')+(st.rooms?' · 방 '+st.rooms+'개':'')+'\n'+
+    (_part ? '공사 범위: 부분 공사 — '+spaces.map(function(s){return s.name;}).join(', ')+'만 공사해요(다른 공간·전체 철거·전체 설비는 포함하지 말 것). 공간별로 항목을 나눠줘.\n'+(area?'(참고: 집 전체 면적 '+area+'평)\n':'')
+           : '면적: '+(area?area+'평':'모름(이미지로 추정)')+(st.rooms?' · 방 '+st.rooms+'개':'')+'\n')+
     (lc && st.type==='build_new' ? '대지 '+Math.round(lc.site)+'㎡, 법정 최대 연면적 약 '+Math.round(lc.maxGFA)+'㎡\n' : '')+
     '마감 등급: '+tier.name+' — '+tier.ko+'\n'+
     (mats?'주요 마감재: '+mats+'\n':'')+
     (target?'이 등급의 2026년 수도권 평균 단가로는 총 약 '+target+'만원 전후가 일반적(±25% 범위에서 이미지에 보이는 사양에 맞게 조정).\n':'')+
-    (bud?'참고로 고객 희망 예산은 '+bud+'만원이에요(금액을 억지로 맞추지 말고 실제 사양 기준으로).\n':'')+
+    (bud?'고객 예산은 '+bud+'만원이에요 — 이 시안은 그 예산에 맞춰 설계된 안이니, 이미지 사양 기준으로 총액이 예산의 85~105% 범위에 들어가도록 항목을 구성해줘(예산을 크게 넘는 사양이 보이면 note에 한 줄로 알려줘).\n':'')+
     '이미지에 실제로 보이는 사양(마감재·가구·조명·설비)을 기준으로 공종별 참고 견적을 만들어줘. 금액 단위는 만원, 정수.\n'+
     '형식: {"items":[{"space":"공간명 또는 공통","work":"공종(예: 철거, 목공, 바닥, 도장, 타일, 욕실, 주방가구, 전기·조명, 설비, 외장, 창호, 구조)","spec":"사양 요약 20자 이내","amount":숫자}],"total":숫자,"note":"한 줄 메모"}\n'+
     '항목은 6~14개. total은 items 합계와 같게.';
@@ -29709,9 +29752,13 @@ function sbConsult(p){
     tg.appendChild(b);
   });
   s1.appendChild(tg);
+  if(!_consultIsBuild(st)){
+    var sl=dv(''); sl.style.cssText='font-size:10.5px;color:var(--m2);font-weight:700;margin:10px 0 4px'; sl.textContent='공사 범위 (주방만·욕실만이면 일부 공사)'; s1.appendChild(sl);
+    s1.appendChild(seg(st.scope==='part'?'part':'all', [{k:'all',l:'🏠 전체 공사'},{k:'part',l:'🔧 일부 공사'}], function(k){ st.scope=k; }));
+  }
   var g1=grid2();
   function lw(t, el){ var w=dv(''); var l=dv(''); l.style.cssText='font-size:10.5px;color:var(--m2);font-weight:700;margin-bottom:3px'; l.textContent=t; w.appendChild(l); w.appendChild(el); return w; }
-  g1.appendChild(lw(st.type==='build_new'?'계획 면적 (평)':'면적 (평)', inp(st.area, '예: 34', function(v){ st.area=v; }, true)));
+  g1.appendChild(lw(st.type==='build_new'?'계획 면적 (평)':(_consultIsPart(st)?'집 면적 (평, 선택)':'면적 (평)'), inp(st.area, _consultIsPart(st)?'비워도 돼요':'예: 34', function(v){ st.area=v; }, true)));
   g1.appendChild(lw('예산 (만원, 선택)', inp(st.budget, '예: 5000', function(v){ st.budget=v; }, true)));
   s1.appendChild(g1);
   if(st.type==='commercial'){ var g2=dv(''); g2.style.marginTop='6px'; g2.appendChild(sel(st.biz, [''].concat(CONSULT_BIZ), function(v){ st.biz=v; })); s1.appendChild(g2); }
@@ -29766,12 +29813,12 @@ function sbConsult(p){
   // ③ 시안 개수
   var s3=step(3,'시안 몇 개 만들까요?');
   s3.appendChild(seg(st.count, [{k:1,l:'1'},{k:2,l:'2'},{k:3,l:'3'},{k:4,l:'4'},{k:5,l:'5'}], function(k){ st.count=k; }));
-  var g3=dv(''); g3.style.marginTop='6px';
-  g3.appendChild(seg(st.mode, [{k:'design',l:'🎨 스타일 다르게'},{k:'budget',l:'💰 가격대 다르게'}], function(k){ st.mode=k; }));
-  s3.appendChild(g3);
   var plan=_consultEnsurePlan(st);
   var pn=dv(''); pn.style.cssText='font-size:11px;color:var(--m2);margin-top:6px;line-height:1.6';
-  pn.innerHTML=plan.map(function(v,i){ return '<b style="color:var(--t2)">'+_consultLetter(i)+'안</b> '+_cEsc(v.name); }).join(' · ');
+  var _tierNm=CONSULT_TIERS[_consultTierFromBudget(st)].name;
+  pn.innerHTML=plan.map(function(v,i){ return '<b style="color:var(--t2)">'+_consultLetter(i)+'안</b> '+_cEsc(v.name); }).join(' · ')+
+    '<br>'+(_consultNum(st.budget)?'💰 예산 '+_consultFmtMan(_consultNum(st.budget))+'에 맞춰 <b style="color:var(--t2)">'+_tierNm+'</b> 마감으로 만들어요':'💰 예산을 넣으면 그 금액에 맞는 마감으로 만들어요 (지금: '+_tierNm+')')+
+    ((st.refs||[]).length?'':'<br>🖼️ 고객 스타일 사진을 넣으면 그 스타일대로 시안이 나와요');
   s3.appendChild(pn);
 
   // 만들기 버튼
