@@ -31252,7 +31252,8 @@ function _consultBuildPdf(onDone){
   if(!pages.length){ alert('먼저 시안 이미지를 만들거나 넣어주세요.'); if(onDone) onDone(); return; }
   var toLoad=[], loaded={};
   if(data.logo) toLoad.push(['logo', data.logo]);
-  toLoad.push(['hero', pages[0].rec.result]);
+  toLoad.push(['hero', st.coverImg || pages[0].rec.result]);
+  if(st.closingImg) toLoad.push(['closing', st.closingImg]);
   spaces.forEach(function(s){ if(s.photo) toLoad.push(['bf_'+s.id, s.photo]); });
   st.variants.forEach(function(v,vi){
     var firstR=null;
@@ -31280,6 +31281,7 @@ function _consultBuildPdf(onDone){
     });
     var closingScenes=pages.map(function(p,i){ return {result:p.rec.result, label:st.variants[p.vi].key+'안 · '+p.sp.name}; });
     pages.forEach(function(p,i){ loaded['a'+i]=loaded['v'+p.vi+'_'+p.sp.id]; });
+    if(st.closingImg && loaded.closing){ closingScenes=[{result:st.closingImg, label:''}]; loaded.a0=loaded.closing; }
     plan.push(function(pi,T){ var d=Object.assign({}, data, {scenes:closingScenes}); return _proposalDrawClosingPageEd(d, loaded, T, loaded.logo); });
     if(!window.jspdf){ alert('PDF 도구를 아직 불러오지 못했어요. 잠시 후 다시 눌러주세요.'); if(onDone) onDone(); return; }
     var T=plan.length, canvases=plan.map(function(fn,i){ return fn(i,T); });
@@ -31292,6 +31294,35 @@ function _consultBuildPdf(onDone){
     try{ _trackAction('consult_pdf'); }catch(e){}
     if(onDone) onDone();
   }
+}
+// 표지/마지막 페이지 사진 고르기: 이 상담의 시안·현장 사진 / 내 갤러리 / 내 PC
+function _consultPdfImgPick(which, anchor){
+  var st=_consultState();
+  var old=document.getElementById('consult-pdfimg-menu'); if(old) old.remove();
+  var m=document.createElement('div'); m.id='consult-pdfimg-menu';
+  var r=anchor.getBoundingClientRect();
+  m.style.cssText='position:fixed;z-index:100004;left:'+Math.max(8,Math.min(window.innerWidth-330, r.left))+'px;top:'+Math.max(8,Math.min(window.innerHeight-380, r.bottom+6))+'px;width:320px;background:var(--card,#141518);border:1px solid var(--bd2);border-radius:12px;padding:12px;box-shadow:0 14px 34px rgba(0,0,0,.55)';
+  function apply(src){ m.remove(); function set(u){ st[which]=u; _consultSave(); _consultBuildPdf(function(){ _consultRefresh(); }); }
+    if(/^data:/.test(src)) _downscaleForMemorySafety(src, set); else set(src); }
+  m.innerHTML='<div style="font-size:12.5px;font-weight:800;color:var(--t);margin-bottom:8px">'+(which==='coverImg'?'표지':'마지막 페이지')+'에 넣을 사진</div>';
+  // 이 상담의 이미지들
+  var srcs=[]; (st.variants||[]).forEach(function(v){ _consultSp(st).forEach(function(s){ var rr=v.spaces&&v.spaces[s.id]; if(rr&&rr.result&&srcs.indexOf(rr.result)<0) srcs.push(rr.result); }); });
+  _consultSp(st).forEach(function(s){ if(s.photo && srcs.indexOf(s.photo)<0) srcs.push(s.photo); });
+  if(srcs.length){
+    var g=document.createElement('div'); g.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:5px;max-height:170px;overflow-y:auto;margin-bottom:8px';
+    srcs.forEach(function(u){ var t=document.createElement('img'); t.src=u; t.style.cssText='width:100%;aspect-ratio:1;object-fit:cover;border-radius:5px;cursor:pointer;border:'+(st[which]===u?'2px solid var(--ac)':'1px solid var(--bd2)'); t.onclick=function(){ apply(u); }; g.appendChild(t); });
+    m.appendChild(g);
+  }
+  var row=document.createElement('div'); row.style.cssText='display:flex;gap:6px';
+  var b1=document.createElement('button'); b1.type='button'; b1.style.cssText='flex:1;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit'; b1.textContent='＋ 내 PC'; 
+  var fi=document.createElement('input'); fi.type='file'; fi.accept='image/*'; fi.style.display='none';
+  fi.onchange=function(){ var f=fi.files&&fi.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ apply(rd.result); }; rd.readAsDataURL(f); };
+  b1.onclick=function(){ fi.click(); };
+  var b2=document.createElement('button'); b2.type='button'; b2.style.cssText='flex:1;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-weight:700;font-size:12px;cursor:pointer;font-family:inherit'; b2.textContent='🖼 갤러리';
+  b2.onclick=function(){ m.remove(); _openGalleryPickerForAnchor(function(u){ apply(u); }); };
+  row.appendChild(b1); row.appendChild(b2); m.appendChild(row); m.appendChild(fi);
+  document.body.appendChild(m);
+  setTimeout(function(){ document.addEventListener('mousedown', function cl(ev){ if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('mousedown', cl); } }); }, 0);
 }
 function _consultDownloadPdf(){
   var st=_consultState();
@@ -31813,7 +31844,22 @@ function _consultRenderCanvas(ub){
     thw.appendChild(thr); pdfC.appendChild(thw);
     if(st.pdfPages){
       var strip=document.createElement('div'); strip.style.cssText='display:flex;gap:8px;overflow-x:auto;margin-top:12px;padding-bottom:6px';
-      st.pdfPages.forEach(function(u,i){ var im=document.createElement('img'); im.src=u; im.style.cssText='height:180px;border-radius:5px;border:1px solid var(--bd2);cursor:zoom-in;flex-shrink:0'; im.onclick=function(){ _proposalLightbox(st.pdfPages, i); }; strip.appendChild(im); });
+      st.pdfPages.forEach(function(u,i){
+        var cell=document.createElement('div'); cell.style.cssText='flex-shrink:0;display:flex;flex-direction:column;gap:5px;align-items:stretch';
+        var im=document.createElement('img'); im.src=u; im.style.cssText='height:180px;border-radius:5px;border:1px solid var(--bd2);cursor:zoom-in'; im.onclick=function(){ _proposalLightbox(st.pdfPages, i); }; cell.appendChild(im);
+        // 2026-10-09 요청: 표지·마지막 페이지 사진을 원하는 이미지로 바꾸기
+        var which = i===0 ? 'coverImg' : (i===st.pdfPages.length-1 ? 'closingImg' : null);
+        if(which){
+          var cb=document.createElement('button'); cb.type='button'; cb.className='cbtn';
+          cb.style.cssText='font-size:11px;padding:5px 6px;white-space:nowrap';
+          cb.textContent='🖼 '+(i===0?'표지':'마지막')+' 사진 바꾸기';
+          cb.onclick=function(e){ e.stopPropagation(); _consultPdfImgPick(which, cb); };
+          cell.appendChild(cb);
+          if(st[which]){ var rb=document.createElement('button'); rb.type='button'; rb.className='cbtn'; rb.style.cssText='font-size:10.5px;padding:3px 6px'; rb.textContent='↺ 원래대로';
+            rb.onclick=function(e){ e.stopPropagation(); st[which]=null; _consultSave(); _consultBuildPdf(function(){ _consultRefresh(); }); }; cell.appendChild(rb); }
+        }
+        strip.appendChild(cell);
+      });
       pdfC.appendChild(strip);
     }
     wrap.appendChild(pdfC);
@@ -37073,7 +37119,7 @@ function _mkCropEditComposite(area, instrText, cb, sourceUrl, refImgForArea){
       try{ cropDataUrl = cropCv.toDataURL('image/jpeg', 0.98); }
       catch(e){ cb(null, '이미지를 자르는 데 실패했습니다(CORS)'); return; }
 
-      var cropPrompt = instrText + '. Photorealistic architectural photography. This is a close-up crop of a larger interior photo — edit it naturally as a complete standalone photo; keep everything not explicitly mentioned in the instruction exactly as it is.';
+      var cropPrompt = instrText + (/(remove|delet|eras|clear away|삭제|지워|지우|없애|제거)/i.test(instrText) ? ' ⚠️ REMOVAL: remove the object(s) COMPLETELY and cleanly — no blur, no smudge, no ghost outline, no leftover shadow or reflection of the removed object. Rebuild what is behind it crisply with the same texture, pattern lines, grout, edges and sharpness as the surrounding surfaces (wall, floor, ceiling, furniture), as if the object had never been there.' : '') + '. Photorealistic architectural photography. This is a close-up crop of a larger interior photo — edit it naturally as a complete standalone photo; keep everything not explicitly mentioned in the instruction exactly as it is.';
       var _origRefs0 = getTab(G.wf).refs;
       getTab(G.wf).refs = refImgForArea ? [refImgForArea] : [];
       var task = {id:Date.now(), img:cropDataUrl, wf:G.wf, prompt:cropPrompt, selK:null, eng:'nano2', resolution: getTab(G.wf).resolution||'1K', noRefRoles:true};
@@ -37314,7 +37360,19 @@ function _getBrushColorBBox(cv, hexColor){
   }catch(e){ console.warn('[브러시 색상 범위 스캔 실패]',e); return null; }
 }
 
+// 2026-10-09 버그("선택영역 수정 버튼이 한두 템포 느려서 두 번 눌렀다"): 누르는 즉시 버튼을 '⏳ 준비 중…'으로 바꾸고 잠근 뒤,
+// 화면이 먼저 그려지게 한 템포 쉬고 실제 작업(마스크 계산 등 무거운 일)을 시작함 → 눌린 게 바로 보이고 두 번 눌러도 한 번만 실행
 function _mkMaskExecute(){
+  if(G._mkMaskClickLock) return;
+  G._mkMaskClickLock=true;
+  var _btns=Array.prototype.filter.call(document.querySelectorAll('button.actbtn'), function(b){ return /선택 영역 수정/.test(b.textContent); });
+  var _orig=_btns.map(function(b){ return b.innerHTML; });
+  _btns.forEach(function(b){ b.disabled=true; b.style.opacity='.7'; b.innerHTML='⏳ 준비 중…'; });
+  function _unlock(){ G._mkMaskClickLock=false; _btns.forEach(function(b,i){ if(document.body.contains(b)){ b.disabled=false; b.style.opacity=''; b.innerHTML=_orig[i]; } }); }
+  setTimeout(_unlock, 5000);
+  setTimeout(function(){ try{ _mkMaskExecuteBody(); }catch(e){ console.error(e); _unlock(); } }, 40);
+}
+function _mkMaskExecuteBody(){
   // ⚠️ 버그 수정(치명적, "버벅거려서 멈춘줄 알고 눌렀는데 똑같은 게 3번 렌더링됐다"): 이 함수는
   // 두 군데서 직접 호출됨 — 사이드바의 "선택 영역 수정" 버튼(_doActbtn을 거치지 않고 바로 호출)과,
   // 화면 맨 아래 공통 실행 버튼(_doActbtn 안에서 "AI편집 + 마스크 지정됨"이면 _actbtnBusy=true를
@@ -39120,7 +39178,9 @@ function _compositeMaskedResult(origUrl, resultUrl, maskDataUrl, cb){
         // 생긴 중간 밝기 값도 자연스럽게 중간 투명도로 이어져서 경계도 부드럽게 유지됨.
         var _mImgData = mctx.getImageData(0,0,W,H);
         var _mPix = _mImgData.data;
-        for(var _mpi=0; _mpi<_mPix.length; _mpi+=4){ _mPix[_mpi+3] = _mPix[_mpi]; }
+        // 2026-10-09 버그("브러시로 삭제하면 깔끔하게 안 지워지고 블러처럼 남는다"): 부드러운 경계(페더) 때문에 칠한 안쪽 가장자리까지
+        // 원본이 반쯤 비쳐 지운 물체가 흐릿하게 남았음 → 절반 이상 칠해진 곳은 100% AI 결과, 바깥쪽 얇은 띠만 부드럽게
+        for(var _mpi=0; _mpi<_mPix.length; _mpi+=4){ _mPix[_mpi+3] = Math.min(255, _mPix[_mpi]*2.2); }
         mctx.putImageData(_mImgData,0,0);
         rctx.globalCompositeOperation='destination-in';
         rctx.drawImage(maskCv,0,0);
@@ -46445,6 +46505,7 @@ function procImg(onDone, onErr) {
       // 꺼져 있었음 — 이제 실제로 확보된 흑백 마스크(hasMask2/editMask2)만으로 판단함.
       var isMaskedNB2 = !!(hasMask2 && editMask2);
       var nb2ap = basePrompt + ' Only modify as described. Keep all other areas exactly unchanged. Preserve the exact same camera angle, framing and composition as the original — do not zoom, crop, or reposition.';
+      nb2ap += (/(remove|delet|eras|clear away|삭제|지워|지우|없애|제거)/i.test(basePrompt) ? ' ⚠️ REMOVAL: remove the object(s) COMPLETELY and cleanly — no blur, no smudge, no ghost outline, no leftover shadow or reflection of the removed object. Rebuild what is behind it crisply with the same texture, pattern lines, grout, edges and sharpness as the surrounding surfaces (wall, floor, ceiling, furniture), as if the object had never been there.' : '');
       if(isMaskedNB2){
         nb2ap += ' The additional reference image is a black-and-white mask of this exact same photo: WHITE areas mark exactly which parts to change, BLACK areas must stay completely untouched. Apply the described change ONLY within the white-marked areas, and never render the black/white mask shapes themselves in the final output (it is guidance only, not part of the design). \u26a0\u26a0\u26a0 CRITICAL — do NOT apply this change to every object of the same type/category in the photo, only to the specific one inside the white-marked area: if the instruction mentions an object type (e.g. "remove the AC unit", "change the chair") and there happen to be other objects of that exact same type elsewhere in the photo that are outside the white area, those other ones must be left completely untouched, exactly as in the original photo — only the instance actually inside the white area should be affected. Marking one object of a type does not mean "all objects of that type"; it means "this specific one, right here." \u26a0\u26a0\u26a0 CRITICAL — IF THE INSTRUCTION GIVES A SPECIFIC NUMERIC SCALE/SIZE MULTIPLIER FOR A PATTERN OR TEXTURE, FOLLOW IT LITERALLY AND PRECISELY: when the instruction specifies a repeat-pattern or texture scale using a number (e.g. wallpaper/fabric/tile pattern "2\uc744\uc740, 2\ubc30\ub85c, \ub450 \ubc30 \ud06c\uac8c" meaning make the individual repeating motif twice as large, or "\uc808\ubc18\uc73c\ub85c, 0.5\ubc30" meaning half the current size), treat that as an exact, literal scale factor on the repeating unit\'s physical size — do not just make it "somewhat bigger/smaller" or apply a vague, timid adjustment. A "2\ubc30" request should produce a pattern whose individual repeat unit is clearly, unambiguously about double the linear size of the original (twice as tall and twice as wide), not a subtle 10-20% increase. A "\uc808\ubc18" request should produce a repeat unit clearly about half the original linear size, not a slight reduction. Keep the pattern\'s own design/motif/color identical — only its physical repeat scale changes according to the given multiplier. If no specific number is given, use your best judgment for a moderate, clearly noticeable change.';
       }
