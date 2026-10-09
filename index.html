@@ -13538,6 +13538,16 @@ function makePi(q, g){
       }
     });
     recWrap.appendChild(recGrid);
+    // 2026-10-09 요청: 자주 찾는 프리셋도 열고 닫기(상태 기억)
+    (function(){
+      var key='clover_qa_closed_'+(list===PS_EDIT?'edit':'other')+'_rec', closed=false; try{ closed=localStorage.getItem(key)==='1'; }catch(e){}
+      var tg=document.createElement('span'); tg.style.cssText='margin-left:auto;font-size:11px;color:var(--m2);font-weight:700'; recTitle.appendChild(tg);
+      recTitle.style.cursor='pointer'; recTitle.style.userSelect='none'; recTitle.title='눌러서 열기/닫기';
+      var gd=recGrid.style.display||'';
+      function ap(){ recGrid.style.display=closed?'none':gd; tg.textContent=closed?'▸ 열기':'▾ 접기'; }
+      recTitle.onclick=function(){ closed=!closed; try{ localStorage.setItem(key, closed?'1':'0'); }catch(e){} ap(); };
+      ap();
+    })();
     w.appendChild(recWrap);
   }
   var accToggleWrap=dv('');accToggleWrap.style.cssText='margin-bottom:10px';
@@ -29132,6 +29142,10 @@ function _consultState(){
     Object.keys(v.spaces||{}).forEach(function(k){ var s=v.spaces[k]; if(s && s.status==='run'){ s.status=s.result?'done':'err'; if(!s.result) s.err='새로고침으로 중단됨 — 다시 뽑기를 눌러주세요'; } });
     if(v.estStatus==='run') v.estStatus=v.estimate?'done':'err';
     if(v.matStatus==='run') v.matStatus=(v.materials&&v.materials.length)?'done':'err';
+    // 2026-10-09 버그: 새로고침 때 '읽는 중' 플래그(_rrBusy)가 저장된 채 남아 마감재 다시 읽기가 영원히 안 돌던 문제
+    v._rrBusy=false; v._rrAgain=false; v.texBusy=false; v._rrFail=0;
+    if(v.schedStatus==='run') v.schedStatus='done';
+    if(!(v.sched && v.sched.fromRender)) v._autoRR=false;
   });
   G_CONSULT.pdfPages=null; // 페이지 이미지는 저장하지 않음(용량) — 필요하면 다시 만들기
   (G_CONSULT.refTags||[]).forEach(function(t,i){ if(t==='…') G_CONSULT.refTags[i]=null; }); // 새로고침으로 끊긴 분류 → 다시
@@ -29144,6 +29158,7 @@ function _consultSave(){
     var st=G_CONSULT; if(!st) return;
     st.updatedAt=Date.now();
     var copy={}; Object.keys(st).forEach(function(k){ if(k!=='pdfPages' && k!=='_pdf' && k!=='_refTok') copy[k]=st[k]; });
+    if(copy.variants) copy.variants=copy.variants.map(function(v){ var o={}; Object.keys(v).forEach(function(k){ if(k!=='_rrBusy' && k!=='_rrAgain' && k!=='_rrTex' && k!=='texBusy' && k!=='_autoRR' && k!=='_rrFail') o[k]=v[k]; }); return o; });
     try{ localStorage.setItem(CONSULT_LS_KEY, JSON.stringify(copy)); }
     catch(e){ // 용량 초과 → 마감재 샘플 이미지를 빼고 다시 시도
       try{ var c2=JSON.parse(JSON.stringify(copy)); (c2.variants||[]).forEach(function(v){ (v.materials||[]).forEach(function(m){ if(m.img && m.img.length>40000) delete m.img; }); }); localStorage.setItem(CONSULT_LS_KEY, JSON.stringify(c2)); }catch(e2){}
@@ -29933,6 +29948,7 @@ function _consultRereadSched(st, v, makeTex){
   v._rrBusy=true; v._autoRR=true;
   _consultEnsureSched(st, v, function(){
     v._rrBusy=false;
+    if(!(v.sched && v.sched.fromRender)){ v._rrFail=(v._rrFail||0)+1; if(v._rrFail<2) setTimeout(function(){ v._autoRR=false; _consultRefresh(); }, 4000); }
     if(v._rrAgain){ var t2=v._rrTex; v._rrAgain=false; v._rrTex=false; setTimeout(function(){ _consultRereadSched(st, v, t2||makeTex); }, 50); return; }
     // 재질 사진이 없는(=새로 읽혀서 이름이 바뀐) 항목이 있으면 자동으로 재질 사진까지
     if(makeTex && (st.makeTex || v.autoTex) && v.sched && v.sched.fromRender && !v.texBusy){
@@ -31700,13 +31716,29 @@ function _consultRenderCanvas(ub){
     // 🎨 제안서 디자인(제안서 제작 탭의 테마 프리셋 그대로) — 누르면 바로 그 디자인으로 PDF 다시 만들기
     var curTheme=st.pdfTheme||((typeof G_PROPOSAL!=='undefined' && G_PROPOSAL.opts && G_PROPOSAL.opts.styleKey)||'gold');
     var thw=document.createElement('div'); thw.style.cssText='margin-top:12px';
-    thw.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--t2);margin-bottom:6px">🎨 제안서 디자인 <span style="font-weight:500;color:var(--m2)">— 누르면 바로 그 디자인으로 바뀌어요</span></div>';
-    var thr=document.createElement('div'); thr.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+    thw.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--t2);margin-bottom:6px">🎨 제안서 디자인 <span style="font-weight:500;color:var(--m2)">— 표지 미리보기를 보고 고르세요. 누르면 그 디자인으로 바뀌어요</span></div>';
+    var thr=document.createElement('div'); thr.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px';
+    // 표지 미리보기에 쓸 실제 사진(첫 시안의 첫 결과 → 없으면 현장 사진)
+    var _cvImg=null; (st.variants||[]).some(function(v){ return _consultSp(st).some(function(sp){ var r=v.spaces&&v.spaces[sp.id]; if(r&&r.result){ _cvImg=r.result; return true; } }); });
+    if(!_cvImg) _consultSp(st).some(function(sp){ if(sp.photo){ _cvImg=sp.photo; return true; } });
+    var _cvTitle=_cEsc((st.client||'고객')+' 님 인테리어 제안');
     PROPOSAL_STYLES.forEach(function(th){
       var b=document.createElement('button'); b.type='button'; var on=th.key===curTheme;
       b.title=th.label;
-      b.style.cssText='display:flex;align-items:center;gap:6px;padding:5px 9px 5px 5px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:11.5px;font-weight:700;border:1.5px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c1,#111)')+';color:'+(on?'var(--ac)':'var(--t2)');
-      b.innerHTML='<span style="width:26px;height:20px;border-radius:4px;background:'+th.bg+';box-shadow:inset 0 0 0 1px rgba(128,128,128,.35);position:relative;overflow:hidden;flex-shrink:0"><span style="position:absolute;left:0;bottom:0;width:100%;height:7px;background:'+th.accent+'"></span><span style="position:absolute;left:4px;top:4px;width:12px;height:3px;background:'+th.ink+'"></span></span>'+_cEsc(th.label)+(th.popular?' <span style="font-size:9px;color:#f5b544">★</span>':'');
+      b.style.cssText='display:block;padding:0;border-radius:9px;overflow:hidden;cursor:pointer;font-family:inherit;text-align:left;border:'+(on?'2.5px solid var(--ac)':'1px solid var(--bd2)')+';background:var(--c1,#111);box-shadow:'+(on?'0 0 0 3px rgba(0,229,204,.2)':'none');
+      var _ov=(th.coverOverlay||['0,0,0'])[0];
+      var _deco = th.deco==='frame' ? '<span style="position:absolute;inset:5px;border:2px solid '+th.accent2+'"></span>' :
+                  th.deco==='neon' ? '<span style="position:absolute;inset:5px;border:1px solid '+th.accent+';box-shadow:0 0 6px '+th.accent+'"></span>' :
+                  th.deco==='geo' ? '<span style="position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;background:'+th.accent2+';opacity:.85"></span>' :
+                  th.deco==='blob' ? '<span style="position:absolute;top:-14px;right:-16px;width:50px;height:40px;border-radius:60% 40% 55% 45%/50% 55% 45% 50%;background:'+th.accent2+';opacity:.55"></span>' : '';
+      // 표지(사진+오버레이+제목) + 아래 내용 페이지 띠(배경색·글자색)
+      b.innerHTML='<span style="display:block;position:relative;aspect-ratio:16/10;background:'+(_cvImg?'#222 url(\''+_cvImg.replace(/'/g,"%27")+'\') center/cover':th.bg)+'">'+
+          '<span style="position:absolute;inset:0;background:linear-gradient(transparent 25%,rgba('+_ov+',.78))"></span>'+_deco+
+          '<span style="position:absolute;left:8px;right:8px;bottom:7px"><span style="display:block;width:22px;height:3px;background:'+th.accent+';margin-bottom:4px"></span>'+
+          '<span style="display:block;font-size:10px;font-weight:900;line-height:1.25;color:'+th.coverText+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_cvTitle+'</span></span></span>'+
+        '<span style="display:flex;align-items:center;gap:5px;padding:5px 7px;background:'+th.bg+';border-top:1px solid '+th.divider+'">'+
+          '<span style="flex:1;font-size:10.5px;font-weight:800;color:'+th.ink+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_cEsc(th.label)+(th.popular?' ★':'')+'</span>'+
+          '<span style="width:9px;height:9px;border-radius:50%;background:'+th.accent+'"></span><span style="width:9px;height:9px;border-radius:50%;background:'+th.accent2+'"></span></span>';
       b.onclick=function(){ if(st.pdfTheme===th.key && st.pdfPages) return; st.pdfTheme=th.key; _consultSave(); if(st.pdfPages && !busy){ b.innerHTML='⏳ 바꾸는 중…'; setTimeout(function(){ _consultBuildPdf(function(){ _consultRefresh(); }); }, 30); } else _consultRefresh(); };
       thr.appendChild(b);
     });
@@ -31780,7 +31812,7 @@ function _consultRenderCanvas(ub){
       var mats=_consultBoardMats(st, v), hasSched=!!(v.sched&&v.sched.items);
       var anyImg=mats.some(function(m){return m.img;});
       mb.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:13px;font-weight:800;color:var(--t)">🧱 마감재 보드</span><span style="font-size:11px;color:var(--m2)">'+(hasSched?((st.refs||[]).length?'참고사진이 있는 공간은 사진 그대로 · 공간마다 다르면 ':'')+'<b style="color:#f5b544">자재를 누르면 다른 자재로 바꾸고(통일) 해당 공간 이미지도 자동으로 다시 렌더링</b>':'')+'</span>'+
-        (v.schedStatus==='run'?'<span style="font-size:11px;color:var(--ac)">마감재 읽는 중…</span>':(hasSched?(v.sched.fromRender?'<span style="font-size:11px;color:var(--ac)">✓ 렌더링 이미지 기준</span>':(v.sched.def?'<span style="font-size:11px;color:#f5b544">⚠ 기본값(분석 전·실패)</span>':'<span style="font-size:11px;color:var(--m2)">렌더링이 끝나면 실제 이미지 기준으로 자동 정리돼요</span>')):''))+(v.texBusy?'<span style="font-size:11px;color:var(--ac)">재질 사진 만드는 중…</span>':'')+
+        (v.schedStatus==='run'?'<span style="font-size:11px;color:var(--ac)">마감재 읽는 중…</span>':(hasSched?(v.sched.fromRender?'<span style="font-size:11px;color:var(--ac)">✓ 렌더링 이미지 기준</span>':(v.sched.def||v.schedReadErr?'<span style="font-size:11px;color:#f5b544">⚠ 이미지에서 마감재를 아직 못 읽었어요</span> <button type="button" class="cbtn crr" style="font-size:11px;padding:3px 9px">🔄 이미지에서 다시 읽기 (무료)</button>':'<span style="font-size:11px;color:var(--m2)">렌더링이 끝나면 실제 이미지 기준으로 자동 정리돼요</span>')):''))+(v.texBusy?'<span style="font-size:11px;color:var(--ac)">재질 사진 만드는 중…</span>':'')+
 
         (hasSched && !v.texBusy && mats.some(function(m){return m.id && m.id!=='light' && !m.img;})?'<button type="button" class="cbtn ctex">🎨 재질 사진으로 '+(anyImg?'다시 ':'')+'만들기 ('+PROPOSAL_TEX_COST+'cr)</button>':'')+'</div>'+
         (mats.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px">'+mats.map(function(m){ return '<div class="cmat" data-id="'+_cEsc(m.id||'')+'" style="position:relative;cursor:'+(m.id?'pointer':'default')+'">'+(m.img?'<img src="'+_cEsc(m.img)+'" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block">':'<div style="aspect-ratio:1;border-radius:8px;background:'+_cEsc(m.hex||'var(--c1,#111)')+';box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)"></div>')+
@@ -31791,6 +31823,7 @@ function _consultRenderCanvas(ub){
       Array.prototype.forEach.call(mb.querySelectorAll('.cmat'), function(el, mi){ var id=el.getAttribute('data-id'); if(id){ el.title='눌러서 자재 바꾸기'; el.onclick=function(){ _consultSwapMaterial(vi, id); }; }
         var zb=el.querySelector('.cmz'); if(zb) zb.onclick=function(e){ e.stopPropagation(); _consultMatZoom(mats, mi); }; });
       var _ct=mb.querySelector('.ctex'); if(_ct) _ct.onclick=function(){ _consultTexManual(vi); };
+      var _crr=mb.querySelector('.crr'); if(_crr) _crr.onclick=function(){ v._rrBusy=false; v._rrFail=0; _consultRereadSched(st, v, !v.imported || !!v.autoTex); };
       var _cr=mb.querySelector('.crr'); if(_cr) _cr.onclick=function(){ _consultRereadSched(st, v, false); };
       vc.appendChild(mb);
       // 견적 상세
