@@ -36208,7 +36208,7 @@ function _lightDrawPreview(ctx, img, lm, opts, W, H, showMarks, showGlow){
   ctx.drawImage(img,0,0,W,H);
   var S=Math.max(W,H);
   var col={'2700':'255,170,90','3000':'255,190,120','4000':'255,236,205'}[opts.temp]||'255,190,120';
-  var pw={soft:0.6,mid:0.85,strong:1.1}[opts.power]||0.85;
+  var pw={soft:0.3,mid:0.43,strong:0.55}[opts.power]||0.43;
   if(showGlow){
     if(opts.mood==='dark'){ ctx.fillStyle='rgba(8,6,4,0.55)'; ctx.fillRect(0,0,W,H); }
     ctx.save(); ctx.globalCompositeOperation='lighter'; ctx.lineCap='round'; ctx.lineJoin='round';
@@ -36519,7 +36519,10 @@ function _lightRun(){
   if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<cost){ alert('크레딧이 부족합니다. 필요: '+cost+'cr, 현재: '+G.cr+'cr'); openMd('credits'); return; }
   var baseImg=tab.inputImg;
   var tempTxt={'2700':'very warm 2700K','3000':'warm 3000K','4000':'neutral-white 4000K'}[o.temp]||'warm 3000K';
-  var powTxt={soft:'soft and subtle',mid:'clearly visible, balanced',strong:'strong and bright'}[o.power]||'clearly visible, balanced';
+  // 2026-10-09 요청: 세 단계 모두 지금보다 50% 약하게
+  var powTxt={soft:'VERY faint and subtle — a barely-there, low-intensity glow at about one quarter of a normal accent light (dim, delicate, never bright; surfaces right next to the light only slightly lit)',
+              mid:'gentle and moderate — about half the brightness of a normal accent light; soft glow and short, soft light falloff, not bright',
+              strong:'clearly visible but restrained — about half of a strong/bright setting; noticeable glow without glare, no blown-out highlights'}[o.power]||'gentle and moderate — about half the brightness of a normal accent light; soft glow and short, soft light falloff, not bright';
   // 그린 위치를 글로도 정확히 알려줌(가로·세로 %) — "그리지 않은 곳에 간접조명이 나온다" 방지
   function _pc(v){ return Math.round(v*100)+'%'; }
   function _dirTxt(a,b){ var dx=Math.abs(b.x-a.x), dy=Math.abs(b.y-a.y); return dy<dx*0.15?'horizontal':(dx<dy*0.15?'vertical':'diagonal'); }
@@ -37132,8 +37135,27 @@ function _mkCropEditComposite(area, instrText, cb, sourceUrl, refImgForArea){
           outCv.width = W; outCv.height = H;
           var octx = outCv.getContext('2d');
           octx.drawImage(freshImg, 0, 0, W, H);
-          octx.drawImage(resImg, cropX, cropY, cropW, cropH);
-          try{ cb(outCv.toDataURL('image/jpeg', 0.97)); }
+          // 2026-10-09 요청("선택한 사물만 딱 잘려서 수정돼야 한다 + 반복 편집하면 화질이 계속 나빠진다"):
+          // 예전엔 주변 여유까지 포함한 사각형 전체를 AI 결과로 덮어서, 선택 안 한 주변 사물도 바뀌고 매번 흐려졌음.
+          // 이제 선택한 모양에 살짝 여유(자연스럽게 이어지도록)만 준 부분만 AI 결과로 덮고, 나머지는 원본 픽셀 그대로.
+          try{
+            var _isRem = /(remove|delet|eras|clear away|삭제|지워|지우|없애|제거)/i.test(instrText);
+            var _dil = Math.max(6, Math.round(Math.min(bw,bh)*(_isRem?0.12:0.06))), _fe = Math.max(4, Math.round(Math.min(bw,bh)*0.04));
+            var mk = document.createElement('canvas'); mk.width=cropW; mk.height=cropH; var mx=mk.getContext('2d');
+            mx.fillStyle='#fff'; mx.strokeStyle='#fff'; mx.lineJoin='round'; mx.lineCap='round'; mx.lineWidth=_dil*2;
+            mx.beginPath(); area.points.forEach(function(pt,i){ var px=pt[0]-cropX, py=pt[1]-cropY; if(i) mx.lineTo(px,py); else mx.moveTo(px,py); }); mx.closePath(); mx.fill(); mx.stroke();
+            var mb = document.createElement('canvas'); mb.width=cropW; mb.height=cropH; var mbx=mb.getContext('2d');
+            mbx.filter='blur('+_fe+'px)'; mbx.drawImage(mk,0,0); mbx.filter='none';
+            var md=mbx.getImageData(0,0,cropW,cropH), dd=md.data;
+            for(var q=0;q<dd.length;q+=4){ dd[q+3]=Math.min(255, dd[q+3]*2); dd[q]=dd[q+1]=dd[q+2]=255; }
+            mbx.putImageData(md,0,0);
+            var rc = document.createElement('canvas'); rc.width=cropW; rc.height=cropH; var rcx=rc.getContext('2d');
+            rcx.imageSmoothingEnabled=true; rcx.imageSmoothingQuality='high';
+            rcx.drawImage(resImg, 0, 0, cropW, cropH);
+            rcx.globalCompositeOperation='destination-in'; rcx.drawImage(mb,0,0);
+            octx.drawImage(rc, cropX, cropY);
+          }catch(_me){ console.warn('[선택 영역 합성] 모양 마스크 실패 → 사각형으로 합성', _me); octx.drawImage(resImg, cropX, cropY, cropW, cropH); }
+          try{ cb(outCv.toDataURL('image/jpeg', 0.985)); }
           catch(e){ console.warn('[crop 합성 실패, 잘린 사진만 결과로 사용]', e); cb(resultUrl); }
         };
         resImg.onerror = function(){ cb(resultUrl); };
@@ -39191,7 +39213,7 @@ function _compositeMaskedResult(origUrl, resultUrl, maskDataUrl, cb){
         var octx=outCv.getContext('2d');
         octx.drawImage(origImg,0,0,W,H);
         octx.drawImage(resCv,0,0);
-        cb(outCv.toDataURL('image/jpeg',0.95));
+        cb(outCv.toDataURL('image/jpeg',0.985)); // 반복 편집 시 화질 저하 줄이기(0.95 → 0.985)
       }catch(e){ console.warn('[마스크 합성] 캔버스 합성 실패(마스크 강제 적용 실패), AI 원본 결과 그대로 사용:', e); cb(null, true); }
     }
     _loadImageForComposite(origUrl, function(img){ origImg=img; ready(); });
