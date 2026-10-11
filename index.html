@@ -41408,6 +41408,17 @@ function addHistEl(item, scroll, targetHs, atBottom){
       sebar.insertBefore(sadj, sebar.firstChild);
     }
 
+    // 2026-10-11: ✨ 빛번짐 — 이미 렌더링된 이미지에도 매입등·할로겐 빛번짐을 무료로 넣어 새 결과로 저장
+    if(item.result && !item.loading && !item.preview && item.wf!=='video' && item.wf!=='shorts' && item.wf!=='world3d' && !/\.(mp4|webm|mov)(\?|$)/i.test(item.result)){
+      var sbl=mk('button','se-btn');sbl.type='button';sbl.innerHTML='✨ 빛번짐';sbl.title='매입등·할로겐 빛이 자연스럽게 번지게 (무료 · 새 이미지로 저장)';
+      sbl.style.cssText='background:rgba(250,204,21,.1);border-color:rgba(250,204,21,.4);color:#fde047;padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
+      (function(theItem, btn){
+        btn.addEventListener('click',function(e){ e.stopPropagation(); _lensBloomMenu(theItem, btn); },false);
+      })(item, sbl);
+      sbl.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      sebar.appendChild(sbl);
+    }
+
     // Tags — 영상이면 엔진명 + 해상도 맨 앞에 표시
     // ⚠️ 버그 수정(치명적, "이미지 미리보기인데 우측 상단에 wan22 720p HD 배지가 왜 뜨냐"):
     // 아까 고친 isVideo 판단과 같은 원인이 여기도 있었음 — item.wf==='video'이기만 하면
@@ -45683,6 +45694,40 @@ function _lensBloom(src, lv, cb){
     };
     im.src=src;
   }catch(e){ fin(null); }
+}
+function _lensBloomMenu(item, anchor){
+  var old=document.getElementById('lb-menu'); if(old){ old.remove(); return; }
+  var m=document.createElement('div'); m.id='lb-menu';
+  var r=anchor.getBoundingClientRect();
+  m.style.cssText='position:fixed;z-index:100040;left:'+Math.max(8,Math.min(window.innerWidth-190,r.left))+'px;top:'+Math.max(8,r.top-150)+'px;width:180px;background:var(--card);border:1px solid var(--bd2);border-radius:10px;padding:8px;box-shadow:0 10px 30px rgba(0,0,0,.45);font-size:12px;color:var(--t)';
+  m.innerHTML='<div style="font-weight:800;margin-bottom:6px">✨ 빛번짐 세기</div><div style="font-size:10px;color:var(--m2);margin-bottom:6px;line-height:1.45">무료 · 원본은 그대로 두고 새 이미지로 저장돼요</div>';
+  [['soft','은은하게'],['mid','보통'],['strong','강하게']].forEach(function(o){
+    var b=document.createElement('button'); b.type='button'; b.textContent=o[1];
+    b.style.cssText='display:block;width:100%;margin:3px 0;padding:7px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer;font-family:inherit;font-size:12px;font-weight:700';
+    b.onclick=function(ev){ ev.stopPropagation(); m.remove(); _lensBloomApplyToItem(item, o[0], anchor); };
+    m.appendChild(b);
+  });
+  document.body.appendChild(m);
+  setTimeout(function(){ document.addEventListener('click', function cl(ev){ if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('click', cl); } }); }, 0);
+}
+function _lensBloomApplyToItem(item, lv, btn){
+  var label=btn?btn.innerHTML:''; if(btn){ btn.disabled=true; btn.innerHTML='✨ 처리 중…'; }
+  function restore(){ if(btn){ btn.disabled=false; btn.innerHTML=label; } }
+  _lensBloom(item.result, lv, function(out){
+    restore();
+    if(!out){ alert('빛번짐을 넣을 작은 광원(매입등·할로겐)을 찾지 못했거나, 이미지를 불러오지 못했어요.'); return; }
+    try{
+      var wf=item.wf||G.wf, id=Date.now();
+      var lvKo={soft:'은은하게',mid:'보통',strong:'강하게'}[lv]||'';
+      var ni={id:id, orig:item.result, result:out, tags:['✨ 빛번짐 '+lvKo].concat((item.tags||[]).slice(0,2)), ai:item.ai||'', preview:false, cx:50, fav:false, wf:wf, savedSelK:item.savedSelK};
+      if(!G.HIST[wf]) G.HIST[wf]=[];
+      G.HIST[wf].unshift(ni);
+      if(G.wf===wf) document.querySelectorAll('.hist-s').forEach(function(hs){ addHistEl(ni,true,hs); });
+      saveHistToStorage();
+      if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery(wf, id, out, /^https?:/.test(item.result)?item.result:null, '빛번짐', '', null, '빛번짐 '+lvKo);
+      if(G.wf!==wf) alert('빛번짐 이미지를 갤러리에 저장했어요.');
+    }catch(e){ console.warn('[빛번짐] 저장 실패', e); }
+  });
 }
 function mkLensBloom(p){
   var v=_lsGetBloom();
