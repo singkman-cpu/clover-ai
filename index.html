@@ -48189,7 +48189,7 @@ function _admMemberDetail(uid){
     _supa.from('profiles').select('*').eq('id',uid).maybeSingle().then(function(r){ out.p=r.data; out.pErr=r.error; }),
     _supa.from('analytics_events').select('event_type,created_at').eq('user_id',uid).gte('created_at',since.toISOString()).order('created_at',{ascending:false}).limit(2000).then(function(r){ out.ev=r.data||[]; out.evErr=r.error; }),
     _supa.from('credit_logs').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(300).then(function(r){ out.cl=r.data||[]; out.clErr=r.error; }),
-    _supa.from('gallery').select('wf,created_at,public_url').eq('user_id',uid).order('created_at',{ascending:false}).limit(500).then(function(r){ out.g=r.data||[]; out.gErr=r.error; })
+    _supa.from('gallery').select('wf,created_at,public_url,orig_url,style_key,engine').eq('user_id',uid).order('created_at',{ascending:false}).limit(500).then(function(r){ out.g=r.data||[]; out.gErr=r.error; })
   ];
   Promise.all(jobs.map(function(j){ return Promise.resolve(j).catch(function(){}); })).then(function(){
     var el=gE('adm-member-body'); if(!el) return;
@@ -48236,11 +48236,25 @@ function _admMemberDetail(uid){
     h+= actKeys.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+actKeys.map(function(k){
         return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px">'+_admEsc(_ACT_LABEL[k]||k)+' <b style="color:var(--ac)">'+acts[k]+'회</b> <span style="color:var(--m2);font-size:10px">· 마지막 '+_admKstDT(actLast[k]).slice(5,16)+'</span></span>';
       }).join('')+'</div>' : '<div style="margin-bottom:12px;color:var(--m2)">아직 기록 없음 (쇼츠 완성·제안서 PDF·포토샵 저장/다운로드를 하면 기록돼요)</div>';
-    // 최근 결과물 썸네일
-    var thumbs=(out.g||[]).filter(function(g){return g.public_url && !/\.(mp4|webm|mov)(\?|$)/i.test(g.public_url);}).slice(0,12);
+    // 2026-10-11: 주로 어떤 작업(프리셋·공간)을 했는지 + 최근 결과물을 원본과 나란히
+    var _pkName={}; try{ [typeof PS_EDIT!=='undefined'?PS_EDIT:[], typeof PS_RENDER!=='undefined'?PS_RENDER:[], typeof PS_SPACE!=='undefined'?PS_SPACE:[], typeof PS_VIDEO!=='undefined'?PS_VIDEO:[]].forEach(function(arr){ (Array.isArray(arr)?arr:[]).forEach(function(p){ if(p&&p.k&&p.l&&!_pkName[p.k]) _pkName[p.k]=p.l; }); }); }catch(_e){}
+    function _skLabel(k){ return _pkName[k]||k; }
+    (out.g||[]).forEach(function(g){ if(g.style_key) g.style_key=_skLabel(String(g.style_key).trim()); });
+    var skCnt={}; (out.g||[]).forEach(function(g){ var k=(g.style_key||'').trim(); if(k) skCnt[k]=(skCnt[k]||0)+1; });
+    var skKeys=Object.keys(skCnt).sort(function(a,b){return skCnt[b]-skCnt[a];}).slice(0,15);
+    if(skKeys.length){
+      h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🎯 주로 한 작업 (프리셋·공간 이름 기준)</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+
+        skKeys.map(function(k){ return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px">'+_admEsc(k)+' <b style="color:var(--ac)">'+skCnt[k]+'</b></span>'; }).join('')+'</div>';
+    }
+    var thumbs=(out.g||[]).filter(function(g){return g.public_url && !/\.(mp4|webm|mov)(\?|$)/i.test(g.public_url);}).slice(0,24);
     if(thumbs.length){
-      h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🖼 최근 만든 이미지</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px">'+
-        thumbs.map(function(g){ return '<a href="'+_admEsc(g.public_url)+'" target="_blank" rel="noopener" title="'+_admEsc((_ADM_WF_LABEL[g.wf]||g.wf||'')+' · '+_admKstDT(g.created_at))+'"><img src="'+_admEsc(g.public_url)+'" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--bd2)"></a>'; }).join('')+'</div>';
+      function _okImg(u){ return u && /^https?:/i.test(u) && !/\.(mp4|webm|mov)(\?|$)/i.test(u); }
+      h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🖼 최근 만든 이미지 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(왼쪽 원본 → 오른쪽 결과 · 누르면 크게)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:12px">'+
+        thumbs.map(function(g){
+          var o=_okImg(g.orig_url)?g.orig_url:'';
+          var cell=function(u,lab){ return u ? '<a href="'+_admEsc(u)+'" target="_blank" rel="noopener" style="position:relative;display:block"><img src="'+_admEsc(u)+'" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--bd2)"><span style="position:absolute;left:4px;top:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9.5px;padding:1px 5px;border-radius:4px">'+lab+'</span></a>' : '<div style="aspect-ratio:1;border-radius:6px;border:1px dashed var(--bd2);display:flex;align-items:center;justify-content:center;color:var(--m2);font-size:10px;text-align:center">원본 없음</div>'; };
+          return '<div style="background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:5px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">'+cell(o,'원본')+cell(g.public_url,'결과')+'</div><div style="font-size:10px;color:var(--m2);margin-top:4px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+_admEsc((g.style_key||'')+' '+(g.engine||''))+'">'+_admEsc(_ADM_WF_LABEL[g.wf]||g.wf||'')+(g.style_key?' · '+_admEsc(g.style_key):'')+' · '+_admKstDT(g.created_at).slice(5,16)+'</div></div>';
+        }).join('')+'</div>';
     }
     // 방문 날짜
     h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🌐 방문한 날 (최근 90일, 한국 시간)</div>';
