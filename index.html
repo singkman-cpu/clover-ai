@@ -39261,7 +39261,7 @@ function _editDetailRestore(origSrc, resSrc, cb){
       if(!W||!H||!rw||!rh){ fin(null); return; }
       if(Math.abs(W/H - rw/rh) > 0.03 || W*H>26000000){ fin(null); return; } // 비율이 다르면(구도 변경) 건너뜀
       // 1) 저해상도에서 바뀐 곳 찾기(전체 색감 차이는 먼저 맞춘 뒤 비교)
-      var sw=Math.max(32, Math.round(256*W/Math.max(W,H))), sh=Math.max(32, Math.round(256*H/Math.max(W,H)));
+      var sw=Math.max(32, Math.round(640*W/Math.max(W,H))), sh=Math.max(32, Math.round(640*H/Math.max(W,H)));
       var A=cv(sw,sh), ax=A.getContext('2d'); ax.filter='blur(2px)'; ax.drawImage(a,0,0,sw,sh);
       var B=cv(sw,sh), bx=B.getContext('2d'); bx.filter='blur(2px)'; bx.drawImage(r,0,0,sw,sh);
       var ad=ax.getImageData(0,0,sw,sh).data, bd=bx.getImageData(0,0,sw,sh).data, N=sw*sh, ma=[0,0,0], mb=[0,0,0];
@@ -39269,7 +39269,7 @@ function _editDetailRestore(origSrc, resSrc, cb){
       var off=[0,1,2].map(function(k){ return (ma[k]-mb[k])/N; });
       var M=cv(sw,sh), mx=M.getContext('2d'), md=mx.createImageData(sw,sh), changed=0;
       for(var j=0;j<ad.length;j+=4){ var d=0; for(var k2=0;k2<3;k2++) d+=Math.abs(ad[j+k2]-(bd[j+k2]+off[k2])); d/=3;
-        var m=Math.max(0,Math.min(1,(d-10)/18)); if(m>0.5) changed++;
+        var m=Math.max(0,Math.min(1,(d-5)/7)); if(m>0.5) changed++;
         var keep=Math.round((1-m)*255); md.data[j]=md.data[j+1]=md.data[j+2]=keep; md.data[j+3]=255; }
       if(changed/N > 0.6){ fin(null); return; } // 거의 전부 바뀐 편집(구도·장면 전환)은 건너뜀
       mx.putImageData(md,0,0);
@@ -39279,11 +39279,17 @@ function _editDetailRestore(origSrc, resSrc, cb){
       var Rb=cv(W,H), rbx=Rb.getContext('2d'); rbx.filter='blur('+rad+'px)'; rbx.drawImage(R,0,0);
       var O=cv(W,H), ox=O.getContext('2d'); ox.drawImage(a,0,0);
       var Ob=cv(W,H), obx=Ob.getContext('2d'); obx.filter='blur('+rad+'px)'; obx.drawImage(O,0,0);
-      var K=cv(W,H), kx=K.getContext('2d'); kx.imageSmoothingEnabled=true; kx.filter='blur('+Math.max(2,Math.round(Math.max(W,H)/180))+'px)'; kx.drawImage(M,0,0,W,H);
+      // 2026-10-11("사람·차·창문이 뿌옇고 이미지 두 개가 겹친 것 같다"): 바뀐 곳 주변까지 원본 디테일이 섞여 이중상이 생겼음
+      // → 바뀐 곳을 넓게 키운 뒤(침식) 확실히 안 바뀐 곳만 복원 + 픽셀 단위로도 색이 다르면 복원 안 함
+      var M2=cv(sw,sh), m2x=M2.getContext('2d'); m2x.fillStyle='#fff'; m2x.fillRect(0,0,sw,sh); m2x.globalCompositeOperation='darken';
+      var _er=Math.max(2,Math.round(Math.max(sw,sh)/160));
+      for(var _dy=-_er;_dy<=_er;_dy+=Math.max(1,Math.floor(_er/2))) for(var _dx=-_er;_dx<=_er;_dx+=Math.max(1,Math.floor(_er/2))) m2x.drawImage(M,_dx,_dy);
+      var K=cv(W,H), kx=K.getContext('2d'); kx.imageSmoothingEnabled=true; kx.filter='blur('+Math.max(2,Math.round(Math.max(W,H)/400))+'px)'; kx.drawImage(M2,0,0,W,H);
       var step=Math.max(1, Math.floor(1500000/W));
       for(var y=0;y<H;y+=step){ var h=Math.min(step,H-y), id=rx.getImageData(0,y,W,h), d2=id.data,
           rb=rbx.getImageData(0,y,W,h).data, od=ox.getImageData(0,y,W,h).data, ob=obx.getImageData(0,y,W,h).data, kd=kx.getImageData(0,y,W,h).data;
-        for(var q=0;q<d2.length;q+=4){ var keepW=kd[q]/255; if(keepW<0.02) continue;
+        for(var q=0;q<d2.length;q+=4){ var keepW=kd[q]/255; keepW=keepW>0.6?(keepW-0.6)/0.4:0; if(keepW<0.02) continue;
+          var _pd=(Math.abs(rb[q]+off[0]-ob[q])+Math.abs(rb[q+1]+off[1]-ob[q+1])+Math.abs(rb[q+2]+off[2]-ob[q+2]))/3; keepW*=Math.max(0,Math.min(1,1-(_pd-6)/8)); if(keepW<0.02) continue;
           for(var c=0;c<3;c++){ var low=rb[q+c], hr=d2[q+c]-low, ho=od[q+c]-ob[q+c]; d2[q+c]= low + (1-keepW)*hr + keepW*ho; } }
         rx.putImageData(id,0,y); }
       console.log('[편집 화질 유지] 안 바뀐 영역 '+Math.round((1-changed/N)*100)+'%에 원본 디테일 복원, 출력 '+W+'×'+H);
@@ -52970,6 +52976,10 @@ document.addEventListener('DOMContentLoaded',function(){try{
       var _wantsSeasonKo = null;
       if(_extra){ Object.keys(_seasonKoToEn).forEach(function(k){ if(_extra.indexOf(k)!==-1) _wantsSeasonKo=k; }); }
       var _stageKeysForSeasonFix=['unfinished_stage0','unfinished_stage1','unfinished_stage2','unfinished_stage3'];
+      // 2026-10-11("옆에 나무가 왜 가을에서 여름으로 바뀌었지?"): 계절 요청이 없으면 원본 사진의 계절·단풍을 그대로 유지
+      if(!_wantsSeasonKo && _stageKeysForSeasonFix.indexOf(tab.selK)!==-1){
+        _finalPrompt += ' ⚠️ KEEP THE SEASON EXACTLY AS IN THE INPUT PHOTO: every tree, shrub and plant must keep exactly the same foliage colour and season as in the input photo (autumn leaves stay the same orange/red/yellow, bare branches stay bare, snow stays) — do NOT turn the trees green or change the season. Keep the same sky, light and weather. Only the main building and its own lot change.';
+      }
       if(_wantsSeasonKo && _stageKeysForSeasonFix.indexOf(tab.selK)!==-1){
         _finalPrompt += ' ⚠⚠⚠⚠ CRITICAL — OVERRIDE THE WEATHER/SEASON VISIBLE IN THE ORIGINAL REFERENCE PHOTO (매우 중요, 사용자가 명시적으로 요청함 — 원본 사진을 그대로 베끼면 명백한 실패): the original reference photo may show snow on the ground/roof/trees, bare winter branches, or some other season\'s weather — you must NOT copy that weather/ground/foliage condition into this result just because it appears in the reference photo. Completely remove any snow, ice, or seasonal condition shown in the reference photo from the ground, roof, scaffolding, construction materials, and every tree/plant, and instead render the weather, sky, ground condition, and all trees/foliage as clearly '+_seasonKoToEn[_wantsSeasonKo]+'. This season change applies only to weather/sky/ground-cover/foliage — the construction-stage condition of the building itself (structure, materials installed so far, work-in-progress state) described earlier in this prompt must still be followed exactly regardless of season.';
       }
