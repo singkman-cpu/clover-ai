@@ -39252,6 +39252,32 @@ function _upscaleToneMatch(origSrc, resSrc, cb){
 // 2026-10-10 요청("AI 편집을 반복할수록 주변 나무 등 화질이 계속 나빠진다 — 무조건 유지"): 전체 이미지를 다시 그리는 편집(공사단계·노후·계절 등)은
 // 매번 AI가 사진 전체를 1K/2K로 새로 그려서, 안 바뀐 배경(나무·하늘·이웃 건물)까지 조금씩 뭉개지고 해상도도 줄었음.
 // → 결과를 원본 크기로 되돌리고, 원본과 비교해 "안 바뀐 곳"에는 원본의 선명한 디테일(고주파)을 다시 입힘. 색·밝기는 결과 그대로라 경계가 생기지 않음.
+// 결과 이미지를 원본과 같은 위치·크기로 맞춤(이동 + 미세 확대/축소). 맞출 필요 없으면 null.
+function _editAlignResult(a, r, W, H){
+  function gray(img, w, h){ var c=document.createElement('canvas'); c.width=w; c.height=h; var x=c.getContext('2d'); x.drawImage(img,0,0,w,h); var d=x.getImageData(0,0,w,h).data, g=new Float32Array(w*h); for(var i=0;i<w*h;i++) g[i]=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2]; return g; }
+  function err(A,B,w,h,s,dx,dy,step){ var cx=w/2, cy=h/2, e=0, n=0, x0=Math.floor(w*0.08), x1=Math.ceil(w*0.92), y0=Math.floor(h*0.08), y1=Math.ceil(h*0.92);
+    for(var y=y0;y<y1;y+=step){ var sy=(y-cy)*s+cy+dy, iy=Math.round(sy); if(iy<0||iy>=h) continue;
+      for(var x=x0;x<x1;x+=step){ var sx=(x-cx)*s+cx+dx, ix=Math.round(sx); if(ix<0||ix>=w) continue; var d=Math.abs(A[y*w+x]-B[iy*w+ix]); e+= d>40?40:d; n++; } }
+    return n? e/n : 1e9; }
+  // 1단계: 거친 탐색(긴 변 256px)
+  var c1=256/Math.max(W,H), w1=Math.max(32,Math.round(W*c1)), h1=Math.max(32,Math.round(H*c1));
+  var A1=gray(a,w1,h1), B1=gray(r,w1,h1), base1=err(A1,B1,w1,h1,1,0,0,2), best={e:base1,s:1,dx:0,dy:0};
+  for(var s=0.97;s<=1.0301;s+=0.005) for(var dy=-8;dy<=8;dy++) for(var dx=-8;dx<=8;dx++){ var e=err(A1,B1,w1,h1,s,dx,dy,3); if(e<best.e){ best={e:e,s:s,dx:dx,dy:dy}; } }
+  // 2단계: 정밀 탐색(긴 변 1024px, 0.5px 단위)
+  var c2=Math.min(1,1024/Math.max(W,H)), w2=Math.max(32,Math.round(W*c2)), h2=Math.max(32,Math.round(H*c2)), k=w2/w1;
+  var A2=gray(a,w2,h2), B2=gray(r,w2,h2), base2=err(A2,B2,w2,h2,1,0,0,2);
+  var b2={e:err(A2,B2,w2,h2,best.s,best.dx*k,best.dy*k,2), s:best.s, dx:best.dx*k, dy:best.dy*k};
+  var s0=b2.s, x0=b2.dx, y0=b2.dy;
+  for(var s2=s0-0.004;s2<=s0+0.0041;s2+=0.001) for(var yy=-3;yy<=3;yy+=0.5) for(var xx=-3;xx<=3;xx+=0.5){ var e2=err(A2,B2,w2,h2,s2,x0+xx,y0+yy,3); if(e2<b2.e){ b2={e:e2,s:s2,dx:x0+xx,dy:y0+yy}; } }
+  var DX=b2.dx/c2, DY=b2.dy/c2;
+  if(!(b2.e < base2*0.92) || (Math.abs(b2.s-1)<0.0015 && Math.abs(DX)<0.6 && Math.abs(DY)<0.6)){ console.log('[편집 화질 유지] 위치 맞춤 불필요(오차 '+base2.toFixed(1)+'→'+b2.e.toFixed(1)+')'); return null; }
+  var out=document.createElement('canvas'); out.width=W; out.height=H; var ox=out.getContext('2d');
+  ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality='high';
+  ox.drawImage(a,0,0,W,H); // 가장자리 빈틈은 원본으로
+  ox.save(); ox.translate(W/2,H/2); ox.scale(1/b2.s,1/b2.s); ox.translate(-W/2-DX,-H/2-DY); ox.drawImage(r,0,0,W,H); ox.restore();
+  console.log('[편집 화질 유지] AI 결과 위치 맞춤: 이동 '+DX.toFixed(1)+','+DY.toFixed(1)+'px · 크기 '+(b2.s*100).toFixed(1)+'% (오차 '+base2.toFixed(1)+'→'+b2.e.toFixed(1)+')');
+  return out;
+}
 function _editDetailRestore(origSrc, resSrc, cb, opt){
   opt=opt||{};
   try{
@@ -39262,6 +39288,12 @@ function _editDetailRestore(origSrc, resSrc, cb, opt){
       var W=a.naturalWidth, H=a.naturalHeight, rw=r.naturalWidth, rh=r.naturalHeight;
       if(!W||!H||!rw||!rh){ fin(null); return; }
       if(Math.abs(W/H - rw/rh) > 0.03 || W*H>26000000){ fin(null); return; } // 비율이 다르면(구도 변경) 건너뜀
+      // 0) 2026-10-11("편집할수록 화질이 안 좋아진다"): AI 결과가 원본보다 몇 픽셀 밀리거나 1~2% 커지고 작아져서
+      //    '안 바뀐 곳'으로 인식이 안 돼 원본 디테일 복원이 거의 안 되고 있었음 → 결과를 원본 위치에 정확히 맞춘 뒤 복원
+      try{
+        var _al=_editAlignResult(a, r, W, H);
+        if(_al){ r=_al; rw=W; rh=H; }
+      }catch(_ale){ console.warn('[편집 화질 유지] 위치 맞춤 건너뜀', _ale); }
       // 1) 저해상도에서 바뀐 곳 찾기(전체 색감 차이는 먼저 맞춘 뒤 비교)
       var sw=Math.max(32, Math.round(640*W/Math.max(W,H))), sh=Math.max(32, Math.round(640*H/Math.max(W,H)));
       var A=cv(sw,sh), ax=A.getContext('2d'); ax.filter='blur(2px)'; ax.drawImage(a,0,0,sw,sh);
