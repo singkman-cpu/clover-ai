@@ -39252,7 +39252,8 @@ function _upscaleToneMatch(origSrc, resSrc, cb){
 // 2026-10-10 요청("AI 편집을 반복할수록 주변 나무 등 화질이 계속 나빠진다 — 무조건 유지"): 전체 이미지를 다시 그리는 편집(공사단계·노후·계절 등)은
 // 매번 AI가 사진 전체를 1K/2K로 새로 그려서, 안 바뀐 배경(나무·하늘·이웃 건물)까지 조금씩 뭉개지고 해상도도 줄었음.
 // → 결과를 원본 크기로 되돌리고, 원본과 비교해 "안 바뀐 곳"에는 원본의 선명한 디테일(고주파)을 다시 입힘. 색·밝기는 결과 그대로라 경계가 생기지 않음.
-function _editDetailRestore(origSrc, resSrc, cb){
+function _editDetailRestore(origSrc, resSrc, cb, opt){
+  opt=opt||{};
   try{
     var a=new Image(), r=new Image(); a.crossOrigin='anonymous'; r.crossOrigin='anonymous'; var n=0, done=false;
     function fin(x){ if(done) return; done=true; cb(x); }
@@ -39277,6 +39278,35 @@ function _editDetailRestore(origSrc, resSrc, cb){
       // 2) 원본 크기 캔버스: 결과(업샘플) / 결과 흐림 / 원본 / 원본 흐림 / '안 바뀐 곳' 지도
       var rad=Math.max(1, Math.round(Math.max(W,H)/900));
       var R=cv(W,H), rx=R.getContext('2d'); rx.imageSmoothingEnabled=true; rx.imageSmoothingQuality='high'; rx.drawImage(r,0,0,W,H);
+      // 2026-10-11("AI 편집하면 전체에 붉은끼가 살짝 생긴다"): 안 바뀐 곳에서 원본과 결과의 색 차이를 지역별로 재서
+      // (천장·바닥·벽마다 틀어진 정도가 다름) 부드러운 보정 지도를 만들고, 바뀐 곳은 주변 값으로 메워서 사진 전체 색을 원본으로 되돌림.
+      // 계절·낮밤 같은 전체 장면 변형 프리셋은 색이 바뀌는 게 목적이라 opt.noColor로 건너뜀.
+      if(!opt.noColor){
+        var gw=Math.max(8,Math.round(48*W/Math.max(W,H))), gh=Math.max(8,Math.round(48*H/Math.max(W,H)));
+        var num=[new Float32Array(gw*gh),new Float32Array(gw*gh),new Float32Array(gw*gh)], den=new Float32Array(gw*gh);
+        for(var yy=0;yy<sh;yy++){ var gy=Math.min(gh-1,Math.floor(yy*gh/sh)); for(var xx=0;xx<sw;xx++){ var p4=(yy*sw+xx)*4, kw=md.data[p4]/255; if(kw<0.5) continue;
+          var gi=gy*gw+Math.min(gw-1,Math.floor(xx*gw/sw)); for(var cc=0;cc<3;cc++) num[cc][gi]+=kw*(ad[p4+cc]-bd[p4+cc]); den[gi]+=kw; } }
+        function blurG(a){ for(var pass=0;pass<3;pass++){ var t=new Float32Array(a.length);
+          for(var y3=0;y3<gh;y3++) for(var x3=0;x3<gw;x3++){ var s3=0; for(var d3=-2;d3<=2;d3++){ var xx3=Math.max(0,Math.min(gw-1,x3+d3)); s3+=a[y3*gw+xx3]; } t[y3*gw+x3]=s3/5; }
+          for(var x4=0;x4<gw;x4++) for(var y4=0;y4<gh;y4++){ var s4=0; for(var d4=-2;d4<=2;d4++){ var yy4=Math.max(0,Math.min(gh-1,y4+d4)); s4+=t[yy4*gw+x4]; } a[y4*gw+x4]=s4/5; } } }
+        var dsum=0; for(var q0=0;q0<den.length;q0++) dsum+=den[q0];
+        if(dsum>0){
+          var glob=[0,1,2].map(function(c4){ var s5=0; for(var q1=0;q1<den.length;q1++) s5+=num[c4][q1]; return s5/dsum; });
+          blurG(den); num.forEach(blurG);
+          var OC=cv(gw,gh), ocx=OC.getContext('2d'), od2=ocx.createImageData(gw,gh), maxAbs=0;
+          for(var q2=0;q2<gw*gh;q2++){ var wgt=Math.min(1, den[q2]/(dsum/(gw*gh)*0.25+1e-6));
+            for(var c5=0;c5<3;c5++){ var v=den[q2]>1e-6 ? num[c5][q2]/den[q2] : glob[c5]; v=v*wgt+glob[c5]*(1-wgt); v=Math.max(-40,Math.min(40,v)); if(Math.abs(v)>maxAbs) maxAbs=Math.abs(v); od2.data[q2*4+c5]=Math.round(128+v*3); }
+            od2.data[q2*4+3]=255; }
+          if(maxAbs>=1){
+            ocx.putImageData(od2,0,0);
+            var OF=cv(W,H), ofx=OF.getContext('2d'); ofx.imageSmoothingEnabled=true; ofx.imageSmoothingQuality='high'; ofx.drawImage(OC,0,0,W,H);
+            var st2=Math.max(1, Math.floor(1500000/W));
+            for(var y5=0;y5<H;y5+=st2){ var h5=Math.min(st2,H-y5), id5=rx.getImageData(0,y5,W,h5), d5=id5.data, o5=ofx.getImageData(0,y5,W,h5).data;
+              for(var q5=0;q5<d5.length;q5+=4){ d5[q5]+=(o5[q5]-128)/3; d5[q5+1]+=(o5[q5+1]-128)/3; d5[q5+2]+=(o5[q5+2]-128)/3; } rx.putImageData(id5,0,y5); }
+            console.log('[편집 색 유지] 원본 색으로 지역별 보정 (전체 평균 R'+glob[0].toFixed(1)+' G'+glob[1].toFixed(1)+' B'+glob[2].toFixed(1)+')');
+          }
+        }
+      }
       var Rb=cv(W,H), rbx=Rb.getContext('2d'); rbx.filter='blur('+rad+'px)'; rbx.drawImage(R,0,0);
       var O=cv(W,H), ox=O.getContext('2d'); ox.drawImage(a,0,0);
       var Ob=cv(W,H), obx=Ob.getContext('2d'); obx.filter='blur('+rad+'px)'; obx.drawImage(O,0,0);
@@ -45907,7 +45937,9 @@ function procImgWithTask(task, onDone, onErr){
       '(1) DOORS & OPENINGS — a door may exist ONLY where the drawing clearly shows a door (door leaf, frame with handle, or a door swing arc on a plan). A window stays a window with the exact same panel divisions; a wall section without an opening stays a SOLID wall. Do NOT turn windows into doors, do NOT add glass doors, entrances or extra openings between windows. Count the doors and windows in the input and output exactly the same number in the same places. '+
       '(2) CEILING — reproduce only the ceiling elements that are drawn. If the ceiling is drawn plain/flat, keep it a plain finished ceiling: do NOT add wood slats/louvers, beams, exposed ducts or pipes, speakers, track lights, extra air-conditioners, extra light fixtures, sprinklers or anything not drawn. Light fixtures, AC units and ceiling lines appear only where drawn, in the same count. '+
       '(3) EVERYTHING ELSE — do not add furniture, equipment, shelves, signs, plants, people or decorations that are not drawn; keep text/signage exactly as written. '+
-      'You may ONLY add realistic materials, colors, textures, lighting, reflections and shadows to the elements that ARE drawn. Before finishing, compare the result with the input element by element and remove anything that is not in the drawing.';
+      '(4) FURNITURE MUST KEEP ITS EXACT DESIGN — 2026-10-11 user-confirmed failure: a thin black metal-frame bed with NO headboard and a GREY-AND-WHITE STRIPED duvet was turned into a beige upholstered bed with a big rounded headboard and a plain white duvet. That is wrong. Every piece of furniture keeps its exact type, frame and silhouette: metal legs stay thin metal legs in the same colour, a bed without a headboard gets NO headboard, an open-leg bed does NOT become a boxy upholstered base, a sofa/chair/table keeps the same arm, back and leg design. BEDDING AND FABRICS keep their exact pattern, colour and shape: stripes stay the same stripes in the same direction and colours, a duvet keeps its shape and how it hangs over the edge, pillows keep their count, colour and pattern, a rug keeps its size and colour. Artwork, wall colour, window-frame colour and curtain colour also stay the same colour. Even if the input is an illustration, cartoon or simple low-detail model, convert the SAME objects to reality — never replace them with a nicer or more typical-looking product. '+
+      '(5) THE 3D MODEL IS THE CLIENT\'S OWN DESIGN — the user built this model themselves, so its design decisions are final and must never be changed on your own. What you SHOULD do is raise its quality: refine the modelling (crisp, clean edges, slightly rounded real-world corners, correct thickness of panels, legs, frames and mattresses, natural fabric folds and wrinkles on bedding and curtains, proper seams and joints) and make every material look truly realistic (real wood grain, fabric weave, metal sheen, wallpaper texture, glass reflections). Better modelling quality and more realistic materials: YES. A different design, shape, pattern or colour: NEVER. '+
+      'You may ONLY add realistic materials, colors, textures, lighting, reflections and shadows to the elements that ARE drawn. Before finishing, compare the result with the input element by element (especially the bed frame, headboard, legs and bedding pattern) and fix anything whose design, pattern or colour differs from the input.';
   }
 
   // ══ EDIT 탭 — 원본 해상도 유지 ═══════════════════════════════════
@@ -46291,7 +46323,7 @@ function procImgWithTask(task, onDone, onErr){
                 });
               } else if(_shouldSkipColorCastFix(task.selK)){
                 console.log('[edit] 전체 장면 변형 프리셋('+task.selK+') — 색온도 드리프트 보정 건너뜀');
-                _editDetailRestore(img, u, function(f){ finishWithResize(f||u, onDone); });
+                _editDetailRestore(img, u, function(f){ finishWithResize(f||u, onDone); }, {noColor:true});
               } else {
                 _neutralizeEditColorCast(img,u,function(correctedUrl){ _editDetailRestore(img, correctedUrl||u, function(f){ finishWithResize(f||correctedUrl, onDone); }); });
               }
