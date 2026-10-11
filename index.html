@@ -22694,6 +22694,19 @@ function sbRender(p){
     _realismNote.innerHTML='⚠️ 이 프리셋은 "아무것도 안 바꾸고 사실감만 올리는" 용도라 <b>위 실사 참고 이미지는 반영되지 않아요</b>(의도적으로 무시함). <br>또한 원본 이미지가 이미 고해상도라면, 아래 해상도를 원본보다 낮게(1K 등) 고르면 오히려 화질이 떨어질 수 있어요 — <b>원본 해상도에 맞춰 4K를 선택</b>하는 걸 추천드려요.';
     p.appendChild(_realismNote);
   }
+  // 2026-10-12: 실사화 계열 프리셋 — 하늘(맑음/구름 조금/흐림) 선택. 노을·야간은 AI 편집에서 변환
+  if(_rTab && _rTab.selK && !/^site_context/.test(_rTab.selK) && _rTab.selK!=='cad_isometric'){
+    if(!G.renderSky){ try{ G.renderSky=localStorage.getItem('clover_render_sky')||'clear'; }catch(e){ G.renderSky='clear'; } }
+    var _skyW=dv('ss'); _skyW.innerHTML='<div class="lbl">☀️ 하늘 <span class="lbl-en">노을·야간은 결과를 AI 편집에서 바꿔요</span></div>';
+    var _skyG=dv(''); _skyG.style.cssText='display:flex;gap:5px';
+    [['clear','맑음'],['partly','구름 조금'],['overcast','흐림']].forEach(function(o){
+      var on=G.renderSky===o[0]; var b=mk('button',''); b.type='button'; b.textContent=o[1];
+      b.style.cssText='flex:1;padding:7px 0;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--card)')+';color:'+(on?'var(--ac)':'var(--t2)');
+      b.onclick=function(){ G.renderSky=o[0]; try{ localStorage.setItem('clover_render_sky',o[0]); }catch(e){} renderSB(); };
+      _skyG.appendChild(b);
+    });
+    _skyW.appendChild(_skyG); p.appendChild(_skyW);
+  }
   mkResolution(p);
   // 2026-10-12: 고급 실사화(나노바나나 Pro) 4K는 90cr — 기본 실사화 4K(45cr)로도 충분히 고화질이라는 안내
   if(_rTab && _rTab.selK==='hq_real_pro'){
@@ -44760,6 +44773,7 @@ function _runToolWithPromptActual(translatedPrompt){
     img:       tab.inputImg,
     rimg:      G.wf==='edit'?tab.inputImg:null,
     userText:  ((tab.prompt||'')+' '+(tab.extraPrompt||'')).trim(),
+    renderSky: (G.wf==='render' ? (G.renderSky||'clear') : null),
     wf:        _realWf(G.wf),
     prompt:    translatedPrompt,
     selK:      tab.selK||null,
@@ -46085,11 +46099,15 @@ function procImgWithTask(task, onDone, onErr){
     // 재질·조경까지 '그대로'로 굳어버렸음 → 형태·배치는 유지하되 재질·식물·바닥재는 실제 사진처럼 완전히 새로 그리라고 맨 끝에서 명확히 구분
     ap += ' ⚠️⚠️⚠️ PHOTOREALISM PRIORITY (final, most important for the look): "keep the design" means keep the SHAPES, POSITIONS, COUNTS and COLOURS — it does NOT mean keep the flat CG look. The result must be indistinguishable from a real photograph taken with a full-frame camera, NOT a 3D render. '+
       'Re-render every surface as the real material: real brick with depth, mortar recesses and slight colour variation; real timber with grain, gaps and shadow lines; real concrete/stone with micro texture; real glass with true reflections of the surroundings and visible interiors. '+
-      'LANDSCAPE MUST BE REAL, NOT TEXTURE MAPS: flat or mapped-looking ground (mulch, soil, sand, gravel, grass) must become real 3D ground cover — individual wood chips/pebbles/grass blades with depth and contact shadows; every tree, shrub, flower and grass clump must become a real living plant of the same kind, size and position, with real leaves, branches and natural irregularity — never cardboard cut-out or low-poly vegetation. '+
+      'LANDSCAPE MUST BE REAL, NOT TEXTURE MAPS: flat or mapped-looking ground (mulch, soil, sand, gravel, grass) must become real 3D ground cover — individual wood chips/pebbles/grass blades with depth and contact shadows; ⚠️ GROUND CLOSEST TO THE CAMERA (2026-10-12 user-confirmed failure: the foreground mulch looked like a flat, smeared, stretched texture image): the nearer the ground is to the camera, the MORE detail it must show — in the foreground every bark chip, pebble or gravel stone must be clearly individual and three-dimensional (visible edges and thickness, small height differences, tiny shadows between pieces, some pieces lying on top of others, a few fallen leaves or twigs), sharply in focus, at true real-world size relative to the paving slabs (bark chips about 2–5 cm, gravel about 1–3 cm). Edges where the ground meets paving slabs must show real loose material touching the slab edge with contact shadow. NEVER a blurred, smeared, flat, repeated or stretched texture; no depth-of-field blur on the near ground. every tree, shrub, flower and grass clump must become a real living plant of the same kind, size and position, with real leaves, branches and natural irregularity — never cardboard cut-out or low-poly vegetation. '+
       'Use physically real light: soft natural shadows, ambient occlusion in corners and under eaves and natural photographic dynamic range — no plastic, uniform CG shading. Paving slabs, steps and decking must show real concrete/stone surfaces with correct scale and perspective — never a stretched or smeared texture. Keep the image clean and crisp: NO added film grain, sensor noise or speckle.';
     // 2026-10-12("3D 캡처 배경이 검은색이라 계속 야간으로 렌더된다 — 따로 요청 안 하면 무조건 맑은 날 주간"): 야간 요청이 없으면 주간 고정
     if(!/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){
-      ap += ' ⚠️⚠️⚠️ TIME OF DAY = CLEAR DAYTIME (user rule, overrides anything that looks like night in the input): a black, dark grey or empty background in a 3D capture is just an unrendered CG background — it does NOT mean night. Render a bright, clear sunny daytime scene: a CLEAR DEEP-BLUE SKY with almost no clouds (at most a couple of small thin wisps — never an overcast, grey or cloudy sky), bright natural sunlight with crisp but soft daylight shadows, exterior lights OFF or barely visible, interiors seen through windows in daylight. Replace the dark background with a realistic daytime sky and surroundings that fit the site. Only render night/evening if the user explicitly asked for it.';
+      var _sky = task.renderSky || 'clear';
+      var _skyTxt = _sky==='partly' ? 'Render a bright daytime scene: a blue sky with some scattered soft white clouds (partly cloudy, still mostly blue), natural sunlight with soft daylight shadows, exterior lights OFF'
+        : _sky==='overcast' ? 'Render a calm overcast daytime scene: an evenly bright soft grey-white cloudy sky (no blue sky, no rain), soft diffuse daylight with very gentle shadows, exterior lights OFF'
+        : 'Render a bright, clear sunny daytime scene: a CLEAR DEEP-BLUE SKY with almost no clouds (at most a couple of small thin wisps — never an overcast, grey or cloudy sky), bright natural sunlight with crisp but soft daylight shadows, exterior lights OFF';
+      ap += ' ⚠️⚠️⚠️ TIME OF DAY = DAYTIME (user rule, overrides anything that looks like night in the input): a black, dark grey or empty background in a 3D capture is just an unrendered CG background — it does NOT mean night. '+_skyTxt+' or barely visible, interiors seen through windows in daylight. Replace the dark background with a realistic daytime sky and surroundings that fit the site. Only render night/evening if the user explicitly asked for it.';
       console.log('[렌더] 야간 요청 없음 → 맑은 주간 고정');
     }
     // 2026-10-11: 3D 렌더 실사화에서 사용자가 프롬프트로 사람을 넣어달라고 하면 — 사람만 예외로 허용하고, 3D 캐릭터가 아니라 실제 사진 속 사람처럼
