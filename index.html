@@ -43391,6 +43391,18 @@ function _w3dTabPoll(operationId, loadingId, srcImg, retryCount, startTime){
     if(goBtn){goBtn.disabled=false;goBtn.innerHTML='🌐 VR 투어 생성하기 <span style="font-size:11px;font-weight:700;background:rgba(0,0,0,.2);border-radius:5px;padding:2px 7px;margin-left:4px">'+_w3dTotalCost()+'cr</span>';}
   });
 }
+// 2026-10-11: 업스케일 결과가 실제로 커졌는지 확인(원본과 같은 크기면 "확대 안 됨"을 알려줌)
+function _imgSize(u, cb){ try{ var i=new Image(); i.crossOrigin='anonymous'; i.onload=function(){ cb(i.naturalWidth, i.naturalHeight); }; i.onerror=function(){ cb(0,0); }; i.src=u; }catch(e){ cb(0,0); } }
+function _checkUpscaled(origUrl, resUrl, cb){
+  if(!origUrl || !resUrl){ cb(true); return; }
+  _imgSize(origUrl, function(ow,oh){ _imgSize(resUrl, function(rw,rh){
+    if(!ow || !rw){ cb(true); return; }
+    var ok = rw*rh > ow*oh*1.3;
+    if(!ok) console.warn('[업스케일 확인] 결과가 커지지 않음: 원본 '+ow+'×'+oh+' → 결과 '+rw+'×'+rh);
+    else console.log('[업스케일 확인] '+ow+'×'+oh+' → '+rw+'×'+rh);
+    cb(ok, ow, oh, rw, rh);
+  }); });
+}
 function _resumeActiveJobs(){
   var jobs=[];
   try{jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');}catch(e){}
@@ -43419,6 +43431,14 @@ function _resumeActiveJobs(){
         G.HIST[jobWf].unshift(recoveredItem);
         saveHistToStorage();
         if(G.wf===jobWf) renderMain(jobWf);
+        if(jobWf==='upscale' && hasOrig){
+          _checkUpscaled(j.origImg, url, function(ok, ow, oh, rw, rh){
+            if(ok) return;
+            recoveredItem.tags=[j.label,'⚠️ 확대 안 됨'];
+            saveHistToStorage(); if(G.wf===jobWf) renderMain(jobWf);
+            _showJobRecoveryBanner('⚠️ 새로고침 후 받아온 업스케일 결과가 원본과 같은 크기('+rw+'×'+rh+')예요. 확대가 적용되지 않았으니 다시 업스케일해 주세요.', true);
+          });
+        }
         // 정상 완료와 동일하게: AI편집 탭이면 이 결과를 다음 "수정할 이미지"로 자동 체이닝
         if(jobWf==='edit'){
           var _editTab2=getTab('edit');
@@ -45869,7 +45889,7 @@ function procImgWithTask(task, onDone, onErr){
           _tzParams2.sharpen = (G.tabs.upscale && G.tabs.upscale.topazSharpen!=null) ? G.tabs.upscale.topazSharpen : 0.5;
         }
         falRun('fal-ai/topaz/upscale/image', _tzParams2,
-          function(d){var u=falExtractImageUrl(d);if(u) _upscaleToneMatch(img, u, function(f){ onDone(f||u); }); else onErr('Topaz URL 없음');},
+          function(d){var u=falExtractImageUrl(d);if(u){ _checkUpscaled(img, u, function(ok,ow,oh,rw,rh){ if(!ok && typeof _agedEnvToast==='function') _agedEnvToast('⚠️ 업스케일 결과가 원본과 같은 크기('+rw+'×'+rh+')로 나왔어요. 확대가 적용되지 않았으니 다시 시도해 주세요.'); }); _upscaleToneMatch(img, u, function(f){ onDone(f||u); }); } else onErr('Topaz URL 없음');},
           function(err){console.warn('[Topaz 실패]',err);onErr(err||'업스케일에 실패했어요. 잠시 후 다시 시도해 주세요.');}
         , _bill);
       });
@@ -46368,7 +46388,10 @@ function procImgWithTask(task, onDone, onErr){
                 });
               } else if(_shouldSkipColorCastFix(task.selK)){
                 console.log('[edit] 전체 장면 변형 프리셋('+task.selK+') — 색온도 드리프트 보정 건너뜀');
-                _editDetailRestore(img, u, function(f){ finishWithResize(f||u, onDone); }, {noColor:true});
+                // 2026-10-11("미완성 공사도 붉은끼"): 색이 바뀌는 게 목적인 프리셋(계절·낮밤·비·조명 켜기/끄기)만 색 보정 생략 —
+                // 미완성 공사·노후 외관은 건물만 바뀌고 주변 색은 원본 그대로여야 하므로 색 보정 적용
+                var _keepColorFix = (STAGE_SURROUND_KEYS.indexOf(task.selK)!==-1) || /^aged_/.test(task.selK||'');
+                _editDetailRestore(img, u, function(f){ finishWithResize(f||u, onDone); }, {noColor:!_keepColorFix});
               } else {
                 _neutralizeEditColorCast(img,u,function(correctedUrl){ _editDetailRestore(img, correctedUrl||u, function(f){ finishWithResize(f||correctedUrl, onDone); }); });
               }
