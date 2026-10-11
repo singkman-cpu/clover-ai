@@ -42399,12 +42399,18 @@ function falPoll(baseUrlOrCandidates, reqId, onDone, onErr, attempt, candidateId
     var pct = Math.min(85, attempt * 1.4);
     var lb = gE('ldbar'); if(lb) lb.style.width = pct + '%';
     if(st === 'COMPLETED'){
-      _falResultGet(baseUrl, reqId)
-      .then(function(res){
-        console.log('[FAL result]', JSON.stringify(res).slice(0,500));
-        onDone(res);
-      })
-      .catch(function(e){ onErr('result fetch 실패: ' + e.message); });
+      // 2026-10-12: 상태 조회는 됐는데 결과 조회가 같은 주소에서 404("Path ... not found")로 실패하는 모델(Seedream 5.0 Pro 등)이 있어서,
+      // 실패하면 다른 후보 주소(소유자/앱 기준 등)로 결과 조회를 다시 시도
+      var _resOrder=[baseUrl].concat(candidates.filter(function(c){ return c!==baseUrl; }));
+      (function tryRes(i, lastErr){
+        if(i>=_resOrder.length){ onErr('result fetch 실패: ' + (lastErr&&lastErr.message||'')); return; }
+        _falResultGet(_resOrder[i], reqId)
+        .then(function(res){
+          console.log('[FAL result]', JSON.stringify(res).slice(0,500));
+          onDone(res);
+        })
+        .catch(function(e){ console.warn('[FAL result] 주소 실패, 다음 후보 시도:', _resOrder[i], e.message); tryRes(i+1, e); });
+      })(0, null);
     } else if(st === 'FAILED') {
       var errMsg = d.error || d.detail || d.message || d.msg || JSON.stringify(d);
       // fal.ai 422 에러는 detail이 배열 형태({loc, msg, type})로 오는 경우가 있음
@@ -43570,7 +43576,11 @@ function falRun(modelId, input, onDone, onErr, billingCtx) {
     var modelIdBaseUrl = FAL_QUEUE + '/' + base;
     var responseUrlBaseUrl = responseUrl ? responseUrl.replace(/\/requests\/[^\/]+.*$/, '') : null;
     var candidates = [];
+    // 2026-10-12(Seedream 5.0 Pro "Path /seedream/v5/pro/edit" 오류): fal 큐의 상태·결과 주소는 모델 경로 전체가 아니라
+    // "소유자/앱" 두 단계(예: fal-ai/bytedance)까지만 씀 — 경로가 긴 모델용 후보를 맨 앞에 추가
+    var _segs = modelId.split('/'), appBaseUrl = _segs.length>2 ? (FAL_QUEUE + '/' + _segs[0] + '/' + _segs[1]) : null;
     if(responseUrlBaseUrl) candidates.push(responseUrlBaseUrl);
+    if(appBaseUrl && candidates.indexOf(appBaseUrl)===-1) candidates.push(appBaseUrl);
     if(modelIdBaseUrl && candidates.indexOf(modelIdBaseUrl)===-1) candidates.push(modelIdBaseUrl);
     console.log('[FAL] baseUrl candidates for polling:', candidates);
     var baseUrl = candidates[0];
