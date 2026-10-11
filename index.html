@@ -46674,9 +46674,24 @@ function procImgWithTask(task, onDone, onErr){
   // 2026-10-12: Seedream 5.0 Pro — 3D 렌더 실사화에서도 실제로 Seedream으로 생성(예전엔 이 분기가 없어 2.1로 실행됐음)
   if(eng==='seedream5pro' && (wf==='render'||wf==='space')){
     // fal Seedream 5.0 Pro 편집은 image_size를 프리셋 이름(auto_1K / auto_2K — 입력 비율 유지)으로 받음. 4K 없음.
+    // 2026-10-12("Seedream이 야간으로 나오고 재질 개선이 안 됐다"): 나노바나나용 긴 프롬프트(수천 자)를 그대로 보내면 Seedream은
+    // 앞부분 위주로만 따르고 맨 끝의 주간·실사 규칙이 무시됨 → 실사화 프리셋이면 핵심만 담은 짧은 프롬프트로 보냄
+    var _sdP = ap;
+    if(task && /^hq_real/.test(task.selK||'')){
+      var _ut=(task.userText||'').trim();
+      var _night=/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(_ut);
+      _sdP = 'Turn this 3D render into a REAL PHOTOGRAPH taken with a full-frame camera — it must not look like a render. '+
+        'Keep exactly the same building, shapes, proportions, camera angle, framing, object positions and the colours of every material. '+
+        (_night ? 'Time of day: as the user asked. ' : 'Time of day: BRIGHT, CLEAR DAYTIME — blue sky with a few soft clouds and natural sunlight with soft shadows. The black or dark background is only an empty 3D background, NOT night: replace it with a realistic daytime sky and natural surroundings. Exterior lights off. ')+
+        'Re-texture every surface as the real material: real brick with depth and mortar joints, real timber with grain and gaps, real concrete and stone texture, real glass reflecting the sky and showing interiors. '+
+        'Replace flat CG plants and mapped ground with real living plants of the same kind and position and real 3D ground cover (wood-chip mulch, gravel, grass) with depth and contact shadows. '+
+        'Natural colours, clean and noise-free, no illustration or CG look.'+
+        (_ut ? ' User request: '+_ut : '')+
+        (/사람|인물|행인|손님|직원|고객|가족|커플/.test(_ut) ? ' Any people must be natural ordinary Koreans that look like real photographed people.' : '');
+    }
     uploadImgToFal(img, function(imgUrl){
       try{ var _ld=gE('ldst'); if(_ld) _ld.textContent='Seedream 5.0 Pro 생성 중...'; }catch(_e){}
-      falRun('bytedance/seedream/v5/pro/edit',{prompt:ap,image_urls:[imgUrl],image_size:(apiRes==='1K'?'auto_1K':'auto_2K'),num_images:1,output_format:'jpeg'},
+      falRun('bytedance/seedream/v5/pro/edit',{prompt:_sdP,image_urls:[imgUrl],image_size:(apiRes==='1K'?'auto_1K':'auto_2K'),num_images:1,output_format:'jpeg'},
         function(d){var url=falExtractImageUrl(d);if(url)onDone(url);else onErr('Seedream 5.0 Pro URL 없음');},onErr,_bill);
     },onErr);
     return;
