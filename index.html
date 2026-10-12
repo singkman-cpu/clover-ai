@@ -51575,6 +51575,19 @@ function _admNotifyPanel(out){
 // ② 결과 없음/중복: 완료됐는데 그 시간대에 갤러리 저장 기록이 없는 유료 작업(후처리 오류·이중 과금 등)
 // 관리자 접속 시 🔔 알림에 개수가 뜨고, 목록에서 버튼 한 번으로 환불 + 사과 안내(다음 접속 때 팝업)
 var _ISSUE_DAYS=7;
+// 결과 파일을 작업과 맞춰볼 시간 범위 — 예전 40분은 너무 넓어서 다른 작업의 파일이 잘못 짝지어졌음(2026-10-13). 이미지는 15분, 영상·업스케일은 40분
+function _admIssueWin(wf){ return (/video|shorts|upscale|world3d/.test(String(wf||''))?40:15)*60000; }
+// 결과(파일·갤러리 기록) 하나를 "그 직전에 시작한 작업"에 짝지음 — 결과는 작업 직후에 생기므로 가장 가까운 앞 작업이 주인.
+// (예전엔 작업 순서대로 앞에서부터 짝지어서, 22:57 작업이 23:08·23:12 작업의 파일을 가져가 버리는 오판이 있었음)
+function _admMatchMiss(jobs, times){
+  var used={}, js=(jobs||[]).slice().sort(function(a,b){ return a.t-b.t; });
+  (times||[]).slice().sort(function(a,b){ return a-b; }).forEach(function(ft){
+    var best=null;
+    js.forEach(function(j){ if(!used[j.id] && j.t<=ft+60000 && ft-j.t<=_admIssueWin(j.wf)) best=j; });
+    if(best) used[best.id]=1;
+  });
+  var miss={}; js.forEach(function(j){ if(!used[j.id]) miss[j.id]=1; }); return miss;
+}
 function _admIssueDoneLS(){ try{ return JSON.parse(localStorage.getItem('adm_issue_done')||'{}')||{}; }catch(e){ return {}; } }
 function _admIssueMarkLS(ids){ try{ var d=_admIssueDoneLS(); ids.forEach(function(i){ d[i]=1; }); localStorage.setItem('adm_issue_done', JSON.stringify(d)); }catch(e){} }
 function _admIssueScan(){
@@ -51591,7 +51604,7 @@ function _admIssueScan(){
     var done=_admIssueDoneLS(), gal={}, galWf={};
     (gr.data||[]).forEach(function(g){ galWf[g.wf]=1; (gal[g.user_id]=gal[g.user_id]||[]).push({t:new Date(g.created_at).getTime(), used:false}); });
     Object.keys(gal).forEach(function(u){ gal[u].sort(function(a,b){ return a.t-b.t; }); });
-    var list=[];
+    var list=[], _galCand={};
     (jr.data||[]).forEach(function(j){
       if(done[j.req_id]) return;
       var t=new Date(j.created_at).getTime();
@@ -51602,9 +51615,11 @@ function _admIssueScan(){
         if(recSince && t>recSince && !rec[j.req_id]) list.push({j:j, t:t, why:'norecv'});
         return;
       }
-      var arr=gal[j.user_id]||[], hit=null;
-      for(var i=0;i<arr.length;i++){ var g=arr[i]; if(!g.used && g.t>=t-60000 && g.t<=t+40*60000){ hit=g; break; } }
-      if(hit) hit.used=true; else list.push({j:j, t:t, why:'nosave'});
+      (_galCand[j.user_id]=_galCand[j.user_id]||[]).push({id:j.req_id, t:t, wf:j.wf, j:j});
+    });
+    Object.keys(_galCand).forEach(function(uid){
+      var miss=_admMatchMiss(_galCand[uid], (gal[uid]||[]).map(function(g){ return g.t; }));
+      _galCand[uid].forEach(function(c){ if(miss[c.id]) list.push({j:c.j, t:c.t, why:'nosave'}); });
     });
     return _admIssueStorageFilter(list, (jr.data||[]).filter(function(j){ return j.status==='completed' && !done[j.req_id] && galWf[j.wf]; }));
   }).catch(function(e){ return {list:[], err:String((e&&e.message)||e)}; });
@@ -51630,12 +51645,9 @@ function _admIssueStorageFilter(list, allDone){
     // 이 회원의 완료 작업 전체를 시간순으로 결과 파일과 1:1로 맞춤(성공한 작업의 파일이 다른 작업 몫으로 잘못 잡히지 않게)
     var miss={};
     uids.forEach(function(uid){
-      var arr=(files[uid]||[]).sort(function(a,b){ return a.t-b.t; });
-      (allDone||[]).filter(function(j){ return j.user_id===uid; }).sort(function(a,b){ return new Date(a.created_at)-new Date(b.created_at); }).forEach(function(j){
-        var t=new Date(j.created_at).getTime(), hit=null;
-        for(var i=0;i<arr.length;i++){ var f=arr[i]; if(!f.used && f.t>=t-60000 && f.t<=t+40*60000){ hit=f; break; } }
-        if(hit) hit.used=true; else miss[j.req_id]=1;
-      });
+      var js=(allDone||[]).filter(function(j){ return j.user_id===uid; }).map(function(j){ return {id:j.req_id, t:new Date(j.created_at).getTime(), wf:j.wf}; });
+      var m=_admMatchMiss(js, (files[uid]||[]).map(function(f){ return f.t; }));
+      Object.keys(m).forEach(function(k){ miss[k]=1; });
     });
     var out=[], recv=0;
     list.forEach(function(x){
