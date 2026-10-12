@@ -30954,7 +30954,7 @@ function _consultStartImport(){
   var _photoSps=_consultSp(st).filter(function(sp){ return !!sp.photo; });
   if(_photoSps.length) plan=plan.slice(0,1);
   // 2026-10-07 요청: "갤러리·외부 사진을 가져와서 마감재 부분만 렌더링" — 공간 렌더링 없이 마감재 재질 사진만 만들지 선택
-  var texOk=!_consultIsBuild(st) && confirm('가져온 이미지에서 마감재를 읽어서 "마감재 보드"를 만들어요.\n\n재질 사진(실제 텍스처 이미지)까지 자동으로 만들까요?\n· 확인 = 재질 사진까지 (시안 1개당 '+PROPOSAL_TEX_COST+'cr, 이미지는 렌더링 안 함)\n· 취소 = 자재 이름·색만 (무료)');
+  var texOk=!_consultIsBuild(st); // 2026-10-12(사용자 요청): 묻지 않고 마감재 보드(재질 사진)까지 자동으로
   st.variants=plan.map(function(p,i){
     var pp=JSON.parse(JSON.stringify(p));
     if(!(st.refs||[]).length){ pp.name='디자인 시안'; pp.ko='준비된 디자인 이미지로 구성한 안'; }
@@ -31759,12 +31759,14 @@ function sbConsult(p){
   bw.appendChild(hint);
   // 렌더링 없이(무료): 갤러리·내 PC 이미지로 제안서
   var imp=mk('button',''); imp.type='button';
-  imp.innerHTML='🖼️ 렌더링 없이 제안서 만들기 <span style="font-size:12px;font-weight:800;background:rgba(0,0,0,.2);border-radius:6px;padding:2px 8px;margin-left:4px">무료</span>';
+  var _impN=st.spaces.some(function(s){return s.photo;}) ? 1 : (st.count||1);
+  var _impCr=_consultIsBuild(st) ? 0 : PROPOSAL_TEX_COST*_impN;
+  imp.innerHTML='🖼️ 렌더링 없이 제안서 만들기 <span style="font-size:12px;font-weight:800;background:rgba(0,0,0,.2);border-radius:6px;padding:2px 8px;margin-left:4px">'+(_impCr?_impCr+'cr':'무료')+'</span>';
   imp.style.cssText='width:100%;margin-top:10px;padding:15px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000;font-weight:900;font-size:15px;cursor:pointer;font-family:inherit';
   if(running){ imp.disabled=true; imp.style.opacity='.5'; }
   imp.onclick=_consultStartImport;
   bw.appendChild(imp);
-  var ih=dv(''); ih.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:4px;line-height:1.5'; ih.textContent='② 에 넣은 이미지(갤러리·내 PC)를 렌더링 없이 그대로 시안 이미지로 써서 마감재 보드·견적·PDF를 만들어요';
+  var ih=dv(''); ih.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:4px;line-height:1.5'; ih.textContent='② 에 넣은 이미지(갤러리·내 PC)를 렌더링 없이 그대로 쓰고, 마감재 보드(재질 사진)만 만들어요 · 견적·PDF는 무료';
   bw.appendChild(ih);
   p.appendChild(bw);
 
@@ -32035,7 +32037,9 @@ function _consultRenderCanvas(ub){
     // 🎨 제안서 디자인(제안서 제작 탭의 테마 프리셋 그대로) — 누르면 바로 그 디자인으로 PDF 다시 만들기
     var curTheme=st.pdfTheme||((typeof G_PROPOSAL!=='undefined' && G_PROPOSAL.opts && G_PROPOSAL.opts.styleKey)||'gold');
     var thw=document.createElement('div'); thw.style.cssText='margin-top:12px';
-    thw.innerHTML='<div class="cpdf-th-hd" style="font-size:12px;font-weight:800;color:var(--t2);margin-bottom:6px;cursor:pointer;user-select:none">'+(st.pdfThemeOpen?'▼':'▶')+' 🎨 제안서 디자인 <span style="font-weight:500;color:var(--m2)">— 누르면 오른쪽에 크게 미리보기 + 그 디자인으로 바뀌어요</span></div>';
+    thw.innerHTML='<button type="button" class="cpdf-th-hd" style="display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin-bottom:10px;padding:13px 16px;border-radius:11px;border:1.5px solid var(--ac);background:var(--acg);color:var(--t);font-family:inherit;cursor:pointer;text-align:left">'+
+      '<span style="font-size:14px;font-weight:900">🎨 제안서 디자인 고르기 <span class="cpdf-th-cur" style="font-size:12px;font-weight:800;color:var(--ac);margin-left:4px"></span><span style="display:block;font-size:11px;font-weight:600;color:var(--m2);margin-top:3px">'+PROPOSAL_STYLES.length+'가지 디자인 중 고르면 오른쪽에 크게 미리보기 + 그 디자인으로 PDF가 바뀌어요</span></span>'+
+      '<span style="flex-shrink:0;padding:8px 14px;border-radius:8px;background:var(--ac);color:#000;font-size:13px;font-weight:900">'+(st.pdfThemeOpen?'▲ 접기':'▼ 펼치기')+'</span></button>';
     // 2026-10-09 요청: 작은 칩들 + 오른쪽 큰 미리보기 1개(누르는 디자인이 바로 크게 보임)
     var thr=document.createElement('div'); thr.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:14px;align-items:start';
     if(window.innerWidth<760) thr.style.gridTemplateColumns='1fr';
@@ -32089,7 +32093,7 @@ function _consultRenderCanvas(ub){
     var _thHd=thw.querySelector('.cpdf-th-hd');
     if(_thHd){
       var _curTh=PROPOSAL_STYLES.filter(function(t){ return t.key===curTheme; })[0];
-      if(!st.pdfThemeOpen && _curTh){ var _ct=document.createElement('span'); _ct.style.cssText='font-weight:800;color:var(--ac);margin-left:6px'; _ct.textContent='· 지금: '+_curTh.label; _thHd.appendChild(_ct); }
+      var _ct=_thHd.querySelector('.cpdf-th-cur'); if(_ct && _curTh) _ct.textContent='· 지금: '+_curTh.label;
       _thHd.onclick=function(){ st.pdfThemeOpen=!st.pdfThemeOpen; _consultSave(); _consultRefresh(); };
     }
     thw.appendChild(thr); pdfC.appendChild(thw);
