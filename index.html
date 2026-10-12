@@ -43839,6 +43839,15 @@ function _checkUpscaled(origUrl, resUrl, cb){
     cb(ok, ow, oh, rw, rh);
   }); });
 }
+// 2026-10-12(관리자 요청 "크레딧 나가는 모든 기능"): 회원 화면이 결과를 실제로 받았다는 수신 기록 — 갤러리에 안 남는 기능도
+// 관리자 🚨 목록에서 "결과 수신 실패"를 구분할 수 있게 함. 실패해도 회원 작업엔 영향 없음.
+function _jobReceipt(reqId, d){
+  try{
+    if(!(_supa && _supaUser && reqId)) return;
+    if(!/https?:\/\//.test(JSON.stringify(d||{}))) return; // 결과 주소가 없으면 받은 게 아님
+    _supa.from('job_receipts').insert({req_id:String(reqId), user_id:_supaUser.id}).then(function(){}).catch(function(){});
+  }catch(e){}
+}
 function _resumeActiveJobs(){
   var jobs=[];
   try{jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');}catch(e){}
@@ -43848,7 +43857,7 @@ function _resumeActiveJobs(){
   jobs.forEach(function(j){
     _showJobRecoveryBanner('🔄 새로고침 전에 진행 중이던 '+j.label+' 작업을 다시 확인하고 있어요...', false);
     falPoll(j.baseUrl, j.reqId, function(d){
-      _clearActiveJob(j.reqId);
+      _clearActiveJob(j.reqId); _jobReceipt(j.reqId, d);
       var url=falExtractImageUrl(d);
       if(url){
         var jobWf=j.wf||G.wf||'edit';
@@ -43957,7 +43966,7 @@ function falRun(modelId, input, onDone, onErr, billingCtx) {
     var baseUrl = candidates[0];
     var _modelLabel=(modelId.split('/')[1]||modelId);
     _saveActiveJob(reqId, baseUrl, _modelLabel);
-    falPoll(candidates, reqId, function(d){ _clearActiveJob(reqId); onDone(d); }, function(e){ _clearActiveJob(reqId); onErr(e); }, 0);
+    falPoll(candidates, reqId, function(d){ _clearActiveJob(reqId); _jobReceipt(reqId, d); onDone(d); }, function(e){ _clearActiveJob(reqId); onErr(e); }, 0);
   }, onErr, billingCtx);
 }
 
@@ -51567,9 +51576,11 @@ function _admIssueScan(){
   var since=new Date(Date.now()-_ISSUE_DAYS*864e5).toISOString(), now=Date.now();
   return Promise.all([
     _supa.from('fal_jobs').select('req_id,user_id,cost,status,wf,created_at').gt('cost',0).in('status',['pending','completed']).gte('created_at',since).order('created_at',{ascending:true}).limit(3000),
-    _supa.from('gallery').select('user_id,wf,created_at').gte('created_at',new Date(Date.now()-(_ISSUE_DAYS+1)*864e5).toISOString()).limit(20000)
+    _supa.from('gallery').select('user_id,wf,created_at').gte('created_at',new Date(Date.now()-(_ISSUE_DAYS+1)*864e5).toISOString()).limit(20000),
+    _supa.from('job_receipts').select('req_id,created_at').gte('created_at',since).order('created_at',{ascending:true}).limit(20000)
   ]).then(function(rs){
-    var jr=rs[0], gr=rs[1];
+    var jr=rs[0], gr=rs[1], rr=rs[2]||{};
+    var rec={}, recSince=0; if(!rr.error && rr.data && rr.data.length){ recSince=new Date(rr.data[0].created_at).getTime(); rr.data.forEach(function(x){ rec[x.req_id]=1; }); }
     if(jr.error) return {list:[], err:jr.error.message};
     var done=_admIssueDoneLS(), gal={}, galWf={};
     (gr.data||[]).forEach(function(g){ galWf[g.wf]=1; (gal[g.user_id]=gal[g.user_id]||[]).push({t:new Date(g.created_at).getTime(), used:false}); });
@@ -51579,7 +51590,12 @@ function _admIssueScan(){
       if(done[j.req_id]) return;
       var t=new Date(j.created_at).getTime();
       if(j.status==='pending'){ if(now-t>20*60000) list.push({j:j, t:t, why:'stuck'}); return; }
-      if(gr.error || now-t<40*60000 || !galWf[j.wf]) return; // 갤러리에 저장되는 기능만 확인(저장 중일 수 있는 최근 40분 제외)
+      if(now-t<40*60000) return; // 저장 중일 수 있는 최근 40분 제외
+      if(gr.error || !galWf[j.wf]){
+        // 갤러리에 안 남는 기능(마감재 보드·분석 등): 수신 기록 기능이 생긴 뒤의 작업만, 화면이 결과를 못 받았으면 피해
+        if(recSince && t>recSince && !rec[j.req_id]) list.push({j:j, t:t, why:'norecv'});
+        return;
+      }
       var arr=gal[j.user_id]||[], hit=null;
       for(var i=0;i<arr.length;i++){ var g=arr[i]; if(!g.used && g.t>=t-60000 && g.t<=t+40*60000){ hit=g; break; } }
       if(hit) hit.used=true; else list.push({j:j, t:t, why:'nosave'});
@@ -51631,7 +51647,7 @@ function _admIssueOpen(){
   md.style.cssText='position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
   md.innerHTML='<div style="width:640px;max-width:100%;max-height:88vh;overflow:auto;background:var(--card,#141518);border:1px solid var(--bd2);border-radius:14px;padding:16px">'+
     '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-size:15px;font-weight:800;color:var(--t);flex:1">🚨 크레딧 확인 필요 (최근 '+_ISSUE_DAYS+'일)</div><button type="button" id="adm-issue-x" style="border:none;background:none;color:var(--m2);font-size:16px;cursor:pointer">✕</button></div>'+
-    '<div style="font-size:11.5px;color:var(--m2);line-height:1.6;margin-bottom:10px">⏸ <b>멈춤</b> = 크레딧은 빠졌는데 20분 넘게 결과가 안 나온 작업<br>📭 <b>결과 파일 없음</b> = 크레딧은 빠졌는데 결과 파일이 저장소에 아예 없는 작업(오류·이중 과금 — 회원이 결과를 못 받음)<br>실패로 이미 자동 환불된 건은 안 나와요.</div>'+
+    '<div style="font-size:11.5px;color:var(--m2);line-height:1.6;margin-bottom:10px">⏸ <b>멈춤</b> = 크레딧은 빠졌는데 20분 넘게 결과가 안 나온 작업<br>📭 <b>결과 파일 없음</b> = 크레딧은 빠졌는데 결과 파일이 저장소에 아예 없는 작업(오류·이중 과금 — 회원이 결과를 못 받음)<br>📡 <b>결과 수신 실패</b> = 갤러리에 안 남는 기능(마감재 보드 등)에서 회원 화면이 결과를 못 받은 작업<br>💳 <b>유료</b> = 크레딧을 결제한 적 있는 회원<br>실패로 이미 자동 환불된 건은 안 나와요.</div>'+
     '<div id="adm-issue-body" style="font-size:12px;color:var(--m2)">확인 중...</div></div>';
   document.body.appendChild(md);
   md.querySelector('#adm-issue-x').onclick=function(){ md.remove(); };
@@ -51645,8 +51661,13 @@ function _admIssueRender(r){
   if(!r.list.length){ body.innerHTML=_recvNote+'<div style="padding:18px;text-align:center;color:var(--ac);font-weight:700">✅ 확인이 필요한 건이 없어요</div>'; return; }
   var by={}, order=[];
   r.list.forEach(function(x){ var u=x.j.user_id; if(!by[u]){ by[u]=[]; order.push(u); } by[u].push(x); });
-  _supa.from('profiles').select('id,email,credits').in('id', order).then(function(pr){
-    var em={}; ((pr&&pr.data)||[]).forEach(function(p){ em[p.id]=p; });
+  Promise.all([
+    _supa.from('profiles').select('id,email,credits,plan').in('id', order),
+    _supa.from('credit_logs').select('user_id,reason').in('user_id', order).gt('amount',0).limit(5000)
+  ]).then(function(rs){
+    var pr=rs[0], paid={};
+    (((rs[1]||{}).data)||[]).forEach(function(l){ if(/결제|충전|구매|구독|플랜|payment|toss|purchase/i.test(String(l.reason||''))) paid[l.user_id]=1; });
+    var em={}; ((pr&&pr.data)||[]).forEach(function(p){ em[p.id]=p; if(p.plan && !/^(free|admin)$/i.test(p.plan)) paid[p.id]=1; });
     var WFL={consult:'상담패키지',space:'현장사진',render:'렌더실사화',edit:'AI편집',psedit:'포토샵편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',spaceset:'공간 컨셉',budget:'AI 견적'};
     body.innerHTML=_recvNote;
     order.forEach(function(u){
@@ -51655,9 +51676,9 @@ function _admIssueRender(r){
       box.style.cssText='border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.06);border-radius:10px;padding:10px 12px;margin-bottom:10px';
       var rows=items.map(function(x){
         var d=new Date(x.t), ts=(d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
-        return '<div style="display:flex;gap:8px;padding:3px 0;color:var(--t2);font-size:11.5px"><span style="width:78px;color:var(--m2)">'+ts+'</span><span style="flex:1">'+(x.why==='stuck'?'⏸ 멈춤':'📭 결과 파일 없음'+(x.unverified?'(파일 확인 불가)':''))+' · '+_admEsc(WFL[x.j.wf]||x.j.wf||'기타')+'</span><span style="font-weight:700;color:#f87171">-'+x.j.cost+'cr</span></div>';
+        return '<div style="display:flex;gap:8px;padding:3px 0;color:var(--t2);font-size:11.5px"><span style="width:78px;color:var(--m2)">'+ts+'</span><span style="flex:1">'+(x.why==='stuck'?'⏸ 멈춤':x.why==='norecv'?'📡 결과 수신 실패':'📭 결과 파일 없음'+(x.unverified?'(파일 확인 불가)':''))+' · '+_admEsc(WFL[x.j.wf]||x.j.wf||'기타')+'</span><span style="font-weight:700;color:#f87171">-'+x.j.cost+'cr</span></div>';
       }).join('');
-      box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="flex:1;font-weight:800;color:var(--t);font-size:13px;word-break:break-all">'+_admEsc(p.email||u)+'</div><div style="font-size:11px;color:var(--m2)">보유 '+((p.credits||0).toLocaleString())+'cr</div></div>'+rows+
+      box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="flex:1;font-weight:800;color:var(--t);font-size:13px;word-break:break-all">'+_admEsc(p.email||u)+'</div>'+(paid[u]?'<span style="font-size:10.5px;font-weight:800;color:#000;background:#f5b544;border-radius:6px;padding:2px 7px">💳 유료'+(p.plan&&!/^free$/i.test(p.plan)?' '+_admEsc(String(p.plan).toUpperCase()):'')+'</span>':'<span style="font-size:10.5px;color:var(--m2);border:1px solid var(--bd2);border-radius:6px;padding:1px 6px">무료</span>')+'<div style="font-size:11px;color:var(--m2)">보유 '+((p.credits||0).toLocaleString())+'cr</div></div>'+rows+
         '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button type="button" data-a="refund" style="flex:1;min-width:150px;padding:9px;border-radius:8px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit">💳 '+sum+'cr 환불 + 사과 안내</button>'+
         '<button type="button" data-a="ok" style="padding:9px 12px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:12px;cursor:pointer;font-family:inherit">문제없음(숨기기)</button></div><div data-r="1" style="font-size:11px;margin-top:6px"></div>';
       box.querySelector('[data-a="refund"]').onclick=function(){ _admIssueResolve(u, items, sum, true, box); };
