@@ -17858,6 +17858,27 @@ function _scIsCopyOfRefs(resUrl, refs, cb){
     });
   }, function(){ fin(false); });
 }
+// 2026-10-12: 공사 단계 이어 만들기 — 각 단계 결과가 '맨 처음 원본(완성 이미지)'이 무엇인지 기억
+var _STAGE_ROOT_MAP={};
+function _stKey(src){ try{ return src ? (String(src.length)+':'+String(src).slice(-80)) : ''; }catch(e){ return ''; } }
+function _stageRootRemember(resultSrc, rootSrc){ try{ if(resultSrc && rootSrc && resultSrc!==rootSrc) _STAGE_ROOT_MAP[_stKey(resultSrc)]=rootSrc; }catch(e){} }
+function _stageRootFor(src){
+  try{
+    if(!src) return null;
+    var cur=src, root=null, guard=0;
+    while(cur && guard++<8){
+      var m=_STAGE_ROOT_MAP[_stKey(cur)];
+      if(m){ root=m; cur=m; continue; }
+      var found=null;
+      Object.keys(G.HIST||{}).some(function(wf){ return (G.HIST[wf]||[]).some(function(it){
+        if(!it || STAGE_SURROUND_KEYS.indexOf(it.savedSelK)===-1) return false;
+        if(it.result===cur || it.cloud_url===cur){ found=it.orig_cloud_url || it.orig || null; return true; }
+        return false; }); });
+      if(found && found!==cur){ root=found; cur=found; } else break;
+    }
+    return root;
+  }catch(e){ return null; }
+}
 function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
@@ -46864,7 +46885,11 @@ function procImgWithTask(task, onDone, onErr){
                 // 2026-10-11("미완성 공사도 붉은끼"): 색이 바뀌는 게 목적인 프리셋(계절·낮밤·비·조명 켜기/끄기)만 색 보정 생략 —
                 // 미완성 공사·노후 외관은 건물만 바뀌고 주변 색은 원본 그대로여야 하므로 색 보정 적용
                 var _keepColorFix = (STAGE_SURROUND_KEYS.indexOf(task.selK)!==-1) || /^aged_/.test(task.selK||'');
-                _editDetailRestore(img, u, function(f){ finishWithResize(f||u, onDone); }, {noColor:!_keepColorFix});
+                // 2026-10-12("단계를 이어서 만들수록 주변 나무가 수채화처럼 뭉개진다"): 공사 단계를 이전 단계 결과로 이어서 만들면
+                // 주변 디테일이 매번 AI를 거쳐 열화됨 → 주변 복원 기준을 '맨 처음 원본(완성 이미지)'으로 잡음(구도가 같아서 그대로 맞음)
+                var _stRoot = (STAGE_SURROUND_KEYS.indexOf(task.selK)!==-1) ? _stageRootFor(task.img) : null;
+                if(_stRoot) console.log('[공사 단계] 이어서 만들기 감지 → 주변 디테일은 맨 처음 원본 기준으로 복원');
+                _editDetailRestore(_stRoot || img, u, function(f){ var fin=f||u; if(STAGE_SURROUND_KEYS.indexOf(task.selK)!==-1) _stageRootRemember(fin, _stRoot || task.img); finishWithResize(fin, onDone); }, {noColor:!_keepColorFix});
               } else {
                 _neutralizeEditColorCast(img,u,function(correctedUrl){ _editDetailRestore(img, correctedUrl||u, function(f){ finishWithResize(f||correctedUrl, onDone); }); });
               }
