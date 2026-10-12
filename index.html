@@ -17899,10 +17899,17 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
           // 여기서 항상 null로 저장하고 있었음. 같은 세션에선 로컬 메모리(G.HIST.budget)에 진짜
           // 값이 남아있어서 괜찮아 보였지만, 새로고침하거나 갤러리 클라우드 동기화가 일어나면
           // 클라우드에서 다시 불러올 때 null로 덮어써져서 예산 패널이 통째로 사라지고 있었음.
-          _supa.from('gallery').insert({
+          // 2026-10-12: 관리자 확인용 meta(공간 컨셉: 회원이 적은 전체 공통 스타일 문구 + 뷰 이름) — 칼럼 없으면 meta 빼고 다시 저장
+          var _sp=null; try{ _sp=(wf==='spaceset')?getTab('spaceset'):null; }catch(_e){}
+          var _row2={
             user_id:_supaUser.id, wf:wf, storage_path:filePath, public_url:publicUrl,
-            orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:roomLabel||'', budget_snapshot:budgetSnapshot||null
-          }).select().single().then(function(){ console.log('[Gallery] 클라우드 저장 완료 ('+wf+')'); })
+            orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:roomLabel||'', budget_snapshot:budgetSnapshot||null,
+            meta:{prompt:String((_sp&&_sp.autoRoomPrompt)||'').slice(0,1000), preset:roomLabel||'', eng:engineName||'', mode:''}
+          };
+          _supa.from('gallery').insert(_row2).select().single().then(function(ins){
+            if(ins && ins.error && /meta/i.test(ins.error.message||'')){ delete _row2.meta; return _supa.from('gallery').insert(_row2).select().single(); }
+            return ins;
+          }).then(function(ins){ if(ins && ins.error) console.warn('[Gallery] DB 저장 실패 ('+wf+'):', ins.error.message||ins.error); else console.log('[Gallery] 클라우드 저장 완료 ('+wf+')'); })
             .catch(function(e){ console.warn('[Gallery] DB 저장 실패:', e); });
         }
         if(origUrl && origUrl.indexOf('data:')===0){
@@ -22405,7 +22412,7 @@ function _padExteriorTo916WithBlur(url, cb){
     if(_looseAspect==='9:16' || _looseAspect==='3:4' || _looseAspect==='2:3') _looseP += ' FINAL OUTPUT RULE: ONE single continuous photograph filling the whole frame — no stacked or split images, no panels, no borders, and never write any instruction text or captions inside the image.';
     if(_isExteriorViewType(typeName) && spTab.autoRoomCurtainBg!==false) _looseP += EXTERIOR_CURTAIN_FINAL; // 2026-10-05: "커튼/블라인드 체크했는데 투시뷰에 하나도 없다" — 중간에 묻혀 있던 지시를 진짜 맨 끝으로
     if(_looseP.indexOf('숲과 나무가 우거진 자연 환경')!==-1) _looseP += SURROUND_FOREST_FINAL; // 2026-10-05: "숲과 나무 배경 골랐는데 단독주택이 많이 나온다"
-    var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1};
+    var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 버그 수정: 해상도가 빠져 4K를 골라도 1K(1376×768)로 생성되던 문제
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
     // ⚠️ 치명적 버그 수정(반영도 3단계가 전부 똑같이 나오던 진짜 원인): 'google/nano-banana-2.1'는
     // (끝에 /edit이 안 붙은) 순수 텍스트→이미지 생성 전용 모델이라, 위에서 image_urls로 넣어준
@@ -22836,7 +22843,7 @@ function _autoRoomRetryOne(idx){
     }
     if(_isExteriorViewType(typeName) && spTab.autoRoomCurtainBg!==false) _looseP2 += EXTERIOR_CURTAIN_FINAL;
     if(_looseP2.indexOf('숲과 나무가 우거진 자연 환경')!==-1) _looseP2 += SURROUND_FOREST_FINAL; // 2026-10-05: "숲과 나무 배경 골랐는데 단독주택이 많이 나온다"
-    var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1};
+    var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 해상도 누락 수정
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
     // ⚠️ 위 _autoRoomGenerateStep과 동일한 치명적 버그 수정: 참고 사진이 있으면 반드시 /edit
     // 모델을 써야 실제로 그 사진을 참고함('/edit' 없는 순수 생성 모델은 image_urls를 무시함).
@@ -45710,6 +45717,7 @@ function executeSingleRender(task){
                     if(ins && ins.error && /meta/i.test(ins.error.message||'')){ delete _row.meta; return _supa.from('gallery').insert(_row).select().single(); }
                     return ins;
                   }).then(function(ins){
+                    if(ins && ins.error){ console.warn('[Gallery] DB 저장 실패:', ins.error.message||ins.error); return; }
                     console.log('[Gallery] 클라우드 저장 완료');
                     item.cloud_url=publicUrl;
                     item.orig_cloud_url=origUrl||null;
@@ -45996,6 +46004,9 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
     loadImgSafe(ri, function(img2){
       try{
         var aiW=img2.naturalWidth, aiH=img2.naturalHeight;
+        // 2026-10-12: AI가 등급 캡보다 크게 만들어 준 경우(예: 나노바나나 2K = 긴 변 2752px)엔 줄이지 않음 — 결제한 해상도를 그대로 살림
+        var _aiLong=Math.max(aiW,aiH);
+        if(_aiLong>TIER_CAP){ if(origAspect>=1){ origW=_aiLong; origH=Math.round(_aiLong/origAspect); } else { origH=_aiLong; origW=Math.round(_aiLong*origAspect); } }
         // AI 결과물과 원본의 비율(가로세로 비) 비교
         var origRatio=origW/origH, aiRatio=aiW/aiH;
         var ratioDiff=Math.abs(origRatio-aiRatio)/origRatio;
@@ -46686,7 +46697,7 @@ function procImgWithTask(task, onDone, onErr){
 
     // 사용자 선택 해상도 우선, 없으면 원본 크기 기반 자동
     function getEditRes(dataUrl, cb){
-      var userRes = getTab('edit').resolution || '';
+      var userRes = (task && task.resolution) || getTab('edit').resolution || ''; // 2026-10-12: 작업을 넣은 시점의 해상도 우선(요금 계산과 일치)
       if(userRes==='1K'||userRes==='2K'||userRes==='4K'){
         console.log('[edit] 사용자 선택 resolution:',userRes);
         cb(userRes, 0, 0); // 리사이즈 불필요
@@ -48127,7 +48138,7 @@ function _openBulkPresetApply(picked){
       var item = picked[i];
       var srcUrl = item.result || item.orig || item.origThumb;
       function doRun(_aspect){
-        falRun('google/nano-banana-2.1/edit', {prompt: PT, image_urls:[srcUrl], aspect_ratio:_aspect, num_images:1}, function(d){
+        falRun('google/nano-banana-2.1/edit', {prompt: PT, image_urls:[srcUrl], aspect_ratio:_aspect, num_images:1, resolution:({'1K':'1K','2K':'2K','4K':'4K'})[resolution]||'1K'}, function(d){ // 2026-10-12: 해상도 누락 수정(요금은 선택 해상도로 차감되는데 1K로 생성되던 문제)
           var url = falExtractImageUrl(d);
           if(url){
             _saveResultToCloudGallery(item.wf||'edit', Date.now()+i, url, srcUrl, 'nano2', resolution, null, null);
