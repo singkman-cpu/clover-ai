@@ -51461,10 +51461,12 @@ function _admNotifyCheck(firstPopup){
   jobs.push(_supa.from('bug_reports').select('id,description').eq('status','open').limit(500).then(function(r){
     (r.data||[]).forEach(function(x){ if(/^💡\[아이디어\] /.test(x.description||'')) out.idea++; else out.bug++; });
   }).catch(function(){}));
+  out.issue=0;
+  jobs.push(_admIssueScan().then(function(r){ out.issue=r.list.length; window._admIssueLast=r; }).catch(function(){}));
   Promise.all(jobs).then(function(){ _admNotifyRender(out, firstPopup); });
 }
 function _admNotifyRender(out, popup){
-  var total=out.comm+out.bug+out.idea;
+  var total=out.comm+out.bug+out.idea+(out.issue||0);
   var bell=document.getElementById('btn-adm-bell');
   if(!bell){
     var anchor=document.getElementById('btn-guide'); if(!anchor) return;
@@ -51474,7 +51476,7 @@ function _admNotifyRender(out, popup){
   }
   bell.innerHTML='🔔'+(total?'<span style="position:absolute;top:-6px;right:-6px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:#ef4444;color:#fff;font-size:10px;font-weight:800;line-height:17px;text-align:center">'+total+'</span>':'');
   bell.onclick=function(){ _admNotifyPanel(out); };
-  var key=out.comm+'|'+out.bug+'|'+out.idea;
+  var key=out.comm+'|'+out.bug+'|'+out.idea+'|'+(out.issue||0);
   if(total && (popup || key!==window._admNotifyLastKey)) _admNotifyPanel(out);
   window._admNotifyLastKey=key;
 }
@@ -51487,6 +51489,7 @@ function _admNotifyPanel(out){
       '<span style="font-size:16px">'+icon+'</span><span style="flex:1">'+label+'</span><span style="font-weight:800;color:'+(n?'#f87171':'var(--m2)')+'">'+n+'</span></button>';
   }
   pop.innerHTML='<div style="display:flex;align-items:center;margin-bottom:10px"><div style="font-size:14px;font-weight:800;color:var(--t);flex:1">🔔 관리자 알림</div><button type="button" data-x="1" style="border:none;background:none;color:var(--m2);font-size:15px;cursor:pointer">✕</button></div>'+
+    row('🚨','크레딧 확인 필요(오류 의심)', out.issue||0, 'issues')+
     row('🌍','커뮤니티 확인 대기', out.comm, 'community')+
     row('🐛','미해결 버그 제보', out.bug, 'bugReports:open')+
     row('💡','새 아이디어 제안', out.idea, 'bugReports:idea')+
@@ -51495,10 +51498,102 @@ function _admNotifyPanel(out){
     var b=e.target.closest('button'); if(!b) return;
     if(b.dataset.x){ pop.remove(); return; }
     var t=b.dataset.tab; if(!t) return;
+    if(t==='issues'){ pop.remove(); _admIssueOpen(); return; }
     var parts=t.split(':'); _adminTab=parts[0]; if(parts[1]) _admBugFilter=parts[1];
     pop.remove(); openMd('admin');
   };
   document.body.appendChild(pop);
+}
+// ═══ 2026-10-12(관리자 요청): 우리 쪽 오류로 크레딧만 빠지고 결과를 못 받은 회원 자동 감지 ═══
+// ① 멈춤: 서버(fal_jobs)에 '진행 중'으로 20분 넘게 남아 있는 유료 작업(렌더 멈춤·중단)
+// ② 결과 없음/중복: 완료됐는데 그 시간대에 갤러리 저장 기록이 없는 유료 작업(후처리 오류·이중 과금 등)
+// 관리자 접속 시 🔔 알림에 개수가 뜨고, 목록에서 버튼 한 번으로 환불 + 사과 안내(다음 접속 때 팝업)
+var _ISSUE_DAYS=7;
+function _admIssueDoneLS(){ try{ return JSON.parse(localStorage.getItem('adm_issue_done')||'{}')||{}; }catch(e){ return {}; } }
+function _admIssueMarkLS(ids){ try{ var d=_admIssueDoneLS(); ids.forEach(function(i){ d[i]=1; }); localStorage.setItem('adm_issue_done', JSON.stringify(d)); }catch(e){} }
+function _admIssueScan(){
+  if(!_supa) return Promise.resolve({list:[], err:null});
+  var since=new Date(Date.now()-_ISSUE_DAYS*864e5).toISOString(), now=Date.now();
+  return Promise.all([
+    _supa.from('fal_jobs').select('req_id,user_id,cost,status,wf,created_at').gt('cost',0).in('status',['pending','completed']).gte('created_at',since).order('created_at',{ascending:true}).limit(3000),
+    _supa.from('gallery').select('user_id,wf,created_at').gte('created_at',new Date(Date.now()-(_ISSUE_DAYS+1)*864e5).toISOString()).limit(20000)
+  ]).then(function(rs){
+    var jr=rs[0], gr=rs[1];
+    if(jr.error) return {list:[], err:jr.error.message};
+    var done=_admIssueDoneLS(), gal={}, galWf={};
+    (gr.data||[]).forEach(function(g){ galWf[g.wf]=1; (gal[g.user_id]=gal[g.user_id]||[]).push({t:new Date(g.created_at).getTime(), used:false}); });
+    Object.keys(gal).forEach(function(u){ gal[u].sort(function(a,b){ return a.t-b.t; }); });
+    var list=[];
+    (jr.data||[]).forEach(function(j){
+      if(done[j.req_id]) return;
+      var t=new Date(j.created_at).getTime();
+      if(j.status==='pending'){ if(now-t>20*60000) list.push({j:j, t:t, why:'stuck'}); return; }
+      if(gr.error || now-t<40*60000 || !galWf[j.wf]) return; // 갤러리에 저장되는 기능만 확인(저장 중일 수 있는 최근 40분 제외)
+      var arr=gal[j.user_id]||[], hit=null;
+      for(var i=0;i<arr.length;i++){ var g=arr[i]; if(!g.used && g.t>=t-60000 && g.t<=t+40*60000){ hit=g; break; } }
+      if(hit) hit.used=true; else list.push({j:j, t:t, why:'nosave'});
+    });
+    return {list:list, err:null};
+  }).catch(function(e){ return {list:[], err:String((e&&e.message)||e)}; });
+}
+function _admIssueOpen(){
+  var old=document.getElementById('adm-issue-md'); if(old) old.remove();
+  var md=document.createElement('div'); md.id='adm-issue-md';
+  md.style.cssText='position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+  md.innerHTML='<div style="width:640px;max-width:100%;max-height:88vh;overflow:auto;background:var(--card,#141518);border:1px solid var(--bd2);border-radius:14px;padding:16px">'+
+    '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-size:15px;font-weight:800;color:var(--t);flex:1">🚨 크레딧 확인 필요 (최근 '+_ISSUE_DAYS+'일)</div><button type="button" id="adm-issue-x" style="border:none;background:none;color:var(--m2);font-size:16px;cursor:pointer">✕</button></div>'+
+    '<div style="font-size:11.5px;color:var(--m2);line-height:1.6;margin-bottom:10px">⏸ <b>멈춤</b> = 크레딧은 빠졌는데 20분 넘게 결과가 안 나온 작업<br>📭 <b>결과 없음</b> = 완료됐는데 갤러리에 저장된 결과가 없는 작업(오류·이중 과금 의심 — 회원이 직접 지웠을 수도 있어요)<br>실패로 이미 자동 환불된 건은 안 나와요.</div>'+
+    '<div id="adm-issue-body" style="font-size:12px;color:var(--m2)">확인 중...</div></div>';
+  document.body.appendChild(md);
+  md.querySelector('#adm-issue-x').onclick=function(){ md.remove(); };
+  md.addEventListener('click', function(e){ if(e.target===md) md.remove(); });
+  _admIssueScan().then(function(r){ window._admIssueLast=r; _admIssueRender(r); });
+}
+function _admIssueRender(r){
+  var body=document.getElementById('adm-issue-body'); if(!body) return;
+  if(r.err){ body.innerHTML='<span style="color:#fca5a5">불러오기 실패: '+_admEsc(r.err)+'<br>Supabase SQL Editor에서 ADMIN_ISSUES.sql을 한 번 실행해 주세요.</span>'; return; }
+  if(!r.list.length){ body.innerHTML='<div style="padding:18px;text-align:center;color:var(--ac);font-weight:700">✅ 확인이 필요한 건이 없어요</div>'; return; }
+  var by={}, order=[];
+  r.list.forEach(function(x){ var u=x.j.user_id; if(!by[u]){ by[u]=[]; order.push(u); } by[u].push(x); });
+  _supa.from('profiles').select('id,email,credits').in('id', order).then(function(pr){
+    var em={}; ((pr&&pr.data)||[]).forEach(function(p){ em[p.id]=p; });
+    var WFL={consult:'상담패키지',space:'현장사진',render:'렌더실사화',edit:'AI편집',psedit:'포토샵편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',spaceset:'공간 컨셉',budget:'AI 견적'};
+    body.innerHTML='';
+    order.forEach(function(u){
+      var items=by[u], sum=items.reduce(function(a,x){ return a+(x.j.cost||0); },0), p=em[u]||{};
+      var box=document.createElement('div');
+      box.style.cssText='border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.06);border-radius:10px;padding:10px 12px;margin-bottom:10px';
+      var rows=items.map(function(x){
+        var d=new Date(x.t), ts=(d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+        return '<div style="display:flex;gap:8px;padding:3px 0;color:var(--t2);font-size:11.5px"><span style="width:78px;color:var(--m2)">'+ts+'</span><span style="flex:1">'+(x.why==='stuck'?'⏸ 멈춤':'📭 결과 없음')+' · '+_admEsc(WFL[x.j.wf]||x.j.wf||'기타')+'</span><span style="font-weight:700;color:#f87171">-'+x.j.cost+'cr</span></div>';
+      }).join('');
+      box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="flex:1;font-weight:800;color:var(--t);font-size:13px;word-break:break-all">'+_admEsc(p.email||u)+'</div><div style="font-size:11px;color:var(--m2)">보유 '+((p.credits||0).toLocaleString())+'cr</div></div>'+rows+
+        '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button type="button" data-a="refund" style="flex:1;min-width:150px;padding:9px;border-radius:8px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit">💳 '+sum+'cr 환불 + 사과 안내</button>'+
+        '<button type="button" data-a="ok" style="padding:9px 12px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--m2);font-size:12px;cursor:pointer;font-family:inherit">문제없음(숨기기)</button></div><div data-r="1" style="font-size:11px;margin-top:6px"></div>';
+      box.querySelector('[data-a="refund"]').onclick=function(){ _admIssueResolve(u, items, sum, true, box); };
+      box.querySelector('[data-a="ok"]').onclick=function(){ _admIssueResolve(u, items, 0, false, box); };
+      body.appendChild(box);
+    });
+  });
+}
+function _admIssueResolve(uid, items, sum, refund, box){
+  var res=box.querySelector('[data-r]'), ids=items.map(function(x){ return x.j.req_id; });
+  box.querySelectorAll('button').forEach(function(b){ b.disabled=true; b.style.opacity='.5'; });
+  function mark(){
+    _admIssueMarkLS(ids);
+    _supa.from('fal_jobs').update({status: refund?'admin_refunded':'admin_ok'}).in('req_id', ids).then(function(){}).catch(function(){});
+    setTimeout(function(){ box.remove(); try{ _admNotifyCheck(false); }catch(e){} }, refund?1600:300);
+  }
+  if(!refund){ mark(); return; }
+  if(!confirm(sum+'cr를 환불하고 회원에게 사과 안내를 보낼까요?')){ box.querySelectorAll('button').forEach(function(b){ b.disabled=false; b.style.opacity=''; }); return; }
+  res.style.color='var(--m2)'; res.textContent='처리 중...';
+  _supa.rpc('admin_adjust_credits', {target_id: uid, amount: sum, log_reason: '오류 환불(자동 감지)'}).then(function(r){
+    if(r.error){ res.style.color='#fca5a5'; res.textContent='오류: '+r.error.message; box.querySelectorAll('button').forEach(function(b){ b.disabled=false; b.style.opacity=''; }); return; }
+    _supa.from('member_notices').insert({user_id:uid, title:'크레딧 환불 안내', body:'서비스 이용 중 오류가 확인되어 사용하신 크레딧을 환불해 드렸어요.\n이용에 불편을 드려 죄송합니다. 더 좋은 서비스로 보답할게요.', credits:sum}).then(function(nr){
+      res.style.color='var(--ac)'; res.textContent='✓ '+sum+'cr 환불 완료'+((nr&&nr.error)?' (안내 메시지 저장 실패 — MEMBER_NOTICES.sql 확인)':' · 다음 접속 때 사과 안내가 떠요');
+      mark();
+    });
+  }).catch(function(e){ res.style.color='#fca5a5'; res.textContent='오류: '+e.message; });
 }
 // 회원이 커뮤니티에 공개 신청하면 관리자 메일로도 알림(10분에 한 번만 — 여러 장 한꺼번에 올려도 메일 폭탄 방지)
 function _commNotifyAdminMail(){
