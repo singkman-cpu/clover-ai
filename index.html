@@ -42769,8 +42769,13 @@ function falPoll(baseUrlOrCandidates, reqId, onDone, onErr, attempt, candidateId
       // 2026-10-12: 상태 조회는 됐는데 결과 조회가 같은 주소에서 404("Path ... not found")로 실패하는 모델(Seedream 5.0 Pro 등)이 있어서,
       // 실패하면 다른 후보 주소(소유자/앱 기준 등)로 결과 조회를 다시 시도
       var _resOrder=[baseUrl].concat(candidates.filter(function(c){ return c!==baseUrl; }));
+      var _resRound=0; // 2026-10-13: 결과 가져오기가 한 번 실패하면(서버 혼잡·일시 타임아웃) 바로 실패 처리돼서 크레딧만 나가던 문제 → 최대 4바퀴 재시도
       (function tryRes(i, lastErr){
-        if(i>=_resOrder.length){ onErr('result fetch 실패: ' + (lastErr&&lastErr.message||'')); return; }
+        if(i>=_resOrder.length){
+          if(++_resRound<4){ console.warn('[FAL result] 결과 가져오기 재시도 '+_resRound+'/3'); setTimeout(function(){ tryRes(0, lastErr); }, 2500*_resRound); return; }
+          try{ _logErrorToServer('[결과 가져오기 실패] '+reqId+' · '+(lastErr&&lastErr.message||''), '', 'fal-result'); }catch(_le){}
+          onErr('result fetch 실패: ' + (lastErr&&lastErr.message||'')); return;
+        }
         _falResultGet(_resOrder[i], reqId)
         .then(function(res){
           console.log('[FAL result]', JSON.stringify(res).slice(0,500));
