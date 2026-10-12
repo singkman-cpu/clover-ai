@@ -45755,7 +45755,7 @@ function executeSingleRender(task){
               _supa.storage.from('gallery').upload(filePath, blob, {
                 contentType:_resCT, upsert:true
               }).then(function(uploadRes){
-                if(uploadRes.error){console.warn('[Gallery] 업로드 실패:',uploadRes.error.message);return;}
+                if(uploadRes.error){console.warn('[Gallery] 업로드 실패:',uploadRes.error.message); try{ _logErrorToServer('[갤러리 업로드 실패] '+task.wf+' · '+uploadRes.error.message, '', 'gallery-upload'); }catch(_le){} return;}
                 var publicUrl=_supa.storage.from('gallery').getPublicUrl(filePath).data.publicUrl;
                 function saveGalleryRow(origUrl){
                   // 2026-10-12(관리자 요청): 회원이 어떤 프롬프트·어떤 영역으로 작업했는지 관리자가 볼 수 있게 meta 저장
@@ -45777,7 +45777,7 @@ function executeSingleRender(task){
                     if(ins && ins.error && /meta/i.test(ins.error.message||'')){ delete _row.meta; return _supa.from('gallery').insert(_row).select().single(); }
                     return ins;
                   }).then(function(ins){
-                    if(ins && ins.error){ console.warn('[Gallery] DB 저장 실패:', ins.error.message||ins.error); return; }
+                    if(ins && ins.error){ console.warn('[Gallery] DB 저장 실패:', ins.error.message||ins.error); try{ _logErrorToServer('[갤러리 DB 저장 실패] '+task.wf+' · '+(ins.error.message||ins.error), '', 'gallery-db'); }catch(_le){} return; }
                     console.log('[Gallery] 클라우드 저장 완료');
                     item.cloud_url=publicUrl;
                     item.orig_cloud_url=origUrl||null;
@@ -45803,8 +45803,8 @@ function executeSingleRender(task){
                 } else {
                   saveGalleryRow(null);
                 }
-              }).catch(function(e){console.warn('[Gallery] 업로드 오류:',e);});
-            }).catch(function(e){console.warn('[Gallery] fetch 오류:',e);});
+              }).catch(function(e){console.warn('[Gallery] 업로드 오류:',e); try{ _logErrorToServer('[갤러리 업로드 오류] '+task.wf+' · '+String(e&&e.message||e), '', 'gallery-upload'); }catch(_le){} });
+            }).catch(function(e){console.warn('[Gallery] fetch 오류:',e); try{ _logErrorToServer('[갤러리 결과 받기 오류] '+task.wf+' · '+String(e&&e.message||e), '', 'gallery-fetch'); }catch(_le){} });
           }catch(e){console.warn('[Gallery] 오류:',e);}
         }
 
@@ -45879,6 +45879,7 @@ function executeSingleRender(task){
     processRenderQueue();
   }, function(err){
     _stopTimer();
+    try{ if(typeof _logErrorToServer==='function') _logErrorToServer('[렌더 실패] '+task.wf+' · '+String(err).slice(0,300), '', 'render:'+task.wf+':'+(task.selK||'-')+':'+(task.eng||'-')+':'+(task.resolution||'-')); }catch(_le){} // 2026-10-13: 크레딧 나간 뒤 실패 원인 추적(관리자 오류 로그)
     G.activeRenders=Math.max(0,G.activeRenders-1);
     task.status='error';
     setTabStatus(task.wf,'error');
