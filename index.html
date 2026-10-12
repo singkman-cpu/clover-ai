@@ -8683,22 +8683,40 @@ function _tpOpenPainter(){
   }, function(){ alert('이미지를 불러오지 못했어요.'); });
 }
 function _rqbProtect(origSrc, resSrc, maskSrc, cb){
+  // v2(2026-10-12 "칠한 부분 주변 색이 달라 티 난다"): 원본을 그대로 붙이지 않고, 칠한 덩어리마다 원본 색·밝기 분포를
+  // 그 자리 AI 결과의 색·밝기 분포에 맞춘 뒤(글자 모양만 원본) 넓게 페더해서 섞음.
   if(!maskSrc){ cb(resSrc); return; }
   var done=false; function fin(x){ if(done) return; done=true; cb(x||resSrc); }
-  setTimeout(function(){ fin(null); }, 25000);
+  setTimeout(function(){ fin(null); }, 30000);
   try{ loadImgSafe(origSrc, function(o){ loadImgSafe(resSrc, function(r){ loadImgSafe(maskSrc, function(m){ try{
-    var W=r.naturalWidth, H=r.naturalHeight, fe=Math.max(2, Math.round(Math.max(W,H)/700));
-    var mc=document.createElement('canvas'); mc.width=W; mc.height=H; var mx=mc.getContext('2d'); mx.filter='blur('+fe+'px)'; mx.drawImage(m,0,0,W,H); mx.filter='none';
-    var oc=document.createElement('canvas'); oc.width=W; oc.height=H; var ox=oc.getContext('2d'); ox.imageSmoothingQuality='high'; ox.drawImage(o,0,0,W,H);
-    // 칠한 부분의 밝기를 결과 주변과 맞춤(원본을 그대로 붙였을 때 밝기 차이로 티 나지 않게)
+    var W=r.naturalWidth, H=r.naturalHeight, fe=Math.max(3, Math.round(Math.max(W,H)/450));
     var rc=document.createElement('canvas'); rc.width=W; rc.height=H; var rx=rc.getContext('2d'); rx.drawImage(r,0,0);
-    var md=mx.getImageData(0,0,W,H).data, od=ox.getImageData(0,0,W,H).data, rd=rx.getImageData(0,0,W,H).data, so=0, sr=0, n=0;
-    for(var i=0;i<md.length;i+=16){ if(md[i+3]>128){ so+=0.299*od[i]+0.587*od[i+1]+0.114*od[i+2]; sr+=0.299*rd[i]+0.587*rd[i+1]+0.114*rd[i+2]; n++; } }
-    var k = n ? Math.max(0.85, Math.min(1.15, (sr/n)/Math.max(1,(so/n)))) : 1;
-    if(Math.abs(k-1)>0.01){ var oc2=document.createElement('canvas'); oc2.width=W; oc2.height=H; var o2=oc2.getContext('2d'); o2.filter='brightness('+k.toFixed(3)+')'; o2.drawImage(oc,0,0); o2.filter='none'; oc=oc2; ox=o2; }
+    var oc=document.createElement('canvas'); oc.width=W; oc.height=H; var ox=oc.getContext('2d'); ox.imageSmoothingQuality='high'; ox.drawImage(o,0,0,W,H);
+    var hc=document.createElement('canvas'); hc.width=W; hc.height=H; var hx=hc.getContext('2d'); hx.drawImage(m,0,0,W,H);
+    var hd=hx.getImageData(0,0,W,H).data, rd=rx.getImageData(0,0,W,H).data, oid=ox.getImageData(0,0,W,H), od=oid.data;
+    // 칠한 덩어리 찾기(저해상도)
+    var S=4, sw=Math.ceil(W/S), sh=Math.ceil(H/S), lab=new Int32Array(sw*sh).fill(-1), blobs=[];
+    function on(x,y){ return hd[((y*S)*W+(x*S))*4+3]>40; }
+    for(var y0=0;y0<sh;y0++) for(var x0=0;x0<sw;x0++){ var id0=y0*sw+x0; if(lab[id0]!==-1||!on(x0,y0)) continue;
+      var st=[id0], b={x0:x0,y0:y0,x1:x0,y1:y0}; lab[id0]=blobs.length;
+      while(st.length){ var c=st.pop(), cx=c%sw, cy=(c/sw)|0; if(cx<b.x0)b.x0=cx; if(cx>b.x1)b.x1=cx; if(cy<b.y0)b.y0=cy; if(cy>b.y1)b.y1=cy;
+        [[1,0],[-1,0],[0,1],[0,-1]].forEach(function(dd){ var nx=cx+dd[0], ny=cy+dd[1]; if(nx<0||ny<0||nx>=sw||ny>=sh) return; var ni=ny*sw+nx; if(lab[ni]===-1&&on(nx,ny)){ lab[ni]=blobs.length; st.push(ni); } }); }
+      blobs.push(b); }
+    blobs.forEach(function(b){
+      var X0=Math.max(0,b.x0*S-fe*3), Y0=Math.max(0,b.y0*S-fe*3), X1=Math.min(W-1,(b.x1+1)*S+fe*3), Y1=Math.min(H-1,(b.y1+1)*S+fe*3);
+      var so=[0,0,0], qo=[0,0,0], sr=[0,0,0], qr=[0,0,0], n=0;
+      for(var y=Y0;y<=Y1;y+=2) for(var x=X0;x<=X1;x+=2){ var p=(y*W+x)*4; if(hd[p+3]<40) continue; n++;
+        for(var k=0;k<3;k++){ var a=od[p+k], bb=rd[p+k]; so[k]+=a; qo[k]+=a*a; sr[k]+=bb; qr[k]+=bb*bb; } }
+      if(n<20) return;
+      var mo=[],mr=[],g=[]; for(var k=0;k<3;k++){ mo[k]=so[k]/n; mr[k]=sr[k]/n; var vo=Math.sqrt(Math.max(1,qo[k]/n-mo[k]*mo[k])), vr=Math.sqrt(Math.max(1,qr[k]/n-mr[k]*mr[k])); g[k]=Math.max(0.75,Math.min(1.3,vr/vo)); }
+      for(var y2=Y0;y2<=Y1;y2++) for(var x2=X0;x2<=X1;x2++){ var q=(y2*W+x2)*4;
+        for(var k2=0;k2<3;k2++){ var v=(od[q+k2]-mo[k2])*g[k2]+mr[k2]; od[q+k2]=v<0?0:(v>255?255:v); } }
+    });
+    ox.putImageData(oid,0,0);
+    var mc=document.createElement('canvas'); mc.width=W; mc.height=H; var mx=mc.getContext('2d'); mx.filter='blur('+fe+'px)'; mx.drawImage(m,0,0,W,H); mx.filter='none';
     ox.globalCompositeOperation='destination-in'; ox.drawImage(mc,0,0); ox.globalCompositeOperation='source-over';
     rx.drawImage(oc,0,0);
-    console.log('[고품질화] 글자 보호 영역 원본 유지 (밝기 맞춤 x'+k.toFixed(3)+', 페더 '+fe+'px)');
+    console.log('[고품질화] 글자 보호 '+blobs.length+'곳 — 주변 색·밝기 맞춤 후 합성 (페더 '+fe+'px)');
     fin(rc.toDataURL('image/jpeg',0.95));
   }catch(e){ console.warn('[고품질화] 글자 보호 실패', e); fin(null); } }, function(){ fin(null); }); }, function(){ fin(null); }); }, function(){ fin(null); });
   }catch(e){ fin(null); }
