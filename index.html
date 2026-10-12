@@ -29349,7 +29349,7 @@ function _consultDefault(type){
   return {
     v:1, type:type, client:'', area:'', rooms:'', budget:'', biz:'', houseKind:'아파트', floorLoc:'1층', memo:'',
     spaces:[], // 사진을 올리면 공간 이름(거실·주방…)이 자동으로 붙음(_consultNextSpaceName)
-    refs:[], count:3, mode:'design', res:'1K', makeTex:true,
+    refs:[], count:1, mode:'design', res:'1K', makeTex:true,
     legal:{zone:'', site:'', foot:'', gfa:'', floors:'', apt:false, aptFloors:'', addFloors:0},
     plan:null, variants:[], round:1, pdfPages:null, updatedAt:Date.now()
   };
@@ -30921,6 +30921,26 @@ function _consultStart(){
 
 // ── 렌더링 없이: 갤러리·내 PC 이미지로 제안서 만들기 (2026-10-07 요청: "가장 중요한 것 — 여기서 렌더링 안 걸어도
 // 갤러리 탭이나 외부 이미지를 불러와서 쓸 수 있게") — 크레딧 0. 공간마다 결과 이미지를 넣으면 마감재 분석(무료)·견적·PDF까지.
+// 2026-10-12(사용자 요청): 시안 숫자를 누르면 메인화면 시안 칸 수도 그에 맞게 — 줄이면 뒤쪽 시안을 빼고, 늘리면 빈 시안 칸을 추가
+function _consultSyncCount(st){
+  try{
+    var n=(st.variants||[]).length, k=st.count||1; if(!n || n===k) return;
+    if(k<n){
+      var lost=st.variants.slice(k).some(function(v){ return Object.keys(v.spaces||{}).some(function(id){ return v.spaces[id] && v.spaces[id].result; }); });
+      if(lost && !confirm('시안을 '+k+'개로 줄이면 뒤쪽 시안('+st.variants.slice(k).map(function(v){return v.key+'안';}).join(', ')+')의 이미지가 빠져요. 줄일까요?')){ st.count=n; return; }
+      st.variants=st.variants.slice(0,k);
+    } else {
+      var plan=_consultEnsurePlan(st);
+      for(var i=n;i<k;i++){
+        var pp=JSON.parse(JSON.stringify(plan[i]||plan[plan.length-1]||{name:'디자인 시안',ko:''}));
+        var v={key:_consultLetter(i), plan:pp, spaces:{}, imported:true, autoTex:false, materials:null, matStatus:null, estimate:null, estStatus:null};
+        if(_consultIsBuild(st)) _consultEstimate(st, v); else { v.sched=_consultSchedDefault(st); _consultEstimate(st, v); }
+        st.variants.push(v);
+      }
+    }
+    st.pdfPages=null; st._pdf=null;
+  }catch(e){ console.warn('[상담] 시안 수 맞추기 실패', e); }
+}
 function _consultStartImport(){
   var st=_consultState();
   if(st.variants.length && !confirm('지금 시안을 지우고, 이미 만든 이미지로 새로 구성할까요?')) return;
@@ -30929,6 +30949,10 @@ function _consultStartImport(){
   }
   var plan=_consultEnsurePlan(st);
   st.importMode=true;
+  // 2026-10-12(사용자 요청 "왜 이렇게 복잡하냐"): 왼쪽 ②에 사진을 넣어뒀으면 그 사진을 그대로 A안 이미지로 바로 사용(렌더링 없음) —
+  // 같은 이미지로 B·C안을 만들 필요가 없으므로 시안은 1개만.
+  var _photoSps=_consultSp(st).filter(function(sp){ return !!sp.photo; });
+  if(_photoSps.length) plan=plan.slice(0,1);
   // 2026-10-07 요청: "갤러리·외부 사진을 가져와서 마감재 부분만 렌더링" — 공간 렌더링 없이 마감재 재질 사진만 만들지 선택
   var texOk=!_consultIsBuild(st) && confirm('가져온 이미지에서 마감재를 읽어서 "마감재 보드"를 만들어요.\n\n재질 사진(실제 텍스처 이미지)까지 자동으로 만들까요?\n· 확인 = 재질 사진까지 (시안 1개당 '+PROPOSAL_TEX_COST+'cr, 이미지는 렌더링 안 함)\n· 취소 = 자재 이름·색만 (무료)');
   st.variants=plan.map(function(p,i){
@@ -30941,6 +30965,7 @@ function _consultStartImport(){
   _consultSave();
   try{ _trackAction('consult_import'); }catch(e){}
   renderSB(); renderMain('consult');
+  if(_photoSps.length){ _photoSps.forEach(function(sp){ _consultSetResult(0, sp.id, sp.photo, null); }); }
 }
 function _consultSetResult(vi, spId, url, origUrl){
   var st=_consultState(), v=st.variants[vi]; if(!v) return;
@@ -31705,7 +31730,7 @@ function sbConsult(p){
 
   // ③ 시안 개수
   var s3=step(3,'시안 몇 개 만들까요?');
-  s3.appendChild(seg(st.count, [{k:1,l:'1'},{k:2,l:'2'},{k:3,l:'3'},{k:4,l:'4'},{k:5,l:'5'}], function(k){ st.count=k; }));
+  s3.appendChild(seg(st.count, [{k:1,l:'1'},{k:2,l:'2'},{k:3,l:'3'},{k:4,l:'4'},{k:5,l:'5'}], function(k){ st.count=k; _consultSyncCount(st); }));
   var asl=dv(''); asl.style.cssText='font-size:10.5px;color:var(--m2);font-weight:700;margin:10px 0 4px'; asl.textContent='이미지 비율 (기본: 원본 사진과 같게)'; s3.appendChild(asl);
   var asw=seg(st.aspect||'auto', [{k:'auto',l:'원본'},{k:'1:1',l:'1:1'},{k:'4:3',l:'4:3'},{k:'3:4',l:'3:4'},{k:'16:9',l:'16:9'},{k:'9:16',l:'9:16'}], function(k){ st.aspect=k; });
   Array.prototype.forEach.call(asw.children, function(b){ b.style.padding='8px 2px'; b.style.fontSize='11.5px'; });
@@ -31734,12 +31759,12 @@ function sbConsult(p){
   bw.appendChild(hint);
   // 렌더링 없이(무료): 갤러리·내 PC 이미지로 제안서
   var imp=mk('button',''); imp.type='button';
-  imp.innerHTML='🖼️ 렌더링 없이 — 이미 만든 이미지로 제안서 만들기 <span style="font-size:11px;font-weight:700;opacity:.8">(무료 · 마감재 재질 사진만 선택)</span>';
-  imp.style.cssText='width:100%;margin-top:8px;padding:11px;border-radius:10px;border:1.5px solid var(--ac);background:var(--acg);color:var(--ac);font-weight:800;font-size:12.5px;cursor:pointer;font-family:inherit';
+  imp.innerHTML='🖼️ 렌더링 없이 제안서 만들기 <span style="font-size:12px;font-weight:800;background:rgba(0,0,0,.2);border-radius:6px;padding:2px 8px;margin-left:4px">무료</span>';
+  imp.style.cssText='width:100%;margin-top:10px;padding:15px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000;font-weight:900;font-size:15px;cursor:pointer;font-family:inherit';
   if(running){ imp.disabled=true; imp.style.opacity='.5'; }
   imp.onclick=_consultStartImport;
   bw.appendChild(imp);
-  var ih=dv(''); ih.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:4px;line-height:1.5'; ih.textContent='갤러리(다른 탭에서 만든 결과)나 외부 이미지를 공간마다 넣으면, 공간은 렌더링하지 않고 마감재 보드·견적·PDF만 만들어줘요';
+  var ih=dv(''); ih.style.cssText='font-size:10.5px;color:var(--m2);text-align:center;margin-top:4px;line-height:1.5'; ih.textContent='② 에 넣은 이미지(갤러리·내 PC)를 렌더링 없이 그대로 시안 이미지로 써서 마감재 보드·견적·PDF를 만들어요';
   bw.appendChild(ih);
   p.appendChild(bw);
 
@@ -32010,7 +32035,7 @@ function _consultRenderCanvas(ub){
     // 🎨 제안서 디자인(제안서 제작 탭의 테마 프리셋 그대로) — 누르면 바로 그 디자인으로 PDF 다시 만들기
     var curTheme=st.pdfTheme||((typeof G_PROPOSAL!=='undefined' && G_PROPOSAL.opts && G_PROPOSAL.opts.styleKey)||'gold');
     var thw=document.createElement('div'); thw.style.cssText='margin-top:12px';
-    thw.innerHTML='<div style="font-size:12px;font-weight:800;color:var(--t2);margin-bottom:6px">🎨 제안서 디자인 <span style="font-weight:500;color:var(--m2)">— 누르면 오른쪽에 크게 미리보기 + 그 디자인으로 바뀌어요</span></div>';
+    thw.innerHTML='<div class="cpdf-th-hd" style="font-size:12px;font-weight:800;color:var(--t2);margin-bottom:6px;cursor:pointer;user-select:none">'+(st.pdfThemeOpen?'▼':'▶')+' 🎨 제안서 디자인 <span style="font-weight:500;color:var(--m2)">— 누르면 오른쪽에 크게 미리보기 + 그 디자인으로 바뀌어요</span></div>';
     // 2026-10-09 요청: 작은 칩들 + 오른쪽 큰 미리보기 1개(누르는 디자인이 바로 크게 보임)
     var thr=document.createElement('div'); thr.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:14px;align-items:start';
     if(window.innerWidth<760) thr.style.gridTemplateColumns='1fr';
@@ -32059,6 +32084,14 @@ function _consultRenderCanvas(ub){
     });
     if(!thPrev.innerHTML) _thPreview(PROPOSAL_STYLES[0]);
     thr.appendChild(thList); thr.appendChild(thPrev);
+    // 2026-10-12(사용자 요청 "화면이 정신없다"): 디자인 고르기는 접었다 펼 수 있게(기본 접힘)
+    if(!st.pdfThemeOpen) thr.style.display='none';
+    var _thHd=thw.querySelector('.cpdf-th-hd');
+    if(_thHd){
+      var _curTh=PROPOSAL_STYLES.filter(function(t){ return t.key===curTheme; })[0];
+      if(!st.pdfThemeOpen && _curTh){ var _ct=document.createElement('span'); _ct.style.cssText='font-weight:800;color:var(--ac);margin-left:6px'; _ct.textContent='· 지금: '+_curTh.label; _thHd.appendChild(_ct); }
+      _thHd.onclick=function(){ st.pdfThemeOpen=!st.pdfThemeOpen; _consultSave(); _consultRefresh(); };
+    }
     thw.appendChild(thr); pdfC.appendChild(thw);
     if(st.pdfPages){
       var strip=document.createElement('div'); strip.style.cssText='display:flex;gap:8px;overflow-x:auto;margin-top:12px;padding-bottom:6px';
