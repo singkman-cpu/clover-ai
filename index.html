@@ -17816,6 +17816,24 @@ function _galMaskUpload(task, path, cb){
     }, function(){ cb(null); });
   }catch(e){ cb(null); }
 }
+// 2026-10-12: 생성 결과가 참고 이미지 중 하나를 거의 그대로 돌려준 것인지 검사(64×64 흑백 비교, 평균 차이가 아주 작으면 복사본)
+function _scIsCopyOfRefs(resUrl, refs, cb){
+  refs=(refs||[]).filter(Boolean).slice(0,4);
+  if(!resUrl || !refs.length){ cb(false); return; }
+  var done=false; function fin(v){ if(done) return; done=true; cb(v); }
+  setTimeout(function(){ fin(false); }, 15000);
+  function gray(im){ var c=document.createElement('canvas'); c.width=64; c.height=64; var x=c.getContext('2d'); x.drawImage(im,0,0,64,64); var d=x.getImageData(0,0,64,64).data, g=new Float32Array(4096); for(var i=0;i<4096;i++){ g[i]=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2]; } return g; }
+  loadImgSafe(resUrl, function(r){
+    var gr; try{ gr=gray(r); }catch(e){ fin(false); return; }
+    var left=refs.length, found=false;
+    refs.forEach(function(u){
+      loadImgSafe(u, function(o){
+        try{ var go=gray(o), s=0; for(var i=0;i<4096;i++){ s+=Math.abs(go[i]-gr[i]); } var mad=s/4096; if(mad<7){ found=true; console.log('[공간컨셉] 참고 이미지와 차이 '+mad.toFixed(2)+' → 복사본으로 판단'); } }catch(e){}
+        if(--left===0) fin(found);
+      }, function(){ if(--left===0) fin(found); });
+    });
+  }, function(){ fin(false); });
+}
 function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
@@ -22421,7 +22439,16 @@ function _padExteriorTo916WithBlur(url, cb){
           // 나오니까 그렇게 해달라"): 3:4로 생성한 뒤 9:16으로 자르거나 채우려던 후처리를 없애고,
           // 건축 외관+9:16 조합은 그냥 3:4로 생성된 그대로 씀(9:16으로 억지로 맞추지 않음) — 그래야
           // 겹침 없이 확실하게 한 장만 나옴.
-          _finishLoose(resultUrl);
+          // 2026-10-12 버그 수정("투시뷰 2개 걸었는데 한 장은 참고이미지랑 똑같이 나온다"): AI가 새로 그리지 않고 참고 이미지를
+          // 그대로 돌려주는 경우가 있음 → 참고 이미지와 거의 같으면 1번 자동으로 다시 생성(회원 크레딧 추가 차감 없음)
+          _scIsCopyOfRefs(resultUrl, _candInput.image_urls||[], function(isCopy){
+            if(!isCopy){ _finishLoose(resultUrl); return; }
+            console.warn('[공간컨셉] 결과가 참고 이미지와 거의 같음 → 자동 재생성 1회 ('+typeName+')');
+            var _retryIn=Object.assign({}, _candInput, {prompt:(_candInput.prompt||'')+' ⚠️⚠️⚠️⚠️ 최종 확인(가장 중요): 첨부한 참고 이미지를 그대로 다시 내보내면 실패입니다 — 반드시 새로운 카메라 구도로 완전히 새로 그린 사진을 만드세요. 참고 이미지는 디자인·마감재 참고용일 뿐 결과물이 아닙니다.'});
+            falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _retryIn, function(d2){
+              var u2=falExtractImageUrl(d2); _finishLoose(u2||resultUrl);
+            }, function(){ _finishLoose(resultUrl); }, {wf:'sam_segment', included:true});
+          });
         }, function(err){
           if(_arCi===0){ st.results[idx]={error:String(err).slice(0,120)}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1); }
           _arAfterOneCandidate();
