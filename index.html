@@ -30128,7 +30128,16 @@ function _consultSp(st){ return (st.spaces||[]).filter(function(s){ return s.pho
 
 // 발코니 확장 — 요청: "확장 안 된 거실 베란다를 확장할지 말지 고객이 원하는 대로 반영, 확장공사 비용도 넣어줘"
 var CONSULT_EXT_OPTS=[['none','확장 안 함'],['living','거실 확장'],['living_room','거실 + 방 1개 확장'],['done','이미 확장됨']];
+// 2026-10-12(사용자 지적 "파우더룸만 넣었는데 거실 발코니 확장 350만원"): 올린 공간만 견적(부분·평수 미입력)일 때는 거실이 있을 때만 확장 비용
 function _consultExt(st){
+  var e=_consultExtRaw(st);
+  if(e!=='none' && !_consultIsBuild(st) && (_consultIsPart(st) || !_consultNum(st.area))){
+    var nm=_consultSp(st).map(function(s){ return s.name; }).join(',');
+    if(!/거실/.test(nm)) return 'none';
+  }
+  return e;
+}
+function _consultExtRaw(st){
   if(st.type!=='home') return 'none';
   if(st.ext) return st.ext;
   var memo=String(st.memo||'');
@@ -30540,6 +30549,7 @@ function _consultCalcEstimate(st, ti, opt){
         if(/욕실|화장실/.test(nm)){ add(nm, P.bath.n, P.bath.spec[ti], P.bath.p[ti], '1칸'); return; }
         if(/주방|부엌/.test(nm)) add(nm, P.kitchen.n, P.kitchen.spec[ti], P.kitchen.p[ti]*kitF, '1식(싱크대·상판·후드·수전)');
         ['demo','wall','floor','ceiling','elec'].forEach(function(k){ var it=P[k]; add(nm, it.n, it.spec[ti], it.p[ti]*spy, pb(it.p[ti],spy,_pyLbl)); });
+        if(/파우더|세면/.test(nm)) add(nm, '세면대·하부장·거울', ['기본 세면대·거울','세면대·하부장·거울','맞춤 하부장·세면볼·조명거울','맞춤 우드 하부장·라운드 조명거울','석재 상판·맞춤 가구'][ti], [80,120,180,250,350][ti], '1식');
         if(/현관/.test(nm)) add(nm, '중문', ['기본 중문','3연동 중문','슬림 원슬라이딩 중문','히든 중문','맞춤 중문'][ti], [70,95,120,150,220][ti], '1개');
         if(/드레스|안방|침실/.test(nm)) add(nm, P.storage.n, P.storage.spec[ti], [60,150,250,380,550][ti], '1식');
         if(!/현관|드레스/.test(nm)) add(nm, P.winfilm.n, P.winfilm.spec[ti], P.winfilm.p[ti]*spy, pb(P.winfilm.p[ti],spy,_pyLbl));
@@ -31234,9 +31244,25 @@ function _consultEstimate(st, v, force){
   if(SI){
     var map=[[/^바닥$/,['floor','kfloor']],[/도배|도장|벽 마감/,['wall']],[/목공/,['ceiling']],[/문·중문·필름/,['door']],[/^주방/,['kcab','kcounter']],[/^욕실/,['bwall','bfloor']],[/현관·베란다 타일/,['etile']],[/붙박이/,['storage']],[/전기·조명/,['light']],[/창호 프레임 시트지/,['window']],
              [/인테리어 공사/,['floor','wall']],[/가구·집기/,['cfurn']],[/^화장실/,['ctile']],[/간판·파사드/,['door']]];
+    var _fromImg=!!(v.sched && v.sched.fromRender);
     est.items.forEach(function(it){
-      for(var i=0;i<map.length;i++){ if(map[i][0].test(it.work)){ var nm=map[i][1].map(function(k){ return SI[k]&&SI[k].ko; }).filter(Boolean).join(' / '); if(nm) it.spec=(it.spec?it.spec+' · ':'')+nm; break; } }
+      for(var i=0;i<map.length;i++){ if(map[i][0].test(it.work)){ var nm=map[i][1].map(function(k){ return SI[k]&&SI[k].ko; }).filter(function(x,xi,arr){ return x && arr.indexOf(x)===xi; }).join(' / '); if(nm) it.spec=_fromImg?nm:((it.spec?it.spec+' · ':'')+nm); break; } }
     });
+    // 2026-10-12(사용자 지적 "이미지랑 견적이 따로 논다"): 이미지에서 읽은 벽·바닥 자재가 우드 판넬·타일·미장 등이면 그 자재 단가로 다시 계산
+    if(_fromImg && st.type==='home'){
+      est.items.forEach(function(it){
+        var m=String(it.basis||'').match(/^([\d.]+)만원\/평 × ([\d.]+)(.*)$/); if(!m) return;
+        var q=parseFloat(m[2]), r=null, ko='';
+        if(/도배|도장/.test(it.work)){ ko=(SI.wall&&SI.wall.ko)||''; r=_consultMatRate('wall', ko); }
+        else if(it.work==='바닥'){ ko=(SI.floor&&SI.floor.ko)||''; r=_consultMatRate('floor', ko); }
+        if(r==null || !q) return;
+        it.amount=Math.round(r*q/10)*10; it.basis=r+'만원/평 × '+q+m[3]+' · 이미지 속 자재 기준';
+        if(/도배|도장/.test(it.work) && !/도배|벽지|실크|합지|도장|페인트/.test(ko)) it.work='벽 마감';
+      });
+      var _mg=est.items.filter(function(x){ return /보양|현장관리/.test(x.work); })[0];
+      if(_mg){ var _pm=String(_mg.basis||'').match(/× (\d+)%/); if(_pm){ var _sb2=est.items.reduce(function(a,x){ return x===_mg?a:a+x.amount; },0); _mg.amount=Math.round(_sb2*parseInt(_pm[1],10)/100/10)*10; _mg.basis='공사비 '+_sb2.toLocaleString()+'만원 × '+_pm[1]+'%'; } }
+      est.total=est.items.reduce(function(a,x){ return a+x.amount; },0);
+    }
   } else {
     (v.materials||[]).forEach(function(m){
       if(!m || !m.v) return;
@@ -31258,6 +31284,31 @@ function _consultEstimate(st, v, force){
   est.note=note;
   if(!_consultIsBuild(st) && !_consultNum(st.area)) est.noAreaV=2;
   v.estimate=est; v.estStatus='done'; v.dirty=true; _consultSave(); _consultRefresh();
+}
+// 자재명 → 평당 단가(만원, 자재+시공) — 2025~26 수도권 시세 중간값. 모르는 자재면 null(등급 단가 유지)
+function _consultMatRate(kind, ko){
+  ko=String(ko||''); if(!ko) return null;
+  if(kind==='wall'){
+    if(/타일|포세린|대리석|석재|라임스톤|트래버틴/.test(ko)) return 40;
+    if(/미장|석회|스타코|특수|마이크로|노출|콘크리트|빈티지/.test(ko)) return 35;
+    if(/우드|원목|판넬|패널|루버|템바|무늬목|베니어|합판/.test(ko)) return 30;
+    if(/도장|페인트/.test(ko)) return 12;
+    if(/실크/.test(ko)) return 7;
+    if(/합지/.test(ko)) return 5;
+    return null;
+  }
+  if(kind==='floor'){
+    if(/대리석|석재|천연석/.test(ko)) return 37;
+    if(/타일|포세린|테라조/.test(ko)) return 27;
+    if(/원목|헤링본|쉐브론/.test(ko)) return 20;
+    if(/마이크로|에폭시|폴리싱|콘크리트/.test(ko)) return 15;
+    if(/광폭/.test(ko)) return 14;
+    if(/강마루/.test(ko)) return 11;
+    if(/강화마루/.test(ko)) return 9;
+    if(/장판|데코타일/.test(ko)) return 8;
+    return null;
+  }
+  return null;
 }
 function _consultVariantTotal(v){ return v.estimate ? v.estimate.total : 0; }
 // 실제 업체 견적은 현장 상태·자재 선택에 따라 달라서 범위로도 보여줌(-10% ~ +15%)
@@ -31909,7 +31960,7 @@ function sbConsult(p){
   if(st.type==='home'){ db.appendChild(lbl('주택 종류')); db.appendChild(sel(st.houseKind, ['아파트','빌라·다세대','단독주택','오피스텔'], function(v){ st.houseKind=v; })); }
   if(st.type==='home'){
     db.appendChild(lbl('발코니 확장 (견적·시안에 반영)'));
-    var es=mk('select',''); es.style.cssText=IS+';color-scheme:dark'; var ce=_consultExt(st);
+    var es=mk('select',''); es.style.cssText=IS+';color-scheme:dark'; var ce=_consultExtRaw(st);
     CONSULT_EXT_OPTS.forEach(function(o){ var op=mk('option',''); op.value=o[0]; op.textContent=o[1]; op.style.cssText='color:#111;background:#fff'; if(o[0]===ce) op.selected=true; es.appendChild(op); });
     es.onchange=function(){ st.ext=es.value; st.variants.forEach(function(v){ if(!(v.estimate&&v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); } }); _consultSave(); renderSB(); renderMain('consult', true); };
     db.appendChild(es);
@@ -32311,7 +32362,7 @@ function _consultRenderCanvas(ub){
         (mats.length?'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px">'+mats.map(function(m){ return '<div class="cmat" data-id="'+_cEsc(m.id||'')+'" style="position:relative;cursor:'+(m.id?'pointer':'default')+'">'+(m.img?'<img src="'+_cEsc(m.img)+'" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block">':'<div style="aspect-ratio:1;border-radius:8px;background:'+_cEsc(m.hex||'var(--c1,#111)')+';box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)"></div>')+
           '<button type="button" class="cmz" title="크게 보기" style="position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:13px;cursor:zoom-in;padding:0">🔍</button>'+'<div style="font-size:10px;color:var(--m2);font-weight:700;margin-top:5px">'+_cEsc(m.k)+'</div><div style="font-size:11.5px;color:var(--t);font-weight:700;line-height:1.35">'+_cEsc(m.v)+'</div>'+
           (m.prod?'<div style="font-size:10px;color:#f5b544;line-height:1.35;margin-top:2px" title="색·질감 기준 유사 추천 제품(참고용)">≈ '+_cEsc(_consultProdShort(m.prod))+(m.prod.src?' <a href="'+_cEsc(m.prod.src)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#f5b544;text-decoration:none">↗</a>':'')+'</div>':'')+'</div>'; }).join('')+'</div>'
-          : '<div style="font-size:11.5px;color:var(--m2)">'+(_consultMatsLocked(v)?(v.texBusy||v.schedStatus==='run'||_consultAutoPending(v)?'⏳ 이미지에서 마감재를 읽고 마감재 보드(재질 사진)를 만드는 중이에요… (30초~1분)':'아직 마감재를 추출하지 않았어요. 위 <b>🎨 이미지에서 마감재 추출 ('+PROPOSAL_TEX_COST+'cr)</b>을 누르면 사진 속 바닥 패턴·벽·필름 등을 읽어서 실제 재질 사진으로 보드를 만들어요.'):(v.matStatus==='err'?'마감재 분석에 실패했어요.':'공간 이미지가 나오면 자동으로 만들어져요.'))+'</div>')+
+          : '<div style="font-size:11.5px;color:var(--m2)">'+(_consultMatsLocked(v)?(v.texBusy||v.schedStatus==='run'||_consultAutoPending(v)?'⏳ 이미지에서 마감재를 읽고 마감재 보드(재질 사진)를 만드는 중이에요… (30초~1분)':(v.schedReadErr?'<span style="color:#f5b544">⚠ 이미지에서 마감재를 읽지 못했어요(크레딧은 빠지지 않았어요).</span> ':'')+'아직 마감재를 추출하지 않았어요. 위 <b>🎨 이미지에서 마감재 추출 ('+PROPOSAL_TEX_COST+'cr)</b>을 누르면 사진 속 바닥 패턴·벽·필름 등을 읽어서 실제 재질 사진으로 보드를 만들어요.'):(v.matStatus==='err'?'마감재 분석에 실패했어요.':'공간 이미지가 나오면 자동으로 만들어져요.'))+'</div>')+
         (!_consultIsBuild(st)?'<div style="font-size:11px;color:var(--m2);margin-top:8px">※ 이미지 속 가구·소품·장식 조명(펜던트·스탠드 등)은 연출용이며 견적에서 제외돼요.'+(mats.some(function(m){return m.prod;})?'<br>※ <span style="color:#f5b544">≈ 유사 추천 제품</span>은 제조사 공식 카탈로그에 실제로 있는 제품 중 색·질감이 가장 가까운 것을 고른 참고용이에요(↗ 제품 페이지). 시공 전 실물 샘플로 확인해주세요. 자재를 누르면 다른 제품으로 바꿀 수 있어요.':'')+'</div>':'');
       Array.prototype.forEach.call(mb.querySelectorAll('.cmat'), function(el, mi){ var id=el.getAttribute('data-id'); if(id){ el.title='눌러서 자재 바꾸기'; el.onclick=function(){ _consultSwapMaterial(vi, id); }; }
         var zb=el.querySelector('.cmz'); if(zb) zb.onclick=function(e){ e.stopPropagation(); _consultMatZoom(mats, mi); }; });
