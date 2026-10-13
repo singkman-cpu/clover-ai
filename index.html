@@ -42947,7 +42947,8 @@ function falPoll(baseUrlOrCandidates, reqId, onDone, onErr, attempt, candidateId
   .then(function(d){
     var st = (d.status || '').toUpperCase();
     var ldst = gE('ldst');
-    var elapsed = Math.round(attempt * 2.5);
+    var _pt0=(window._pollT0=window._pollT0||{}); if(!_pt0[reqId]) _pt0[reqId]=Date.now();
+    var elapsed = Math.round((Date.now()-_pt0[reqId])/1000);
     if(ldst) ldst.textContent =
       st === 'IN_PROGRESS' ? 'AI 생성 중... (' + elapsed + 's 경과)' :
       st === 'IN_QUEUE'    ? '대기 중... (' + elapsed + 's 경과) - 서버 혼잡 시 1~2분 소요' : st;
@@ -42987,7 +42988,10 @@ function falPoll(baseUrlOrCandidates, reqId, onDone, onErr, attempt, candidateId
         onErr('생성 실패: ' + errStr.slice(0,150) + ' — 레퍼런스 이미지 개수를 줄이거나 프롬프트를 단순하게 바꿔 다시 시도해보세요.');
       }
     } else {
-      var wait = attempt < 15 ? 300 : attempt < 30 ? 500 : 1000;
+      // 2026-10-13(회원 증가 대비): 예전엔 0.3~1초마다 서버에 상태를 물어봐서 렌더 1건에 서버 호출이 수십~백 번 발생 →
+      // 동시 접속자가 늘면 서버(엣지 함수·로그인 확인)가 먼저 버벅임. 1.2초 → 2초 → 3초 간격으로 늘려 호출을 1/3 수준으로 줄임
+      // (결과가 나온 뒤 화면에 뜨기까지 최대 1~2초 늦어질 수 있지만 체감 차이는 거의 없음)
+      var wait = attempt < 10 ? 1200 : attempt < 60 ? 2000 : 3000;
       setTimeout(function(){ falPoll(candidates, reqId, onDone, onErr, attempt + 1, candidateIdx); }, wait);
     }
   })
@@ -50402,7 +50406,8 @@ function admMail(c){
     '<div style="font-size:12px;font-weight:700;color:var(--ac);margin-bottom:12px">📧 전체 회원 단체 메일 발송</div>'+
     '<div style="background:rgba(245,181,68,.08);border:1px solid rgba(245,181,68,.45);border-radius:8px;padding:10px 12px;margin-bottom:14px">'+
       '<div style="font-size:11px;font-weight:700;color:#f5b544;margin-bottom:6px">📄 자주 쓰는 메일 템플릿</div>'+
-      '<button type="button" onclick="admMailTplTeam()" style="padding:8px 14px;background:#f5b544;border:none;color:#000;border-radius:7px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">💼 기업 정기권 안내 불러오기</button>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:11px;color:var(--t2);font-weight:600">입금 계좌</span><input id="mail-team-bank" type="text" placeholder="예: 국민은행 000000-00-000000 (예금주: 스냅)" style="flex:1;min-width:220px;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:6px 9px;font-size:11.5px;border-radius:6px;outline:none" oninput="try{localStorage.setItem(\'clover_team_bank\',this.value)}catch(e){}"></div>'+
+      '<button type="button" onclick="admMailTplTeam()" style="padding:8px 14px;background:#f5b544;border:none;color:#000;border-radius:7px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">💼 기업 플랜 안내 불러오기</button>'+
       '<div style="font-size:10.5px;color:var(--m2);margin-top:6px;line-height:1.5">누르면 제목·내용이 채워지고 수신 대상이 "직접 입력"으로 바뀌어요 — 받는 분 이메일만 넣고 🧪 테스트로 확인한 뒤 보내세요.</div>'+
     '</div>'+
     '<div style="background:var(--c2);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:14px">'+
@@ -50456,6 +50461,7 @@ function admMail(c){
     // API 키 초기값 세팅
     var ki=gE('resend-key-inp');
     if(ki)ki.value=RESEND_KEY;
+    try{ var _tb=gE('mail-team-bank'); if(_tb) _tb.value=localStorage.getItem('clover_team_bank')||''; }catch(_e){}
     var ks=gE('resend-key-status');
     if(ks)ks.textContent=RESEND_KEY?'✓ API 키 저장됨':'API 키를 입력하면 실제 메일이 발송됩니다';
 
@@ -50509,27 +50515,37 @@ var TEAM_PLANS=[
   {n:'팀 비즈니스', won:990000, cr:102000}
 ];
 function admMailTplTeam(){
-  var rows=TEAM_PLANS.map(function(p){ return '· '+p.n+': 월 '+p.won.toLocaleString()+'원 — '+p.cr.toLocaleString()+'크레딧 (1K 이미지 약 '+Math.floor(p.cr/20).toLocaleString()+'장)'; }).join('\n');
+  var rows=TEAM_PLANS.map(function(p){ return '· '+p.n+': '+p.won.toLocaleString()+'원 — '+p.cr.toLocaleString()+'크레딧 (1K 이미지 약 '+Math.floor(p.cr/20).toLocaleString()+'장)'; }).join('\n');
+  var bank=''; try{ bank=((gE('mail-team-bank')||{}).value||localStorage.getItem('clover_team_bank')||'').trim(); }catch(_e){}
   var body=
     '문의 주셔서 감사합니다.\n'+
-    '여러 분이 함께 매달 이용하시는 업체를 위한 기업 정기 이용 플랜을 안내드립니다.\n\n'+
-    '■ 기업 정기 플랜 (월 단위)\n'+rows+'\n\n'+
+    '여러 분이 함께 이용하시는 업체를 위한 기업 플랜을 안내드립니다.\n\n'+
+    '■ 기업 플랜 (1회 충전 기준)\n'+rows+'\n\n'+
     '■ 개인 충전보다 유리한 점\n'+
     '· 같은 금액의 개인 충전(Business 99,000원 / 8,800크레딧)보다 크레딧을 8~16% 더 드립니다.\n'+
     '· 많이 이용하실수록 1크레딧당 가격이 낮아집니다.\n\n'+
     '■ 이용 방식\n'+
-    '· 직원분들이 각자 회원가입을 하시면, 결제하신 크레딧을 원하시는 비율로 각 계정에 나눠 넣어 드립니다.\n'+
-    '· 결제는 매달 계좌이체로 진행하며, 세금계산서를 발행해 드립니다.\n'+
-    '· 정기 플랜 크레딧도 결제일로부터 1년 동안 사용하실 수 있습니다.\n\n'+
+    '· 정해진 기간 없이, 크레딧이 필요하실 때마다 원하시는 플랜으로 충전하시면 됩니다.\n'+
+    '· 충전하신 크레딧은 결제일로부터 1년 동안 사용하실 수 있습니다.\n'+
+    '· 입금 확인 후 세금계산서를 발행해 드립니다.\n\n'+
+    '■ 신청 방법\n'+
+    '1) 이용하실 직원분들이 cloverai.kr 에서 먼저 회원가입을 해 주세요.\n'+
+    '2) 이 메일로 아래 내용을 회신해 주세요.\n'+
+    '   - 선택하신 플랜\n'+
+    '   - 가입하신 이메일 주소와 계정별로 나눌 크레딧 (예: a@회사.com 10,000 / b@회사.com 9,000)\n'+
+    '   - 세금계산서 발행용 사업자등록증 사본(또는 사업자 정보)과 세금계산서 받으실 이메일\n'+
+    '3) 아래 계좌로 플랜 금액을 입금해 주세요. (입금자명은 회사명으로 부탁드립니다)\n'+
+    '   입금 계좌: '+(bank||'[은행명 계좌번호 (예금주)]')+'\n'+
+    '4) 입금이 확인되면 각 계정에 크레딧을 넣어 드리고 세금계산서를 발행해 드립니다.\n\n'+
     '참고로 이미지 1장은 1K 기준 20크레딧부터이며, 2K·4K, 업스케일, 영상은 크레딧이 더 소모됩니다.\n\n'+
     '궁금하신 점은 이 메일로 회신 주시거나, 연락처를 남겨주시면 전화로 안내드리겠습니다.';
   var subj=gE('mail-subject'), ta=gE('mail-body');
-  if(subj) subj.value='[CLOVER AI] 기업 정기 이용 플랜 안내';
+  if(subj) subj.value='[CLOVER AI] 기업 플랜 안내';
   if(ta) ta.value=body;
   var man=document.querySelector('input[name="mail-target"][value="manual"]');
   if(man){ man.checked=true; if(man.onchange) man.onchange(); }
   setTimeout(function(){ var em=gE('mail-manual-emails'); if(em){ em.placeholder='받는 분 이메일 (예: ceo@company.com)'; em.focus(); } }, 50);
-  var r=gE('mail-result'); if(r){ r.style.color='#f5b544'; r.textContent='템플릿을 불러왔어요 — 받는 분 이메일을 넣고 보내세요.'; }
+  var r=gE('mail-result'); if(r){ r.style.color='#f5b544'; r.textContent=bank?'템플릿을 불러왔어요 — 받는 분 이메일을 넣고 보내세요.':'⚠ 위 "입금 계좌" 칸이 비어 있어요 — 계좌를 적고 다시 불러오세요.'; }
 }
 function admMailInsertVar(v){
   var ta=gE('mail-body');if(!ta)return;
