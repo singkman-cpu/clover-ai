@@ -18521,8 +18521,13 @@ function mkMultiRoomSpace(p){
   });
   listWrap.appendChild(listBox);
 
-  var addBox=dv('');addBox.style.cssText='margin-top:8px;border:1.5px dashed var(--bd2);border-radius:9px;padding:14px;text-align:center;cursor:pointer;background:var(--c2)';
-  addBox.innerHTML='<div style="font-size:12px;color:var(--t2)">+ 공간 사진 추가 (여러 장 한번에 선택 가능, Ctrl+V로 붙여넣기도 가능)</div>';
+  // 2026-10-13(요청): 우리집 사진 넣는 곳을 눈에 잘 띄게 — 사진이 없을 땐 더 크게
+  var _mrEmpty=!(spTab.multiRoomImages||[]).length;
+  var addBox=dv('');addBox.style.cssText='margin-top:8px;border:2px dashed var(--ac);border-radius:11px;padding:'+(_mrEmpty?'26px 14px':'16px 14px')+';text-align:center;cursor:pointer;background:rgba(0,229,204,.08);transition:background .15s';
+  addBox.onmouseenter=function(){ addBox.style.background='rgba(0,229,204,.16)'; }; addBox.onmouseleave=function(){ addBox.style.background='rgba(0,229,204,.08)'; };
+  addBox.innerHTML=(_mrEmpty?'<div style="font-size:28px;line-height:1;margin-bottom:6px">📷</div>':'')
+    +'<div style="font-size:'+(_mrEmpty?'14.5':'13')+'px;font-weight:800;color:var(--ac)">＋ 우리집 사진 '+(_mrEmpty?'넣기':'더 넣기')+'</div>'
+    +'<div style="font-size:11px;color:var(--t2);margin-top:4px">거실·주방·안방 등 공간마다 1장씩 · 여러 장 한번에 선택 가능 · Ctrl+V 붙여넣기 가능</div>';
   var addInput=document.createElement('input');addInput.type='file';addInput.accept='image/*';addInput.multiple=true;addInput.style.display='none';
   addBox.appendChild(addInput);
   addBox.onclick=function(){ addInput.click(); };
@@ -43057,7 +43062,10 @@ function falPoll(baseUrlOrCandidates, reqId, onDone, onErr, attempt, candidateId
           console.log('[FAL result]', JSON.stringify(res).slice(0,500));
           onDone(res);
         })
-        .catch(function(e){ console.warn('[FAL result] 주소 실패, 다음 후보 시도:', _resOrder[i], e.message); tryRes(i+1, e); });
+        .catch(function(e){
+          // 요청 자체가 거절된 경우(프롬프트 오류 등) — 다시 시도해도 같으므로 바로 실패 처리(서버가 크레딧 자동 환불)
+          if(/자동 환불|"detail"/.test(String(e&&e.message||''))){ try{ _logErrorToServer('[결과 가져오기 실패] '+reqId+' · '+String(e.message).slice(0,400), '', 'fal-result'); }catch(_le){} onErr(String(e.message)); return; }
+          console.warn('[FAL result] 주소 실패, 다음 후보 시도:', _resOrder[i], e.message); tryRes(i+1, e); });
       })(0, null);
     } else if(st === 'FAILED') {
       var errMsg = d.error || d.detail || d.message || d.msg || JSON.stringify(d);
