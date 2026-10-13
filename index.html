@@ -17956,6 +17956,39 @@ function _showRoomResultInMain(origUrl, resultUrl, roomLabel, isAptOverride){
 // 자체는 multiple 선택이 가능했지만, 메인화면 빈 상태를 클릭했을 땐 전혀 다른 단일 이미지
 // 업로드 경로로 연결되어 있어서 방 목록에 추가되지도 않았음) — 이제 메인화면 클릭이든 사이드바
 // 버튼이든 전부 이 함수 하나로 여러 장을 한 번에 처리하도록 통일함.
+// ── 2026-10-13: 올린 사진이 어떤 공간인지 AI가 보고 공간 이름을 자동으로 맞춤(무료) ──
+// 예전엔 올린 순서대로 거실→주방→욕실→침실… 기본값이 붙어서, 다른 업종 사진(어린이집 교실 등)을 올리면 "욕실" 같은 엉뚱한 이름으로 렌더됐음
+function _mrRoomMismatch(r, spTab){
+  if(!r || !r.detLabel || r.detLabel==='기타') return false;
+  if(r.detCat && r.detCat!==spTab.multiRoomCategory) return true;
+  return r.label!==r.detLabel && !/기타/.test(r.label||'');
+}
+function _mrDetectRoom(room){
+  try{
+    if(!room || !room.img || !_supa || !_supaUser) return;
+    room.detBusy=true;
+    var cats=Object.keys(SPACE_CATEGORIES).filter(function(k){ return k!=='exterior'; });
+    var list=cats.map(function(k){ return k+'('+SPACE_CATEGORIES[k].label+'): '+SPACE_CATEGORIES[k].types.join(', '); }).join('\n');
+    var prompt='[공간 판별 — JSON 하나만 답할 것, 설명 금지]\n이 사진이 어떤 공간인지 아래 목록에서 가장 가까운 카테고리 키와 공간 이름을 골라. 건물 바깥(외관) 사진이면 cat은 "exterior", label은 "외관".\n'+list+'\n형식: {"cat":"키","label":"목록에 있는 공간 이름 그대로","desc":"사진 속 실제 공간을 10자 이내로(예: 어린이집 교실)"}';
+    _proposalImgToB64(room.img, function(b64){
+      if(!b64){ room.detBusy=false; return; }
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:prompt}]}]}, function(res){
+        room.detBusy=false;
+        var j=null; try{ j=_consultParseJson(res); }catch(e){}
+        if(j && j.cat){
+          var cat=String(j.cat), lab=String(j.label||'');
+          if(cat==='exterior'){ room.detCat='exterior'; room.detLabel=''; }
+          else if(SPACE_CATEGORIES[cat]){
+            room.detCat=cat; room.detLabel=(SPACE_CATEGORIES[cat].types.indexOf(lab)!==-1)?lab:'기타'; room.detDesc=String(j.desc||'').slice(0,16);
+            var spTab=getTab('spaceset');
+            if(!room.userLabeled && cat===spTab.multiRoomCategory && room.detLabel!=='기타') room.label=room.detLabel;
+          }
+        }
+        if(G.wf==='spaceset') renderSB();
+      }, function(){ room.detBusy=false; if(G.wf==='spaceset') renderSB(); });
+    });
+  }catch(e){ room.detBusy=false; }
+}
 function _addMultiRoomPhotosFromFiles(fileList){
   var spTab=getTab('spaceset');
   if(!spTab.multiRoomImages) spTab.multiRoomImages=[];
@@ -17972,6 +18005,7 @@ function _addMultiRoomPhotosFromFiles(fileList){
         var nextIdx=spTab.multiRoomImages.length;
         var newRoom={id:Date.now()+Math.random(), img:resized, label:MULTIROOM_LABELS[Math.min(nextIdx,MULTIROOM_LABELS.length-1)]};
         spTab.multiRoomImages.push(newRoom);
+        _mrDetectRoom(newRoom);
         // 업로드하자마자 우측 메인 화면에 바로 보이게 함 — 예전엔 사이드바 썸네일에만 나오고
         // 메인 화면엔 아무 반응이 없어서 "업로드가 안 된 건가?" 헷갈렸음.
         if(G.wf==='spaceset') _showRoomResultInMain(null, resized, newRoom.label);
@@ -17991,6 +18025,7 @@ function _addMultiRoomPhotoFromGallerySrc(src){
   var nextIdx=spTab.multiRoomImages.length;
   var newRoom={id:Date.now()+Math.random(), img:src, label:MULTIROOM_LABELS[Math.min(nextIdx,MULTIROOM_LABELS.length-1)]};
   spTab.multiRoomImages.push(newRoom);
+  _mrDetectRoom(newRoom);
   if(G.wf==='spaceset') _showRoomResultInMain(null, src, newRoom.label);
   renderSB();
 }
@@ -18184,6 +18219,20 @@ function mkMultiRoomSpace(p){
     mrCatRow.appendChild(b);
   });
   mrCatWrap.appendChild(mrCatRow);
+  (function(){
+    var rs=(spTab.multiRoomImages||[]).filter(function(r){ return r.detCat && r.detCat!=='exterior'; });
+    if(!rs.length) return;
+    var cnt={}; rs.forEach(function(r){ cnt[r.detCat]=(cnt[r.detCat]||0)+1; });
+    var top=Object.keys(cnt).sort(function(a,b){ return cnt[b]-cnt[a]; })[0];
+    if(!top || top===spTab.multiRoomCategory || cnt[top]<Math.ceil(rs.length/2)) return;
+    var bn=dv(''); bn.style.cssText='margin-top:8px;padding:9px 10px;border-radius:8px;border:1px solid rgba(245,181,68,.55);background:rgba(245,181,68,.08);font-size:11.5px;line-height:1.5;color:var(--t)';
+    var desc=(rs.filter(function(r){ return r.detCat===top; })[0]||{}).detDesc||'';
+    bn.innerHTML='📷 올린 사진이 <b>'+_admEsc(SPACE_CATEGORIES[top].label)+'</b>'+(desc?' ('+_admEsc(desc)+')':'')+' 공간으로 보여요. 지금은 <b>'+_admEsc(SPACE_CATEGORIES[spTab.multiRoomCategory].label)+'</b>로 되어 있어요.';
+    var bb=mk('button',''); bb.type='button'; bb.textContent=SPACE_CATEGORIES[top].label+'(으)로 바꾸고 공간 이름 맞추기';
+    bb.style.cssText='display:block;margin-top:6px;width:100%;padding:7px;border-radius:7px;border:none;background:#f5b544;color:#000;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit';
+    bb.onclick=function(){ spTab.multiRoomCategory=top; (spTab.multiRoomImages||[]).forEach(function(r){ if(r.detCat===top && r.detLabel && r.detLabel!=='기타'){ r.label=r.detLabel; r.userLabeled=false; } }); renderSB(); };
+    bn.appendChild(bb); mrCatWrap.appendChild(bn);
+  })();
   p.appendChild(mrCatWrap);
 
   // ⚠️ 요청 반영: "기존 건물 형태 유지하고 마감만 바꿀지, 아니면 참고 이미지처럼 신축으로 새로
@@ -18293,8 +18342,8 @@ function mkMultiRoomSpace(p){
   p.appendChild(refDesignWrap);
 
   var listWrap=dv('ss');
-  listWrap.innerHTML='<div class="lbl"><span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--c2);border:1px solid var(--bd2);color:var(--t2);font-size:10px;font-weight:800;margin-right:5px">2</span>우리집 사진</div>'
-    +'<div style="font-size:10px;color:var(--m2);margin:3px 0 6px">각자 위 ① 참고 사진을 보고 독립적으로 바뀌어요</div>';
+  listWrap.innerHTML='<div class="lbl" style="color:var(--t);font-size:13px;font-weight:800"><span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--ac);color:#000;font-size:11px;font-weight:900;margin-right:6px">2</span>우리집 사진</div>'
+    +'<div style="font-size:10.5px;color:var(--t2);margin:3px 0 6px">각자 위 ① 참고 사진을 보고 독립적으로 바뀌어요 · 사진을 넣은 뒤 <b style="color:var(--ac)">어떤 공간인지 꼭 골라주세요</b></div>';
   var listBox=dv('');listBox.style.cssText='display:flex;flex-direction:column;gap:10px';
   spTab.multiRoomImages.forEach(function(room,idx){
     var cardWrap=dv('');cardWrap.style.cssText='background:var(--c2);border-radius:9px;padding:10px';
@@ -18417,7 +18466,10 @@ function mkMultiRoomSpace(p){
     badge.textContent=(idx+1);
     row.appendChild(badge);
     var sel=document.createElement('select');
-    sel.style.cssText='flex:1;padding:6px;background:var(--card);border:1px solid var(--bd2);border-radius:6px;color:var(--t);font-size:12px;font-family:inherit;align-self:flex-start';
+    // 2026-10-13(요청): 처음 쓰는 회원이 공간 이름을 안 고르고 그냥 렌더하는 일이 없게 — 공간 선택 칸을 눈에 띄게
+    sel.style.cssText='flex:1;padding:8px;background:rgba(0,229,204,.12);border:1.5px solid var(--ac);border-radius:7px;color:var(--t);font-size:13px;font-weight:800;font-family:inherit;align-self:flex-start;cursor:pointer;color-scheme:dark';
+    var _selHint=dv(''); _selHint.style.cssText='font-size:11px;font-weight:800;color:var(--ac);margin:6px 0 4px 48px'; _selHint.textContent='▼ 이 사진은 어떤 공간인가요?';
+    cardWrap.appendChild(_selHint);
     // 위에서 고른 카테고리(주거/오피스/카페)에 맞는 공간 종류만 보여줌 — 예전엔 3개 카테고리를
     // 전부 optgroup으로 섞어서 보여줘서 목록이 너무 길었음.
     SPACE_CATEGORIES[spTab.multiRoomCategory].types.forEach(function(l){ var o=document.createElement('option');o.value=l;o.textContent=l;sel.appendChild(o); });
@@ -18425,13 +18477,18 @@ function mkMultiRoomSpace(p){
     var _catTypes=SPACE_CATEGORIES[spTab.multiRoomCategory].types;
     sel.value=room.label||_catTypes[Math.min(idx,_catTypes.length-1)];
     room.label=sel.value;
-    sel.onchange=function(){ room.label=sel.value; };
+    sel.onchange=function(){ room.label=sel.value; room.userLabeled=true; renderSB(); };
     row.appendChild(sel);
     var delBtn=mk('button','');delBtn.type='button';delBtn.textContent='✕';
     delBtn.style.cssText='width:26px;height:26px;flex-shrink:0;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:#f87171;cursor:pointer;font-size:12px;align-self:flex-start';
     delBtn.onclick=function(){ spTab.multiRoomImages=spTab.multiRoomImages.filter(function(r){return r.id!==room.id;}); renderSB(); };
     row.appendChild(delBtn);
     cardWrap.appendChild(row);
+    if(room.detBusy || room.detLabel){
+      var _dh=dv(''); _dh.style.cssText='font-size:9.5px;line-height:1.35;margin:2px 0 0 48px;color:'+(room.detBusy?'var(--m2)':(_mrRoomMismatch(room, spTab)?'#f5b544':'var(--ac)'));
+      _dh.textContent=room.detBusy?'🔎 사진 속 공간을 확인하는 중…':(_mrRoomMismatch(room, spTab)?('⚠ 사진은 "'+(room.detDesc||room.detLabel)+'"(으)로 보여요 — 지금 고른 공간과 달라 결과가 어색할 수 있어요'):('✓ 사진 확인: '+(room.detDesc||room.detLabel)));
+      cardWrap.appendChild(_dh);
+    }
 
     listBox.appendChild(cardWrap);
   });
@@ -18795,6 +18852,9 @@ function _multiRoomRun(){
   var spTab=getTab('spaceset');
   var n=spTab.multiRoomImages.length;
   if(n<1){ alert('공간 사진을 최소 1개는 넣어주세요.'); return; }
+  // 2026-10-13(회원 결과 확인): 어린이집 교실 사진에 기본값(안방·욕실·현관…)이 붙은 채로 돌려서 엉뚱한 결과가 나온 사례 → 실행 전에 한 번 확인
+  var _mm=spTab.multiRoomImages.map(function(r,i){ return _mrRoomMismatch(r, spTab)?('· '+(i+1)+'번: "'+r.label+'"(으)로 되어 있지만 사진은 "'+(r.detDesc||r.detLabel)+'"'):null; }).filter(Boolean);
+  if(_mm.length && !confirm('사진과 고른 공간이 다른 것 같아요.\n\n'+_mm.join('\n')+'\n\n이 기능은 올린 사진의 구조를 그대로 두고 마감만 바꿔서, 사진과 다른 공간(예: 교실 사진 → 욕실)으로는 잘 안 바뀌어요.\n사진에 맞게 공간을 고르면 훨씬 잘 나와요.\n\n그래도 이대로 진행할까요?')) return;
   // ⚠️ 요청 반영("참고 이미지 안 넣으면 왜 생성이 아예 안 되냐"): 공통 참고 이미지가 없어도,
   // 등록된 방 전부가 각자 "이 방 전용 참고 이미지"를 갖고 있으면 그걸로 충분히 "어떤 느낌으로"
   // 통일할지 기준이 서므로 실행을 막지 않음 — 공통 참고도 없고 방별 전용 참고도 없는 방이
