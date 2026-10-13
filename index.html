@@ -30137,6 +30137,13 @@ function _consultExt(st){
   }
   return e;
 }
+// 견적·공사 전 확인사항 전용: 평수 없이 올린 공간만 견적일 때는 회원이 직접 "확장"을 고르거나 메모에 적었을 때만 발코니 확장 비용
+// (2026-10-13 지적: 발코니가 없는 단독·캐빈형 거실 사진에도 거실 확장 520만원이 자동으로 붙었음)
+function _consultExtEst(st){
+  var e=_consultExt(st);
+  if(e!=='none' && !_consultIsBuild(st) && (_consultIsPart(st) || !_consultNum(st.area)) && !st.ext && !/확장/.test(String(st.memo||''))) return 'none';
+  return e;
+}
 function _consultExtRaw(st){
   if(st.type!=='home') return 'none';
   if(st.ext) return st.ext;
@@ -30236,6 +30243,7 @@ function _consultEnsureSched(st, v, cb, opt){
     v.schedStatus='done'; v.dirty=true;
     if(!(v.estimate && v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); }
     _consultSave(); _consultRefresh(); cb&&cb();
+    if(s && opt.fromResults) _consultTakeoff(st, v); // 2026-10-13: 사진에 보이는 공종만 골라 견적(카탈로그 방식)
   }
   if(!left){ send(); return; }
   imgs.forEach(function(u,i){
@@ -30545,6 +30553,18 @@ function _consultCalcEstimate(st, ti, opt){
       add('공통', P.winfilm.n, P.winfilm.spec[ti], P.winfilm.p[ti]*py, pb(P.winfilm.p[ti],py));
     } else {
       _consultSp(st).forEach(function(s){
+        var _tk=opt.takeoff && opt.takeoff[s.id];
+        if(_tk && _tk.items && _tk.items.length){ // 사진 분석 결과(카탈로그 항목)로 견적 — 사진에 있는 것만, 단가는 카탈로그 고정
+          var _tpy=(s.estPy>0?s.estPy:(_tk.py>0?_tk.py:_consultSpacePy(s.name)));
+          _tk.items.forEach(function(x){
+            var c=CONSULT_CAT_BY_ID[x.id]; if(!c) return;
+            var q=(c.u==='py')?_tpy:x.qty;
+            var before=items.length;
+            add(s.name, c.cat, c.n, c.p*q, c.p+'만원/'+CONSULT_CAT_UNIT[c.u]+' × '+(Math.round(q*10)/10)+CONSULT_CAT_UNIT[c.u]+(c.u==='py'?'(사진으로 추정)':'')+(x.note?' · 사진: '+x.note:''));
+            if(items.length>before) items[items.length-1].tk=true;
+          });
+          return;
+        }
         var nm=s.name, spy=(s.estPy>0?s.estPy:_consultSpacePy(nm)), _pyLbl=(s.estPy>0?'평(사진으로 추정)':'평(공간 추정)');
         if(/욕실|화장실/.test(nm)){ add(nm, P.bath.n, P.bath.spec[ti], P.bath.p[ti], '1칸'); return; }
         if(/주방|부엌/.test(nm)) add(nm, P.kitchen.n, P.kitchen.spec[ti], P.kitchen.p[ti]*kitF, '1식(싱크대·상판·후드·수전)');
@@ -30555,7 +30575,7 @@ function _consultCalcEstimate(st, ti, opt){
         if(!/현관|드레스/.test(nm)) add(nm, P.winfilm.n, P.winfilm.spec[ti], P.winfilm.p[ti]*spy, pb(P.winfilm.p[ti],spy,_pyLbl));
       });
     }
-    var _ex=_consultExt(st);
+    var _ex=_consultExtEst(st);
     if(_ex==='living' || _ex==='living_room'){
       add(part?'거실':'공통', '발코니 확장(거실)', '내측 창 철거·단열·바닥 난방 연장·마감', P.extLiving[ti], '거실 1곳');
       if(_ex==='living_room') add(part?'방':'공통', '발코니 확장(방)', '내측 창 철거·단열·난방 연장', P.extRoom[ti], '방 1곳');
@@ -30706,7 +30726,7 @@ function _consultLegal(st){
     var moveWork=/이동|옮기|위치\s*변경|자리/.test(memo);
     if(isApt){
       if(!part || wallWork) c('no','내력벽 철거·변경 불가','공동주택의 내력벽(구조벽) 철거·이동은 공동주택관리법상 행위허가 대상이라 사실상 불가해요. 비내력벽도 철거 전 관리주체 확인이 필요해요.','도면·관리사무소에서 구조벽 위치 확인');
-      var _ex=_consultExt(st);
+      var _ex=_consultExtEst(st);
       if(_ex==='living'||_ex==='living_room') c('warn','발코니 확장','발코니 확장은 가능하지만 관할 구청 신고가 필요하고, 대피공간·방화판·외부 창호 단열 기준을 지켜야 해요.','구청 건축과 발코니 확장 신고');
       c('warn','공사 신고·공사 시간','관리사무소 공사 신고와 이웃 동의서가 필요하고, 관리규약상 보통 평일 주간에만 공사할 수 있어요.','관리사무소에 공사 기간·시간 확인');
       if((hasBath||hasKitchen) && (moveWork || !part)) c('warn','욕실·주방 배관 위치','공용 배관(수직 배관)은 옮길 수 없어요. 싱크대·변기 위치를 옮기면 배관 경사·방수 문제로 아래층 누수 책임이 생길 수 있어요.','배관 경로 사전 확인 + 방수 2회 이상');
@@ -31238,7 +31258,11 @@ function _consultEstimate(st, v, force){
     _consultGuessPy(st, function(changed){ if(changed) (st.variants||[]).forEach(function(vv){ if(!(vv.estimate && vv.estimate.edited)){ vv.estimate=null; _consultEstimate(st, vv); } }); });
   }
   var ti=v.plan.tier==null?1:v.plan.tier;
-  var est=_consultCalcEstimate(st, ti);
+  var _tkOk=null; // 지금 이미지와 같은 이미지로 분석한 결과만 사용(이미지를 바꿨으면 예전 분석은 버림)
+  if(v.takeoff && st.type==='home' && !_consultIsBuild(st) && (_consultIsPart(st) || !_consultNum(st.area))){
+    Object.keys(v.takeoff).forEach(function(k){ var r=v.spaces&&v.spaces[k], t=v.takeoff[k]; if(r && t && t.src===r.result){ (_tkOk=_tkOk||{})[k]=t; } });
+  }
+  var est=_consultCalcEstimate(st, ti, {takeoff:_tkOk});
   // 시안 마감재 스케줄의 자재명을 사양에 표시(금액은 등급 단가 그대로) — 공종 ↔ 스케줄 항목
   var SI=v.sched&&v.sched.items;
   if(SI){
@@ -31246,14 +31270,19 @@ function _consultEstimate(st, v, force){
              [/인테리어 공사/,['floor','wall']],[/가구·집기/,['cfurn']],[/^화장실/,['ctile']],[/간판·파사드/,['door']]];
     var _fromImg=!!(v.sched && v.sched.fromRender);
     est.items.forEach(function(it){
-      for(var i=0;i<map.length;i++){ if(map[i][0].test(it.work)){ var nm=map[i][1].map(function(k){ return SI[k]&&SI[k].ko; }).filter(function(x,xi,arr){ return x && arr.indexOf(x)===xi; }).join(' / '); if(nm) it.spec=_fromImg?nm:((it.spec?it.spec+' · ':'')+nm); break; } }
+      if(it.tk) return; // 사진 분석(카탈로그) 항목은 이미 자재명·단가가 정해져 있음
+      for(var i=0;i<map.length;i++){ if(map[i][0].test(it.work)){ var _keys=map[i][1]; if(_fromImg && it.work==='바닥' && !/주방|부엌|공통/.test(it.space||'')) _keys=['floor']; // 거실·방 바닥엔 주방 바닥재를 같이 적지 않음
+          var nm=_keys.map(function(k){ return SI[k]&&SI[k].ko; }).filter(function(x,xi,arr){ return x && arr.indexOf(x)===xi; }).join(' / '); if(nm) it.spec=_fromImg?nm:((it.spec?it.spec+' · ':'')+nm); break; } }
     });
     // 2026-10-12(사용자 지적 "이미지랑 견적이 따로 논다"): 이미지에서 읽은 벽·바닥 자재가 우드 판넬·타일·미장 등이면 그 자재 단가로 다시 계산
     if(_fromImg && st.type==='home'){
       est.items.forEach(function(it){
+        if(it.tk) return;
         var m=String(it.basis||'').match(/^([\d.]+)만원\/평 × ([\d.]+)(.*)$/); if(!m) return;
         var q=parseFloat(m[2]), r=null, ko='';
         if(/도배|도장/.test(it.work)){ ko=(SI.wall&&SI.wall.ko)||''; r=_consultMatRate('wall', ko); }
+        else if(/목공/.test(it.work)){ ko=(SI.ceiling&&SI.ceiling.ko)||''; r=_consultMatRate('ceiling', ko); }
+        else if(/전기·조명/.test(it.work)){ ko=(SI.light&&SI.light.ko)||''; r=_consultMatRate('light', ko); }
         else if(it.work==='바닥'){ ko=(SI.floor&&SI.floor.ko)||''; r=_consultMatRate('floor', ko); }
         if(r==null || !q) return;
         it.amount=Math.round(r*q/10)*10; it.basis=r+'만원/평 × '+q+m[3]+' · 이미지 속 자재 기준';
@@ -31273,7 +31302,7 @@ function _consultEstimate(st, v, force){
   if(bud){ var diff=Math.round((est.total-bud)/bud*100); note+=' 고객 예산 '+_consultFmtMan(bud)+' 대비 '+(diff>=0?'+':'')+diff+'%.'; }
   if(!_consultIsBuild(st) && !_consultNum(st.area)) note=' [평수 미입력] 집 전체가 아니라 올린 공간('+_consultSp(st).map(function(s){ return s.name+(s.estPy>0?' 약 '+s.estPy+'평':''); }).join(', ')+')만, 사진으로 추정한 면적 기준으로 낸 금액이에요. 평수를 입력하면 집 전체 기준으로 다시 계산돼요. '+note;
   if(st.type==='home') note+=' 샷시(창호)는 교체하지 않고 기존 프레임에 시트지만 시공해요.';
-  var _ex=_consultExt(st);
+  var _ex=_consultExtEst(st);
   if(_ex==='living'||_ex==='living_room') note+=' 발코니 확장은 구청 신고가 필요하고, 외부 창호가 단열 기준에 못 미치면 창호 보완 비용이 따로 생길 수 있어요.';
   // 요청("소품은 포함 아닌거지? 조명은?"): 포함/미포함을 견적에 명확히 적음
   if(!_consultIsBuild(st)){
@@ -31281,9 +31310,148 @@ function _consultEstimate(st, v, force){
   } else {
     note+=' [미포함] 토지비, 취득세, 가구·가전, 조경·외부 부대시설(항목에 없을 때).';
   }
+  if(_tkOk) note='[사진 분석 견적] 사진에 실제로 보이는 시공 항목만 골라 정해진 단가표로 계산했어요(항목별 "사진:" 근거 참고). 실측·자재 확정 후 ±20~30% 달라질 수 있어요. '+note;
   est.note=note;
   if(!_consultIsBuild(st) && !_consultNum(st.area)) est.noAreaV=2;
   v.estimate=est; v.estStatus='done'; v.dirty=true; _consultSave(); _consultRefresh();
+}
+// ══ 2026-10-13: 공종 카탈로그 견적 ══════════════════════════════════════════════════════════
+// 요청("사진마다 견적이 틀려서 계속 고쳐야 한다 → AI는 사진에 뭐가 있는지만 판단, 금액은 코드가"): AI가 사진을 보고
+// 아래 목록에서 실제로 보이는 시공 항목과 수량만 고르고, 금액은 이 표의 단가로 계산함(AI가 금액을 지어내지 않음).
+// 단가 = 자재+시공 중간값(만원, 부가세 별도, 2025~26 수도권). 단가를 바꾸려면 이 표의 숫자만 고치면 됨.
+// 단위: py=그 공간 바닥 평수, m=길이(m), ea=개, set=1식, face=벽 1면
+var CONSULT_CAT_UNIT={py:'평', m:'m', ea:'개', set:'식', face:'면'};
+var CONSULT_CATALOG=[
+  // 철거
+  {id:'demo_full', cat:'철거·폐기물', n:'전체 철거·폐기물', u:'py', p:11},
+  {id:'demo_part', cat:'철거·폐기물', n:'부분 철거·폐기물', u:'py', p:6},
+  // 바닥 (하나만)
+  {id:'fl_vinyl', cat:'바닥', n:'장판', u:'py', p:8},
+  {id:'fl_deco', cat:'바닥', n:'데코타일', u:'py', p:7},
+  {id:'fl_laminate', cat:'바닥', n:'강화마루', u:'py', p:9},
+  {id:'fl_engineered', cat:'바닥', n:'강마루', u:'py', p:11},
+  {id:'fl_wide', cat:'바닥', n:'광폭 강마루', u:'py', p:14},
+  {id:'fl_wood', cat:'바닥', n:'원목마루', u:'py', p:20},
+  {id:'fl_herringbone', cat:'바닥', n:'헤링본 원목마루', u:'py', p:25},
+  {id:'fl_tile', cat:'바닥', n:'포세린 타일', u:'py', p:27},
+  {id:'fl_marble', cat:'바닥', n:'대리석', u:'py', p:40},
+  {id:'fl_micro', cat:'바닥', n:'마이크로시멘트·에폭시·폴리싱', u:'py', p:18},
+  // 벽 기본 마감 (하나만)
+  {id:'wl_paper', cat:'벽 마감', n:'합지 도배', u:'py', p:5},
+  {id:'wl_silk', cat:'벽 마감', n:'실크 도배', u:'py', p:7},
+  {id:'wl_paint', cat:'벽 마감', n:'일반 도장', u:'py', p:12},
+  {id:'wl_putty', cat:'벽 마감', n:'올퍼티 도장', u:'py', p:25},
+  {id:'wl_plaster', cat:'벽 마감', n:'특수미장(석회·마이크로시멘트)', u:'py', p:35},
+  {id:'wl_wood_all', cat:'벽 마감', n:'벽 전체 우드 판넬', u:'py', p:30},
+  {id:'wl_tile_all', cat:'벽 마감', n:'벽 전체 타일', u:'py', p:40},
+  // 포인트 벽 (면 단위, 여러 개 가능)
+  {id:'pw_wood', cat:'포인트 벽', n:'우드 판넬·루버 포인트 벽', u:'face', p:150},
+  {id:'pw_temba', cat:'포인트 벽', n:'템바보드 포인트 벽', u:'face', p:110},
+  {id:'pw_stone', cat:'포인트 벽', n:'석재·라임스톤 포인트 벽', u:'face', p:220},
+  {id:'pw_tile', cat:'포인트 벽', n:'타일 포인트 벽', u:'face', p:120},
+  // 천장 (하나만)
+  {id:'cl_flat', cat:'천장', n:'천장 평탄화·도배/도장', u:'py', p:10},
+  {id:'cl_nomold', cat:'천장', n:'무몰딩·히든 디테일 천장', u:'py', p:20},
+  {id:'cl_coffer', cat:'천장', n:'우물천장·간접등 박스', u:'py', p:22},
+  {id:'cl_exposed', cat:'천장', n:'노출 천장(면 정리·코팅)', u:'py', p:15},
+  {id:'cl_wood', cat:'천장', n:'우드 천장 마감', u:'py', p:32},
+  // 조명·전기
+  {id:'el_basic', cat:'조명·전기', n:'기본 전기(스위치·콘센트·등 교체)', u:'py', p:7},
+  {id:'el_downlight', cat:'조명·전기', n:'매입 다운라이트', u:'py', p:10},
+  {id:'el_indirect', cat:'조명·전기', n:'간접조명 라인', u:'m', p:4},
+  {id:'el_line', cat:'조명·전기', n:'라인 조명', u:'m', p:6},
+  {id:'el_rail', cat:'조명·전기', n:'레일 + 스팟 조명', u:'m', p:9},
+  {id:'el_pendant', cat:'조명·전기', n:'펜던트 배선(등기구 제외)', u:'ea', p:8},
+  // 문·창
+  {id:'dr_film', cat:'문·창', n:'방문 필름', u:'ea', p:20},
+  {id:'dr_new', cat:'문·창', n:'방문 교체', u:'ea', p:45},
+  {id:'dr_hidden', cat:'문·창', n:'히든 도어', u:'ea', p:90},
+  {id:'dr_middle', cat:'문·창', n:'중문', u:'ea', p:110},
+  {id:'win_film', cat:'문·창', n:'창호 프레임 시트지(기존 샷시 유지)', u:'py', p:3},
+  // 붙박이(벽·바닥에 고정된 것만)
+  {id:'bi_wardrobe', cat:'붙박이', n:'붙박이장', u:'m', p:45},
+  {id:'bi_shoe', cat:'붙박이', n:'신발장', u:'m', p:40},
+  {id:'bi_bench', cat:'붙박이', n:'붙박이 벤치·좌석', u:'m', p:35},
+  {id:'bi_shelf', cat:'붙박이', n:'벽 선반·책장', u:'m', p:30},
+  {id:'bi_tvwall', cat:'붙박이', n:'TV월·아트월 수납', u:'set', p:250},
+  // 주방 (하나만 + 옵션)
+  {id:'kt_basic', cat:'주방', n:'주방 가구 실속(PET·인조대리석)', u:'set', p:380},
+  {id:'kt_std', cat:'주방', n:'주방 가구 표준(도장·칸스톤)', u:'set', p:800},
+  {id:'kt_premium', cat:'주방', n:'주방 가구 고급(무광 도장·세라믹)', u:'set', p:1300},
+  {id:'kt_high', cat:'주방', n:'주방 가구 하이엔드(맞춤·빌트인)', u:'set', p:1700},
+  {id:'kt_island', cat:'주방', n:'아일랜드', u:'ea', p:250},
+  {id:'kt_tile', cat:'주방', n:'주방 벽 타일', u:'set', p:60},
+  // 욕실 (하나만)
+  {id:'ba_overlay', cat:'욕실', n:'욕실 덧방 리모델링', u:'set', p:260},
+  {id:'ba_full', cat:'욕실', n:'욕실 올철거·방수·타일', u:'set', p:520},
+  {id:'ba_premium', cat:'욕실', n:'욕실 고급(대형 타일·수전)', u:'set', p:800},
+  {id:'ba_hotel', cat:'욕실', n:'호텔식 욕실', u:'set', p:1000},
+  {id:'pw_vanity', cat:'세면', n:'세면대·하부장·거울', u:'set', p:150},
+  // 기타
+  {id:'fireplace', cat:'기타', n:'벽난로(에탄올·전기식)', u:'ea', p:250},
+  {id:'etile', cat:'기타', n:'현관·베란다 타일', u:'py', p:5},
+  {id:'glass_part', cat:'기타', n:'유리 파티션', u:'m', p:45}
+];
+var CONSULT_CAT_BY_ID={}; CONSULT_CATALOG.forEach(function(c){ CONSULT_CAT_BY_ID[c.id]=c; });
+function _consultTakeoffPrompt(spName){
+  return [
+    '[인테리어 시공 항목 판별 — JSON 하나만 답할 것, 설명·인사말·코드블록 금지]',
+    '첨부 이미지는 "'+spName+'" 공간의 완성 디자인 이미지야. 이 디자인을 실제로 시공하려면 필요한 항목을 아래 카탈로그에서만 골라.',
+    '규칙:',
+    '1) 이미지에 실제로 보이는 것만 골라. 보이지 않는 건 절대 넣지 마(예: 발코니·주방·욕실이 안 보이면 그 항목 금지).',
+    '2) 바닥·벽 마감·천장·주방 가구·욕실은 각각 하나만. 보이는 재질과 가장 가까운 것을 골라.',
+    '3) 소파·식탁·의자·침대·러그·소품·스탠드/펜던트 등기구 자체는 가구라서 제외. 벽·바닥에 고정된 벤치·수납·선반은 붙박이로 넣어.',
+    '4) 철거는 기본적으로 demo_full. 전기는 보이는 조명 방식에 맞춰 넣고, 최소 el_basic.',
+    '5) qty: 단위가 py인 항목은 qty 생략. m는 대략 길이(m), ea는 개수, face는 벽 면 수, set은 1.',
+    '6) note: 사진에서 무엇을 보고 골랐는지 12자 이내(예: "오크 원목 바닥").',
+    '7) py: 이 공간 바닥 면적을 평으로 추정(가구 크기·천장 높이 기준).',
+    '카탈로그(id | 항목 | 단위):',
+    CONSULT_CATALOG.map(function(c){ return c.id+' | '+c.n+' | '+CONSULT_CAT_UNIT[c.u]; }).join('\n'),
+    '형식: {"py":숫자,"items":[{"id":"…","qty":숫자,"note":"…"}, …]}'
+  ].join('\n');
+}
+function _consultTakeoffParse(res){
+  var j=_consultParseJson(res); if(!j || !Array.isArray(j.items)) return null;
+  var one={}, out=[];
+  var single=/^(fl_|wl_|cl_|kt_(basic|std|premium|high)|ba_|demo_)/;
+  j.items.forEach(function(x){
+    var c=x&&CONSULT_CAT_BY_ID[x.id]; if(!c) return;
+    var g=(String(x.id).match(single)||[])[0]; if(g){ if(one[g]) return; one[g]=1; }
+    var q=parseFloat(x.qty); if(c.u==='py') q=1; else if(c.u==='set') q=1;
+    else { var mx={m:30, ea:10, face:4}[c.u]||10; if(!(q>0)) q=1; q=Math.min(mx, Math.round(q*10)/10); }
+    out.push({id:c.id, qty:q, note:String(x.note||'').slice(0,20)});
+  });
+  if(!out.length) return null;
+  if(!out.some(function(x){ return /^demo_/.test(x.id); })) out.unshift({id:'demo_full', qty:1, note:''});
+  if(!out.some(function(x){ return /^el_(basic|downlight)$/.test(x.id); })) out.push({id:'el_basic', qty:1, note:''}); // 레일·라인 조명만 있어도 스위치·콘센트 등 기본 전기는 필요
+  var py=parseFloat(j.py); py=(py>0)?Math.max(0.5, Math.min(60, Math.round(py*10)/10)):0;
+  return {py:py, items:out};
+}
+function _consultTakeoff(st, v, done){
+  try{
+    if(st.type!=='home' || _consultIsBuild(st)){ done&&done(); return; }
+    v.takeoff=v.takeoff||{};
+    var sps=_consultSp(st).filter(function(s){ var r=v.spaces[s.id]; return r && r.result && !(v.takeoff[s.id] && v.takeoff[s.id].src===r.result); }).slice(0,6);
+    if(!sps.length){ done&&done(); return; }
+    var left=sps.length; v.takeoffBusy=true; _consultRefresh();
+    function fin(){ if(--left>0) return; v.takeoffBusy=false; if(!(v.estimate && v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); } _consultSave(); _consultRefresh(); done&&done(); }
+    sps.forEach(function(s){
+      var url=v.spaces[s.id].result;
+      _proposalImgToB64(url, function(b64){
+        var blk=b64 ? {type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}} : (/^https?:/.test(url)?{type:'image', source:{type:'url', url:url}}:null);
+        if(!blk){ fin(); return; }
+        var tries=0;
+        (function attempt(){
+          _falProxyCall('chat-assistant', {messages:[{role:'user', content:[blk, {type:'text', text:_consultTakeoffPrompt(s.name)}]}]}, function(res){
+            var t=_consultTakeoffParse(res);
+            if(!t && ++tries<2){ setTimeout(attempt, 1200); return; }
+            if(t){ t.src=url; v.takeoff[s.id]=t; }
+            fin();
+          }, function(){ if(++tries<2){ setTimeout(attempt, 1500); return; } fin(); });
+        })();
+      });
+    });
+  }catch(e){ console.warn('[상담패키지] 시공 항목 판별 실패', e); done&&done(); }
 }
 // 자재명 → 평당 단가(만원, 자재+시공) — 2025~26 수도권 시세 중간값. 모르는 자재면 null(등급 단가 유지)
 function _consultMatRate(kind, ko){
@@ -31292,9 +31460,29 @@ function _consultMatRate(kind, ko){
     if(/타일|포세린|대리석|석재|라임스톤|트래버틴/.test(ko)) return 40;
     if(/미장|석회|스타코|특수|마이크로|노출|콘크리트|빈티지/.test(ko)) return 35;
     if(/우드|원목|판넬|패널|루버|템바|무늬목|베니어|합판/.test(ko)) return 30;
+    if(/올퍼티|퍼티/.test(ko)) return 25;
     if(/도장|페인트/.test(ko)) return 12;
     if(/실크/.test(ko)) return 7;
     if(/합지/.test(ko)) return 5;
+    return null;
+  }
+  if(kind==='ceiling'){ // 천장 목공(평탄화·몰딩 포함) 평당
+    if(/곡면|특수/.test(ko)) return 40;
+    if(/우드|원목|루버|템바|무늬목/.test(ko)) return 32;
+    if(/우물|간접|등박스/.test(ko)) return 22;
+    if(/무몰딩|히든/.test(ko)) return 20;
+    if(/노출|콘크리트|미장/.test(ko)) return 15;
+    if(/도장|평탄/.test(ko)) return 14;
+    if(/몰딩/.test(ko)) return 12;
+    return null;
+  }
+  if(kind==='light'){ // 전기·조명 평당(배선·스위치·콘센트 포함)
+    if(/설계|디밍|다운라이트 전체/.test(ko)) return 30;
+    if(/라인/.test(ko)) return 22;
+    if(/레일|스팟/.test(ko)) return 16;
+    if(/간접/.test(ko)) return 14;
+    if(/매입등|다운라이트/.test(ko)) return 10;
+    if(/등기구|조명 교체/.test(ko)) return 7;
     return null;
   }
   if(kind==='floor'){
