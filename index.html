@@ -48851,14 +48851,12 @@ function admSetTab(tab){_adminTab=tab;buildAdminDashboard();}
 // 관리자 지급·환불·쿠폰·가입 보너스는 빼고, 기업 플랜(계좌이체)은 지급 사유에 "입금" 또는 "기업"이 들어가면 매출로 셈.
 var SALES_PACKS={700:9900, 1500:19900, 4200:49900, 8800:99000};
 var _admSalesMonth=null;
+function _salesManualLS(){ try{ return JSON.parse(localStorage.getItem('clover_sales_manual')||'[]')||[]; }catch(e){ return []; } }
+function _salesMonthEndDate(y,m){ var d=new Date(Date.UTC(y,m+1,0)); return d.getUTCFullYear()+'-'+(d.getUTCMonth()<9?'0':'')+(d.getUTCMonth()+1)+'-'+(d.getUTCDate()<10?'0':'')+d.getUTCDate(); }
 function _admSalesClassify(l){
   var a=+l.amount||0, r=String(l.reason||'');
   if(a<=0) return null;
-  if(/입금|기업|팀 ?(라이트|스탠다드|프로|비즈니스)/.test(r)){
-    var tp=(typeof TEAM_PLANS!=='undefined'?TEAM_PLANS:[]).filter(function(t){ return t.cr===a; })[0];
-    var m=r.match(/([\d,]{5,})\s*원/); var won=tp?tp.won:(m?parseInt(m[1].replace(/,/g,''),10):0);
-    return won?{won:won, kind:'bank', label:tp?tp.n:'기업 플랜(계좌이체)'}:null;
-  }
+  if(/입금|기업|팀 ?(라이트|스탠다드|프로|비즈니스)/.test(r)) return null; // 계좌이체 매출은 아래 "입금 기록"으로만 셈(중복 방지)
   if(/관리자|환불|쿠폰|가입|보상|오류|테스트|이벤트|무료|복구|사과/.test(r)) return null;
   var w=SALES_PACKS[a]; if(!w) return null;
   return {won:w, kind:'card', label:({700:'Basic',1500:'Pro',4200:'Studio',8800:'Business'})[a]+' '+a.toLocaleString()+'cr'};
@@ -48874,30 +48872,90 @@ function admSales(c){
     '<button type="button" id="sales-next" style="padding:5px 10px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer">▶</button></div><div id="sales-body" style="color:var(--m2);font-size:12px">불러오는 중...</div>';
   gE('sales-prev').onclick=function(){ _admSalesMonth={y:m===0?y-1:y, m:(m+11)%12}; admSales(c); };
   gE('sales-next').onclick=function(){ _admSalesMonth={y:m===11?y+1:y, m:(m+1)%12}; admSales(c); };
-  _supa.from('credit_logs').select('user_id,amount,reason,created_at').gt('amount',0).gte('created_at',start).lt('created_at',end).order('created_at',{ascending:false}).limit(5000).then(function(res){
+  Promise.all([
+    _supa.from('credit_logs').select('*').gt('amount',0).gte('created_at',start).lt('created_at',end).order('created_at',{ascending:false}).limit(5000),
+    _supa.from('sales_excluded').select('log_key').limit(5000).then(function(r){ return r; }, function(){ return {error:true}; }),
+    _supa.from('sales_manual').select('*').gte('paid_at',y+'-'+(m<9?'0':'')+(m+1)+'-01').lte('paid_at',_salesMonthEndDate(y,m)).order('paid_at',{ascending:false}).limit(1000).then(function(r){ return r; }, function(){ return {error:true}; })
+  ]).then(function(rs){
+    var res=rs[0], ex=rs[1]||{}, mn=rs[2]||{};
+    var _mnDb=!(mn&&mn.error);
+    var manual=_mnDb?(mn.data||[]):_salesManualLS().filter(function(x){ return String(x.paid_at||'').slice(0,7)===y+'-'+(m<9?'0':'')+(m+1); });
     var body=gE('sales-body'); if(!body) return;
     if(res.error){ body.innerHTML='<span style="color:#fca5a5">불러오기 실패: '+_admEsc(res.error.message)+'</span>'; return; }
-    var rows=[]; (res.data||[]).forEach(function(l){ var k=_admSalesClassify(l); if(k) rows.push({l:l, k:k}); });
-    var uids=rows.map(function(r){ return r.l.user_id; }).filter(function(u,i,a){ return u && a.indexOf(u)===i; });
+    var excl={}; ((ex&&!ex.error&&ex.data)||[]).forEach(function(x){ excl[x.log_key]=1; });
+    var _exDb=!(ex&&ex.error); try{ JSON.parse(localStorage.getItem('clover_sales_excl')||'[]').forEach(function(k){ excl[k]=1; }); }catch(_e){}
+    var all=[]; (res.data||[]).forEach(function(l){ var k=_admSalesClassify(l); if(k) all.push({l:l, k:k, key:(l.id!=null?String(l.id):(l.user_id+'|'+l.created_at))}); });
+    var rows=all.filter(function(r){ return !excl[r.key]; }), outRows=all.filter(function(r){ return excl[r.key]; });
+    var uids=all.map(function(r){ return r.l.user_id; }).filter(function(u,i,a){ return u && a.indexOf(u)===i; });
     var pq=uids.length?_supa.from('profiles').select('id,email').in('id',uids):Promise.resolve({data:[]});
     pq.then(function(pr){
       var em={}; ((pr&&pr.data)||[]).forEach(function(p){ em[p.id]=p.email; });
       var tot=0, card=0, bank=0, per={};
       rows.forEach(function(r){ tot+=r.k.won; if(r.k.kind==='card') card+=r.k.won; else bank+=r.k.won; var u=r.l.user_id; per[u]=per[u]||{won:0,n:0}; per[u].won+=r.k.won; per[u].n++; });
+      manual.forEach(function(x){ var w=+x.amount||0; tot+=w; bank+=w; var u='manual:'+(x.payer||'(이름 없음)'); em[u]=(x.payer||'(이름 없음)')+' · 계좌'; per[u]=per[u]||{won:0,n:0}; per[u].won+=w; per[u].n++; });
+      var payers=Object.keys(per).length, _cnt=rows.length+manual.length;
       var fee=Math.round(card*0.0374);
       function box(l,v,sub){ return '<div style="background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px"><div style="font-size:10.5px;color:var(--m2)">'+l+'</div><div style="font-size:18px;font-weight:800;color:var(--ac);margin-top:3px">'+v+'</div>'+(sub?'<div style="font-size:10.5px;color:var(--m2);margin-top:2px">'+sub+'</div>':'')+'</div>'; }
       var h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px">'+
-        box('월 총 결제액', tot.toLocaleString()+'원', rows.length+'건 · '+uids.length+'명')+
+        box('월 총 결제액', tot.toLocaleString()+'원', _cnt+'건 · '+payers+'곳')+
         box('카드(토스)', card.toLocaleString()+'원', '수수료 약 '+fee.toLocaleString()+'원(3.74%)')+
         box('계좌이체(기업)', bank.toLocaleString()+'원', '수수료 없음')+
         box('예상 입금액', (tot-fee).toLocaleString()+'원', '토스 수수료 뺀 금액')+'</div>';
+      // 계좌이체 입금 기록(기업 플랜 등) — 직접 적기
+      var _today=_admKstDT(new Date().toISOString()).slice(0,10);
+      var _planOpts=(typeof TEAM_PLANS!=='undefined'?TEAM_PLANS:[]).map(function(t){ return '<option value="'+t.won+'|'+_admEsc(t.n)+'">'+_admEsc(t.n)+' — '+t.won.toLocaleString()+'원</option>'; }).join('')+'<option value="0|직접 입력">직접 입력</option>';
+      var IS='background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:7px 9px;font-size:12px;border-radius:6px;outline:none;font-family:inherit;box-sizing:border-box';
+      h+='<div style="background:rgba(245,181,68,.07);border:1px solid rgba(245,181,68,.4);border-radius:10px;padding:10px 12px;margin-bottom:14px">'+
+        '<div style="font-size:12px;font-weight:800;color:#f5b544;margin-bottom:8px">🏦 계좌이체 입금 기록 (기업 플랜 등)</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px">'+
+          '<input id="sm-date" type="date" value="'+_today+'" style="'+IS+';color-scheme:dark">'+
+          '<input id="sm-payer" type="text" placeholder="입금자·회사명 (예: 주식회사세움)" style="'+IS+'">'+
+          '<select id="sm-plan" style="'+IS+';color-scheme:dark">'+_planOpts+'</select>'+
+          '<input id="sm-amt" type="number" placeholder="금액(원)" value="'+((typeof TEAM_PLANS!=='undefined'&&TEAM_PLANS[0])?TEAM_PLANS[0].won:'')+'" style="'+IS+'">'+
+          '<input id="sm-memo" type="text" placeholder="메모 (선택: 세금계산서 발행 등)" style="'+IS+'">'+
+          '<button type="button" id="sm-add" style="padding:7px 12px;border-radius:6px;border:none;background:#f5b544;color:#000;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit">+ 입금 기록 추가</button>'+
+        '</div>'+
+        (manual.length?'<div style="margin-top:10px;border:1px solid var(--bd2);border-radius:8px;overflow:hidden">'+manual.map(function(x){
+          return '<div style="display:flex;gap:8px;padding:7px 10px;border-bottom:1px solid var(--bd);font-size:11.5px;align-items:center"><span style="color:var(--m2);min-width:78px">'+_admEsc(String(x.paid_at||'').slice(0,10))+'</span><span style="flex:1;color:var(--t);word-break:break-all">'+_admEsc(x.payer||'')+(x.memo?' <span style="color:var(--m2)">· '+_admEsc(x.memo)+'</span>':'')+'</span><span style="color:var(--t2)">'+_admEsc(x.plan||'')+'</span><span style="font-weight:800;color:var(--t);min-width:70px;text-align:right">'+(+x.amount||0).toLocaleString()+'원</span><button type="button" data-sm="'+_admEsc(String(x.id))+'" style="padding:3px 8px;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:#f87171;font-size:10.5px;cursor:pointer;font-family:inherit">삭제</button></div>';
+        }).join('')+'</div>':'<div style="font-size:11px;color:var(--m2);margin-top:8px">이 달 계좌이체 입금 기록이 없어요.</div>')+
+        (_mnDb?'':'<div style="font-size:10.5px;color:#f5b544;margin-top:6px">SALES_EXCLUDED.sql을 실행하면 입금 기록이 PC·폰에서 똑같이 보여요(지금은 이 기기에만 저장).</div>')+
+      '</div>';
       var order=Object.keys(per).sort(function(a,b){ return per[b].won-per[a].won; });
       h+='<div style="font-size:12px;font-weight:800;color:var(--t);margin:4px 0 6px">👤 회원별 합계</div><div style="border:1px solid var(--bd2);border-radius:8px;overflow:hidden;margin-bottom:14px">'+
         (order.length?order.map(function(u){ return '<div style="display:flex;gap:8px;padding:7px 10px;border-bottom:1px solid var(--bd);font-size:12px"><span style="flex:1;color:var(--t);word-break:break-all">'+_admEsc(em[u]||u)+'</span><span style="color:var(--m2)">'+per[u].n+'건</span><span style="font-weight:800;color:var(--ac);min-width:80px;text-align:right">'+per[u].won.toLocaleString()+'원</span></div>'; }).join(''):'<div style="padding:12px;text-align:center;color:var(--m2);font-size:12px">이 달 결제가 없어요</div>')+'</div>';
-      h+='<div style="font-size:12px;font-weight:800;color:var(--t);margin:4px 0 6px">🧾 결제 내역</div><div style="border:1px solid var(--bd2);border-radius:8px;overflow:hidden">'+
-        rows.map(function(r){ return '<div style="display:flex;gap:8px;padding:7px 10px;border-bottom:1px solid var(--bd);font-size:11.5px;align-items:center"><span style="color:var(--m2);min-width:92px">'+_admKstDT(r.l.created_at).slice(5,16)+'</span><span style="flex:1;color:var(--t);word-break:break-all">'+_admEsc(em[r.l.user_id]||r.l.user_id)+'</span><span style="color:var(--t2)" title="기록 사유: '+_admEsc(r.l.reason||'')+'">'+_admEsc(r.k.label)+(r.k.kind==='bank'?' · 계좌':'')+'</span><span style="font-weight:800;color:var(--t);min-width:76px;text-align:right">'+r.k.won.toLocaleString()+'원</span></div>'; }).join('')+'</div>';
-      h+='<div style="font-size:10.5px;color:var(--m2);line-height:1.6;margin-top:8px">· 회원 크레딧 충전 기록으로 계산한 금액이에요. 결제 취소·환불은 토스 관리자 화면 기준으로 확인해 주세요.<br>· 기업 플랜(계좌이체)은 크레딧 지급할 때 사유에 "기업 플랜 입금"처럼 <b>입금</b> 또는 <b>기업</b>을 넣으면 여기 매출로 잡혀요.</div>';
+      function line(r, isOut){
+        return '<div style="display:flex;gap:8px;padding:7px 10px;border-bottom:1px solid var(--bd);font-size:11.5px;align-items:center'+(isOut?';opacity:.55':'')+'"><span style="color:var(--m2);min-width:84px">'+_admKstDT(r.l.created_at).slice(5,16)+'</span><span style="flex:1;color:var(--t);word-break:break-all">'+_admEsc(em[r.l.user_id]||r.l.user_id)+'</span><span style="color:var(--t2)" title="기록 사유: '+_admEsc(r.l.reason||'')+'">'+_admEsc(r.k.label)+(r.k.kind==='bank'?' · 계좌':'')+'</span><span style="font-weight:800;color:var(--t);min-width:70px;text-align:right'+(isOut?';text-decoration:line-through':'')+'">'+r.k.won.toLocaleString()+'원</span>'+
+          '<button type="button" data-k="'+_admEsc(r.key)+'" data-out="'+(isOut?1:0)+'" style="padding:3px 8px;border-radius:6px;border:1px solid var(--bd2);background:transparent;color:'+(isOut?'var(--ac)':'#f87171')+';font-size:10.5px;cursor:pointer;font-family:inherit;white-space:nowrap">'+(isOut?'다시 포함':'매출 제외')+'</button></div>';
+      }
+      h+='<div style="font-size:12px;font-weight:800;color:var(--t);margin:4px 0 6px">🧾 결제 내역</div><div style="border:1px solid var(--bd2);border-radius:8px;overflow:hidden">'+rows.map(function(r){ return line(r,false); }).join('')+'</div>';
+      if(outRows.length) h+='<div style="font-size:12px;font-weight:800;color:var(--m2);margin:14px 0 6px">🚫 매출에서 뺀 결제 (테스트·취소)</div><div style="border:1px solid var(--bd2);border-radius:8px;overflow:hidden">'+outRows.map(function(r){ return line(r,true); }).join('')+'</div>';
+      h+='<div style="font-size:10.5px;color:var(--m2);line-height:1.6;margin-top:8px">· 회원 크레딧 충전 기록으로 계산한 금액이에요. 토스에서 취소한 결제나 테스트 결제는 <b>매출 제외</b>를 눌러 빼 주세요.'+(_exDb?'':' <span style="color:#f5b544">(SALES_EXCLUDED.sql을 실행하면 제외 목록이 PC·폰에서 똑같이 보여요)</span>')+'<br>· 계좌이체(기업 플랜 등)는 위 <b>🏦 입금 기록</b>에 적으면 월 합계에 들어가요. 크레딧 지급은 크레딧 지급 탭에서 따로 해 주세요.</div>';
       body.innerHTML=h;
+      var _sp=gE('sm-plan'), _sa=gE('sm-amt');
+      if(_sp) _sp.onchange=function(){ var w=parseInt(_sp.value.split('|')[0],10)||0; if(_sa){ _sa.value=w||''; if(!w) _sa.focus(); } };
+      var _add=gE('sm-add'); if(_add) _add.onclick=function(){
+        var d=(gE('sm-date')||{}).value, payer=((gE('sm-payer')||{}).value||'').trim(), amt=parseInt((gE('sm-amt')||{}).value,10)||0, plan=(_sp?_sp.value.split('|').slice(1).join('|'):''), memo=((gE('sm-memo')||{}).value||'').trim();
+        if(!d){ alert('입금 날짜를 고르세요.'); return; } if(!payer){ alert('입금자·회사명을 적어주세요.'); return; } if(!(amt>0)){ alert('금액을 적어주세요.'); return; }
+        var row={paid_at:d, payer:payer.slice(0,60), plan:plan, amount:amt, memo:memo.slice(0,100)};
+        _add.disabled=true;
+        if(_mnDb){ _supa.from('sales_manual').insert(row).then(function(r){ if(r&&r.error){ alert('저장 실패: '+r.error.message); _add.disabled=false; return; } var dm=d.split('-'); _admSalesMonth={y:+dm[0], m:+dm[1]-1}; admSales(c); }); }
+        else { var a=_salesManualLS(); row.id='ls'+Date.now(); a.push(row); try{ localStorage.setItem('clover_sales_manual', JSON.stringify(a)); }catch(_e){} var dm2=d.split('-'); _admSalesMonth={y:+dm2[0], m:+dm2[1]-1}; admSales(c); }
+      };
+      body.querySelectorAll('button[data-sm]').forEach(function(b){ b.onclick=function(){
+        if(!confirm('이 입금 기록을 삭제할까요?')) return;
+        var id=b.getAttribute('data-sm');
+        if(/^ls/.test(id)){ try{ localStorage.setItem('clover_sales_manual', JSON.stringify(_salesManualLS().filter(function(x){ return String(x.id)!==id; }))); }catch(_e){} admSales(c); return; }
+        _supa.from('sales_manual').delete().eq('id', id).then(function(){ admSales(c); }, function(){ admSales(c); });
+      }; });
+      body.querySelectorAll('button[data-k]').forEach(function(b){ b.onclick=function(){
+        var key=b.getAttribute('data-k'), isOut=b.getAttribute('data-out')==='1';
+        if(!isOut && !confirm('이 결제를 매출에서 뺄까요? (테스트·취소 결제)')) return;
+        b.disabled=true;
+        function lsSet(){ try{ var a=JSON.parse(localStorage.getItem('clover_sales_excl')||'[]'); a=a.filter(function(x){ return x!==key; }); if(!isOut) a.push(key); localStorage.setItem('clover_sales_excl', JSON.stringify(a)); }catch(_e){} }
+        lsSet();
+        var q=isOut ? _supa.from('sales_excluded').delete().eq('log_key', key) : _supa.from('sales_excluded').insert({log_key:key});
+        Promise.resolve(q).then(function(){ admSales(c); }, function(){ admSales(c); });
+      }; });
     });
   });
 }
