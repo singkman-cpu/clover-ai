@@ -48820,6 +48820,7 @@ function buildAdminDashboard(){
     {k:'dashboard',l:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;margin-right:3px"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>대시보드'},
     {k:'analytics',l:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;margin-right:3px"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>방문·클릭 통계'},
     {k:'members',l:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;margin-right:3px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>회원 관리'},
+    {k:'sales',l:'💰 매출'},
     {k:'credit',l:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;margin-right:3px"><circle cx="12" cy="12" r="9"/><path d="M14.5 9a2.5 2.5 0 0 0-2.5-1.5c-1.66 0-3 1.12-3 2.5S10.34 12.5 12 12.5s3 1.12 3 2.5-1.34 2.5-3 2.5A2.5 2.5 0 0 1 9.5 16"/><line x1="12" y1="6" x2="12" y2="18"/></svg>크레딧 지급'},
     {k:'coupon',l:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;margin-right:3px"><path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v5c1.1 0 2 .9 2 2s-.9 2-2 2v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5c-1.1 0-2-.9-2-2s.9-2 2-2z"/></svg>쿠폰 관리'},
     {k:'presetThumb',l:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;vertical-align:-2px;margin-right:3px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>프리셋 썸네일'},
@@ -48845,6 +48846,62 @@ function buildAdminDashboard(){
 
 function admSetTab(tab){_adminTab=tab;buildAdminDashboard();}
 
+// ═══ 2026-10-13(관리자 요청): 월별 매출 — 누가 얼마를 결제했는지 + 월 합계 ═══
+// 결제 서버(토스)가 크레딧을 넣을 때 남기는 크레딧 기록(credit_logs, +금액)을 충전 패키지 크레딧 수로 금액 환산함.
+// 관리자 지급·환불·쿠폰·가입 보너스는 빼고, 기업 플랜(계좌이체)은 지급 사유에 "입금" 또는 "기업"이 들어가면 매출로 셈.
+var SALES_PACKS={700:9900, 1500:19900, 4200:49900, 8800:99000};
+var _admSalesMonth=null;
+function _admSalesClassify(l){
+  var a=+l.amount||0, r=String(l.reason||'');
+  if(a<=0) return null;
+  if(/입금|기업|팀 ?(라이트|스탠다드|프로|비즈니스)/.test(r)){
+    var tp=(typeof TEAM_PLANS!=='undefined'?TEAM_PLANS:[]).filter(function(t){ return t.cr===a; })[0];
+    var m=r.match(/([\d,]{5,})\s*원/); var won=tp?tp.won:(m?parseInt(m[1].replace(/,/g,''),10):0);
+    return won?{won:won, kind:'bank', label:tp?tp.n:'기업 플랜(계좌이체)'}:null;
+  }
+  if(/관리자|환불|쿠폰|가입|보상|오류|테스트|이벤트|무료|복구|사과/.test(r)) return null;
+  var w=SALES_PACKS[a]; if(!w) return null;
+  return {won:w, kind:'card', label:({700:'Basic',1500:'Pro',4200:'Studio',8800:'Business'})[a]+' '+a.toLocaleString()+'cr'};
+}
+function admSales(c){
+  if(!_supa){ c.innerHTML='<div style="color:#fca5a5;padding:20px">Supabase 미연결</div>'; return; }
+  var now=new Date(Date.now()+9*3600e3); // 한국 시간
+  if(!_admSalesMonth) _admSalesMonth={y:now.getUTCFullYear(), m:now.getUTCMonth()};
+  var y=_admSalesMonth.y, m=_admSalesMonth.m;
+  var start=new Date(Date.UTC(y,m,1)-9*3600e3).toISOString(), end=new Date(Date.UTC(y,m+1,1)-9*3600e3).toISOString();
+  c.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><button type="button" id="sales-prev" style="padding:5px 10px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer">◀</button>'+
+    '<div style="font-size:15px;font-weight:800;color:var(--t)">'+y+'년 '+(m+1)+'월 매출</div>'+
+    '<button type="button" id="sales-next" style="padding:5px 10px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer">▶</button></div><div id="sales-body" style="color:var(--m2);font-size:12px">불러오는 중...</div>';
+  gE('sales-prev').onclick=function(){ _admSalesMonth={y:m===0?y-1:y, m:(m+11)%12}; admSales(c); };
+  gE('sales-next').onclick=function(){ _admSalesMonth={y:m===11?y+1:y, m:(m+1)%12}; admSales(c); };
+  _supa.from('credit_logs').select('user_id,amount,reason,created_at').gt('amount',0).gte('created_at',start).lt('created_at',end).order('created_at',{ascending:false}).limit(5000).then(function(res){
+    var body=gE('sales-body'); if(!body) return;
+    if(res.error){ body.innerHTML='<span style="color:#fca5a5">불러오기 실패: '+_admEsc(res.error.message)+'</span>'; return; }
+    var rows=[]; (res.data||[]).forEach(function(l){ var k=_admSalesClassify(l); if(k) rows.push({l:l, k:k}); });
+    var uids=rows.map(function(r){ return r.l.user_id; }).filter(function(u,i,a){ return u && a.indexOf(u)===i; });
+    var pq=uids.length?_supa.from('profiles').select('id,email').in('id',uids):Promise.resolve({data:[]});
+    pq.then(function(pr){
+      var em={}; ((pr&&pr.data)||[]).forEach(function(p){ em[p.id]=p.email; });
+      var tot=0, card=0, bank=0, per={};
+      rows.forEach(function(r){ tot+=r.k.won; if(r.k.kind==='card') card+=r.k.won; else bank+=r.k.won; var u=r.l.user_id; per[u]=per[u]||{won:0,n:0}; per[u].won+=r.k.won; per[u].n++; });
+      var fee=Math.round(card*0.0374);
+      function box(l,v,sub){ return '<div style="background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:10px 12px"><div style="font-size:10.5px;color:var(--m2)">'+l+'</div><div style="font-size:18px;font-weight:800;color:var(--ac);margin-top:3px">'+v+'</div>'+(sub?'<div style="font-size:10.5px;color:var(--m2);margin-top:2px">'+sub+'</div>':'')+'</div>'; }
+      var h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px">'+
+        box('월 총 결제액', tot.toLocaleString()+'원', rows.length+'건 · '+uids.length+'명')+
+        box('카드(토스)', card.toLocaleString()+'원', '수수료 약 '+fee.toLocaleString()+'원(3.74%)')+
+        box('계좌이체(기업)', bank.toLocaleString()+'원', '수수료 없음')+
+        box('예상 입금액', (tot-fee).toLocaleString()+'원', '토스 수수료 뺀 금액')+'</div>';
+      var order=Object.keys(per).sort(function(a,b){ return per[b].won-per[a].won; });
+      h+='<div style="font-size:12px;font-weight:800;color:var(--t);margin:4px 0 6px">👤 회원별 합계</div><div style="border:1px solid var(--bd2);border-radius:8px;overflow:hidden;margin-bottom:14px">'+
+        (order.length?order.map(function(u){ return '<div style="display:flex;gap:8px;padding:7px 10px;border-bottom:1px solid var(--bd);font-size:12px"><span style="flex:1;color:var(--t);word-break:break-all">'+_admEsc(em[u]||u)+'</span><span style="color:var(--m2)">'+per[u].n+'건</span><span style="font-weight:800;color:var(--ac);min-width:80px;text-align:right">'+per[u].won.toLocaleString()+'원</span></div>'; }).join(''):'<div style="padding:12px;text-align:center;color:var(--m2);font-size:12px">이 달 결제가 없어요</div>')+'</div>';
+      h+='<div style="font-size:12px;font-weight:800;color:var(--t);margin:4px 0 6px">🧾 결제 내역</div><div style="border:1px solid var(--bd2);border-radius:8px;overflow:hidden">'+
+        rows.map(function(r){ return '<div style="display:flex;gap:8px;padding:7px 10px;border-bottom:1px solid var(--bd);font-size:11.5px;align-items:center"><span style="color:var(--m2);min-width:92px">'+_admKstDT(r.l.created_at).slice(5,16)+'</span><span style="flex:1;color:var(--t);word-break:break-all">'+_admEsc(em[r.l.user_id]||r.l.user_id)+'</span><span style="color:var(--t2)" title="기록 사유: '+_admEsc(r.l.reason||'')+'">'+_admEsc(r.k.label)+(r.k.kind==='bank'?' · 계좌':'')+'</span><span style="font-weight:800;color:var(--t);min-width:76px;text-align:right">'+r.k.won.toLocaleString()+'원</span></div>'; }).join('')+'</div>';
+      h+='<div style="font-size:10.5px;color:var(--m2);line-height:1.6;margin-top:8px">· 회원 크레딧 충전 기록으로 계산한 금액이에요. 결제 취소·환불은 토스 관리자 화면 기준으로 확인해 주세요.<br>· 기업 플랜(계좌이체)은 크레딧 지급할 때 사유에 "기업 플랜 입금"처럼 <b>입금</b> 또는 <b>기업</b>을 넣으면 여기 매출로 잡혀요.</div>';
+      body.innerHTML=h;
+    });
+  });
+}
+
 function admRenderTab(){
   var c=gE('adm-content');if(!c)return;
   c.innerHTML='<div style="text-align:center;padding:20px;color:var(--m2)">불러오는 중...</div>';
@@ -48852,6 +48909,7 @@ function admRenderTab(){
   else if(_adminTab==='analytics') admAnalytics(c);
   else if(_adminTab==='members') admMembers(c);
   else if(_adminTab==='credit') admCreditGive(c);
+  else if(_adminTab==='sales') admSales(c);
   else if(_adminTab==='coupon') admCoupon(c);
   else if(_adminTab==='presetThumb') admPresetThumb(c);
   else if(_adminTab==='community') admCommunity(c);
@@ -49546,7 +49604,7 @@ function _admCommunityPending(c, pend){
       var card=document.createElement('div'); card.style.cssText='position:relative;border-radius:10px;overflow:hidden;background:var(--card);border:1px solid var(--bd2)';
       var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
       card.innerHTML=(isVid?'<video src="'+_admEsc(p.image_url)+'" muted controls style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block"></video>':'<img src="'+_admEsc(p.image_url)+'" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block;cursor:zoom-in">')+
-        '<div style="font-size:10px;color:var(--m2);padding:5px 7px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(p.caption?_admEsc(p.caption):'(문구 없음)')+' · '+_admEsc(String(p.created_at||'').slice(0,10))+'</div>';
+        '<div style="font-size:10px;color:var(--m2);padding:5px 7px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(p.caption?_admEsc(p.caption):'(문구 없음)')+' · '+_admEsc(String_admKstDT(p.created_at).slice(0,10))+'</div>';
       var im=card.querySelector('img'); if(im) im.onclick=function(){ window.open(p.image_url,'_blank'); };
       var row=document.createElement('div'); row.style.cssText='display:flex;gap:6px;padding:6px 7px 7px';
       var ok=document.createElement('button'); ok.type='button'; ok.textContent='✅ 공개';
@@ -50009,7 +50067,7 @@ function admLogs(c){
     var rows=res.data||[];
     if(!rows.length){c.innerHTML='<div style="color:var(--m2);text-align:center;padding:20px">이력 없음</div>';return;}
     c.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px 8px;text-align:left">회원</th><th style="padding:6px 4px;text-align:center">수량</th><th style="padding:6px 8px;text-align:left">사유</th><th style="padding:6px 4px;text-align:center">일시</th></tr></thead><tbody>'+
-      rows.map(function(l){var ip=l.amount>0;var em=l.profiles?l.profiles.email:'unknown';return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t2)">'+em+'</td><td style="padding:6px 4px;text-align:center;font-weight:700;color:'+(ip?'var(--ac)':'#fca5a5)')+'">'+(ip?'+':'')+l.amount+'cr</td><td style="padding:6px 8px;color:var(--m2)">'+(l.reason||'-')+'</td><td style="padding:6px 4px;text-align:center;color:var(--m2)">'+(l.created_at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table></div>';
+      rows.map(function(l){var ip=l.amount>0;var em=l.profiles?l.profiles.email:'unknown';return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t2)">'+em+'</td><td style="padding:6px 4px;text-align:center;font-weight:700;color:'+(ip?'var(--ac)':'#fca5a5)')+'">'+(ip?'+':'')+l.amount+'cr</td><td style="padding:6px 8px;color:var(--m2)">'+(l.reason||'-')+'</td><td style="padding:6px 4px;text-align:center;color:var(--m2)">'+_admKstDT(l.created_at)+'</td></tr>';}).join('')+'</tbody></table></div>';
   });
 }
 
@@ -50048,7 +50106,7 @@ function admBugReports(c){
       var top=document.createElement('div');
       top.style.cssText='display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px';
       var meta=document.createElement('div');
-      meta.innerHTML='<div style="font-size:11.5px;font-weight:700;color:var(--t2)">'+(r.user_email||'익명')+'</div><div style="font-size:10px;color:var(--m2)">'+(r.created_at||'').slice(0,16).replace('T',' ')+'</div>';
+      meta.innerHTML='<div style="font-size:11.5px;font-weight:700;color:var(--t2)">'+(r.user_email||'익명')+'</div><div style="font-size:10px;color:var(--m2)">'+_admKstDT(r.created_at)+'</div>';
       top.appendChild(meta);
       var toggleBtn=document.createElement('button');
       toggleBtn.type='button';
@@ -50494,6 +50552,10 @@ function admMail(c){
     var tBtn=gE('mail-test-btn');
     if(tBtn)tBtn.onclick=function(){admMailSend(true);};
     var sBtn=gE('mail-send-btn');
+    // 2026-10-13: 수신 대상에 맞춰 버튼 글자 변경("직접 입력"이면 입력한 주소로만 발송)
+    function _mailBtnLabel(){ var t=document.querySelector('input[name="mail-target"]:checked'); if(sBtn) sBtn.textContent=(t&&t.value==='manual')?'📧 입력한 주소로 발송':(t&&t.value==='plan')?'📧 선택한 플랜 회원에게 발송':'📧 전체 발송'; }
+    document.querySelectorAll('input[name="mail-target"]').forEach(function(r){ r.addEventListener('change', _mailBtnLabel); });
+    window._mailBtnLabel=_mailBtnLabel;
     if(sBtn)sBtn.onclick=function(){
       var _tg=document.querySelector('input[name="mail-target"]:checked');
       if(_tg && _tg.value==='manual'){
@@ -50527,23 +50589,23 @@ function admMailTplTeam(){
     '■ 이용 방식\n'+
     '· 정해진 기간 없이, 크레딧이 필요하실 때마다 원하시는 플랜으로 충전하시면 됩니다.\n'+
     '· 충전하신 크레딧은 결제일로부터 1년 동안 사용하실 수 있습니다.\n'+
-    '· 입금 확인 후 세금계산서를 발행해 드립니다.\n\n'+
+    '· 세금계산서가 필요하시면 말씀해 주세요. 입금 확인 후 발행해 드립니다.\n\n'+
     '■ 신청 방법\n'+
     '1) 이용하실 직원분들이 cloverai.kr 에서 먼저 회원가입을 해 주세요.\n'+
     '2) 이 메일로 아래 내용을 회신해 주세요.\n'+
     '   - 선택하신 플랜\n'+
-    '   - 가입하신 이메일 주소와 계정별로 나눌 크레딧 (예: a@회사.com 10,000 / b@회사.com 9,000)\n'+
-    '   - 세금계산서 발행용 사업자등록증 사본(또는 사업자 정보)과 세금계산서 받으실 이메일\n'+
+    '   - 가입하신 아이디와 나눌 크레딧 (예: 아이디 / 10,000cr)\n'+
+    '   - 세금계산서가 필요하시면 사업자등록증 사본과 받으실 이메일\n'+
     '3) 아래 계좌로 플랜 금액을 입금해 주세요. (입금자명은 회사명으로 부탁드립니다)\n'+
     '   입금 계좌: '+(bank||'[은행명 계좌번호 (예금주)]')+'\n'+
-    '4) 입금이 확인되면 각 계정에 크레딧을 넣어 드리고 세금계산서를 발행해 드립니다.\n\n'+
+    '4) 입금이 확인되면 각 계정에 크레딧을 넣어 드립니다. (세금계산서는 요청하신 경우 함께 발행해 드립니다)\n\n'+
     '참고로 이미지 1장은 1K 기준 20크레딧부터이며, 2K·4K, 업스케일, 영상은 크레딧이 더 소모됩니다.\n\n'+
     '궁금하신 점은 이 메일로 회신 주시거나, 연락처를 남겨주시면 전화로 안내드리겠습니다.';
   var subj=gE('mail-subject'), ta=gE('mail-body');
   if(subj) subj.value='[CLOVER AI] 기업 플랜 안내';
   if(ta) ta.value=body;
   var man=document.querySelector('input[name="mail-target"][value="manual"]');
-  if(man){ man.checked=true; if(man.onchange) man.onchange(); }
+  if(man){ man.checked=true; if(man.onchange) man.onchange(); if(window._mailBtnLabel) window._mailBtnLabel(); }
   setTimeout(function(){ var em=gE('mail-manual-emails'); if(em){ em.placeholder='받는 분 이메일 (예: ceo@company.com)'; em.focus(); } }, 50);
   var r=gE('mail-result'); if(r){ r.style.color='#f5b544'; r.textContent=bank?'템플릿을 불러왔어요 — 받는 분 이메일을 넣고 보내세요.':'⚠ 위 "입금 계좌" 칸이 비어 있어요 — 계좌를 적고 다시 불러오세요.'; }
 }
@@ -50670,7 +50732,7 @@ function _admMailDoSend(apiKey,from,subject,body,emails,isTest){
       var msg=(isTest?'🧪 테스트 발송 완료!':'📧 전체 발송 완료!')+' 성공: '+sent+'명'+(failed>0?' / 실패: '+failed+'명':'');
       if(result){result.style.color='var(--ac)';result.textContent=msg;}
       var hist=[];try{hist=JSON.parse(localStorage.getItem('clover_mail_history')||'[]');}catch(e){}
-      hist.unshift({date:new Date().toISOString().slice(0,16).replace('T',' '),subject:subject,body:body,count:sent,total:total,test:isTest});
+      hist.unshift({date:_admKstDT(new Date().toISOString()), kst:true,subject:subject,body:body,count:sent,total:total,test:isTest});
       if(hist.length>20)hist=hist.slice(0,20);
       localStorage.setItem('clover_mail_history',JSON.stringify(hist));
       admMailLoadHistory();
@@ -50706,6 +50768,13 @@ function _admMailDoSend(apiKey,from,subject,body,emails,isTest){
   sendBatch();
 }
 
+// 2026-10-13: 발송 이력 시간을 한국 시간으로 (예전 기록은 세계 표준시로 저장돼 있어서 +9시간 변환)
+function _mailHistDate(item){
+  if(!item || !item.date) return '';
+  if(item.kst) return item.date;
+  var m=String(item.date).match(/^(\d{4}-\d\d-\d\d) (\d\d:\d\d)$/);
+  return m ? _admKstDT(m[1]+'T'+m[2]+':00Z') : item.date;
+}
 function admMailLoadHistory(){
   var h=gE('mail-history');if(!h)return;
   var hist=[];try{hist=JSON.parse(localStorage.getItem('clover_mail_history')||'[]');}catch(e){}
@@ -50713,7 +50782,7 @@ function admMailLoadHistory(){
   h.innerHTML=hist.map(function(item,i){
     return '<div onclick="admMailViewHistory('+i+')" style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:6px;background:var(--c2);margin-bottom:5px;cursor:pointer" onmouseover="this.style.background=\'var(--bd)\'" onmouseout="this.style.background=\'var(--c2)\'">'+
       '<div>'+
-        '<span style="font-size:10px;color:var(--m2)">'+item.date+'</span>'+
+        '<span style="font-size:10px;color:var(--m2)">'+_mailHistDate(item)+'</span>'+
         (item.test?'<span style="margin-left:6px;font-size:9px;background:rgba(0,229,204,.1);color:var(--ac);padding:1px 5px;border-radius:3px">테스트</span>':'')+
         '<div style="font-size:12px;color:var(--t);margin-top:2px">'+item.subject+'</div>'+
       '</div>'+
@@ -50737,7 +50806,7 @@ function admMailViewHistory(i){
   win.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>발송 내용 확인</title></head><body style="margin:0;background:#151515">');
   win.document.write(
     '<div style="text-align:center;padding-top:14px;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#777">'+
-      item.date+(item.test?' · 테스트':' · 실제 발송')+' · 성공 '+item.count+(item.total!=null?'/'+item.total:'')+'명'+
+      _mailHistDate(item)+(item.test?' · 테스트':' · 실제 발송')+' · 성공 '+item.count+(item.total!=null?'/'+item.total:'')+'명'+
     '</div>'
   );
   win.document.write(_cloverMailHtml(subj, html));
