@@ -26675,6 +26675,14 @@ function _shortsRenderLivePreview(container){
     else if(window._capPvT!=null){ _capEl=window._capPvT; _capGhost=false; }
     else if(_pvVideoActive && _pvVideoActive.readyState>=2){ _capEl=Math.max(0,((_pvVideoActive.currentTime||0)-(firstSlide.trimStart||0))/(firstSlide.playbackRate||1)); }
     _shortsDrawCaptions(ctx,1080,1920,_pvCapIm?_pvCapIm.captions:firstSlide.captions,G_SHORTS.opts.fontFamily,_capBoxes,_capEl,_capGhost);
+    // 🔔 미리보기 재생 중 자막이 나타나는 순간 효과음
+    try{
+      if(!_capGhost && _capEl!=null){
+        var _pe=window._capSfxPrev; if(_pe==null || _capEl<_pe || window._capSfxIm!==firstSlide.imId) _pe=-0.001;
+        ((_pvCapIm?_pvCapIm.captions:firstSlide.captions)||[]).forEach(function(c){ var t0=(c.t0>0)?+c.t0:0; if(c.sfx && String(c.text||'').trim() && t0>_pe && t0<=_capEl) _shortsSfxPreview(c.sfx); });
+        window._capSfxPrev=_capEl; window._capSfxIm=firstSlide.imId;
+      } else { window._capSfxPrev=null; }
+    }catch(e){}
     if(G_SHORTS.opts.watermark)_shortsDrawWatermark(ctx,1080,1920);
   }
   // 이미지 URL이 이전과 같고 이미 로딩까지 끝난 상태면(꽉채우기/레터박스만 바꾼 경우처럼), 새로 안 불러오고
@@ -26964,7 +26972,11 @@ function _shortsRenderLivePreview(container){
     addB.style.cssText='padding:5px 10px;border-radius:7px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
     addB.onclick=function(){
       if(!im.captions) im.captions=[];
-      im.captions.push({id:'c'+Date.now()+Math.floor(Math.random()*1000), text:'자막을 입력하세요', x:0.5, y:0.5, size:64, color:'#ffffff', bg:true});
+      // 2026-10-14(요청: 기존 자막을 똑같이 쓰고 내용만 바꾸게): 이 장면의 마지막 자막 → 없으면 다른 장면에서 마지막으로 쓴 자막의 위치·크기·색·배경을 그대로 가져옴
+      var _src = im.captions.length ? im.captions[im.captions.length-1] : window._shortsLastCap;
+      var _nc = {id:'c'+Date.now()+Math.floor(Math.random()*1000), text:'자막을 입력하세요', x:0.5, y:0.5, size:64, color:'#ffffff', bg:true};
+      if(_src){ _nc.x=_src.x; _nc.y=_src.y; _nc.size=_src.size; _nc.color=_src.color; _nc.bg=_src.bg; if(_src.sfx) _nc.sfx=_src.sfx; }
+      im.captions.push(_nc); window._shortsLastCap=_nc; window._shortsFocusCap=_nc.id;
       renderMain('shorts');
     };
     head.appendChild(ttl); head.appendChild(addB); box.appendChild(head);
@@ -26991,12 +27003,21 @@ function _shortsRenderLivePreview(container){
       var r1=document.createElement('div'); r1.style.cssText='display:flex;gap:6px;align-items:center';
       var ta=document.createElement('textarea'); ta.rows=1; ta.value=c.text||''; ta.placeholder='자막 내용 (Shift+Enter 줄바꿈)';
       ta.style.cssText='flex:1;resize:vertical;min-height:28px;padding:5px 7px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t);font-size:12px;font-family:inherit';
-      ta.oninput=function(){ c.text=ta.value; paint(); };
+      ta.oninput=function(){ c.text=ta.value; window._shortsLastCap=c; paint(); };
+      if(window._shortsFocusCap===c.id){ window._shortsFocusCap=null; setTimeout(function(){ try{ ta.focus(); ta.select(); }catch(e){} },0); }
       ta.onkeydown=function(e){ e.stopPropagation(); if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); ta.blur(); } };
       var del=document.createElement('button'); del.type='button'; del.textContent='✕'; del.title='이 자막 삭제';
       del.style.cssText='width:26px;height:26px;flex-shrink:0;border-radius:6px;border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.08);color:#fca5a5;cursor:pointer;font-size:11px';
       del.onclick=function(){ im.captions.splice(ci,1); renderMain('shorts'); };
-      r1.appendChild(ta); r1.appendChild(del); row.appendChild(r1);
+      // 📋 같은 위치·크기·색으로 복제(내용만 바꾸면 됨). 사라짐 시간이 있으면 그 다음 순서로 시간도 이어붙임
+      var dup=document.createElement('button'); dup.type='button'; dup.textContent='📋'; dup.title='이 자막 그대로 복제 (위치·크기·색 같음, 내용만 바꾸면 돼요)';
+      dup.style.cssText='width:26px;height:26px;flex-shrink:0;border-radius:6px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);cursor:pointer;font-size:11px';
+      dup.onclick=function(){
+        var nc=JSON.parse(JSON.stringify(c)); nc.id='c'+Date.now()+Math.floor(Math.random()*100000);
+        if(c.t1!=null && c.t1!=='' && isFinite(c.t1)){ var len=Math.max(0.3, +c.t1-(c.t0||0)); nc.t0=Math.round((+c.t1+0.2)*10)/10; nc.t1=Math.round((nc.t0+len)*10)/10; }
+        im.captions.splice(ci+1,0,nc); window._shortsLastCap=nc; window._shortsFocusCap=nc.id; renderMain('shorts');
+      };
+      r1.appendChild(ta); r1.appendChild(dup); r1.appendChild(del); row.appendChild(r1);
       var r2=document.createElement('div'); r2.style.cssText='display:flex;gap:6px;align-items:center;flex-wrap:wrap';
       var szL=document.createElement('span'); szL.style.cssText='font-size:10px;color:var(--m2)'; szL.textContent='크기';
       var sz=document.createElement('input'); sz.type='range'; sz.min='24'; sz.max='180'; sz.step='2'; sz.value=String(c.size||64); sz.style.cssText='width:90px;accent-color:var(--ac)';
@@ -27036,6 +27057,17 @@ function _shortsRenderLivePreview(container){
       var t1i=tIn('t1','끝까지'); r3.appendChild(t1i); r3.appendChild(document.createTextNode('초'));
       if(firstSlide.isVideo) r3.appendChild(nowBtn('t1'));
       row.appendChild(r3);
+      // 🔔 효과음 — 자막이 나타나는 순간 재생
+      var r4=document.createElement('div'); r4.style.cssText='display:flex;gap:4px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--m2)';
+      r4.appendChild(document.createTextNode('🔔 효과음'));
+      SHORTS_SFX.forEach(function(o){
+        var b=document.createElement('button'); b.type='button'; b.textContent=o.l; var on=(c.sfx||'')===o.k;
+        b.style.cssText='padding:2px 8px;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--card)')+';color:'+(on?'var(--ac)':'var(--t2)');
+        b.title=o.k?'누르면 소리 미리 듣기 + 적용':'효과음 없음';
+        b.onclick=function(){ c.sfx=o.k||undefined; if(!o.k) delete c.sfx; window._shortsLastCap=c; _shortsSfxPreview(o.k); renderMain('shorts'); };
+        r4.appendChild(b);
+      });
+      row.appendChild(r4);
       box.appendChild(row);
     });
     wrap.appendChild(box);
@@ -35352,10 +35384,13 @@ function _shortsGenerate(){
         var combined=new MediaStream([].concat(vidStream.getVideoTracks(),dest.stream.getAudioTracks()));
         var rec=beginRecord(combined);
         var _stallWarned=false;
+        var _sfxEv=[]; try{ _sfxEv=_shortsSfxEvents(slides, timeline); }catch(e){} var _sfxI=0;
         runRenderLoop(ctx,W,H,slides,timeline,totalFrames,FPS,opts,imgCache,function(p){
           if(progFill)progFill.style.width=Math.round(p*100)+'%';
           if(progTxt)progTxt.textContent='생성 중... '+Math.round(p*100)+'% ('+Math.round(p*totalDuration)+'s / '+Math.round(totalDuration)+'s)';
           _shortsCheckEncoderStall(rec, progWrap, function(){return _stallWarned;}, function(v){_stallWarned=v;_shortsEncoderStalled=v;});
+          // 자막 효과음: 실제 렌더 진행 시각이 그 자막 나타나는 시각을 지나면 바로 재생
+          try{ var _sfxNow=p*totalDuration; while(_sfxI<_sfxEv.length && _sfxEv[_sfxI].t<=_sfxNow){ _shortsSfx(audioCtx, dest, _sfxEv[_sfxI].kind, audioCtx.currentTime); _sfxI++; } }catch(e){}
           // 오디오 볼륨을 "정해진 시간"이 아니라 "실제 렌더링 진행률(p)"에 맞춰 갱신.
           // 탭이 백그라운드로 밀려 렌더링이 느려지더라도, 음악은 항상 실제 영상 진행 상황과 정확히 맞물려 끝난다.
           if(bgmGainNode){
@@ -35449,6 +35484,42 @@ function _shortsGenerate(){
   }
 }
 
+// ── 🔔 자막 효과음(2026-10-14 요청: 자막에 띵 같은 간단한 효과음) — 음원 파일 없이 그때그때 합성 ──
+var SHORTS_SFX=[{k:'',l:'없음'},{k:'ding',l:'띵'},{k:'pop',l:'뿅'},{k:'click',l:'딸깍'},{k:'whoosh',l:'휙'},{k:'chime',l:'짠'}];
+function _shortsSfx(ac, dest, kind, at, vol){
+  if(!kind) return; vol=vol||0.6;
+  function tone(freq, t, dur, v, type, f2){
+    var o=ac.createOscillator(), g=ac.createGain(); o.type=type||'sine';
+    o.frequency.setValueAtTime(freq, t); if(f2) o.frequency.exponentialRampToValueAtTime(f2, t+Math.min(dur,0.09));
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(0.001,v), t+0.006); g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.connect(g); g.connect(dest); o.start(t); o.stop(t+dur+0.03);
+  }
+  if(kind==='ding'){ tone(1318.5, at, 1.1, vol*0.55); tone(2637, at, 0.6, vol*0.18); tone(3951, at, 0.3, vol*0.06); }
+  else if(kind==='pop'){ tone(380, at, 0.16, vol*0.7, 'sine', 1250); }
+  else if(kind==='click'){
+    var n=Math.max(1,Math.round(ac.sampleRate*0.03)), b=ac.createBuffer(1,n,ac.sampleRate), d=b.getChannelData(0);
+    for(var i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,4);
+    var src=ac.createBufferSource(); src.buffer=b; var hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=2500;
+    var g=ac.createGain(); g.gain.value=vol*1.2; src.connect(hp); hp.connect(g); g.connect(dest); src.start(at);
+    tone(1800, at, 0.04, vol*0.25, 'square');
+  }
+  else if(kind==='whoosh'){ _shortsPlaySwoosh(ac, dest, at, vol*1.1); }
+  else if(kind==='chime'){ tone(1046.5, at, 0.5, vol*0.4); tone(1318.5, at+0.08, 0.5, vol*0.4); tone(1568, at+0.16, 0.9, vol*0.45); tone(2093, at+0.16, 0.6, vol*0.12); }
+}
+// 미리보기/샘플 재생용
+function _shortsSfxPreview(kind){
+  if(!kind) return;
+  try{ if(!window._sfxPvCtx) window._sfxPvCtx=new (window.AudioContext||window.webkitAudioContext)(); var ac=window._sfxPvCtx; if(ac.state==='suspended') ac.resume(); _shortsSfx(ac, ac.destination, kind, ac.currentTime+0.02); }catch(e){}
+}
+// 최종 영상에서 효과음이 날 시각 목록 [{t, kind}] — 장면 시작 + 자막 나타남 시간
+function _shortsSfxEvents(slides, timeline){
+  var ev=[];
+  (timeline||[]).forEach(function(en){
+    if(en.type!=='hold') return; var sl=slides[en.idx]; if(!sl || !sl.captions) return;
+    sl.captions.forEach(function(c){ if(c.sfx && String(c.text||'').trim()){ var t=en.start+((c.t0>0)?+c.t0:0); if(t<en.end) ev.push({t:t, kind:c.sfx}); } });
+  });
+  return ev.sort(function(a,b){ return a.t-b.t; });
+}
 // ── 전환 효과음(스윽~) 합성 ──────────────────────────────────────
 // 별도 음원 파일 없이, 화이트노이즈를 대역통과 필터로 스윕해서 가볍고 잔잔한 "스윽" 소리를 그때그때 만든다.
 function _shortsPlaySwoosh(audioCtx, dest, atTime, volume){
@@ -35648,6 +35719,7 @@ async function _shortsRenderOffline(p){
         hasSound=true;
       }catch(e){ /* 소리 트랙이 없는 영상 등 — 무음으로 진행 */ }
     }
+    try{ _shortsSfxEvents(slides, timeline).forEach(function(ev){ _shortsSfx(oac, oac.destination, ev.kind, ev.t); hasSound=true; }); }catch(e){ console.warn('[쇼츠] 자막 효과음 실패(무시):', e); }
     var out=await oac.startRendering();
     return {buf:out, hasSound:hasSound};
   }
