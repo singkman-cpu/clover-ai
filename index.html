@@ -45938,6 +45938,10 @@ function executeSingleRender(task){
         var ps=allPS.find(function(p){return p.k===task.selK;});
         if(ps)tags.push('preset:'+ps.l);
       }
+      // 2026-10-13(요청): 3D 렌더 실사화 — 어떤 하늘로 렌더했는지 결과 우측 상단에 표시(야간 요청·고품질화는 하늘을 안 바꾸므로 제외)
+      if(task.wf==='render' && task.renderSky && task.selK!=='render_quality_boost' && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'')){
+        tags.push(({clear:'☀️ 맑음', partly:'⛅ 구름 조금', overcast:'☁️ 흐림'})[task.renderSky]||'☀️ 맑음');
+      }
       // 크레딧: 영상은 실제 청구(getCost())와 동일한 공식으로 계산
       var cost;
       if(task.wf==='video'){
@@ -46848,11 +46852,15 @@ function procImgWithTask(task, onDone, onErr){
     // 2026-10-12("3D 캡처 배경이 검은색이라 계속 야간으로 렌더된다 — 따로 요청 안 하면 무조건 맑은 날 주간"): 야간 요청이 없으면 주간 고정
     if(task.selK!=='render_quality_boost' && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){ // 2026-10-12: 고품질화는 이미 렌더링된 이미지의 시간대·조명 분위기를 그대로 유지
       var _sky = task.renderSky || 'clear';
-      var _skyTxt = _sky==='partly' ? 'Render a bright daytime scene: a blue sky with some scattered soft white clouds (partly cloudy, still mostly blue), natural sunlight with soft daylight shadows, exterior lights OFF'
-        : _sky==='overcast' ? 'Render a calm overcast daytime scene: an evenly bright soft grey-white cloudy sky (no blue sky, no rain), soft diffuse daylight with very gentle shadows, exterior lights OFF'
-        : 'Render a bright, clear sunny daytime scene: a CLEAR DEEP-BLUE SKY with almost no clouds (at most a couple of small thin wisps — never an overcast, grey or cloudy sky), bright natural sunlight with crisp but soft daylight shadows, exterior lights OFF';
+      // 2026-10-13(요청): 구름 조금 = 맑은 날에 구름이 조금 / 흐림 = 진짜 흐린 날
+      var _skyTxt = _sky==='partly' ? 'Render a bright, SUNNY CLEAR-WEATHER daytime scene with just a few clouds: a vivid blue sky with a few scattered fluffy white cumulus clouds (mostly blue — clouds only about 15-25% of the sky), direct bright sunshine with crisp daylight shadows — this is a fine sunny day, NOT a grey or overcast day, exterior lights OFF'
+        : _sky==='overcast' ? 'Render a truly OVERCAST daytime scene: the entire sky is covered by a uniform grey cloud layer (no blue sky at all, no visible sun, no rain), flat soft diffuse daylight with almost no shadows, slightly muted colors like a real cloudy day, exterior lights OFF'
+        : 'Render a bright, crisp, perfectly clear sunny daytime scene: a CLOUDLESS, saturated deep-blue sky — NO CLOUDS AT ALL (zero clouds, not even small puffy ones; if the input or any reference shows clouds, remove them and show only clean blue sky, slightly lighter toward the horizon), high visibility, strong bright natural sunlight with crisp daylight shadows, exterior lights OFF';
       ap += ' ⚠️⚠️⚠️ TIME OF DAY = DAYTIME (user rule, overrides anything that looks like night in the input): a black, dark grey or empty background in a 3D capture is just an unrendered CG background — it does NOT mean night. '+_skyTxt+' or barely visible, interiors seen through windows in daylight. Replace the dark background with a realistic daytime sky and surroundings that fit the site. IF THIS IS AN INTERIOR VIEW: the sky only shows through the windows — natural daylight enters through the windows with believable falloff into the room, and keep each interior light fixture exactly as in the input — a fixture that is ON in the input stays on and realistically lights the room, a fixture that is OFF stays off (never switch lights on or off on your own) (do not turn the room into an outdoor scene). Only render night/evening if the user explicitly asked for it.';
-      console.log('[렌더] 야간 요청 없음 → 맑은 주간 고정');
+      ap += (_sky==='clear') ? ' FINAL SKY CHECK: the sky must be a clean, cloudless deep blue — remove every cloud.'
+          : (_sky==='partly') ? ' FINAL SKY CHECK: this is a SUNNY, CLEAR-WEATHER day with only a few white clouds — mostly bright blue sky (clouds cover roughly 15-25% of the sky), direct sunshine and clear shadows; never grey, gloomy or overcast.'
+          : ' FINAL SKY CHECK: this is a truly OVERCAST day — the whole sky is covered by grey cloud, no blue sky and no visible sun, flat soft light with almost no shadows.';
+      console.log('[렌더] 야간 요청 없음 → 주간 고정, 하늘:', _sky);
     }
     // 2026-10-11: 3D 렌더 실사화에서 사용자가 프롬프트로 사람을 넣어달라고 하면 — 사람만 예외로 허용하고, 3D 캐릭터가 아니라 실제 사진 속 사람처럼
     if(/사람|인물|행인|손님|직원|고객|환자|가족|아이|커플/.test(task.userText||'')){
@@ -54353,7 +54361,8 @@ document.addEventListener('DOMContentLoaded',function(){try{
   gE('nav-logo').onclick=function(e){e.preventDefault();goHome();};
   var _actbtnBusy=false;
   function _doActbtn(){
-    if(_actbtnBusy)return; // 중복 클릭(터치+클릭 동시 발생) 방지
+    console.log('[actbtn] 실행 버튼 처리 시작 — 탭:', G.wf, '| 렌더 중:', G.activeRenders, '/', G.maxConcurrent, '| 대기:', (G.renderQueue||[]).filter(function(t){return t.status==='queued';}).length, '| 일괄대기:', (G._batchPendingQueue||[]).length, '| 업로드중:', !!G._uploadBusy);
+    if(_actbtnBusy){ console.log('[actbtn] 0.8초 안에 다시 눌러서 무시됨'); return; } // 중복 클릭(터치+클릭 동시 발생) 방지
     // ⚠️ 재설계(일괄 업로드): 검토 화면에서 "확인"을 눌러 대기 큐(G._batchPendingQueue)에
     // 담아둔 사진들이 있으면, 평소처럼 쓰던 이 공용 "실행" 버튼을 눌렀을 때 그 큐를 순차
     // 실행하는 쪽으로 넘김 — 사용자가 실제로 "실행"을 누르기 전까지는 아무 것도 돌아가지 않음.
@@ -55053,7 +55062,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
     // 가드를 거치지 않으니 영향 없고, 사람이 직접 누르는 것만 막음.
     if(G._batchRunning){ alert('일괄 렌더링이 진행 중이에요. 끝난 뒤에 다시 눌러주세요.'); return; }
     var now = Date.now();
-    if(now - _actbtnLastFire < 800) return; // 800ms 안에 또 불리면 중복 실행으로 보고 무시
+    if(now - _actbtnLastFire < 800){ console.log('[actbtn] 중복 클릭으로 무시됨'); return; } // 800ms 안에 또 불리면 중복 실행으로 보고 무시
     _actbtnLastFire = now; // confirm()보다 먼저 갱신 — 취소했을 때 touchend+click 중복으로 확인창이 두 번 뜨는 것 방지
     // ⚠️ 요청 반영("모바일버전에서는 실수로 렌더링 버튼을 누르는 경우가 많다"): 화면이 좁은
     // 모바일에서만 렌더링 시작 전에 한 번 더 확인창을 띄움(데스크탑은 기존처럼 바로 실행 —
