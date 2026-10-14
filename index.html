@@ -26270,8 +26270,10 @@ function _shortsBuildSlides(){
     // 에 맞춰 playbackRate를 계산해서 슬라이드에 실어보냄 — 실제 배속 재생은 videoCache 예열/재생
     // 코드(_autoRoomPromptFor 근처가 아니라 렌더 tick 쪽)에서 vEl.playbackRate로 적용함.
     var _vFullDur = im.isVideo ? (im._fullDuration || im.duration || 0) : 0;
-    var _speedRate = (im.isVideo && im.speedMode && im.speedTargetDur>0) ? (_vFullDur / im.speedTargetDur) : 1;
-    var vidDuration = im.isVideo ? (im.speedMode ? Math.max(0.2, im.speedTargetDur||_vFullDur) : ((im.trimEnd!=null && im.trimStart!=null) ? Math.max(0.2, im.trimEnd-im.trimStart) : im.duration)) : im.duration;
+    // 2026-10-14(요청: 편집된 클립 속도 빠르게/느리게): im.speed(0.25~4배) — 잘라낸 구간을 그 배속으로 재생, 장면 길이 = 구간 ÷ 배속
+    var _clipSpd = (im.isVideo && !im.speedMode && im.speed>0) ? im.speed : 1;
+    var _speedRate = (im.isVideo && im.speedMode && im.speedTargetDur>0) ? (_vFullDur / im.speedTargetDur) : _clipSpd;
+    var vidDuration = im.isVideo ? (im.speedMode ? Math.max(0.2, im.speedTargetDur||_vFullDur) : Math.max(0.2, ((im.trimEnd!=null && im.trimStart!=null) ? (im.trimEnd-im.trimStart) : im.duration)/_clipSpd)) : im.duration;
     slides.push({type:'slide', imId:im.id, img:im.img, label:lbl, role:r, zoom:im.coverZoom||1, offX:im.coverOffX||0, offY:im.coverOffY||0,
       isVideo:!!im.isVideo, videoUrl:im.videoUrl, duration:vidDuration, trimStart:im.isVideo?(im.speedMode?0:(im.trimStart||0)):0,
       playbackRate:_speedRate,
@@ -26667,7 +26669,12 @@ function _shortsRenderLivePreview(container){
       _shortsDrawText(ctx,1080,1920,firstSlide.label,G_SHORTS.opts.textPos,G_SHORTS.opts.fontFamily,_pvSrc(),_effFitModePv);
     }
     _capBoxes={};
-    _shortsDrawCaptions(ctx,1080,1920,_pvCapIm?_pvCapIm.captions:firstSlide.captions,G_SHORTS.opts.fontFamily,_capBoxes);
+    // 자막 타이밍: 영상 재생 중이면 실제 재생 위치 기준, 사진은 "▶ 자막 미리 재생" 중일 때만 시간 적용(평소엔 흐리게 다 보여서 위치 잡기 가능)
+    var _capEl=null, _capGhost=true;
+    if(_pvVideoActive && _pvVideoActive.readyState>=2 && !_pvVideoActive.paused){ _capEl=Math.max(0,((_pvVideoActive.currentTime||0)-(firstSlide.trimStart||0))/(firstSlide.playbackRate||1)); _capGhost=false; }
+    else if(window._capPvT!=null){ _capEl=window._capPvT; _capGhost=false; }
+    else if(_pvVideoActive && _pvVideoActive.readyState>=2){ _capEl=Math.max(0,((_pvVideoActive.currentTime||0)-(firstSlide.trimStart||0))/(firstSlide.playbackRate||1)); }
+    _shortsDrawCaptions(ctx,1080,1920,_pvCapIm?_pvCapIm.captions:firstSlide.captions,G_SHORTS.opts.fontFamily,_capBoxes,_capEl,_capGhost);
     if(G_SHORTS.opts.watermark)_shortsDrawWatermark(ctx,1080,1920);
   }
   // 이미지 URL이 이전과 같고 이미 로딩까지 끝난 상태면(꽉채우기/레터박스만 바꾼 경우처럼), 새로 안 불러오고
@@ -26754,7 +26761,7 @@ function _shortsRenderLivePreview(container){
     _pvVideoActive=v;
     function rangeStart(){ return vIm.speedMode ? 0 : (vIm.trimStart||0); }
     function rangeEnd(){ return vIm.speedMode ? (vIm._fullDuration||fullDur) : (vIm.trimEnd!=null?vIm.trimEnd:fullDur); }
-    try{ v.playbackRate = (vIm.speedMode && vIm.speedTargetDur>0) ? ((vIm._fullDuration||fullDur)/vIm.speedTargetDur) : 1; }catch(e){}
+    try{ v.playbackRate = (vIm.speedMode && vIm.speedTargetDur>0) ? ((vIm._fullDuration||fullDur)/vIm.speedTargetDur) : (vIm.speed>0?vIm.speed:1); }catch(e){}
     // 프레임 그리기 루프 — 이 캔버스가 화면에서 사라지면 자동 종료
     if(window._shortsPvRaf) cancelAnimationFrame(window._shortsPvRaf);
     function loop(){
@@ -26826,9 +26833,29 @@ function _shortsRenderLivePreview(container){
     function updUsed(){
       usedLbl.textContent = vIm.speedMode
         ? '⏩ 배속 모드 — 전체 '+fmt(vIm._fullDuration||fullDur)+'를 '+fmt(vIm.speedTargetDur)+'로 압축 (구간 편집은 사이드바에서 배속을 끄면 가능)'
-        : '✂️ 사용 구간: '+fmt(vIm.trimStart)+' ~ '+fmt(vIm.trimEnd)+' (총 '+fmt(vIm.trimEnd-vIm.trimStart)+')  ✎';
+        : '✂️ 사용 구간: '+fmt(vIm.trimStart)+' ~ '+fmt(vIm.trimEnd)+' (총 '+fmt(vIm.trimEnd-vIm.trimStart)+')  ✎'
+          + ((vIm.speed>0 && vIm.speed!==1) ? '  →  ⚡'+vIm.speed+'배속 = 영상에선 '+fmt((vIm.trimEnd-vIm.trimStart)/vIm.speed) : '');
     }
     bar.appendChild(usedLbl);
+    // ⚡ 재생 속도(요청: 편집된 클립을 빠르게/느리게) — 사이드바 '배속 모드'(전체를 정해진 시간에 압축)와는 별개
+    (function(){
+      var spRow=document.createElement('div'); spRow.style.cssText='display:flex;align-items:center;gap:4px;flex-wrap:wrap';
+      var spL=document.createElement('span'); spL.style.cssText='font-size:10.5px;font-weight:700;color:var(--t2);margin-right:2px'; spL.textContent='⚡ 속도';
+      spRow.appendChild(spL);
+      var cur=(vIm.speed>0?vIm.speed:1);
+      [0.25,0.5,0.75,1,1.25,1.5,2,3,4].forEach(function(r){
+        var b=document.createElement('button'); b.type='button'; b.textContent=(r===1?'보통':r+'x');
+        var on=Math.abs(cur-r)<0.001;
+        b.style.cssText='padding:3px 7px;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit;border:1px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c2)')+';color:'+(on?'var(--ac)':'var(--t2)');
+        b.title = r<1 ? '느리게 (슬로우)' : (r>1 ? '빠르게' : '원래 속도');
+        b.disabled=!!vIm.speedMode;
+        if(vIm.speedMode) b.style.opacity='.4';
+        b.onclick=function(){ vIm.speed=r; try{ v.playbackRate=r; }catch(e){} renderSB(); renderMain('shorts'); };
+        spRow.appendChild(b);
+      });
+      if(vIm.speedMode){ var nt=document.createElement('span'); nt.style.cssText='font-size:10px;color:var(--m2)'; nt.textContent='(배속 모드를 끄면 사용 가능)'; spRow.appendChild(nt); }
+      bar.appendChild(spRow);
+    })();
     // 요청 반영("사용 구간 정확한 초수를 쓰고 싶다, 더블클릭하면 숫자 바꿀 수 있게"): 사용 구간 글자를 더블클릭하면
     // 시작·끝 초를 직접 입력하는 칸이 열림(엔터 또는 '적용'으로 반영, Esc로 취소)
     usedLbl.title='더블클릭해서 시작·끝 초를 직접 입력';
@@ -26942,8 +26969,23 @@ function _shortsRenderLivePreview(container){
     };
     head.appendChild(ttl); head.appendChild(addB); box.appendChild(head);
     var tip=document.createElement('div'); tip.style.cssText='font-size:10px;color:var(--m2);line-height:1.5';
-    tip.textContent=(im.captions&&im.captions.length)?'미리보기에서 자막을 마우스로 끌면 원하는 위치로 옮겨져요.':'예: 사진 오른쪽에 "이미지 업로드" 같은 설명을 넣을 수 있어요. 추가한 뒤 미리보기에서 끌어서 위치를 정하세요.';
+    tip.textContent=(im.captions&&im.captions.length)?'미리보기에서 자막을 마우스로 끌면 원하는 위치로 옮겨져요. ⏱ 나타남·사라짐 초를 넣으면 그 시간에만 보였다 사라져요(장면 시작 기준, 비우면 계속 표시). 여러 자막에 시간을 다르게 주면 단어가 차례로 나왔다 사라져요.':'예: 사진 오른쪽에 "이미지 업로드" 같은 설명을 넣을 수 있어요. 추가한 뒤 미리보기에서 끌어서 위치를 정하세요.';
     box.appendChild(tip);
+    // 사진 장면: 자막 타이밍을 미리 재생해서 확인(영상 장면은 영상 재생 버튼으로 확인)
+    if(!firstSlide.isVideo && (im.captions||[]).some(function(c){ return c.t0>0 || (c.t1!=null && c.t1!==''); })){
+      var pvB=document.createElement('button'); pvB.type='button'; pvB.textContent='▶ 자막 나타남/사라짐 미리 재생';
+      pvB.style.cssText='padding:6px 10px;border-radius:7px;border:1px solid var(--acb);background:var(--acg);color:var(--ac);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+      pvB.onclick=function(){
+        var end=0.8; (im.captions||[]).forEach(function(c){ end=Math.max(end, (c.t1!=null&&c.t1!=='')?+c.t1+0.5:(c.t0||0)+1.5); });
+        var st=performance.now(); pvB.disabled=true;
+        (function step(){
+          if(!canvas.isConnected){ window._capPvT=null; return; }
+          var t=(performance.now()-st)/1000; window._capPvT=t; paint();
+          if(t<end) requestAnimationFrame(step); else { window._capPvT=null; pvB.disabled=false; paint(); }
+        })();
+      };
+      box.appendChild(pvB);
+    }
     (im.captions||[]).forEach(function(c, ci){
       var row=document.createElement('div'); row.style.cssText='display:flex;flex-direction:column;gap:5px;padding:7px;border:1px solid var(--bd2);border-radius:8px;background:var(--c2)';
       var r1=document.createElement('div'); r1.style.cssText='display:flex;gap:6px;align-items:center';
@@ -26971,6 +27013,29 @@ function _shortsRenderLivePreview(container){
       bgL.appendChild(bgC); bgL.appendChild(document.createTextNode('배경 박스'));
       r2.appendChild(bgL);
       row.appendChild(r2);
+      // ⏱ 나타남/사라짐 시간(초) — 비우면 장면 처음부터/끝까지
+      var r3=document.createElement('div'); r3.style.cssText='display:flex;gap:5px;align-items:center;flex-wrap:wrap;font-size:10px;color:var(--m2)';
+      function tIn(key, ph){
+        var w=document.createElement('input'); w.type='number'; w.min='0'; w.step='0.1'; w.placeholder=ph;
+        w.value=(c[key]!=null && c[key]!=='')?String(c[key]):'';
+        w.style.cssText='width:54px;padding:3px 5px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t);font-size:11px;font-family:inherit;text-align:right';
+        w.onkeydown=function(e){ e.stopPropagation(); };
+        w.oninput=function(){ var n=parseFloat(w.value); if(w.value===''||!isFinite(n)||n<0){ if(key==='t0') c.t0=0; else c.t1=null; } else c[key]=Math.round(n*10)/10; paint(); };
+        return w;
+      }
+      function nowBtn(key){
+        var b=document.createElement('button'); b.type='button'; b.textContent='지금'; b.title='영상의 지금 재생 위치로';
+        b.style.cssText='padding:2px 6px;border-radius:5px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10px;cursor:pointer;font-family:inherit';
+        b.onclick=function(){ if(!_pvVideoActive) return; c[key]=Math.round(Math.max(0,((_pvVideoActive.currentTime||0)-(firstSlide.trimStart||0))/(firstSlide.playbackRate||1))*10)/10; renderMain('shorts'); };
+        return b;
+      }
+      r3.appendChild(document.createTextNode('⏱ 나타남'));
+      var t0i=tIn('t0','0'); r3.appendChild(t0i); r3.appendChild(document.createTextNode('초'));
+      if(firstSlide.isVideo) r3.appendChild(nowBtn('t0'));
+      r3.appendChild(document.createTextNode('· 사라짐'));
+      var t1i=tIn('t1','끝까지'); r3.appendChild(t1i); r3.appendChild(document.createTextNode('초'));
+      if(firstSlide.isVideo) r3.appendChild(nowBtn('t1'));
+      row.appendChild(r3);
       box.appendChild(row);
     });
     wrap.appendChild(box);
@@ -33630,7 +33695,7 @@ function _shortsRenderCanvas(ub){
     im._tileDomId = _tileImgId; // 썸네일 생성이 끝나면 이 id로 찾아서 바로 교체해줌
     _shortsEnsureThumb(im); // 아직 썸네일이 없으면 백그라운드에서 생성 시작(없어도 원본으로 우선 표시됨)
     tile.innerHTML='<img id="'+_tileImgId+'" src="'+_tileImgSrc+'" loading="lazy" decoding="async" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none" onerror="this.style.display=\'none\';this.nextElementSibling.nextElementSibling.nextElementSibling.style.display=\'flex\'">'+
-      (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+(im.speedMode?(im.speedTargetDur||im.duration||0):((im.trimEnd!=null&&im.trimStart!=null)?(im.trimEnd-im.trimStart):(im.duration||0))).toFixed(1)+(im.speedMode?'s⏩':'s')+'</div>':'')+
+      (im.isVideo?'<div style="position:absolute;bottom:8px;right:8px;z-index:1;font-size:10px;font-weight:800;color:#fff;background:rgba(139,92,246,.85);padding:2px 7px;border-radius:6px;pointer-events:none">🎬 '+(im.speedMode?(im.speedTargetDur||im.duration||0):((im.trimEnd!=null&&im.trimStart!=null)?(im.trimEnd-im.trimStart):(im.duration||0))/((im.speed>0)?im.speed:1)).toFixed(1)+(im.speedMode?'s⏩':((im.speed>0&&im.speed!==1)?'s ⚡'+im.speed+'x':'s'))+'</div>':'')+
       '<div style="position:absolute;top:8px;left:8px;z-index:1;width:22px;height:22px;border-radius:50%;background:'+(usable?'var(--ac)':'#f59e0b')+';color:#000;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;pointer-events:none">'+(idx+1)+'</div>'+
       '<div style="position:relative;z-index:1;font-size:12px;font-weight:800;color:#fff;background:'+(usable?'rgba(0,0,0,.65)':'rgba(245,158,11,.92)')+';padding:4px 9px;border-radius:7px;margin:8px;pointer-events:none">'+badgeTxt+'</div>'+
       '<div style="display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:#2a1a0a;color:#f59e0b;font-size:11px;font-weight:700;text-align:center;padding:8px;pointer-events:none">⚠️ 이미지 깨짐<span style="font-size:9px;color:#ccc;font-weight:500">클릭 후 Delete로 삭제하고<br>새로 올려주세요</span></div>'+
@@ -33670,7 +33735,7 @@ function _shortsRenderCanvas(ub){
         if(!im.videoUrl){ alert('영상 파일을 다시 불러오는 중이거나 찾을 수 없어요. 잠시 후 다시 눌러보시거나, 영상을 다시 올려주세요.'); return; }
         var _s = im.speedMode ? 0 : (im.trimStart||0);
         var _e = im.speedMode ? null : (im.trimEnd!=null ? im.trimEnd : null);
-        _openVideoLightbox(im.videoUrl, _s, _e, im.speedMode && im.speedTargetDur>0 ? ((im._fullDuration||im.duration||0)/im.speedTargetDur) : 1);
+        _openVideoLightbox(im.videoUrl, _s, _e, im.speedMode && im.speedTargetDur>0 ? ((im._fullDuration||im.duration||0)/im.speedTargetDur) : (im.speed>0?im.speed:1));
       };
       vZoomIcon.onmousedown=function(e){ e.stopPropagation(); };
       tile.appendChild(vZoomIcon);
@@ -35709,13 +35774,28 @@ function _shortsRenderFrame(ctx, W, H, t, slides, timeline, opts, imgCache, vide
 // 전체 문구를 그대로 다 보여줌(썸네일·전환 중 프레임 등 애니메이션이 필요 없는 경우).
 // 💬 장면별 자막(요청: "영상 클립·사진 위 원하는 위치에 '이미지 업로드' 같은 자막을 넣고 싶다")
 // caption = {id, text, x, y(0~1, 화면 기준 가운데 위치), size(1080 기준 px), color, bg(배경 박스 여부)}
-function _shortsDrawCaptions(ctx, W, H, caps, fontKey, boxesOut){
+// 2026-10-14(요청: 자막이 어느 순간 나타났다 사라졌다): c.t0(나타남, 초) / c.t1(사라짐, 초, 비우면 장면 끝까지)
+// elapsed = 이 장면이 시작된 뒤 지난 시간(초). 페이드+살짝 커지며 나타나고, 페이드로 사라짐(0.3초).
+// elapsed가 없으면: 미리보기(ghost=true)는 시간 지정 자막을 흐리게 보여줘서 위치를 잡을 수 있게, 영상 전환 프레임은 시간 지정 자막을 숨김.
+function _shortsCapAlpha(c, elapsed, ghost){
+  var t0=(c.t0>0)?c.t0:0, t1=(c.t1!=null && c.t1!=='' && isFinite(c.t1))?+c.t1:null, timed=(t0>0||t1!=null);
+  if(!timed) return 1;
+  if(elapsed==null) return ghost?0.3:0;
+  if(elapsed<t0 || (t1!=null && elapsed>t1)) return ghost?0.3:0;
+  var F=0.3, a=1;
+  if(t0>0) a=Math.min(a,(elapsed-t0)/F);
+  if(t1!=null) a=Math.min(a,(t1-elapsed)/F);
+  return Math.max(ghost?0.3:0, Math.min(1,a));
+}
+function _shortsDrawCaptions(ctx, W, H, caps, fontKey, boxesOut, elapsed, ghost){
   if(!caps || !caps.length) return;
   var k=W/1080;
   caps.forEach(function(c){
     var txt=String(c.text||'').trim(); if(!txt) return;
+    var _ca=_shortsCapAlpha(c, elapsed, ghost); if(_ca<=0) return;
     var fs=Math.max(10, (c.size||64)*k);
     ctx.save();
+    if(_ca<1){ ctx.globalAlpha=_ca; var _cx0=(c.x!=null?c.x:0.5)*W, _cy0=(c.y!=null?c.y:0.5)*H, _sc=ghost&&_ca<=0.3?1:(0.88+0.12*_ca); ctx.translate(_cx0,_cy0); ctx.scale(_sc,_sc); ctx.translate(-_cx0,-_cy0); }
     ctx.font=_shortsFontCss(fontKey, fs);
     ctx.textAlign='center'; ctx.textBaseline='middle';
     try{ ctx.letterSpacing='0px'; }catch(e){}
@@ -35785,7 +35865,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
     } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
       _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,_vSrc,_effFitModeV);
     }
-    _shortsDrawCaptions(ctx,W,H,slide.captions,opts&&opts.fontFamily);
+    _shortsDrawCaptions(ctx,W,H,slide.captions,opts&&opts.fontFamily,null,elapsed);
     return;
   }
   if(slide.type==='ending'){
@@ -35842,7 +35922,7 @@ function _shortsDrawSlide(ctx, W, H, slide, opts, imgCache, videoCache, elapsed,
   } else if(slide.label && (!opts || opts.showSlideLabels!==false)){
     _shortsDrawText(ctx,W,H,slide.label,opts&&opts.textPos,opts&&opts.fontFamily,img,_effFitMode);
   }
-  _shortsDrawCaptions(ctx,W,H,slide.captions,opts&&opts.fontFamily);
+  _shortsDrawCaptions(ctx,W,H,slide.captions,opts&&opts.fontFamily,null,elapsed);
 }
 
 // 레터박스에서 하단 검은 바는 고정 브랜드 문구가 차지하고 있을 때, 장면별 내용(현장 사진/AI
