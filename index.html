@@ -57528,9 +57528,13 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // 2026-10-14(요청: "마블 사이트에선 선명한데 우리 고화질은 똑같이 안 좋다"): 고화질은 진짜 고화질로 —
     // 점 개수 제한을 마블/Spark 기본 수준(PC 250만)으로 풀고, 점 크기 제한도 기본값(√8)으로 되돌림.
     // (마블 사이트처럼 무거울 수 있음 → 부드럽게 보려면 '보통')
-    var _lodCount = _isHighQ ? (_isMob ? 900000 : 2500000) : (_isMob ? 400000 : 800000);
-    var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount, lodSplatScale: 1,
-      maxStdDev: _isHighQ ? Math.sqrt(8) : Math.sqrt(6), maxPixelRadius: _isHighQ ? 512 : 256, behindFoveate: 1, coneFoveate: 1 });
+    // 2026-10-14(요청: 고화질이 너무 버벅임): 선명함은 원본(full_res)에서 고르는 데서 나오고, 버벅임은 화면 픽셀보다
+    // 작은 점까지 전부 그리는 데서 나옴 → Spark 권장대로 lodRenderScale 2(2픽셀보다 작은 점은 안 그림, 눈으로는 거의 차이 없음),
+    // 점 개수 160만, 거대 점 크기 제한 384px로 맞춤. 그래도 느린 PC면 처음 12초 동안 점 개수만 조금씩 줄임(해상도는 유지).
+    var _lodCount = _isHighQ ? (_isMob ? 800000 : 1600000) : (_isMob ? 400000 : 800000);
+    var _lodRS = _isHighQ ? 2.0 : 1.0;
+    var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount, lodSplatScale: 1, lodRenderScale: _lodRS,
+      maxStdDev: _isHighQ ? Math.sqrt(8) : Math.sqrt(6), maxPixelRadius: _isHighQ ? 384 : 256, behindFoveate: 1, coneFoveate: 1 });
     try{ spark.behindFoveate=1; spark.coneFoveate=1; spark.lodQuatOverride = new THREE.Quaternion(); }catch(e){}
     window._w3dSpark = spark;
     scene.add(spark);
@@ -57676,7 +57680,21 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     var isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
     var yaw = 0, pitch = 0;
     var keys = {};
-    var moveSpeed = 1.6 * metricScale; // 초당 이동 속도(월드 실제 크기에 비례해서 보정)
+    // 2026-10-14(요청: VR 시작 위치가 원본 사진과 다르다):
+    // ① 기본 시작 화각을 원본 사진과 비슷한 가로 약 72°로(예전 세로 70° = 와이드 화면에서 가로 107° 광각이라 멀고 휘어 보였음)
+    // ② "📌 시작 시점 저장"으로 지금 보는 위치·방향·화각을 이 VR의 시작 화면으로 저장(0키도 이 시점으로 복귀)
+    var _vrStartKey = 'clover_vr_start_' + String(spzUrl||'').split('?')[0].slice(-120);
+    function _vrDefaultFov(){ var a=(containerEl.clientWidth||w)/Math.max(1,(containerEl.clientHeight||h)); return Math.max(40, Math.min(85, 2*Math.atan(Math.tan(36*Math.PI/180)/Math.max(0.5,a))*180/Math.PI)); }
+    function _vrGetStart(){ try{ var j=JSON.parse(localStorage.getItem(_vrStartKey)||'null'); if(j && isFinite(j.yaw)) return j; }catch(e){} return null; }
+    function _vrGoStart(){
+      var sv=_vrGetStart();
+      if(sv){ camera.position.set(sv.x||0, sv.y||0, sv.z||0); yaw=sv.yaw||0; pitch=sv.pitch||0; camera.fov=sv.fov||_vrDefaultFov(); }
+      else { camera.position.set(0,0,0); yaw=0; pitch=0; camera.fov=_vrDefaultFov(); }
+      camera.updateProjectionMatrix();
+      camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+    }
+    _vrGoStart();
+    var moveSpeed = 2.6 * metricScale; // 2026-10-14(요청: 가는 속도 너무 느림) 1.6→2.6 // 초당 이동 속도(월드 실제 크기에 비례해서 보정)
     var lookSpeed = 0.0028;
 
     function clampPitch(p){ return Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, p)); }
@@ -57725,7 +57743,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         // 방향키/스페이스로 VR을 조작하는 동안 배경 페이지가 스크롤되는 것 방지
         if(['arrowup','arrowdown','arrowleft','arrowright',' '].indexOf(k)>=0) e.preventDefault();
         // Marble과 동일하게 '0'키로 원점(촬영 시점)으로 즉시 복귀
-        if(e.key==='0'){ camera.position.set(0,0,0); yaw=0; pitch=0; camera.fov=70; camera.updateProjectionMatrix(); applyRotation(); }
+        if(e.key==='0'){ _vrGoStart(); applyRotation(); }
       };
       window.addEventListener('keydown', _onKeyDown);
       _onKeyUp = function(e){ keys[(e.key||'').toLowerCase()]=false; };
@@ -57783,6 +57801,17 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
           recBtnGroup.appendChild(qSel);
         }
       }
+      var startBtn=document.createElement('button');
+      startBtn.type='button'; startBtn.textContent=_vrGetStart()?'📌 시작 시점 ✓':'📌 시작 시점 저장';
+      startBtn.title='지금 보고 있는 위치·방향·확대를 이 VR을 열 때 처음 보이는 화면으로 저장해요 (0키로 언제든 복귀). 우클릭하면 원래대로';
+      startBtn.style.cssText='padding:7px 12px;border-radius:7px;background:rgba(18,230,230,.15);color:#12E6E6;font-weight:700;font-size:12px;border:1px solid rgba(18,230,230,.5);cursor:pointer;font-family:inherit;white-space:nowrap';
+      startBtn.onclick=function(e){
+        e.stopPropagation();
+        try{ localStorage.setItem(_vrStartKey, JSON.stringify({x:camera.position.x,y:camera.position.y,z:camera.position.z,yaw:yaw,pitch:pitch,fov:camera.fov})); }catch(_e){}
+        startBtn.textContent='📌 저장됨 ✓'; setTimeout(function(){ startBtn.textContent='📌 시작 시점 ✓'; },1500);
+      };
+      startBtn.oncontextmenu=function(e){ e.preventDefault(); if(confirm('시작 시점을 처음 상태(원본 촬영 위치)로 되돌릴까요?')){ try{ localStorage.removeItem(_vrStartKey); }catch(_e){} startBtn.textContent='📌 시작 시점 저장'; _vrGoStart(); applyRotation(); } };
+      recBtnGroup.appendChild(startBtn);
       recBtnGroup.appendChild(recBtn);
       recBtnGroup.appendChild(previewBtn);
       if(spzUrl && typeof cloverShareVR==='function'){
@@ -58075,7 +58104,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     function animate(){
       if(stopped) return;
       requestAnimationFrame(animate);
-      var dt = Math.min(0.05, clock.getDelta());
+      var dt = Math.min(0.12, clock.getDelta()); // 2026-10-14: 0.05였을 때 화면이 버벅이면(20fps 미만) 이동도 같이 느려졌음 → 실제 시간만큼 이동
 
       // 카메라가 보는 수평 방향(앞/옆)만 추출해서 걷는 느낌 유지 (위아래로 안 기울어짐)
       camera.getWorldDirection(forward);
@@ -58094,7 +58123,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         if(keys['a']||keys['arrowleft'])  moveDir.addScaledVector(right, -1);
         if(keys['d']||keys['arrowright']) moveDir.addScaledVector(right, 1);
       }
-      var speed = moveSpeed * ((!isTouch && keys['shift']) ? 2.2 : 1);
+      var speed = moveSpeed * ((!isTouch && keys['shift']) ? 2.5 : 1);
       if(moveDir.lengthSq()>0){
         moveDir.normalize();
         camera.position.x += moveDir.x*speed*dt;
@@ -58125,10 +58154,10 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
       // 해상도를 바꿔도 점 계산(LoD)은 그대로 유지되게 lodRenderScale로 보정(이글거림 재발 방지).
       if(_vrBasePR==null) _vrBasePR=renderer.getPixelRatio();
       var _interacting = !_rec && (_moving || (_nowR-_vrLastInput) < 450);
-      var _wantPR = _interacting ? Math.max(0.5, _vrBasePR*0.62) : _vrBasePR;
+      var _wantPR = _vrBasePR; // 2026-10-14(요청: 화면 움직일 때마다 저화질로 바뀜) — 움직이는 동안 해상도를 낮추던 것 제거, 항상 같은 화질
       if(Math.abs(renderer.getPixelRatio()-_wantPR) > 0.01){
         renderer.setPixelRatio(_wantPR);
-        try{ spark.lodRenderScale = _wantPR/_vrBasePR; }catch(e){}
+        try{ spark.lodRenderScale = _lodRS*_wantPR/_vrBasePR; }catch(e){}
       }
       if(!_rec && _nowR-_vrLastRender < (_interacting ? 21.5 : 15.5)) return; // 움직이는 중 최대 45fps, 평소 60fps
       _vrLastRender=_nowR;
@@ -58146,13 +58175,17 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         var ls=spark.lodSplatScale||1;
         // 처음 12초 동안만, "낮추는 방향으로만" 맞춤 — 예전처럼 올렸다 내렸다 반복하면 그때마다 화면을
         // 다시 계산해서 깜빡이는 원인이 됐음. 한 번 맞춰지면 그 상태로 고정.
-        if(!_isHighQ && _now>_fpsStart && _now-_fpsStart < 12000 && fps<30){ // 고화질은 화질을 자동으로 낮추지 않음
+        if(_isHighQ && _now>_fpsStart && _now-_fpsStart < 12000 && fps<30){
+          // 고화질: 해상도는 그대로 두고 점 개수만 단계적으로 줄임(최저 약 100만 = 보통보다 많음)
+          if(ls>0.65) spark.lodSplatScale=Math.max(0.65, ls-0.15);
+        } else
+        if(!_isHighQ && _now>_fpsStart && _now-_fpsStart < 12000 && fps<30){
           if(ls>0.6) spark.lodSplatScale=Math.max(0.6, ls-0.2); // 너무 내리면 그림처럼 뭉개져서 하한 0.6
           else if(_vrBasePR>0.6){ _vrBasePR=Math.max(0.6, _vrBasePR-0.2); }
         }
       }
     }
-    var _fpsFrames=0, _fpsT0=performance.now(), _fpsStart=performance.now()+2500, _maxPR=Math.min(window.devicePixelRatio||1, _isHighQ ? 2 : 1.5); // +2.5초: 로딩 직후 프레임은 원래 느리니 측정에서 제외
+    var _fpsFrames=0, _fpsT0=performance.now(), _fpsStart=performance.now()+2500, _maxPR=Math.min(window.devicePixelRatio||1, 1.5); // +2.5초: 로딩 직후 프레임은 원래 느리니 측정에서 제외
     renderer.setPixelRatio(Math.min(renderer.getPixelRatio(), _maxPR));
     animate();
 
