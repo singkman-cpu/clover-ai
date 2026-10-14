@@ -8776,11 +8776,11 @@ function updBtn(){
     if(_batchPendingN){ al.textContent = _batchCrOk ? ('📦 '+_batchPendingN+'장 일괄 렌더링') : ('크레딧 부족 ('+G.cr+'cr)'); return; }
     if(G._uploadBusy){ al.textContent='이미지 업로드 중...'; return; }
     var tab=getTab(G.wf);
-    if(!tab||!tab.inputImg){ al.textContent=WFL[G.wf]||'실행'; }
+    if(!tab||!tab.inputImg){ al.textContent=(G.wf==='edit'&&G._staging)?'🛋 홈스테이징':(WFL[G.wf]||'실행'); }
     else if(G.wf==='render' && !tab.selK){ al.textContent='프리셋을 선택하세요'; }
     else if((G.wf==='space' || G.wf==='edit' || (G.wf==='video' && tab.vidMode!=='prompt')) && !tab.selK && !(tab.prompt||'').trim() && !(tab.refs && tab.refs.some(function(r){return !!r;}))){ al.textContent='프리셋을 선택하거나 프롬프트를 입력하세요'; }
     else if(G.supaRole!=='admin' && G.plan!=='admin' && localStorage.getItem('clover_plan')!=='admin' && G.cr<cost){ al.textContent='크레딧 부족 ('+G.cr+'cr)'; }
-    else { al.textContent=WFL[G.wf]||'실행'; }
+    else { al.textContent=(G.wf==='edit'&&G._staging)?'🛋 홈스테이징':(WFL[G.wf]||'실행'); }
   });
   document.querySelectorAll('.accr').forEach(function(ac){
     if(_batchPendingN){ ac.textContent=_batchTotalCost+' cr'; return; }
@@ -8992,7 +8992,10 @@ function _loginGateMsg(wf){
   document.body.appendChild(ov);
 }
 function selectWF(wf){
+  if(wf==='staging'){ _openStaging(); return; } // 빈집 홈스테이징은 AI편집 엔진을 쓰는 전용 모드
   if(LOGIN_ONLY_WF[wf] && !_supaUser && window._authInitDone){ _loginGateMsg(wf); return; }
+  if(!G._stagingEntering) G._staging=false;
+  if(wf==='edit' && !G._stagingEntering){ try{ var _et=G.tabs&&G.tabs.edit; if(_et && _et.selK && String(_et.selK).indexOf('staging_')===0){ _et.selK=null; _et.prompt=''; } }catch(e){} }
   try{ _trackTabOnce(wf); }catch(e){}
   // ⚠️ 2026-07-25: 영상 제작을 Pro 전용으로 막아뒀었는데, 전체 플랜에서 다 쓸 수 있게 풀어달라는
   // 요청으로 제한을 없앰. 크레딧만 있으면 어떤 플랜이든 영상 제작 가능.
@@ -9226,6 +9229,11 @@ function selectWF(wf){
 //   2. 아무것도 없음 → #canvas-upload-box 표시
 // ══════════════════════════════════════════════════════════════
 var WF_INFO={
+  staging:{
+    icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 9V6a2 2 0 00-2-2H6a2 2 0 00-2 2v3"/><path d="M2 11v5a2 2 0 002 2h16a2 2 0 002-2v-5a2 2 0 00-4 0v2H6v-2a2 2 0 00-4 0z"/><line x1="6" y1="19" x2="6" y2="21"/><line x1="18" y1="19" x2="18" y2="21"/></svg>',
+    title:'빈 방 사진을 <span>클릭해서 업로드</span>',
+    sub:'가구 없는 빈 방(또는 짐이 있는 방) 사진을 올리면 디자이너 가구·소품으로 예쁘게 채워드려요'
+  },
   agent:{
     icon:'<svg viewBox="0 0 24 24" fill="none" stroke="var(--ac)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>',
     title:'현장사진을 <span>클릭해서 업로드</span>',
@@ -9667,7 +9675,7 @@ function renderMain(callWf, preserveScroll){
       hs.style.display='none';
       window._disposeW3DViewersIn&&window._disposeW3DViewersIn(hs);
       hs.innerHTML='';
-      var info=WF_INFO[wf]||WF_INFO.space;
+      var info=(wf==='edit'&&G._staging&&WF_INFO.staging)||WF_INFO[wf]||WF_INFO.space;
       // ⚠️ 요청 반영("비포/애프터 영상 만들기 눌렀는데 또 업로드하라는 것처럼 보인다"): Start/End
       // 프레임이 이미 둘 다 채워진 상태에서 이 빈 화면(메인 캔버스)에 여전히 "클릭해서 업로드"
       // 문구가 나가서, 마치 뭘 더 올려야 하는 것처럼 보였음 — 실제로는 다 준비된 상태라 왼쪽 아래
@@ -10582,7 +10590,10 @@ var _STAGE_STYLES = [
 _STAGE_STYLES.forEach(function(st){ PS_EDIT.push({k:st[0], l:st[1], pt:_STAGE_BASE+st[2], s:'<svg class="pi-svg" viewBox="0 0 24 24"><path d="M20 9V6a2 2 0 00-2-2H6a2 2 0 00-2 2v3"/><path d="M2 11v5a2 2 0 002 2h16a2 2 0 002-2v-5a2 2 0 00-4 0v2H6v-2a2 2 0 00-4 0z"/><line x1="6" y1="19" x2="6" y2="21"/><line x1="18" y1="19" x2="18" y2="21"/></svg>'}); });
 function _openStaging(){
   G.editMode='normal';
-  selectWF('edit');
+  G._stagingEntering=true; G._staging=true;
+  try{ selectWF('edit'); }finally{ G._stagingEntering=false; }
+  G._staging=true;
+  document.querySelectorAll('.wft').forEach(function(x){ x.classList.toggle('on', x.dataset.w==='staging'); });
   var t=getTab('edit');
   if(!t.selK || t.selK.indexOf('staging_')!==0){
     var q=PS_EDIT.find(function(x){ return x.k==='staging_modern'; });
@@ -10590,7 +10601,10 @@ function _openStaging(){
     try{ _recordRecentPreset && _recordRecentPreset(q.k); }catch(e){}
   }
   renderSB();
+  try{ renderMain('edit'); }catch(e){}
+  try{ updBtn(); var _st=gE('stl'); if(_st) _st.textContent=t.inputImg?'이미지 로드됨 - 실행하세요':'빈 방 사진을 업로드하세요'; }catch(e){}
 }
+var PS_STAGE = PS_EDIT.filter(function(q){ return q.k.indexOf('staging_')===0; });
 var LIGHT_ONOFF_PRESETS=PS_EDIT.filter(function(q){ return q.k==='lights_on'||q.k==='lights_off'; });
 PS_EDIT=PS_EDIT.filter(function(q){ return q.k!=='lights_on' && q.k!=='lights_off'; });
 var PS_EDIT_CATS=[
@@ -24269,6 +24283,15 @@ function sbEdit(p){
   // 원하는 오브젝트로 교체")이 '일반 프롬프트' 모드에만 맞는 설명인데, 아래 "편집 방식"에서
   // 브러시/대화형으로 바꿔도 이 줄이 그대로 남아있어서 실제로 하는 작업과 안 맞았음 — 지금
   // 고른 편집 방식에 맞는 설명으로 바뀌게 함.
+  if(G._staging){
+    G.editMode='normal';
+    mkNote(p,'<strong style="color:var(--ac)">🛋 빈집 홈스테이징</strong><br>빈 방 사진에 디자이너 가구·소품을 채워서 살고 싶은 집으로 연출해요<br><span style="font-size:11px;color:var(--m2)">벽·바닥·천장·창문은 그대로 두고 가구·소품만 추가해요 (짐이 있으면 치우고 새로 꾸며요)</span>');
+    mkEng(p,false); mkUB(p,'빈 방 사진','main');
+    mkTA(p,'추가 요청 (선택)\n예) 소파는 그린 벨벳으로\n예) 아이방처럼 꾸며줘');
+    mkResolution(p); mkAspectRatio(p);
+    mkPre(p,PS_STAGE);
+    return;
+  }
   if(!G.editMode) G.editMode='normal';
   var _editModeNoteMap={
     normal:'레퍼런스 이미지 업로드 → 원하는 오브젝트로 교체',
@@ -55283,6 +55306,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // 번 더 실행되어 덮어쓰고 있었음 — 메인 그리드(#hgrid) 핸들러에는 이미 있던 예외 처리를
       // 여기에도 동일하게 추가함.
       if(t.dataset.w==='apt'){ selectAptShortcut(); }
+      else if(t.dataset.w==='staging'){ /* onclick(_openStaging)에서 이미 처리 */ }
       else { selectWF(t.dataset.w); }
       document.querySelectorAll('.mob-tab').forEach(function(b){b.classList.remove('on');});
       var mb=gE('mobt-'+t.dataset.w);if(mb)mb.classList.add('on');
