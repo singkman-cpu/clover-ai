@@ -57215,7 +57215,7 @@ if ('serviceWorker' in navigator) {
      생성된 원본 스플랫(.spz) 파일은 직접 받아와서 우리 화면 안에 띄울 수 있다. -->
 <script type="module">
 import * as THREE from "three";
-import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
+import { SparkRenderer, SplatMesh, dyno } from "@sparkjsdev/spark";
 // VR 뷰어를 정리(화질 변경·다른 VR 열기)할 때 Spark 작업 스레드가 끝나면서 남기는 무해한 에러
 // ("Worker terminate", undefined)가 콘솔에 빨간 에러로 쌓이던 것 — 이 두 가지만 조용히 무시.
 window.addEventListener('unhandledrejection', function(e){
@@ -57525,9 +57525,12 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // ⚠️ "고화질이 전보다 더 버벅인다" → 고화질에 점 개수를 120만으로 올리고 정밀 모드를 썼던 게 원인이라
     // 되돌림. 고화질도 화면에 그리는 점 개수는 보통과 같게(PC 80만) 두고, 대신 원본(full_res)에서 골라
     // 그리기 때문에 같은 점 개수로도 가까운 곳 디테일은 더 좋음. 움직일 땐 점 수를 조금 더 줄여 부드럽게.
-    var _lodCount = _isMob ? 400000 : 800000;
+    // 2026-10-14(요청: "마블 사이트에선 선명한데 우리 고화질은 똑같이 안 좋다"): 고화질은 진짜 고화질로 —
+    // 점 개수 제한을 마블/Spark 기본 수준(PC 250만)으로 풀고, 점 크기 제한도 기본값(√8)으로 되돌림.
+    // (마블 사이트처럼 무거울 수 있음 → 부드럽게 보려면 '보통')
+    var _lodCount = _isHighQ ? (_isMob ? 900000 : 2500000) : (_isMob ? 400000 : 800000);
     var spark = new SparkRenderer({ renderer: renderer, lodSplatCount: _lodCount, lodSplatScale: 1,
-      maxStdDev: Math.sqrt(6), maxPixelRadius: 256, behindFoveate: 1, coneFoveate: 1 });
+      maxStdDev: _isHighQ ? Math.sqrt(8) : Math.sqrt(6), maxPixelRadius: _isHighQ ? 512 : 256, behindFoveate: 1, coneFoveate: 1 });
     try{ spark.behindFoveate=1; spark.coneFoveate=1; spark.lodQuatOverride = new THREE.Quaternion(); }catch(e){}
     window._w3dSpark = spark;
     scene.add(spark);
@@ -57561,9 +57564,60 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // "작게 시작해서 커지며 자리 잡는" 애니메이션 + 반짝이는 파티클 오버레이를 재생한다.
     // (실제 포인트 단위 스캐터/컨버지까지는 라이브러리 API로 직접 제어하기 어려워서,
     //  스케일 그로우 + 파티클 오버레이로 같은 느낌을 냄)
-    splat.scale.setScalar(0.02);
+    // 2026-10-14(요청: 마블처럼 처음에 반짝이는 점들이 모여 장면이 되는 연출): Spark dyno 셰이더로
+    // 각 점을 작고 밝은 동그란 점으로 흩뿌려 시작 → 순서대로 제자리로 모이며 원래 크기·색으로 채워짐(약 4.5초).
+    var _revealT=null, _revealOk=false;
+    try{
+      if(dyno && dyno.dynoFloat){
+        _revealT = dyno.dynoFloat(0);
+        splat.objectModifier = dyno.dynoBlock({ gsplat: dyno.Gsplat }, { gsplat: dyno.Gsplat }, function(io){
+          var d = new dyno.Dyno({
+            inTypes: { gsplat: dyno.Gsplat, t: 'float' },
+            outTypes: { gsplat: dyno.Gsplat },
+            globals: function(){ return [dyno.unindent(`
+              float cvHash(float n){ return fract(sin(n*12.9898)*43758.5453); }
+            `)]; },
+            statements: function(c){ return dyno.unindentLines(`
+              ${c.outputs.gsplat} = ${c.inputs.gsplat};
+              float fi = float(${c.inputs.gsplat}.index);
+              float r1 = cvHash(fi*0.137+1.3);
+              float r2 = cvHash(fi*0.291+7.1);
+              float tt = ${c.inputs.t};
+              float p = clamp(tt*1.25 - r1*0.8, 0.0, 1.0);
+              float e = smoothstep(0.25, 1.0, p);
+              vec3 ctr = ${c.inputs.gsplat}.center;
+              float dist = max(length(ctr), 0.05);
+              vec3 dir = normalize(vec3(r1-0.5, r2-0.5, cvHash(fi*0.53)-0.5) + 0.001);
+              ${c.outputs.gsplat}.center = ctr * (1.0 + (1.0-e)*0.35*(r2-0.3)) + dir*dist*0.08*(1.0-e);
+              float dotS = dist*0.0035*(0.7+r2*0.9);
+              ${c.outputs.gsplat}.scales = mix(vec3(dotS), ${c.inputs.gsplat}.scales, e*e*e);
+              vec4 col = ${c.inputs.gsplat}.rgba;
+              vec3 glow = min(col.rgb*1.5 + 0.18, vec3(1.0));
+              ${c.outputs.gsplat}.rgba = vec4(mix(glow, col.rgb, e), mix(min(1.0, col.a*0.5+0.5), col.a, e) * smoothstep(0.0, 0.12, p));
+            `); }
+          });
+          return { gsplat: d.apply({ gsplat: io.gsplat, t: _revealT }).gsplat };
+        });
+        splat.updateGenerator();
+        _revealOk = true;
+      }
+    }catch(e){ console.warn('[VR 투어] 모이는 연출 준비 실패 → 기존 확대 연출 사용:', e); _revealOk=false; try{ splat.objectModifier=undefined; splat.updateGenerator(); }catch(_e){} }
+    if(!_revealOk) splat.scale.setScalar(0.02);
     var _matStarted=false;
     function _vrStartMaterialize(){ if(_matStarted) return; _matStarted=true;
+      if(_revealOk){
+        var rvStart=null, rvDur=4500;
+        (function rvStep(ts){
+          if(stopped) return;
+          if(rvStart==null) rvStart=ts;
+          var t=Math.min(1.6,(ts-rvStart)/rvDur*1.6);
+          try{ _revealT.value=t; splat.updateVersion(); }catch(e){}
+          if(typeof _vrMarkDirty==='function') _vrMarkDirty(400);
+          if(t<1.6) requestAnimationFrame(rvStep);
+          else { try{ splat.objectModifier=undefined; splat.updateGenerator(); if(typeof _vrMarkDirty==='function') _vrMarkDirty(600); }catch(e){} }
+        })(performance.now());
+        return;
+      }
       var matStart=null, matDur=1400;
       function matStep(ts){
         if(matStart==null) matStart=ts;
@@ -57579,6 +57633,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
     // 반짝이는 파티클 오버레이 — 로딩 스피너와 같은 자리에, 스플랫이 커지는 동안만 잠깐 보여주고
     // 자연스럽게 사라짐(별도 캔버스라 3D 렌더링 자체에는 영향 없음, 순수 장식).
     (function(){
+      if(_revealOk) return; // 셰이더 연출이 되면 별도 반짝이 오버레이는 생략
       var pCanvas=document.createElement('canvas');
       pCanvas.style.cssText='position:absolute;inset:0;z-index:6;pointer-events:none;transition:opacity .5s ease';
       pCanvas.width=w; pCanvas.height=h;
@@ -58091,13 +58146,13 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
         var ls=spark.lodSplatScale||1;
         // 처음 12초 동안만, "낮추는 방향으로만" 맞춤 — 예전처럼 올렸다 내렸다 반복하면 그때마다 화면을
         // 다시 계산해서 깜빡이는 원인이 됐음. 한 번 맞춰지면 그 상태로 고정.
-        if(_now>_fpsStart && _now-_fpsStart < 12000 && fps<30){
+        if(!_isHighQ && _now>_fpsStart && _now-_fpsStart < 12000 && fps<30){ // 고화질은 화질을 자동으로 낮추지 않음
           if(ls>0.6) spark.lodSplatScale=Math.max(0.6, ls-0.2); // 너무 내리면 그림처럼 뭉개져서 하한 0.6
           else if(_vrBasePR>0.6){ _vrBasePR=Math.max(0.6, _vrBasePR-0.2); }
         }
       }
     }
-    var _fpsFrames=0, _fpsT0=performance.now(), _fpsStart=performance.now()+2500, _maxPR=Math.min(window.devicePixelRatio||1, 1.5); // +2.5초: 로딩 직후 프레임은 원래 느리니 측정에서 제외
+    var _fpsFrames=0, _fpsT0=performance.now(), _fpsStart=performance.now()+2500, _maxPR=Math.min(window.devicePixelRatio||1, _isHighQ ? 2 : 1.5); // +2.5초: 로딩 직후 프레임은 원래 느리니 측정에서 제외
     renderer.setPixelRatio(Math.min(renderer.getPixelRatio(), _maxPR));
     animate();
 
