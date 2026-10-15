@@ -17642,6 +17642,35 @@ function _trackSignupSrc(user){
     localStorage.setItem(k,'1');
     var fs='direct'; try{ var o=JSON.parse(localStorage.getItem('clover_first_src')||'null'); if(o&&o.s) fs=o.s; }catch(e){}
     _trackEvent('signup_src_'+fs);
+    _askHowFound(user);
+  }catch(e){}
+}
+// 가입 직후 1번만: "어디서 알게 되셨나요?" (2026-10-15 요청) — 본인이 고르니 가장 정확. 건너뛰기 가능.
+var HOW_OPTS=[['tiktok','🎵 틱톡'],['instagram','📸 인스타그램·릴스'],['youtube','▶️ 유튜브'],['naver_blog','📝 네이버 블로그'],['naver_cafe','☕ 네이버 카페'],['search','🔍 검색(네이버·구글)'],['friend','🙋 지인 소개'],['etc','✨ 기타']];
+function _askHowFound(user){
+  try{
+    var k='clover_how_asked_'+user.id; if(localStorage.getItem(k)) return;
+    var tries=0;
+    (function wait(){
+      tries++;
+      var busy=!!document.getElementById('welcome-modal') || [].some.call(document.querySelectorAll('.mbg'),function(m){ return getComputedStyle(m).display!=='none'; });
+      if(busy && tries<40){ setTimeout(wait, 3000); return; }
+      if(localStorage.getItem(k)) return;
+      localStorage.setItem(k,'1');
+      var ov=document.createElement('div'); ov.id='how-found-ov';
+      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99998;display:flex;align-items:center;justify-content:center;padding:20px';
+      ov.innerHTML='<div style="background:var(--card,#16181d);border:1px solid var(--bd2,#333);border-radius:14px;padding:22px 20px;width:100%;max-width:380px;box-shadow:0 20px 50px rgba(0,0,0,.5)">'+
+        '<div style="font-size:16px;font-weight:800;color:var(--t,#fff);margin-bottom:4px">🎉 가입을 환영해요!</div>'+
+        '<div style="font-size:12.5px;color:var(--m2,#aaa);margin-bottom:14px">CLOVER AI를 어디서 알게 되셨나요? <span style="color:var(--m1,#777)">(한 번만 눌러주세요)</span></div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">'+HOW_OPTS.map(function(o){ return '<button type="button" data-k="'+o[0]+'" style="padding:10px 8px;border-radius:9px;border:1px solid var(--bd2,#333);background:var(--c2,#1f2228);color:var(--t,#fff);font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left">'+o[1]+'</button>'; }).join('')+'</div>'+
+        '<button type="button" data-k="" style="margin-top:12px;width:100%;padding:8px;border:none;background:none;color:var(--m1,#777);font-size:11.5px;cursor:pointer;font-family:inherit">건너뛰기</button></div>';
+      ov.addEventListener('click', function(e){
+        var b=e.target.closest('button[data-k]'); if(!b && e.target!==ov) return;
+        var kk=b?b.dataset.k:''; if(kk) _trackEvent('how_'+kk);
+        ov.remove();
+      });
+      document.body.appendChild(ov);
+    })();
   }catch(e){}
 }
 var _visitTrackChecked=false;
@@ -49594,6 +49623,18 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
               return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t);font-weight:700">'+lab(k)+'</td><td style="padding:6px 8px;text-align:right;color:var(--t2)">'+v+' <span style="color:var(--m1)">('+(visT[k]||0)+')</span></td><td style="padding:6px 8px"><div style="height:8px;border-radius:4px;background:var(--c2);overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--ac)"></div></div></td><td style="padding:6px 8px;text-align:right;color:var(--ac);font-weight:700">'+g+' <span style="color:var(--m1);font-weight:400">('+(sigT[k]||0)+')</span></td><td style="padding:6px 8px;text-align:right;color:var(--t2)">'+(v?Math.round(g/v*1000)/10+'%':'-')+'</td></tr>'; }).join('')+
             '</tbody></table></div>';
         }
+        // 🙋 가입자가 직접 고른 "어디서 알게 됐는지"
+        (function(){
+          var how={}, seenH={}, totH=0;
+          rows.forEach(function(r){ var et=r.event_type||''; if(et.indexOf('how_')!==0) return; if(r.user_id){ if(seenH[r.user_id]) return; seenH[r.user_id]=1; } var kk=et.slice(4); how[kk]=(how[kk]||0)+1; totH++; });
+          var lb={}; (typeof HOW_OPTS!=='undefined'?HOW_OPTS:[]).forEach(function(o){ lb[o[0]]=o[1]; });
+          html+='<div style="font-size:12.5px;font-weight:800;color:var(--t);margin:16px 0 6px">🙋 가입자 응답 — "어디서 알게 되셨나요?" (최근 30일 '+totH+'명)</div>';
+          if(!totH){ html+='<div style="font-size:11.5px;color:var(--m1);padding:10px;background:var(--c2);border-radius:8px">아직 응답이 없어요 — 새로 가입한 회원부터 쌓여요.</div>'; }
+          else {
+            html+='<div style="display:flex;flex-direction:column;gap:5px">'+Object.keys(how).sort(function(a,b){ return how[b]-how[a]; }).map(function(kk){ var pc=Math.round(how[kk]/totH*100);
+              return '<div style="display:flex;align-items:center;gap:8px;font-size:11.5px"><div style="width:150px;color:var(--t);font-weight:700">'+(lb[kk]||kk)+'</div><div style="flex:1;height:9px;border-radius:5px;background:var(--c2);overflow:hidden"><div style="height:100%;width:'+pc+'%;background:#a78bfa"></div></div><div style="width:70px;text-align:right;color:var(--t2)">'+how[kk]+'명 ('+pc+'%)</div></div>'; }).join('')+'</div>';
+          }
+        })();
         var base=location.origin.indexOf('http')===0?location.origin:'https://cloverai.kr';
         html+='<div style="margin-top:10px;padding:10px 12px;background:var(--c2);border:1px solid var(--bd2);border-radius:9px;font-size:11px;color:var(--m2);line-height:1.8">'+
           '<b style="color:var(--t)">🔗 채널별 링크 (프로필·설명란에 이걸 넣으면 가장 정확해요)</b><br>'+
@@ -49608,7 +49649,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           var email=r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인';
           var kt=_kst(r.created_at);
           return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+kt.date+' '+kt.time+'</td>'+
-            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:(r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
+            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:(r.event_type.indexOf('how_')===0?('🙋 가입 응답: '+(((typeof HOW_OPTS!=='undefined'?HOW_OPTS:[]).find(function(o){return o[0]===r.event_type.slice(4);})||[0,r.event_type.slice(4)])[1])):r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
         }).join('')+
       '</tbody></table></div>';
