@@ -17617,7 +17617,7 @@ function _detectVisitSrc(){
 }
 (function(){
   try{
-    var src=_detectVisitSrc(); if(!src) return;
+    var src=_detectVisitSrc(); if(!src) return; window._visitSrc=src;
     // 처음 들어온 채널(가입 경로용)은 한 번 저장되면 유지(직접 방문으로 덮어쓰지 않음)
     try{
       var _fs=null; try{ _fs=JSON.parse(localStorage.getItem('clover_first_src')||'null'); }catch(_e){}
@@ -17634,6 +17634,63 @@ function _detectVisitSrc(){
     }, 3000);
   }catch(e){}
 })();
+// ── 🟢 실시간 접속자(2026-10-15 요청: 지금 접속 중인 회원·비회원을 관리자에게만 실시간으로) ─────────────
+// Supabase Realtime "Presence" 사용(DB 테이블·SQL 필요 없음). 방문자는 이름표만 붙여 채널에 들어오고(이메일 같은 개인정보는 안 보냄 — 회원은 id만),
+// 관리자 화면에서만 목록을 모아서 보여줌. 페이지 열고 5초 뒤 시작(첫 화면 속도에 영향 없게), 20초마다 보고 있는 탭이 바뀌면 갱신.
+var _olCh=null, _olKey=null, _olLast='', _olStart=Date.now(), _olEmails={}, _olOpen=false;
+function _olPayload(){
+  var mob=(window.innerWidth||1024)<768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+  return { u:(_supaUser&&_supaUser.id)||null, a:(typeof G!=='undefined'&&G.supaRole==='admin')?1:0, w:(typeof G!=='undefined'&&G.wf)||'home', d:mob?'m':'pc', s:window._visitSrc||'', t:_olStart };
+}
+function _olStartPresence(){
+  try{
+    if(_olCh) return;
+    if(!_supa || !_supa.channel){ _olStartPresence._n=(_olStartPresence._n||0)+1; if(_olStartPresence._n<10) setTimeout(_olStartPresence, 5000); return; }
+    _olKey='v'+Math.random().toString(36).slice(2,10);
+    _olCh=_supa.channel('clover-online', { config:{ presence:{ key:_olKey } } });
+    _olCh.on('presence', { event:'sync' }, function(){ if(typeof G!=='undefined' && G.supaRole==='admin') _olRenderAdmin(); });
+    _olCh.subscribe(function(st){
+      if(st==='SUBSCRIBED'){ var pl=_olPayload(); _olLast=JSON.stringify(pl); _olCh.track(pl); }
+    });
+    setInterval(function(){
+      try{ if(!_olCh) return; var pl=_olPayload(), js=JSON.stringify(pl); if(js!==_olLast){ _olLast=js; _olCh.track(pl); } if(typeof G!=='undefined' && G.supaRole==='admin') _olRenderAdmin(); }catch(e){}
+    }, 20000);
+  }catch(e){}
+}
+setTimeout(_olStartPresence, 5000);
+function _olRenderAdmin(){
+  try{
+    if(!_olCh || typeof G==='undefined' || G.supaRole!=='admin') return;
+    var st=_olCh.presenceState()||{}, list=[];
+    Object.keys(st).forEach(function(k){ var arr=st[k]||[]; if(arr.length){ var x=arr[arr.length-1]; if(!x.a) list.push(x); } });
+    var mem=list.filter(function(x){return x.u;}), guest=list.length-mem.length;
+    // 회원 이메일은 관리자 권한으로 profiles에서 조회(캐시)
+    var need=mem.map(function(x){return x.u;}).filter(function(u){ return !(u in _olEmails); });
+    if(need.length && _supa){ need.forEach(function(u){ _olEmails[u]=''; }); _supa.from('profiles').select('id,email').in('id',need).then(function(r){ (r.data||[]).forEach(function(p){ _olEmails[p.id]=p.email; }); _olRenderAdmin(); }).catch(function(){}); }
+    var pill=document.getElementById('ol-pill');
+    if(!pill){
+      pill=document.createElement('div'); pill.id='ol-pill';
+      pill.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9000;background:rgba(10,12,16,.92);border:1px solid rgba(34,197,94,.5);border-radius:20px;padding:6px 12px;font-size:12px;font-weight:800;color:#fff;cursor:pointer;font-family:inherit;box-shadow:0 4px 14px rgba(0,0,0,.4);user-select:none';
+      pill.title='관리자에게만 보여요 — 눌러서 자세히';
+      pill.onclick=function(){ _olOpen=!_olOpen; _olRenderAdmin(); };
+      document.body.appendChild(pill);
+    }
+    pill.innerHTML='<span style="color:#22c55e">●</span> 실시간 접속 '+list.length+'명 <span style="font-weight:600;color:#9ca3af">(회원 '+mem.length+' · 비회원 '+guest+')</span>';
+    var pan=document.getElementById('ol-panel');
+    if(!_olOpen){ if(pan) pan.remove(); return; }
+    if(!pan){ pan=document.createElement('div'); pan.id='ol-panel'; pan.style.cssText='position:fixed;left:12px;bottom:52px;z-index:9000;width:min(420px,calc(100vw - 24px));max-height:60vh;overflow:auto;background:rgba(14,16,20,.97);border:1px solid #333;border-radius:12px;padding:12px;font-size:11.5px;color:#ddd;box-shadow:0 10px 30px rgba(0,0,0,.5)'; document.body.appendChild(pan); }
+    var wl=function(w){ return w==='home'?'메인화면':((typeof _ADM_WF_LABEL!=='undefined'&&_ADM_WF_LABEL[w])||(w==='staging'?'빈집 홈스테이징':w)); };
+    var sl=function(s){ return s?((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[s])||s):'-'; };
+    list.sort(function(a,b){ return (b.u?1:0)-(a.u?1:0) || a.t-b.t; });
+    pan.innerHTML='<div style="font-weight:800;color:#fff;margin-bottom:8px">🟢 지금 접속 중 ('+list.length+'명) <span style="font-weight:400;color:#888">· 관리자 본인 제외</span></div>'+
+      (list.length? list.map(function(x){ var mins=Math.max(0,Math.round((Date.now()-x.t)/60000));
+        return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #262626">'+
+          '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:'+(x.u?'#12E6E6':'#bbb')+';font-weight:700">'+(x.u?(_olEmails[x.u]||'회원'):'👤 비회원')+'</div>'+
+          '<div style="color:#ddd;white-space:nowrap">'+wl(x.w)+'</div>'+
+          '<div style="color:#888;white-space:nowrap">'+(x.d==='m'?'📱':'💻')+' '+sl(x.s)+' · '+mins+'분</div></div>'; }).join('') : '<div style="color:#777">지금은 접속자가 없어요</div>')+
+      '<div style="color:#666;font-size:10px;margin-top:8px">탭 이동은 20초 안에 반영돼요 · 창을 닫으면 몇 초 뒤 목록에서 빠져요</div>';
+  }catch(e){}
+}
 function _trackSignupSrc(user){
   try{
     if(!user || !user.created_at) return;
@@ -49507,6 +49564,11 @@ function admAnalytics(c){
     .catch(function(e){ c.innerHTML='<div style="color:#fca5a5">조회 실패: '+(e&&e.message||e)+'</div>'; });
 }
 
+// 관리자 '방문' 화면 칸 접기/열기(2026-10-15 요청) — 접어둔 칸은 직접 열 때까지 계속 접힌 상태로 기억
+function _admSecClosed(k){ try{ return localStorage.getItem('clover_adm_sec_'+k)==='0'; }catch(e){ return false; } }
+function _admSec(k,t){ var cl=_admSecClosed(k); return '<div class="adm-sec" style="margin:12px 0;border:1px solid var(--bd2);border-radius:10px;overflow:hidden"><div onclick="_admSecToggle(this,\''+k+'\')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;background:var(--c2);font-size:13px;font-weight:800;color:var(--t);user-select:none"><span>'+t+'</span><span class="adm-sec-ar" style="font-size:11px;color:var(--ac);font-weight:700;white-space:nowrap">'+(cl?'열기 ▾':'접기 ▴')+'</span></div><div class="adm-sec-b" style="padding:10px 12px;display:'+(cl?'none':'block')+'">'; }
+function _admSecEnd(){ return '</div></div>'; }
+function _admSecToggle(h,k){ var b=h.nextElementSibling; if(!b) return; var open=b.style.display==='none'; b.style.display=open?'block':'none'; var a=h.querySelector('.adm-sec-ar'); if(a) a.textContent=open?'접기 ▴':'열기 ▾'; try{ localStorage.setItem('clover_adm_sec_'+k, open?'1':'0'); }catch(e){} }
 function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
     // 2026-10-09 요청("하루 접속수가 같은 아이디 중복으로 잡히면 안 된다"): 사이트 방문은 같은 아이디면 하루(한국 날짜) 1번만 세고,
     // 관리자 본인 접속은 빼고 셈(예전에 쌓인 중복 기록도 화면에서는 자동으로 하나로 합쳐짐)
@@ -49549,7 +49611,8 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         if(d===todayStr) todayCount[r.event_type]=(todayCount[r.event_type]||0)+1;
         if(d.slice(0,7)===monthStr) monthCount[r.event_type]=(monthCount[r.event_type]||0)+1;
       });
-      var html='<div style="font-size:11px;color:var(--m2);margin-bottom:14px">최근 30일 집계 (한국 시간 KST 기준, 관리자 화면을 볼 때마다 다시 조회돼요)</div>';
+      var html='<div style="font-size:11px;color:var(--m2);margin-bottom:14px">최근 30일 집계 (한국 시간 KST 기준, 관리자 화면을 볼 때마다 다시 조회돼요) · 각 칸 제목을 누르면 접고 열 수 있어요(상태 기억)</div>';
+      html+=_admSec('summary','📊 오늘·이번달 요약');
       // 오늘 / 이번달 요약 카드
       html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">';
       EVENT_DEFS.forEach(function(ev){
@@ -49561,6 +49624,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         '</div>';
       });
       html+='</div>';
+      html+=_admSecEnd()+_admSec('daily','📅 최근 30일 일별');
       // 최근 30일 일별 표 — 오늘(KST)부터 하루씩 거슬러 올라가며 날짜 생성
       var days=[]; for(var i=0;i<30;i++){ var dt=new Date(nowKst._d.getTime()); dt.setUTCDate(dt.getUTCDate()-i); days.push(dt.getUTCFullYear()+'-'+_pad2(dt.getUTCMonth()+1)+'-'+_pad2(dt.getUTCDate())); }
       html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)">'+
@@ -49573,6 +49637,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           '</tr>';
         }).join('')+
       '</tbody></table></div>';
+      html+=_admSecEnd();
 
       // ⚠️ 요청 반영: 이벤트별로 "누가" 했는지 회원별 집계 표를 추가함(비로그인은 하나로 묶음).
       var userMap={}; // key: user_id(없으면 'anon') -> {email, counts:{eventType:n}}
@@ -49589,7 +49654,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         var bt=Object.values(b.counts).reduce(function(s,n){return s+n;},0);
         return bt-at;
       });
-      html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 8px">👥 누가 방문·클릭했나 (최근 30일)</div>';
+      html+=_admSec('who','👥 누가 방문·클릭했나 (최근 30일)');
       html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)">'+
         '<th style="padding:6px 8px;text-align:left">회원</th>'+
         EVENT_DEFS.map(function(ev){return '<th style="padding:6px 8px;text-align:center">'+ev.l+'</th>';}).join('')+
@@ -49603,6 +49668,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
 
       // ⚠️ 요청 반영: 시간순으로 "누가 언제 뭘 했는지" 그대로 보고 싶을 수도 있어서, 최근 이벤트
       // 원본 목록(최대 200개)도 같이 보여줌.
+      html+=_admSecEnd();
       // 📣 유입 채널(2026-10-15)
       (function(){
         var vis={}, sig={}, sigSeen={}, visT={}, sigT={};
@@ -49613,7 +49679,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         });
         var keys=Object.keys(Object.assign({},vis,sig)).sort(function(a,b){ return (vis[b]||0)-(vis[a]||0); });
         var lab=function(k){ return (typeof SRC_LABELS!=='undefined'&&SRC_LABELS[k])||(k.indexOf('etc_')===0?('링크: '+k.slice(4)):k); };
-        html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 4px">📣 유입 채널 (최근 30일)</div>'+
+        html+=_admSec('src','📣 유입 채널 (최근 30일)')+
           '<div style="font-size:10.5px;color:var(--m2);margin-bottom:8px;line-height:1.6">어디를 보고 들어왔는지예요. 방문은 같은 브라우저에서 채널별로 하루 1번만 세요. 가입은 처음 들어온 채널 기준이에요.</div>';
         if(!keys.length){ html+='<div style="font-size:11.5px;color:var(--m1);padding:10px;background:var(--c2);border-radius:8px">아직 기록이 없어요 — 이 버전을 올린 뒤부터 쌓여요.</div>'; }
         else {
@@ -49641,7 +49707,8 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           [['tiktok','틱톡'],['reels','인스타·릴스'],['youtube','유튜브'],['blog','네이버 블로그'],['cafe','네이버 카페'],['kakao','카카오톡']].map(function(x){ var u=base+'/?src='+x[0]; return x[1]+': <code style="color:var(--ac);cursor:pointer" title="클릭하면 복사" onclick="try{navigator.clipboard.writeText(\''+u+'\');this.textContent=\'복사됨 ✓\';}catch(e){}">'+u+'</code>'; }).join('<br>')+
           '<br><span style="color:var(--m1)">링크 없이 들어와도 인스타·틱톡·카톡·네이버 앱 안에서 열면 자동으로 구분돼요(정확도는 링크보다 조금 낮아요).</span></div>';
       })();
-      html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 8px">🕓 최근 이벤트 목록 (최대 200개, 한국 시간)</div>';
+      html+=_admSecEnd();
+      html+=_admSec('recent','🕓 최근 이벤트 목록 (최대 200개, 한국 시간)');
       html+='<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2);position:sticky;top:0;background:var(--card)">'+
         '<th style="padding:6px 8px;text-align:left">일시</th><th style="padding:6px 8px;text-align:left">이벤트</th><th style="padding:6px 8px;text-align:left">회원</th></tr></thead><tbody>'+
         rows.slice(0,200).map(function(r){
@@ -49653,6 +49720,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
         }).join('')+
       '</tbody></table></div>';
+      html+=_admSecEnd();
 
       c.innerHTML=html;
     })();
