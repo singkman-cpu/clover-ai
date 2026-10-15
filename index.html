@@ -9851,7 +9851,7 @@ function rUB(b,key){
   var v=key==='main'?getTab(G.wf).inputImg:G.tabs.video.endImg;
   if(v){
     var th=dv('uthumb');var im=mk('img','');im.src=v;var db=mk('button','uth-del');db.textContent='\u2715';
-    db.onclick=function(){if(key==='main'){getTab(G.wf).inputImg=null;getTab(G.wf).status='idle';}else{G.tabs.video.endImg=null;}rUB(b,key);updBtn();if(G.wf==='world3d')_w3dRefreshButtonStates();};
+    db.onclick=function(){if(key==='main'){getTab(G.wf).inputImg=null;getTab(G.wf).status='idle';try{_saveMainTabImagesDraft();}catch(e){}}else{G.tabs.video.endImg=null;}rUB(b,key);updBtn();if(G.wf==='world3d')_w3dRefreshButtonStates();};
     // 픽셀 정보 배지 (uthumb 우하단)
     var pxBadge=document.createElement('div');
     pxBadge.style.cssText='position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#ccc;font-size:9px;text-align:center;padding:2px 0;letter-spacing:.3px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
@@ -26193,6 +26193,8 @@ function _saveMainTabImagesDraft(){
       var t=(wf==='edit' && G._editTabStash) ? G._editTabStash : G.tabs[wf]; // 홈스테이징 중이면 진짜 AI편집 사진을 저장
       if(t && t.inputImg) snap[wf]={inputImg:t.inputImg, inputImgName:t.inputImgName||'', endImg:t.endImg||null, refs:t.refs||null, refParts:t.refParts||null, refPartTxt:t.refPartTxt||null};
     });
+    // 2026-10-15 버그 신고("빈집 홈스테이징 업로드 사진이 새로고침하면 없어진다"): 홈스테이징 탭 사진·고른 스타일도 따로 저장
+    try{ var st=G._staging ? G.tabs.edit : G._stagingTab; if(st && st.inputImg) snap.staging={inputImg:st.inputImg, inputImgName:st.inputImgName||'', selK:(st.selK&&String(st.selK).indexOf('staging_')===0)?st.selK:null}; }catch(e){}
     idbSaveDraft(_mainImgDraftKey(), snap).catch(function(){});
   }, 600);
 }
@@ -26203,7 +26205,7 @@ function _restoreMainTabImagesDraft(){
     if(!data) return;
     var changed=false;
     Object.keys(data).forEach(function(wf){
-      var t=G.tabs[wf]; var saved=data[wf];
+      var t=(wf==='edit' && G._editTabStash) ? G._editTabStash : G.tabs[wf]; var saved=data[wf];
       if(t && saved && saved.inputImg && !t.inputImg){
         t.inputImg=saved.inputImg;
         t.inputImgName=saved.inputImgName||'';
@@ -26228,6 +26230,25 @@ function _restoreMainTabImagesDraft(){
         changed=true;
       }
     });
+    // 홈스테이징 사진 복원(AI편집과 별도 보관)
+    try{
+      var ss=data.staging;
+      if(ss && ss.inputImg){
+        var st=G._staging ? G.tabs.edit : G._stagingTab;
+        if(!st){ G._stagingTab = st = Object.assign({}, G.tabs.edit, {inputImg:null, inputImgName:'', endImg:null, refs:[], refParts:null, refPartTxt:null, prompt:'', extraPrompt:'', selK:null, status:'idle', maskData:null}); }
+        if(!st.inputImg){
+          st.inputImg=ss.inputImg; st.inputImgName=ss.inputImgName||'';
+          if(ss.selK){ var q=(typeof PS_EDIT!=='undefined')&&PS_EDIT.find(function(x){ return x.k===ss.selK; }); if(q){ st.selK=q.k; st.prompt=q.pt; } }
+          if(!G.HIST.edit) G.HIST.edit=[];
+          var _hasStg=G.HIST.edit.some(function(x){ return !x.preview && _isStagingItem(x); });
+          if(!_hasStg){
+            G.HIST.edit = G.HIST.edit.filter(function(x){ return !(x.preview && _isStagingItem(x)); });
+            G.HIST.edit.unshift({id:Date.now()+1,orig:ss.inputImg,origName:ss.inputImgName||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:'edit',preview:true,staging:true});
+          }
+          changed=true;
+        }
+      }
+    }catch(e){}
     if(changed){ try{ renderSB(); renderMain(G.wf); }catch(e){} }
   }).catch(function(){});
 }
@@ -42823,9 +42844,12 @@ function delItem(id){
     toast.remove();
     // 여기서부터는 예전 delItem 로직 그대로(진짜 삭제)
     deleteHistItem(id);
-    if(!(G.HIST[wf]||[]).length){
+    // 2026-10-15: AI편집/홈스테이징은 같은 HIST.edit를 쓰므로, 지금 보고 있는 쪽 항목만 기준으로 판단 + 삭제 상태 저장(새로고침해도 다시 안 살아나게)
+    var _left=(G.HIST[wf]||[]); if(wf==='edit'){ var _stgNow=!!G._staging; _left=_left.filter(function(x){ return _isStagingItem(x)===_stgNow; }); }
+    if(!_left.length){
       var tab=getTab(wf);
       tab.inputImg=null; tab.status='idle';
+      try{ _saveMainTabImagesDraft(); }catch(e){}
     }
     renderMain(wf, true);
     updBtn();
