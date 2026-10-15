@@ -17569,6 +17569,81 @@ function _trackAction(name){
 // 같은 브라우저에서 반복 새로고침해도 서버 요청 자체가 안 나가게 막음 — 기기가 다르면(로컬
 // 저장소가 다르니) 여전히 서버가 계정 기준으로 잡아줌.
 function _kstDateStr(){ return new Date(Date.now()+9*3600000).toISOString().slice(0,10); } // 한국 날짜 YYYY-MM-DD
+
+// ── 📣 유입 채널 추적(2026-10-15 요청: 틱톡·릴스·네이버블로그 등 어디 보고 들어왔는지) ─────────────
+// 판단 순서: ① 링크에 붙인 ?src=tiktok (가장 정확) → ② 앱 안 브라우저 정보(인스타·틱톡·카톡·네이버 앱) → ③ 이전 페이지 주소(referrer) → 직접 방문
+// 방문은 채널별로 이 브라우저에서 하루 1번만 기록(src_채널), 가입은 처음 들어온 채널로 1번 기록(signup_src_채널)
+var SRC_LABELS={tiktok:'틱톡',instagram:'인스타그램(릴스)',youtube:'유튜브',naver_blog:'네이버 블로그',naver_cafe:'네이버 카페',naver:'네이버(검색 등)',kakao:'카카오톡',facebook:'페이스북',threads:'스레드',x:'X(트위터)',google:'구글 검색',daum:'다음',ads:'광고',direct:'직접 방문·북마크',other:'기타 사이트'};
+function _detectVisitSrc(){
+  try{
+    var q=new URLSearchParams(location.search);
+    var p=(q.get('src')||q.get('utm_source')||'').toLowerCase().replace(/[^a-z0-9_]/g,'').slice(0,20);
+    if(p){
+      if(/^(tt|tiktok)/.test(p)) return 'tiktok';
+      if(/^(ig|insta|reels?)/.test(p)) return 'instagram';
+      if(/^(yt|youtube|shorts)/.test(p)) return 'youtube';
+      if(/^(blog|naverblog|nblog)/.test(p)) return 'naver_blog';
+      if(/^(cafe|navercafe)/.test(p)) return 'naver_cafe';
+      if(/^(kakao|kt)/.test(p)) return 'kakao';
+      if(/^(fb|facebook)/.test(p)) return 'facebook';
+      if(/^threads/.test(p)) return 'threads';
+      return SRC_LABELS[p] ? p : ('etc_'+p);
+    }
+    var ua=navigator.userAgent||'';
+    if(/musical_ly|TikTok|BytedanceWebview|trill/i.test(ua)) return 'tiktok';
+    if(/Instagram/i.test(ua)) return 'instagram';
+    if(/Barcelona/i.test(ua)) return 'threads';
+    if(/KAKAOTALK/i.test(ua)) return 'kakao';
+    if(/FBAN|FBAV/i.test(ua)) return 'facebook';
+    if(/NAVER\(inapp|NAVER\/|whale.*naver/i.test(ua)) return 'naver';
+    var r=(document.referrer||'').toLowerCase();
+    if(!r) return 'direct';
+    var h=''; try{ h=new URL(r).hostname; }catch(e){}
+    if(h===location.hostname) return null; // 우리 사이트 안에서 이동 — 기록 안 함
+    if(/tiktok\.com/.test(h)) return 'tiktok';
+    if(/instagram\.com/.test(h)) return 'instagram';
+    if(/youtube\.com|youtu\.be/.test(h)) return 'youtube';
+    if(/blog\.naver\.com|m\.blog\.naver/.test(h)) return 'naver_blog';
+    if(/cafe\.naver\.com/.test(h)) return 'naver_cafe';
+    if(/naver\.com/.test(h)) return 'naver';
+    if(/kakao/.test(h)) return 'kakao';
+    if(/facebook\.com|fb\.com/.test(h)) return 'facebook';
+    if(/threads\.net/.test(h)) return 'threads';
+    if(/(^|\.)x\.com|t\.co|twitter\.com/.test(h)) return 'x';
+    if(/google\./.test(h)) return 'google';
+    if(/daum\.net/.test(h)) return 'daum';
+    return 'other';
+  }catch(e){ return 'direct'; }
+}
+(function(){
+  try{
+    var src=_detectVisitSrc(); if(!src) return;
+    // 처음 들어온 채널(가입 경로용)은 한 번 저장되면 유지(직접 방문으로 덮어쓰지 않음)
+    try{
+      var _fs=null; try{ _fs=JSON.parse(localStorage.getItem('clover_first_src')||'null'); }catch(_e){}
+      if(!_fs || (_fs.s==='direct' && src!=='direct')) localStorage.setItem('clover_first_src', JSON.stringify({s:src,t:Date.now()}));
+    }catch(e){}
+    setTimeout(function(){
+      try{
+        if(typeof G!=='undefined' && G.supaRole==='admin') return;
+        var k='clover_src_tracked_'+_kstDateStr()+'_'+src;
+        if(localStorage.getItem(k)) return;
+        localStorage.setItem(k,'1');
+        _trackEvent('src_'+src);
+      }catch(e){}
+    }, 3000);
+  }catch(e){}
+})();
+function _trackSignupSrc(user){
+  try{
+    if(!user || !user.created_at) return;
+    if(Date.now()-new Date(user.created_at).getTime() > 3*24*3600*1000) return; // 가입 3일 이내 첫 로그인만
+    var k='clover_signup_src_done_'+user.id; if(localStorage.getItem(k)) return;
+    localStorage.setItem(k,'1');
+    var fs='direct'; try{ var o=JSON.parse(localStorage.getItem('clover_first_src')||'null'); if(o&&o.s) fs=o.s; }catch(e){}
+    _trackEvent('signup_src_'+fs);
+  }catch(e){}
+}
 var _visitTrackChecked=false;
 function _trackVisitOncePerDay(userId){
   if(_visitTrackChecked) return; // 같은 세션에서 중복 체크 방지
@@ -49499,6 +49574,32 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
 
       // ⚠️ 요청 반영: 시간순으로 "누가 언제 뭘 했는지" 그대로 보고 싶을 수도 있어서, 최근 이벤트
       // 원본 목록(최대 200개)도 같이 보여줌.
+      // 📣 유입 채널(2026-10-15)
+      (function(){
+        var vis={}, sig={}, sigSeen={}, visT={}, sigT={};
+        rows.forEach(function(r){
+          var et=r.event_type||''; var d=_kst(r.created_at).date;
+          if(et.indexOf('src_')===0){ var s0=et.slice(4); vis[s0]=(vis[s0]||0)+1; if(d===todayStr) visT[s0]=(visT[s0]||0)+1; }
+          else if(et.indexOf('signup_src_')===0){ if(r.user_id){ if(sigSeen[r.user_id]) return; sigSeen[r.user_id]=1; } var s1=et.slice(11); sig[s1]=(sig[s1]||0)+1; if(d===todayStr) sigT[s1]=(sigT[s1]||0)+1; }
+        });
+        var keys=Object.keys(Object.assign({},vis,sig)).sort(function(a,b){ return (vis[b]||0)-(vis[a]||0); });
+        var lab=function(k){ return (typeof SRC_LABELS!=='undefined'&&SRC_LABELS[k])||(k.indexOf('etc_')===0?('링크: '+k.slice(4)):k); };
+        html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 4px">📣 유입 채널 (최근 30일)</div>'+
+          '<div style="font-size:10.5px;color:var(--m2);margin-bottom:8px;line-height:1.6">어디를 보고 들어왔는지예요. 방문은 같은 브라우저에서 채널별로 하루 1번만 세요. 가입은 처음 들어온 채널 기준이에요.</div>';
+        if(!keys.length){ html+='<div style="font-size:11.5px;color:var(--m1);padding:10px;background:var(--c2);border-radius:8px">아직 기록이 없어요 — 이 버전을 올린 뒤부터 쌓여요.</div>'; }
+        else {
+          var tv=0; keys.forEach(function(k){ tv+=(vis[k]||0); });
+          html+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px 8px;text-align:left">채널</th><th style="padding:6px 8px;text-align:right">방문 (오늘)</th><th style="padding:6px 8px;text-align:left;width:30%">비율</th><th style="padding:6px 8px;text-align:right">가입 (오늘)</th><th style="padding:6px 8px;text-align:right">가입률</th></tr></thead><tbody>'+
+            keys.map(function(k){ var v=vis[k]||0, g=sig[k]||0, pct=tv?Math.round(v/tv*100):0;
+              return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t);font-weight:700">'+lab(k)+'</td><td style="padding:6px 8px;text-align:right;color:var(--t2)">'+v+' <span style="color:var(--m1)">('+(visT[k]||0)+')</span></td><td style="padding:6px 8px"><div style="height:8px;border-radius:4px;background:var(--c2);overflow:hidden"><div style="height:100%;width:'+pct+'%;background:var(--ac)"></div></div></td><td style="padding:6px 8px;text-align:right;color:var(--ac);font-weight:700">'+g+' <span style="color:var(--m1);font-weight:400">('+(sigT[k]||0)+')</span></td><td style="padding:6px 8px;text-align:right;color:var(--t2)">'+(v?Math.round(g/v*1000)/10+'%':'-')+'</td></tr>'; }).join('')+
+            '</tbody></table></div>';
+        }
+        var base=location.origin.indexOf('http')===0?location.origin:'https://cloverai.kr';
+        html+='<div style="margin-top:10px;padding:10px 12px;background:var(--c2);border:1px solid var(--bd2);border-radius:9px;font-size:11px;color:var(--m2);line-height:1.8">'+
+          '<b style="color:var(--t)">🔗 채널별 링크 (프로필·설명란에 이걸 넣으면 가장 정확해요)</b><br>'+
+          [['tiktok','틱톡'],['reels','인스타·릴스'],['youtube','유튜브'],['blog','네이버 블로그'],['cafe','네이버 카페'],['kakao','카카오톡']].map(function(x){ var u=base+'/?src='+x[0]; return x[1]+': <code style="color:var(--ac);cursor:pointer" title="클릭하면 복사" onclick="try{navigator.clipboard.writeText(\''+u+'\');this.textContent=\'복사됨 ✓\';}catch(e){}">'+u+'</code>'; }).join('<br>')+
+          '<br><span style="color:var(--m1)">링크 없이 들어와도 인스타·틱톡·카톡·네이버 앱 안에서 열면 자동으로 구분돼요(정확도는 링크보다 조금 낮아요).</span></div>';
+      })();
       html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:22px 0 8px">🕓 최근 이벤트 목록 (최대 200개, 한국 시간)</div>';
       html+='<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2);position:sticky;top:0;background:var(--card)">'+
         '<th style="padding:6px 8px;text-align:left">일시</th><th style="padding:6px 8px;text-align:left">이벤트</th><th style="padding:6px 8px;text-align:left">회원</th></tr></thead><tbody>'+
@@ -49507,7 +49608,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           var email=r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인';
           var kt=_kst(r.created_at);
           return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+kt.date+' '+kt.time+'</td>'+
-            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:(r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
+            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:(r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
         }).join('')+
       '</tbody></table></div>';
@@ -56214,6 +56315,7 @@ function initSupabase(){
       if((event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session&&session.user){
         _supaUser=session.user;
         onSupaLogin(session.user);
+        try{ _trackSignupSrc(session.user); }catch(_e){}
         // 구글 redirect 후 돌아온 경우 URL 해시/파라미터 정리
         if(window.location.hash&&window.location.hash.indexOf('access_token')!==-1){
           history.replaceState(null,'',window.location.pathname);
