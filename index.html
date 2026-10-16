@@ -49972,11 +49972,20 @@ function _admMemberDetail(uid){
     _supa.from('profiles').select('*').eq('id',uid).maybeSingle().then(function(r){ out.p=r.data; out.pErr=r.error; }),
     _supa.from('analytics_events').select('event_type,created_at').eq('user_id',uid).gte('created_at',since.toISOString()).order('created_at',{ascending:false}).limit(2000).then(function(r){ out.ev=r.data||[]; out.evErr=r.error; }),
     _supa.from('credit_logs').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(300).then(function(r){ out.cl=r.data||[]; out.clErr=r.error; }),
-    _supa.from('gallery').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(500).then(function(r){ out.g=r.data||[]; out.gErr=r.error; })
+    _supa.from('gallery').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(500).then(function(r){ out.g=r.data||[]; out.gErr=r.error; }),
+    // 2026-10-16 요청("회원들 며칠 작업한 게 다 사라졌다, 가입 후 뭘 작업했는지 계속 보고 싶다"): 회원이 지운 결과물 보관함(GALLERY_ARCHIVE.sql) — 테이블 없으면 조용히 무시
+    _supa.from('gallery_archive').select('*').eq('user_id',uid).order('created_at',{ascending:false}).limit(500).then(function(r){ out.ga=(r&&!r.error&&r.data)||[]; })
   ];
   Promise.all(jobs.map(function(j){ return Promise.resolve(j).catch(function(){}); })).then(function(){
     var el=gE('adm-member-body'); if(!el) return;
     var p=out.p||{}, h='';
+    // 보관함(회원이 지운 것) 합치기 — 같은 파일이 갤러리에도 있으면 중복 제외, 최신순 정렬
+    var _delCnt=0;
+    try{
+      var _have={}; (out.g||[]).forEach(function(g){ if(g.storage_path) _have[g.storage_path]=1; if(g.public_url) _have[g.public_url]=1; });
+      (out.ga||[]).forEach(function(a){ if((a.storage_path&&_have[a.storage_path])||(a.public_url&&_have[a.public_url])) return; a._del=a.source||'member_deleted'; _delCnt++; (out.g=out.g||[]).push(a); });
+      if(_delCnt) out.g.sort(function(x,y){ return new Date(y.created_at)-new Date(x.created_at); });
+    }catch(_e){}
     function card(label,val,sub){ return '<div style="background:var(--c2);border:1px solid var(--bd2);border-radius:10px;padding:10px"><div style="font-size:10.5px;color:var(--m2)">'+label+'</div><div style="font-size:17px;font-weight:800;color:var(--ac);margin-top:3px">'+val+'</div>'+(sub?'<div style="font-size:10.5px;color:var(--m2);margin-top:2px">'+sub+'</div>':'')+'</div>'; }
     // 방문
     var visitDays={}; (out.ev||[]).forEach(function(e){ if(e.event_type==='page_visit') visitDays[_admKstDT(e.created_at).slice(0,10)]=1; });
@@ -49993,11 +50002,11 @@ function _admMemberDetail(uid){
       card('최근 90일 방문',vd.length+'일', vd[0]?('마지막 '+vd[0]):'')+
       card('사용한 크레딧',used.toLocaleString()+'cr', lastUse?('마지막 사용 '+_admKstDT(lastUse.created_at).slice(0,10)):'')+
       card('충전·지급 받은 크레딧',bought.toLocaleString()+'cr', buyCnt+'건')+
-      card('만든 결과물',(out.g||[]).length+'개')+
+      card('만든 결과물',(out.g||[]).length+'개', _delCnt?('회원이 지운 것 '+_delCnt+'개 포함'):'')+
     '</div>';
     // 기능별
     var wfKeys=Object.keys(wfCnt).sort(function(a,b){return wfCnt[b]-wfCnt[a];});
-    h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🧰 어떤 기능을 썼나 (갤러리에 저장된 결과 기준)</div>';
+    h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🧰 어떤 기능을 썼나 (만든 결과 기준 · 회원이 지운 것 포함)</div>';
     h+= wfKeys.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+wfKeys.map(function(k){return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px">'+_admEsc(_ADM_WF_LABEL[k]||k)+' <b style="color:var(--ac)">'+wfCnt[k]+'</b></span>';}).join('')+'</div>' : '<div style="margin-bottom:12px">'+(out.gErr?('갤러리 조회 실패: '+_admEsc(out.gErr.message||'')):'저장된 결과물이 없어요.')+'</div>';
     // 2026-10-06: 어떤 탭을 열었나(하루 1번씩) + 핵심 작업 기록 — 저장 안 한 작업도 여기서 확인 가능
     var _ACT_LABEL={shorts_render:'쇼츠 영상 완성', proposal_pdf:'제안서 PDF 생성', psedit_save:'포토샵 편집 갤러리 저장', psedit_download:'포토샵 편집 다운로드'};
@@ -50029,17 +50038,17 @@ function _admMemberDetail(uid){
       h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🎯 주로 한 작업 (프리셋·공간 이름 기준)</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">'+
         skKeys.map(function(k){ return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px">'+_admEsc(k)+' <b style="color:var(--ac)">'+skCnt[k]+'</b></span>'; }).join('')+'</div>';
     }
-    var thumbs=(out.g||[]).filter(function(g){return g.public_url && !/\.(mp4|webm|mov)(\?|$)/i.test(g.public_url);}).slice(0,24);
+    var thumbs=(out.g||[]).filter(function(g){return g.public_url && !/\.(mp4|webm|mov)(\?|$)/i.test(g.public_url);}).slice(0,60);
     window._admLbItems=thumbs.map(function(g){ var o=(g.orig_url && /^https?:/i.test(g.orig_url) && !/\.(mp4|webm|mov)(\?|$)/i.test(g.orig_url))?g.orig_url:''; var mt=g.meta||{}; return {orig:o, res:g.public_url, mask:mt.mask_url||'', prompt:mt.prompt||'', mode:mt.mode||'', label:(_ADM_WF_LABEL[g.wf]||g.wf||'')+(g.style_key?' · '+g.style_key:'')+' · '+_admKstDT(g.created_at).slice(5,16)}; });
     if(thumbs.length){
       function _okImg(u){ return u && /^https?:/i.test(u) && !/\.(mp4|webm|mov)(\?|$)/i.test(u); }
-      h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🖼 최근 만든 이미지 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(왼쪽 원본 → 오른쪽 결과 · 누르면 크게)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:12px">'+
+      h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🖼 최근 만든 이미지 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(왼쪽 원본 → 오른쪽 결과 · 누르면 크게 · 최근 60개 · 빨간 테두리 = 회원이 지운 것)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:12px">'+
         thumbs.map(function(g){
           var o=_okImg(g.orig_url)?g.orig_url:'';
           var _ix=thumbs.indexOf(g);
           var _mt=g.meta||{};
           var cell=function(u,lab){ return u ? '<a href="javascript:void(0)" onclick="_admLightbox('+_ix+','+(lab==='원본'?1:0)+')" style="position:relative;display:block;cursor:zoom-in"><img src="'+_admEsc(u)+'" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--bd2)">'+((lab==='원본' && _mt.mask_url)?'<img src="'+_admEsc(_mt.mask_url)+'" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;pointer-events:none">':'')+'<span style="position:absolute;left:4px;top:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9.5px;padding:1px 5px;border-radius:4px">'+lab+'</span></a>' : '<div style="aspect-ratio:1;border-radius:6px;border:1px dashed var(--bd2);display:flex;align-items:center;justify-content:center;color:var(--m2);font-size:10px;text-align:center">원본 없음</div>'; };
-          return '<div style="background:var(--c2);border:1px solid var(--bd2);border-radius:8px;padding:5px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">'+cell(o,'원본')+cell(g.public_url,'결과')+'</div><div style="font-size:10px;color:var(--m2);margin-top:4px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+_admEsc((g.style_key||'')+' '+(g.engine||''))+'">'+_admEsc(_ADM_WF_LABEL[g.wf]||g.wf||'')+(g.style_key?' · '+_admEsc(g.style_key):'')+' · '+_admKstDT(g.created_at).slice(5,16)+'</div>'+
+          return '<div style="background:var(--c2);border:1px solid '+(g._del?'rgba(248,113,113,.45)':'var(--bd2)')+';border-radius:8px;padding:5px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">'+cell(o,'원본')+cell(g.public_url,'결과')+'</div><div style="font-size:10px;color:var(--m2);margin-top:4px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+_admEsc((g.style_key||'')+' '+(g.engine||''))+'">'+(g._del?'<b style="color:#f87171">'+(g._del==='storage_recovered'?'♻ 복구됨':'🗑 회원 삭제')+'</b> · ':'')+_admEsc(_ADM_WF_LABEL[g.wf]||g.wf||'')+(g.style_key?' · '+_admEsc(g.style_key):'')+' · '+_admKstDT(g.created_at).slice(5,16)+'</div>'+
             ((_mt.prompt||_mt.mode)?'<div style="font-size:10.5px;color:var(--t2);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden" title="'+_admEsc(_mt.prompt||'')+'">'+(_mt.mode==='mask'?'<b style="color:#ff6b8a">🖌 칠해서 편집</b> ':(_mt.mode==='full'?'<b style="color:var(--m2)">전체 편집</b> ':''))+(_mt.prompt?'📝 '+_admEsc(_mt.prompt):'<span style="color:var(--m2)">(프롬프트 없음 · 프리셋만)</span>')+'</div>':'')+
             '</div>';
         }).join('')+'</div>';
