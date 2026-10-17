@@ -18308,6 +18308,36 @@ function _mrDetectRoom(room){
     });
   }catch(e){ room.detBusy=false; }
 }
+// 2026-10-18 요청: 공간 컨셉 디자인 집 사진·참고 사진을 눌러 고른 뒤 Del/백스페이스로 삭제
+function _mrSelect(rid, ref){
+  window._mrSel={rid:rid, ref:(ref==null?-1:ref)};
+  try{
+    document.querySelectorAll('.mr-card').forEach(function(c){ c.style.outline=(String(c.dataset.rid)===String(rid) && window._mrSel.ref<0)?'2px solid var(--ac)':''; });
+    document.querySelectorAll('.mr-ref').forEach(function(t){ t.style.outline=(String(t.dataset.rid)===String(rid) && String(t.dataset.ri)===String(window._mrSel.ref))?'2px solid #fff':''; });
+  }catch(e){}
+}
+document.addEventListener('keydown', function(e){
+  try{
+    if(e.key!=='Delete' && e.key!=='Backspace') return;
+    if(typeof G==='undefined' || G.wf!=='spaceset' || !window._mrSel) return;
+    var t=e.target, tag=(t&&t.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea'||tag==='select'||(t&&t.isContentEditable)) return;
+    var spTab=getTab('spaceset'); if(!spTab || spTab.multiRoomSubMode==='auto' || !spTab.multiRoomImages) return;
+    var sel=window._mrSel, room=spTab.multiRoomImages.find(function(r){ return String(r.id)===String(sel.rid); });
+    if(!room){ window._mrSel=null; return; }
+    e.preventDefault();
+    if(sel.ref>=0){
+      var rr=_mrRoomRefs(room); if(sel.ref<rr.length){ room.refImgs.splice(sel.ref,1); room.refParts.splice(sel.ref,1); room.refPartTxt.splice(sel.ref,1); _mrRoomRefs(room); }
+      window._mrSel={rid:room.id, ref:-1};
+    } else {
+      var ix=spTab.multiRoomImages.indexOf(room);
+      spTab.multiRoomImages=spTab.multiRoomImages.filter(function(r){ return r!==room; });
+      var nx=spTab.multiRoomImages[Math.min(ix, spTab.multiRoomImages.length-1)];
+      window._mrSel = nx ? {rid:nx.id, ref:-1} : null; // 연달아 지울 수 있게 다음 사진을 자동 선택
+    }
+    renderSB();
+  }catch(_e){}
+});
 function _addMultiRoomPhotosFromFiles(fileList){
   var spTab=getTab('spaceset');
   if(!spTab.multiRoomImages) spTab.multiRoomImages=[];
@@ -18608,7 +18638,7 @@ function mkMultiRoomSpace(p){
   var mrFidWrap=dv('ss');mrFidWrap.innerHTML='<div class="lbl">레퍼런스 반영도</div>';
   var mrFidRow=dv('');mrFidRow.style.cssText='display:flex;flex-direction:column;gap:6px';
   [
-    {key:'medium', label:'🟡 비슷하게', desc:'전체 규모는 비슷하되 세부 형태·마감재는 자유롭게'},
+    {key:'medium', label:'🟡 비슷하게', desc:'구조는 그대로 · 참고 이미지 50% + 새 디자인 50%'},
     {key:'tight', label:'🔴 최대한 동일하게 (기본값)', desc:'참고 이미지를 거의 그대로 재현 — 저작권 있는 이미지면 주의하세요'}
   ].forEach(function(opt){
     var isOn=spTab.multiRoomFidelity===opt.key;
@@ -18695,6 +18725,18 @@ function mkMultiRoomSpace(p){
   var listBox=dv('');listBox.style.cssText='display:flex;flex-direction:column;gap:10px';
   spTab.multiRoomImages.forEach(function(room,idx){
     var cardWrap=dv('');cardWrap.style.cssText='background:var(--c2);border-radius:9px;padding:10px';
+    // 2026-10-18 요청: 사진을 눌러 고른 뒤 Del/백스페이스로 삭제 — 고른 카드는 테두리 표시
+    cardWrap.className='mr-card'; cardWrap.dataset.rid=String(room.id);
+    if(window._mrSel && String(window._mrSel.rid)===String(room.id) && window._mrSel.ref<0) cardWrap.style.outline='2px solid var(--ac)';
+    cardWrap.addEventListener('mousedown', function(e){ _mrSelect(room.id, (e._mrRefIdx!=null)?e._mrRefIdx:-1); });
+    // 이 카드 위에 사진을 끌어다 놓으면 → 이 방의 참고 사진으로 추가
+    cardWrap.addEventListener('dragover', function(e){ e.preventDefault(); e.stopPropagation(); cardWrap.style.outline='2px dashed var(--ac)'; });
+    cardWrap.addEventListener('dragleave', function(){ cardWrap.style.outline=''; });
+    cardWrap.addEventListener('drop', function(e){ e.preventDefault(); e.stopPropagation(); cardWrap.style.outline='';
+      var gs=e.dataTransfer && e.dataTransfer.getData('clover/imgSrc');
+      if(gs){ _mrAddRoomRef(gs); return; }
+      if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) _mrReadFiles(e.dataTransfer.files);
+    });
 
     // ── 요청 반영("원본 넣고 바로 옆에 참고 넣고, 그다음 원본 옆에 참고 — 한눈에 보기 편하게"):
     // 예전엔 원본 사진(위 줄)과 이 공간 전용 참고 이미지(아래 줄, 접혀있어서 잘 안 보임)가
@@ -18747,6 +18789,9 @@ function mkMultiRoomSpace(p){
       var g=document.createElement('div'); g.style.cssText='display:grid;grid-template-columns:repeat(2,1fr);gap:4px;width:100%';
       rr.forEach(function(src,i){
         var t=document.createElement('div'); t.style.cssText='position:relative;aspect-ratio:1;border-radius:6px;overflow:hidden;border:1.5px solid var(--acb);background:var(--card)';
+        t.className='mr-ref'; t.dataset.rid=String(room.id); t.dataset.ri=String(i);
+        if(window._mrSel && String(window._mrSel.rid)===String(room.id) && window._mrSel.ref===i) t.style.outline='2px solid #fff';
+        t.addEventListener('mousedown', function(e){ e._mrRefIdx=i; });
         var im=document.createElement('img'); im.src=src; im.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
         t.appendChild(im); _wireImgPreview(im, src, 'spaceset');
         var del=document.createElement('button'); del.type='button'; del.textContent='✕'; del.title='이 참고 사진 빼기';
@@ -18849,11 +18894,19 @@ function mkMultiRoomSpace(p){
   addBox.onmouseenter=function(){ addBox.style.background='rgba(0,229,204,.16)'; }; addBox.onmouseleave=function(){ addBox.style.background='rgba(0,229,204,.08)'; };
   addBox.innerHTML=(_mrEmpty?'<div style="font-size:28px;line-height:1;margin-bottom:6px">📷</div>':'')
     +'<div style="font-size:'+(_mrEmpty?'14.5':'13')+'px;font-weight:800;color:var(--ac)">＋ 우리집 사진 '+(_mrEmpty?'넣기':'더 넣기')+'</div>'
-    +'<div style="font-size:11px;color:var(--t2);margin-top:4px">거실·주방·안방 등 공간마다 1장씩 · 여러 장 한번에 선택 가능 · Ctrl+V 붙여넣기 가능</div>';
+    +'<div style="font-size:11px;color:var(--t2);margin-top:4px">거실·주방·안방 등 공간마다 1장씩 · 여러 장 한번에 선택 가능 · 끌어다 놓기·Ctrl+V 붙여넣기 가능</div>'+(_mrEmpty?'':'<div style="font-size:10.5px;color:var(--m2);margin-top:3px">사진을 한 번 누르고 Del·백스페이스 키를 누르면 삭제돼요</div>');
   var addInput=document.createElement('input');addInput.type='file';addInput.accept='image/*';addInput.multiple=true;addInput.style.display='none';
   addBox.appendChild(addInput);
   addBox.onclick=function(){ addInput.click(); };
   addInput.onchange=function(){ _addMultiRoomPhotosFromFiles(addInput.files); };
+  // 2026-10-18 요청: 집 사진을 끌어다 놓아서 업로드(파일·내 갤러리 이미지 둘 다)
+  addBox.addEventListener('dragover', function(e){ e.preventDefault(); e.stopPropagation(); addBox.style.outline='2px dashed var(--ac)'; addBox.style.outlineOffset='3px'; });
+  addBox.addEventListener('dragleave', function(){ addBox.style.outline='none'; });
+  addBox.addEventListener('drop', function(e){ e.preventDefault(); e.stopPropagation(); addBox.style.outline='none';
+    var gs=e.dataTransfer && e.dataTransfer.getData('clover/imgSrc');
+    if(gs){ _addMultiRoomPhotoFromGallerySrc(gs); return; }
+    if(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) _addMultiRoomPhotosFromFiles([].filter.call(e.dataTransfer.files,function(f){ return /^image\//.test(f.type||'image/'); }));
+  });
   // ⚠️ 요청 반영("사진 업로드할 때 캡처한 걸 바로 Ctrl+V로 붙여넣고 싶은데, 지금은 박스를 한번
   // 눌렀다가 취소하고 붙여넣어야 해서 번거롭다"): 박스를 클릭 안 해도 포커스만 가 있으면 바로
   // Ctrl+V가 되도록 표준 헬퍼로 연결함 — 다른 곳(참고 디자인 이미지 등)과 동일한 방식.
@@ -19443,7 +19496,9 @@ function _multiRoomBuildPrompt(userStyle, roomLabel, hasRoomRef){
     // 실제로 "편집"하는 구조라서(컨셉확장/자동 흐름과 달리 순수 생성으로 바꾸지 않음), 아무리
     // 문구를 강하게 써도 색상·소품까지 완전히 다르게는 잘 안 나올 수 있음 — 이 부분은 이번엔
     // 문구만 정정하고, 구조 자체를 바꾸는 건 별도로 필요할 수 있음.
-    prompt += ' ⚠️⚠️ 매우 중요 — 위의 "거의 그대로 복제하라"는 지시는 무시하세요, 실제 반영도는 "비슷하게"입니다: ⚠️ 반드시 유지할 것 — 딱 이것 하나뿐입니다: 스타일 장르/콘셉트(예: 미드센추리 모던, 미니멀, 한국 전통 느낌, 인더스트리얼 등 — 참고 이미지가 어떤 장르인지 파악해서 그 장르 안에서 새로 디자인), 그리고 전체적인 퀄리티·고급스러움의 수준. ⚠️ 자유롭게 바꿔야 할 것 — 색상을 포함한 모든 디자인 요소: 가구·조명 기구의 구체적인 형태·디자인·색상을 전부 새로 창작하세요 — 색상이 같아야 한다는 제약은 없습니다, 같은 스타일 장르 안에서 어울리면 참고 이미지와 다른 색이어도 됩니다. 소품의 종류·배치·개수·디자인도 새로 창작하세요(똑같은 소품이 나오면 실패). 목표는 "완전히 다른 가구·소품인데, 같은 스타일 장르로 꾸며진 방"입니다 — "같은 방을 살짝만 바꾼 것 같다"는 인상을 주면 명백한 실패입니다(저작권 문제가 됩니다).';
+    // 2026-10-18 요청 반영("비슷하게가 잘 안 된다 — 구조는 절대 손대지 말고, 마감재·가구·소품은 참고이미지에 있는 것 50% + 없는 것 50%로
+    // 완전히 똑같지 않다는 걸 보여주고, 가구·소품·조명은 디자인 퀄리티 좋은 것으로"): 예전 문구(색까지 전부 새로 창작)는 결과가 들쭉날쭉했음 → 비율을 명확히 지정
+    prompt += ' ⚠️⚠️ 매우 중요 — 반영도 "비슷하게"(위의 "거의 그대로 복제하라"는 지시보다 우선): ① 구조는 반영도와 상관없이 절대 그대로 — 벽·문·창문·기둥·보·천장 높이·골조의 개수·위치·크기는 원본 사진과 100% 같아야 하고, 문이나 창문을 새로 만들거나 옮기거나 없애면 명백한 실패입니다. ② 마감재·가구·소품·조명은 참고 이미지와 "반반"으로 — 약 50%는 참고 이미지에 있는 것을 그대로 가져오고(예: 바닥재 종류와 톤, 벽 마감, 메인 소파의 스타일과 색, 전체 컬러 팔레트), 나머지 약 50%는 참고 이미지에 없는 새 아이템으로 바꾸세요(예: 다른 디자인의 라운지체어·커피테이블·조명·러그 무늬·액자·소품). 결과를 보면 "참고 이미지와 같은 분위기·톤인데, 가구와 소품 구성은 분명히 다르다"는 게 한눈에 보여야 합니다 — 참고 이미지와 거의 똑같으면 실패, 분위기와 톤이 완전히 달라져도 실패입니다. ③ 새로 넣는 가구·소품·조명은 반드시 디자인 퀄리티가 높은 것으로 — 잡지·쇼룸에 나올 법한 최신 디자이너 가구와 조명(슬림한 비율, 깔끔한 라인, 좋은 소재: 부클레·린넨·가죽·원목·트래버틴·대리석·브러시드 메탈)을 쓰고, 투박하거나 오래돼 보이거나 저렴해 보이는 기성 가구는 넣지 마세요. 소품은 개수를 과하게 늘리지 말고 몇 개만 세련되게 배치하세요.';
   }
   // ⚠️ 보완: 여러 공간이 전부 같은 "전체 공통" 참고 이미지 1장만 보고 만들어질 때(이 방 전용
   // 참고가 없을 때)만 해당하는 주의사항 — 이땐 여러 방에 똑같은 특정 소품(액자, 러그 등)이
@@ -31528,6 +31583,31 @@ function _consultToGallery(url, origUrl, label, res){
   }catch(e){ console.warn('[상담패키지] 갤러리 저장 실패', e); }
 }
 function _consultUrl(u, cb){ if(!u){ cb(null); return; } if(/^https?:/.test(u)){ cb(u); return; } _doUpload(u, cb, function(){ cb(null); }); }
+// 현장사진세트(공간 컨셉 디자인)의 프롬프트를 상담 패키지용으로 빌려 씀 — 그 함수가 공간컨셉 탭 설정(반영도·공간 종류·날씨 등)을 읽으므로
+// 잠깐 상담 패키지에 맞는 값(반영도=최대한 동일하게)으로 바꿔서 만들고, 끝나면 사용자의 공간컨셉 설정을 그대로 되돌림
+var _CONSULT_BIZ_CAT={'카페':'cafe','식당':'restaurant','주점':'restaurant','베이커리':'cafe','사무':'office','미용':'salon','네일':'salon','학원':'academy','교습':'academy','병원':'medical','의원':'medical','숙박':'hotel','게스트':'hotel'};
+function _consultSpacesetPrompt(st, sp, roles, hasAnchor, nImgs){
+  var t=getTab('spaceset'); if(!t) return '';
+  var keys=['multiRoomFidelity','multiRoomCategory','autoRoomWeather','scCeilingType','multiRoomPrompt'], bak={};
+  keys.forEach(function(k){ bak[k]=t[k]; });
+  var cat='residential';
+  if(st.type==='commercial'){ cat=null; Object.keys(_CONSULT_BIZ_CAT).some(function(k){ if(String(st.biz||'').indexOf(k)>=0){ cat=_CONSULT_BIZ_CAT[k]; return true; } return false; }); }
+  var out='';
+  try{
+    t.multiRoomFidelity='tight'; t.multiRoomCategory=cat; t.autoRoomWeather=''; t.scCeilingType=null;
+    out=_multiRoomBuildPrompt(st.memo||'', sp.name, false);
+  } finally { keys.forEach(function(k){ t[k]=bak[k]; }); }
+  if(!out) return '';
+  // 이미지 역할(어느 사진이 이 공간 참고인지) — 현장사진세트의 역할 안내와 같은 방식
+  var lines=['Image 1: the real site photo to edit (structure, doors, windows, walls, camera all come ONLY from this image)'];
+  (roles||[]).forEach(function(r){ lines.push('Image '+r.n+': '+(r.own ? ('this room\'s own reference — '+(r.partEn ? r.partEn+' — take nothing else from this image' : 'overall design of this room: copy its finishes, colors, furniture, lighting fixtures, decor and mood as literally as possible')) : 'reference for another room of this same home — only for overall consistency')); });
+  if(hasAnchor) lines.push('Image '+nImgs+': already-approved rendering of another room in this same project — match its finish materials, door/frame color and palette');
+  out += ' ⚠️ REFERENCE IMAGE ROLES (follow strictly): '+lines.join('; ')+'.';
+  if(st.type==='home') out += ' 이 집의 창호는 교체하지 않습니다 — 창문·발코니 문의 프레임 형태·분할·크기·위치는 원본 그대로, 프레임 색만 바뀔 수 있습니다.';
+  if(st.type==='home' && _consultExtApplies(st, sp.name)) out += ' 발코니 확장(고객 선택): 원본에 이 방과 발코니 사이 안쪽 창/문이 있으면 그것만 없애고 바닥·벽·천장을 바깥 발코니 창까지 이어서 확장하세요 — 바깥 창은 그대로.';
+  out += ' 🔒 마지막 확인(가장 중요): 원본 사진(이미지 1)과 결과를 비교해서 문·문틀·출입구의 개수와 위치(특히 사진 양쪽 가장자리의 문), 창문의 개수·위치·크기, 벽·기둥·보·천장 단차의 위치가 하나라도 다르면 실패입니다 — 참고 이미지의 문·창 위치를 절대 따라가지 말고 원본 위치 그대로 고치세요. 참고 이미지의 마감재·가구·조명·소품은 최대한 그대로 가져와서 이 현장 구조에 맞게 배치하세요.';
+  return out;
+}
 function _consultRunSpace(st, v, vp, sp, anchorUrl, done){
   var rec=v.spaces[sp.id]||(v.spaces[sp.id]={});
   rec.status='run'; rec.err=null; _consultRefresh();
@@ -31546,6 +31626,9 @@ function _consultRunSpace(st, v, vp, sp, anchorUrl, done){
     var useAnchor = anchorUrl && !hasOwn; // 이 공간 전용 참고사진이 있으면 그 사진들이 우선(통일은 마감재 스케줄로)
     if(useAnchor) list.push(anchorUrl);
     var prompt=_consultPrompt(st, vp, sp, nRefs, !!useAnchor, v, hasOwn?{roles:roles}:false);
+    // 2026-10-18 요청("상담패키지 렌더링이 현장사진 문 위치를 바꿔버렸다 — 공간컨셉 현장사진세트 기능을 여기 넣어, 문 위치·골조 고정 잘하잖아.
+    // 최대한 동일하게로 참고이미지 그대로 복사해서 현장이미지에 맞게"): 실내 공사 + 참고사진이 있으면 현장사진세트(최대한 동일하게) 프롬프트로 생성
+    if(!_consultIsBuild(st) && nRefs>0){ try{ var _mp=_consultSpacesetPrompt(st, sp, roles, !!useAnchor, list.length); if(_mp) prompt=_mp; }catch(_e){ console.warn('[상담패키지] 현장사진세트 프롬프트 실패 → 기존 방식', _e); } }
     _withExplicitAspect(urls[0], function(asp){
       falRun('google/nano-banana-2.1/edit', {prompt:prompt, image_urls:list, num_images:1, resolution:({'1K':'1K','2K':'2K','4K':'4K'})[st.res]||'1K', aspect_ratio:asp}, function(d){
         var url=falExtractImageUrl(d);
@@ -31946,22 +32029,25 @@ var CONSULT_CATALOG=[
   {id:'glass_part', cat:'기타', n:'유리 파티션', u:'m', p:45}
 ];
 var CONSULT_CAT_BY_ID={}; CONSULT_CATALOG.forEach(function(c){ CONSULT_CAT_BY_ID[c.id]=c; });
-function _consultTakeoffPrompt(spName){
+function _consultTakeoffPrompt(spName, hasSite){
   return [
     '[인테리어 시공 항목 판별 — JSON 하나만 답할 것, 설명·인사말·코드블록 금지]',
-    '첨부 이미지는 "'+spName+'" 공간의 완성 디자인 이미지야. 이 디자인을 실제로 시공하려면 필요한 항목을 아래 카탈로그에서만 골라.',
+    hasSite ? ('첫 번째 이미지는 "'+spName+'" 공간의 지금 현장 사진, 두 번째 이미지는 이 공간의 완성 디자인 이미지야. 완성 디자인을 실제로 시공하려면 필요한 항목을 아래 카탈로그에서만 골라.')
+            : ('첨부 이미지는 "'+spName+'" 공간의 완성 디자인 이미지야. 이 디자인을 실제로 시공하려면 필요한 항목을 아래 카탈로그에서만 골라.'),
+    // 2026-10-18 요청("현장이 다 철거됐는데 무슨 철거비용까지 나오냐"): 현장 사진이 이미 철거된 상태면 철거 항목을 빼게 함
+    hasSite ? '0) 먼저 현장 사진을 봐: 바닥재·벽지·천장 마감·몰딩·문짝 등 기존 마감이 이미 뜯겨서 시멘트·석고보드·콘크리트 바탕이 드러나 있고 잔해만 남은 "이미 철거된 상태"면 "demolished":true로 답하고 철거 항목(demo_)은 넣지 마. 기존 마감이 대부분 남아 있으면 false.' : '',
     '규칙:',
     '1) 이미지에 실제로 보이는 것만 골라. 보이지 않는 건 절대 넣지 마(예: 발코니·주방·욕실이 안 보이면 그 항목 금지).',
     '2) 바닥·벽 마감·천장·주방 가구·욕실은 각각 하나만. 보이는 재질과 가장 가까운 것을 골라.',
     '3) 소파·식탁·의자·침대·러그·소품·스탠드/펜던트 등기구 자체는 가구라서 제외. 벽·바닥에 고정된 벤치·수납·선반은 붙박이로 넣어.',
-    '4) 철거는 기본적으로 demo_full. 전기는 보이는 조명 방식에 맞춰 넣고, 최소 el_basic.',
+    '4) 철거는 기본적으로 demo_full(단, 현장이 이미 철거된 상태면 철거 항목 없음). 전기는 보이는 조명 방식에 맞춰 넣고, 최소 el_basic.',
     '5) qty: 단위가 py인 항목은 qty 생략. m는 대략 길이(m), ea는 개수, face는 벽 면 수, set은 1.',
     '6) note: 사진에서 무엇을 보고 골랐는지 12자 이내(예: "오크 원목 바닥").',
     '7) py: 이 공간 바닥 면적을 평으로 추정(가구 크기·천장 높이 기준).',
     '카탈로그(id | 항목 | 단위):',
     CONSULT_CATALOG.map(function(c){ return c.id+' | '+c.n+' | '+CONSULT_CAT_UNIT[c.u]; }).join('\n'),
-    '형식: {"py":숫자,"items":[{"id":"…","qty":숫자,"note":"…"}, …]}'
-  ].join('\n');
+    '형식: {"py":숫자,'+(hasSite?'"demolished":true/false,':'')+'"items":[{"id":"…","qty":숫자,"note":"…"}, …]}'
+  ].filter(Boolean).join('\n');
 }
 function _consultTakeoffParse(res){
   var j=_consultParseJson(res); if(!j || !Array.isArray(j.items)) return null;
@@ -31975,10 +32061,12 @@ function _consultTakeoffParse(res){
     out.push({id:c.id, qty:q, note:String(x.note||'').slice(0,20)});
   });
   if(!out.length) return null;
-  if(!out.some(function(x){ return /^demo_/.test(x.id); })) out.unshift({id:'demo_full', qty:1, note:''});
+  var _demolished = (j.demolished===true || j.demolished==='true');
+  if(_demolished) out=out.filter(function(x){ return !/^demo_/.test(x.id); }); // 이미 철거된 현장 → 철거비 없음
+  else if(!out.some(function(x){ return /^demo_/.test(x.id); })) out.unshift({id:'demo_full', qty:1, note:''});
   if(!out.some(function(x){ return /^el_(basic|downlight)$/.test(x.id); })) out.push({id:'el_basic', qty:1, note:''}); // 레일·라인 조명만 있어도 스위치·콘센트 등 기본 전기는 필요
   var py=parseFloat(j.py); py=(py>0)?Math.max(0.5, Math.min(60, Math.round(py*10)/10)):0;
-  return {py:py, items:out};
+  return {py:py, items:out, demolished:_demolished};
 }
 function _consultTakeoff(st, v, done){
   try{
@@ -31990,19 +32078,19 @@ function _consultTakeoff(st, v, done){
     function fin(){ if(--left>0) return; v.takeoffBusy=false; if(!(v.estimate && v.estimate.edited)){ v.estimate=null; _consultEstimate(st, v); } _consultSave(); _consultRefresh(); done&&done(); }
     sps.forEach(function(s){
       var url=v.spaces[s.id].result;
-      _proposalImgToB64(url, function(b64){
-        var blk=b64 ? {type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}} : (/^https?:/.test(url)?{type:'image', source:{type:'url', url:url}}:null);
+      function _toBlk(u, cb){ if(!u){ cb(null); return; } _proposalImgToB64(u, function(b){ cb(b ? {type:'image', source:{type:'base64', media_type:'image/jpeg', data:b}} : (/^https?:/.test(u)?{type:'image', source:{type:'url', url:u}}:null)); }); }
+      _toBlk(s.photo, function(siteBlk){ _toBlk(url, function(blk){
         if(!blk){ fin(); return; }
-        var tries=0;
+        var tries=0, _cont=siteBlk ? [siteBlk, blk] : [blk];
         (function attempt(){
-          _falProxyCall('chat-assistant', {messages:[{role:'user', content:[blk, {type:'text', text:_consultTakeoffPrompt(s.name)}]}]}, function(res){
+          _falProxyCall('chat-assistant', {messages:[{role:'user', content:_cont.concat([{type:'text', text:_consultTakeoffPrompt(s.name, !!siteBlk)}])}]}, function(res){
             var t=_consultTakeoffParse(res);
             if(!t && ++tries<2){ setTimeout(attempt, 1200); return; }
             if(t){ t.src=url; v.takeoff[s.id]=t; }
             fin();
           }, function(){ if(++tries<2){ setTimeout(attempt, 1500); return; } fin(); });
         })();
-      });
+      }); });
     });
   }catch(e){ console.warn('[상담패키지] 시공 항목 판별 실패', e); done&&done(); }
 }
@@ -39663,24 +39751,32 @@ var AGED_STAGE_METHOD=true;
 function _agedStagePrompt(k, onEmptyLot){
   function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
   var TYPE={
+    // 2026-10-18 요청("노후주택은 왜 항상 70~80년대 똑같은 건물이냐 — 빨간벽돌처럼 주변 건물 보고 다양한 주택으로"): 1990~2010년대 주택 여러 유형 중 무작위
     aged_house:{
-      what:'an ordinary, lived-in old Korean SINGLE-STOREY detached house (단독주택)',
-      size:'It is a LOW single-storey house: compare it directly with the neighbouring TWO-storey houses in the photo — the old house\'s whole height from the ground up to its roof ridge must be only about the height of ONE storey of those two-storey houses (its eaves at about the level of their first-floor window tops), so next to them it clearly reads as half their height. Ordinary low ceiling height (about 2.4 m inside), NO raised plinth or podium — at most two low steps (about 30 cm) up to the door. Its windows are small old windows, about the same size in the image as the windows of the neighbouring houses — NOT large picture windows. Do NOT copy the current building\'s tall double-height ground floor or its eave height.',
-      look:'exterior '+pick(['faded cream painted stucco','scratch-textured beige cement render','old red brick with a cement-rendered upper band','grey cement render with a brick base'])+', roof '+pick(['low old clay roof tiles (기와)','low grey slate roof (슬레이트)','low cement-tile gable roof'])+', '+pick(['old wooden-frame windows','brown aluminium sash windows','sash windows with simple security bars'])+', '+pick(['a small concrete front step and a tiny entrance canopy','a few concrete steps up to a wooden front door','a plain steel front door with no canopy'])
+      what:'an ordinary, lived-in older Korean detached house (단독주택) about 15–25 years old (built in the late 1990s to early 2010s) — the same style family as the neighbouring houses in the photo, just older, smaller and more worn; NOT a 1970s–80s house (no slate roof, no old clay-tile hip roof, no tiny 새마을-era cement house)',
+      size:'It is a LOW house, at most '+pick(['ONE storey','TWO storeys'])+' and in any case LOWER than the current building and NO TALLER than the neighbouring houses in the photo — its roof must stay clearly below the roofline of the current building and at or below the neighbours\' rooflines. Each storey is exactly as tall in the image as one storey of the neighbouring houses (one window row). Ordinary ceiling height, NO raised plinth or podium — at most two low steps up to the door. Its windows are about the same size in the image as the neighbours\' windows.',
+      look:pick([
+        'a hipped roof of dark grey asphalt shingles, beige stucco walls and brown aluminium sash windows',
+        'red-brown face brick on the ground floor with cream stucco above and a flat roof with a low parapet',
+        'a gable roof of grey corrugated metal roofing with light wood-look siding and white window frames, like a modest country house (전원주택)',
+        'a flat roof, light grey scratch-texture render and a small front balcony with a plain steel railing',
+        'a low gable roof of brown asphalt shingles over light brown brick walls',
+        'an orange-brown clay-look shingle roof over white stucco walls with brown window frames'
+      ])+', '+pick(['a plain steel front door with a small canopy','a wooden-look front door with a small porch roof','a glass-panel front door with a simple concrete step'])
     },
     aged_villa:{
       what:'an ordinary, lived-in old Korean low-rise walk-up multi-unit building (빌라/다세대주택)',
-      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its rooftop parapet clearly BELOW the current building\'s roofline.',
+      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its rooftop parapet clearly BELOW the current building\'s roofline — AND it must be NO TALLER than the neighbouring houses in the photo (if the neighbours are 2 storeys, the old building is at most 2 storeys, never 3). Each storey is exactly as tall in the image as one storey of the neighbouring houses.',
       look:'exterior '+pick(['brown or red-brown face brick (치장벽돌) on the upper floors','grey-beige face brick','light grey or beige stucco (드라이비트) with a brick-clad lower part','grey granite stone on the ground floor and red-brown brick above'])+', '+pick(['a ground-floor pilotis parking area with plain columns','a granite-clad ground-floor entrance'])+', '+pick(['brown aluminium sash windows','silver aluminium sash windows','some windows with security bars'])+', '+pick(['a steel shared entrance door with a small canopy','a glass-and-steel shared entrance door','a plain steel shared entrance door'])+', '+pick(['a flat roof with green waterproofing paint and a water tank','a plain flat rooftop with a low parapet'])
     },
     aged_redbrick:{
       what:'an ordinary, lived-in old Korean red-brick multi-unit building (다세대/연립주택)',
-      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its rooftop parapet clearly BELOW the current building\'s roofline.',
+      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its rooftop parapet clearly BELOW the current building\'s roofline — AND it must be NO TALLER than the neighbouring houses in the photo (if the neighbours are 2 storeys, the old building is at most 2 storeys, never 3). Each storey is exactly as tall in the image as one storey of the neighbouring houses.',
       look:'brick '+pick(['deep red-brown Korean red brick (적벽돌)','dark red-brown brick with slightly darker headers','classic reddish-brown red brick, a little faded'])+' with uneven, slightly varied bricks, '+pick(['silver aluminium sash windows','brown aluminium sash windows','windows of slightly different sizes per floor'])+', '+pick(['a flat roof with a low parapet','a small rooftop room','an old water tank on the roof'])+', '+pick(['a steel gate between brick pillars','a low brick wall with a steel gate','a concrete wall with a low steel gate'])
     },
     aged_commercial_ext:{
       what:'an ordinary old Korean neighbourhood commercial building (근린생활시설/상가건물) that is still in business',
-      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its roofline clearly BELOW the current building\'s roofline.',
+      size:'It must be exactly ONE storey LOWER than the current building (count the current building\'s window rows; a 1–2 storey current building becomes a 1-storey old building), with its roofline clearly BELOW the current building\'s roofline — AND NO TALLER than the neighbouring buildings in the photo. Each storey is exactly as tall in the image as one storey of the neighbouring buildings.',
       look:'facade '+pick(['beige or light grey exterior tiles','red-brown brick','grey granite on the ground floor with plain painted upper floors','light grey stucco'])+', '+pick(['a mix of mismatched projecting signs','a row of plain horizontal signboards','some faded hand-painted signs'])+' with very short Korean shop names, '+pick(['some roller shutters half down','most shops open','a couple of shutters closed'])
     }
   };
@@ -39688,9 +39784,9 @@ function _agedStagePrompt(k, onEmptyLot){
   // 17차: "빈 대지 위에 짓기" — 0단계(빈 대지) 결과 사진을 입력으로 쓸 때. 끌려갈 큰 건물이 없으니 옆집·도로만 보고 크기를 정하게 함
   if(onEmptyLot){
     var SZ={
-      aged_house:'a LOW single-storey house: its whole height from the ground up to its roof ridge is only about the height of ONE storey of the neighbouring two-storey houses, so next to them it clearly reads as about half their height; ordinary low ceilings, at most two low steps (about 30 cm) up to the door, small old windows about the same size in the image as the neighbours\' windows',
-      aged_villa:'2–3 storeys, each storey exactly as tall in the image as one storey of the neighbouring houses (one window row each)',
-      aged_redbrick:'2–3 storeys, each storey exactly as tall in the image as one storey of the neighbouring houses (one window row each)',
+      aged_house:'a LOW house of 1–2 storeys, NO taller than the neighbouring houses (each storey exactly as tall in the image as one storey of the neighbours), at most two low steps up to the door, windows about the same size in the image as the neighbours\' windows',
+      aged_villa:'2 storeys (3 only if the neighbouring buildings are clearly 3 storeys or taller) — never taller than the neighbours, each storey exactly as tall in the image as one storey of the neighbouring houses (one window row each)',
+      aged_redbrick:'2 storeys (3 only if the neighbouring buildings are clearly 3 storeys or taller) — never taller than the neighbours, each storey exactly as tall in the image as one storey of the neighbouring houses (one window row each)',
       aged_commercial_ext:'2 storeys, each storey exactly as tall in the image as one storey of the neighbouring houses'
     };
     return 'This photo shows an EMPTY, vacant lot in the middle of the scene. Build on this lot how it looked many years ago: '+T.what+'. '+
@@ -54208,6 +54304,8 @@ var GUIDE_SECTIONS = [
   {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/></svg>',title:'공간 컨셉 디자인',
    // ⚠️ 요청 반영("유튜브 사용설명서 영상, 사용가이드 탭에 넣어줘"): 이 기능 설명 아래에
    // 유튜브 튜토리얼 영상이 바로 재생되도록 videoId 추가.
+   // 2026-10-18 요청: 현장사진세트 설명서 영상 추가(영상 2개 — 현장 사진 세트 / 컨셉 확장)
+   videos:[{id:'ocZHwGYUTaY',label:'📷 현장 사진 세트 사용법'},{id:'8YCAJudG4BA',label:'🎨 컨셉 확장 사용법'}],
    videoId:'8YCAJudG4BA',desc:'건물 외관·여러 실내 공간(거실, 침실, 주방 등)을 한꺼번에 통일된 스타일로 만들 때 써요. 배치도를 참고 이미지로 넣으면 실제 공간 구조에 맞춰 더 정확하게 만들어줘요.',
    steps:['건물 외관 사진(파사드뷰·투시뷰·조감뷰 등)과 실내 사진들을 각각 올려요.','필요하면 배치도(평면도) 이미지도 참고용으로 추가해요 — 방 형태·비율을 더 정확히 반영해줘요.','"AI가 만들어줄 뷰"에서 원하는 공간들을 체크하고, 레퍼런스 반영도(비슷하게/최대한 동일하게)를 골라요.','한 번에 여러 공간이 통일된 스타일로 생성돼요.']},
   {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.6L19 10.5l-5.2 1.9L12 18l-1.8-5.6L5 10.5l5.2-1.9z"/></svg>',title:'3D 렌더 실사화',
@@ -54261,7 +54359,17 @@ function buildGuide(){
       var html='<div style="margin-bottom:12px;color:var(--t2)">'+sec.desc+'</div>';
       // ⚠️ 요청 반영("유튜브 사용설명서 영상 사용가이드 탭에 넣어줘"): videoId가 있는 항목은
       // 설명 아래·단계 목록 위에 유튜브 임베드를 넣음. 16:9 비율 유지되도록 padding-top 트릭 사용.
-      if(sec.videoId){
+      if(sec.videos && sec.videos.length){
+        sec.videos.forEach(function(vd){
+          html+='<div style="font-size:13px;font-weight:800;color:var(--t);margin:4px 0 6px">'+vd.label+'</div>'+
+            '<div style="position:relative;width:100%;padding-top:56.25%;margin-bottom:16px;border-radius:10px;overflow:hidden;background:#000">'+
+            '<iframe src="https://www.youtube.com/embed/'+vd.id+'" title="'+sec.title+' — '+vd.label+'" '+
+            'style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" '+
+            'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '+
+            'allowfullscreen loading="lazy"></iframe></div>'+
+            '<div style="margin:-8px 0 14px;text-align:right"><a href="https://www.youtube.com/watch?v='+vd.id+'" target="_blank" rel="noopener" style="font-size:12.5px;color:#ff6b6b;font-weight:700;text-decoration:none">▶ 유튜브에서 크게 보기 ↗</a></div>';
+        });
+      } else if(sec.videoId){
         html+='<div style="position:relative;width:100%;padding-top:56.25%;margin-bottom:16px;border-radius:10px;overflow:hidden;background:#000">'+
           '<iframe src="https://www.youtube.com/embed/'+sec.videoId+'" title="'+sec.title+' 사용법 영상" '+
           'style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" '+
