@@ -925,10 +925,116 @@ function _ensureFalKeyThen(cb, maxWaitMs){
 // ── fal.ai 프록시 호출 (개인 키가 없을 때 이걸 씀) ──────────────────
 // 진짜 fal.ai 키는 서버(Supabase Edge Function `fal-proxy`)에만 있고, 여기서는 로그인 토큰만
 // 실어 보낸다. 크레딧 확인·차감·환불도 전부 서버가 처리한다(브라우저는 결과만 받음).
+// ══ 2026-10-18 비회원 무료 체험 1장 ═══════════════════════════════════════════════
+// 요청: 비회원도 현장사진·공간컨셉(1장)·AI편집·렌더 실사화·빈집 홈스테이징 중 1장 체험, 1K 고정, 결과에 워터마크,
+// 끝나면 "가입하면 100cr" 안내. 1장 제한은 서버(guest-trial 함수)가 기기 ID+기기 특징값+IP로 판단 —
+// 컴퓨터를 껐다 켜거나, 몇 시간·하루가 지나도 다시 열리지 않음(기간 초기화 없음).
+var GUEST_TRIAL_WFS=['space','spaceset','edit','render'];
+function _guestId(){
+  try{
+    var k='clover_guest_id', v=localStorage.getItem(k);
+    if(!v){ v='g'+Date.now().toString(36)+Math.random().toString(36).slice(2,12)+Math.random().toString(36).slice(2,8); localStorage.setItem(k,v); }
+    return v;
+  }catch(e){ return 'g'+Date.now().toString(36)+'nostore'; }
+}
+// 브라우저 기록을 지워도 같은 기기·브라우저면 같은 값이 나오는 기기 특징값(개인정보 아님, 해시값만 보냄)
+function _guestFp(){
+  if(window._guestFpCache) return window._guestFpCache;
+  var parts=[navigator.userAgent, navigator.language, (navigator.languages||[]).join(','), screen.width+'x'+screen.height+'x'+screen.colorDepth, (window.devicePixelRatio||1), new Date().getTimezoneOffset(), navigator.hardwareConcurrency||0, navigator.platform||''];
+  try{ var c=document.createElement('canvas'); c.width=200; c.height=40; var x=c.getContext('2d'); x.textBaseline='top'; x.font='16px Arial'; x.fillStyle='#f60'; x.fillRect(10,5,60,20); x.fillStyle='#069'; x.fillText('Clover AI 체험',2,12); parts.push(c.toDataURL().slice(-80)); }catch(e){}
+  var str=parts.join('|'), h1=0x811c9dc5, h2=0x12345;
+  for(var i=0;i<str.length;i++){ var ch=str.charCodeAt(i); h1=Math.imul(h1^ch,16777619)>>>0; h2=Math.imul(h2+ch,2654435761)>>>0; }
+  window._guestFpCache='f'+h1.toString(36)+h2.toString(36);
+  return window._guestFpCache;
+}
+function _guestTrialUsedLocal(){ try{ return localStorage.getItem('clover_guest_trial_done')==='1'; }catch(e){ return false; } }
+function _guestTrialCall(action, body, cb, errCb){
+  var payload=Object.assign({action:action, guest_id:_guestId(), guest_fp:_guestFp()}, body||{});
+  fetch(SUPA_URL+'/functions/v1/guest-trial', {method:'POST', headers:{'apikey':SUPA_KEY, 'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+  .then(function(res){ return res.json().then(function(d){ return {ok:res.ok, d:d}; }); })
+  .then(function(x){
+    if(!x.ok){
+      var code=(x.d&&x.d.error)||'';
+      if(code==='TRIAL_USED'){ try{ localStorage.setItem('clover_guest_trial_done','1'); }catch(e){} G._guestRun=false; _guestSignupPrompt('used'); errCb('무료 체험은 기기당 1장이에요. 가입하면 100cr을 바로 드려요.'); return; }
+      if(code==='TRIAL_SOLDOUT'){ G._guestRun=false; _guestSignupPrompt('soldout'); errCb('오늘 무료 체험이 마감됐어요. 가입하면 100cr을 바로 드려요.'); return; }
+      if(code==='TRIAL_WF'||code==='TRIAL_MODEL'){ G._guestRun=false; _guestSignupPrompt('feature'); errCb('이 기능은 가입 후 이용할 수 있어요.'); return; }
+      errCb(code || ('체험 서버 오류 '+JSON.stringify(x.d).slice(0,120))); return;
+    }
+    cb(x.d);
+  }).catch(function(e){ errCb('체험 요청 실패: '+e.message); });
+}
+// 결과 이미지에 워터마크(대각선 반복 + 우측 하단 안내) — 비회원 체험 결과 전용
+function _guestWatermark(src, cb){
+  function draw(img){
+    try{
+      var cv=document.createElement('canvas'); cv.width=img.naturalWidth; cv.height=img.naturalHeight;
+      var x=cv.getContext('2d'); x.drawImage(img,0,0);
+      var W=cv.width, H=cv.height, fs=Math.max(16, Math.round(Math.min(W,H)*0.055));
+      x.save(); x.translate(W/2,H/2); x.rotate(-Math.PI/7);
+      x.font='800 '+fs+'px Helvetica,Arial,sans-serif'; x.textAlign='center'; x.textBaseline='middle';
+      x.fillStyle='rgba(255,255,255,0.28)'; x.strokeStyle='rgba(0,0,0,0.18)'; x.lineWidth=Math.max(1,fs*0.04);
+      var stepY=fs*4.2, stepX=x.measureText('CLOVER AI · 무료 체험').width+fs*3, span=Math.hypot(W,H);
+      for(var yy=-span; yy<span; yy+=stepY){ var off=(Math.abs(Math.round(yy/stepY))%2)*stepX/2; for(var xx=-span; xx<span; xx+=stepX){ x.strokeText('CLOVER AI · 무료 체험', xx+off, yy); x.fillText('CLOVER AI · 무료 체험', xx+off, yy); } }
+      x.restore();
+      var fs2=Math.max(14, Math.round(W*0.028)); x.font='700 '+fs2+'px Helvetica,Arial,sans-serif'; x.textAlign='right'; x.textBaseline='bottom';
+      var msg='가입하면 워터마크 없이 · cloverai.kr', mw=x.measureText(msg).width+fs2*1.2;
+      x.fillStyle='rgba(0,0,0,0.5)'; x.fillRect(W-mw, H-fs2*2, mw, fs2*2);
+      x.fillStyle='#fff'; x.fillText(msg, W-fs2*0.6, H-fs2*0.5);
+      cb(cv.toDataURL('image/jpeg', 0.9));
+    }catch(e){ cb(src); }
+  }
+  try{
+    if(/^data:/.test(src)){ var im=new Image(); im.onload=function(){ draw(im); }; im.onerror=function(){ cb(src); }; im.src=src; return; }
+    fetch(src).then(function(r){ return r.blob(); }).then(function(b){
+      var u=URL.createObjectURL(b), im=new Image(); im.onload=function(){ draw(im); URL.revokeObjectURL(u); }; im.onerror=function(){ URL.revokeObjectURL(u); cb(src); }; im.src=u;
+    }).catch(function(){ cb(src); });
+  }catch(e){ cb(src); }
+}
+function _guestTrialFinished(){
+  G._guestRun=false;
+  try{ localStorage.setItem('clover_guest_trial_done','1'); }catch(e){}
+  try{ _trackEvent('guest_trial_done'); }catch(e){}
+  setTimeout(function(){ _guestSignupPrompt('done'); }, 1500);
+}
+function _guestSignupPrompt(reason){
+  try{
+    var old=document.getElementById('guest-signup-ov'); if(old) old.remove();
+    var t={
+      done:['🎉 무료 체험 완료!','마음에 드셨나요? 지금 가입하면 <b style="color:var(--ac)">100cr을 바로 드려요</b>.<br>워터마크 없이, 더 높은 화질로, 다른 스타일도 계속 만들어보세요.'],
+      used:['무료 체험은 기기당 1장이에요','이미 무료 체험을 사용하셨어요. 지금 가입하면 <b style="color:var(--ac)">100cr을 바로 드려요</b> — 워터마크 없이 계속 만들 수 있어요.'],
+      soldout:['오늘 무료 체험이 마감됐어요','오늘 준비한 무료 체험이 모두 소진됐어요. 가입하면 <b style="color:var(--ac)">100cr을 바로 드려서</b> 지금 바로 만들어볼 수 있어요.'],
+      feature:['가입 후 이용할 수 있어요','이 기능은 회원 전용이에요. 가입하면 <b style="color:var(--ac)">100cr을 바로 드려요</b>.<br>(비회원 무료 체험: 현장사진 디자인·공간 컨셉·AI 편집(일반)·렌더 실사화·빈집 홈스테이징 중 1장)'],
+      intro:['비회원 무료 체험 1장','가입 없이 1장을 무료로 만들어볼 수 있어요 (1K 화질 · 워터마크 포함).<br>공간 컨셉 디자인은 첫 번째 공간 1장만 만들어져요.']
+    }[reason]||['가입하면 100cr 무료',''];
+    var ov=document.createElement('div'); ov.id='guest-signup-ov';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100001;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML='<div style="background:var(--card);border:1px solid var(--acb);border-radius:16px;max-width:380px;width:100%;padding:24px 22px;text-align:center;color:var(--t);font-family:inherit">'+
+      '<div style="font-size:19px;font-weight:800;margin-bottom:10px">'+t[0]+'</div>'+
+      '<div style="font-size:13.5px;line-height:1.7;color:var(--t2);margin-bottom:18px">'+t[1]+'</div>'+
+      (reason==='intro'?'':'<button id="guest-signup-go" type="button" style="width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">무료 가입하고 100cr 받기</button>')+
+      '<button id="guest-signup-later" type="button" style="width:100%;margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:13px;cursor:pointer;font-family:inherit">'+(reason==='intro'?'확인':'나중에')+'</button></div>';
+    document.body.appendChild(ov);
+    ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+    var go=document.getElementById('guest-signup-go'); if(go) go.onclick=function(){ ov.remove(); try{ _trackEvent('guest_signup_click'); }catch(e){} openMd('account'); };
+    document.getElementById('guest-signup-later').onclick=function(){ ov.remove(); };
+  }catch(e){ try{ openMd('account'); }catch(e2){} }
+}
+// 비회원 체험 시작 (실행 버튼에서 호출) — true면 체험으로 진행, false면 안내/로그인 창
+function _guestTrialBegin(wf){
+  if(_supaUser) return false;
+  if(GUEST_TRIAL_WFS.indexOf(wf)<0){ _guestSignupPrompt('feature'); return false; }
+  if(_guestTrialUsedLocal()){ _guestSignupPrompt('used'); return false; }
+  if(G._guestRun){ alert('무료 체험이 진행 중이에요. 잠시만 기다려주세요.'); return false; }
+  G._guestRun=true;
+  try{ _trackEvent('guest_trial_start'); }catch(e){}
+  var stl=gE('stl'); if(stl) stl.textContent='비회원 무료 체험 1장 진행 중 (1K · 워터마크)';
+  return true;
+}
 function _falProxyCall(action, body, cb, errCb){
   if(!_supa){ errCb('로그인 시스템이 초기화되지 않았습니다.'); return; }
   _supa.auth.getSession().then(function(r){
     var token = r&&r.data&&r.data.session&&r.data.session.access_token;
+    if(!token && G._guestRun && ['submit','status','result','upload-initiate'].indexOf(action)>=0){ _guestTrialCall(action, body, cb, errCb); return; }
     if(!token){ errCb('로그인이 필요합니다.'); return; }
     var payload = Object.assign({action:action}, body);
     fetch(SUPA_URL+'/functions/v1/fal-proxy', {
@@ -17748,6 +17854,7 @@ function _trackSignupSrc(user){
     localStorage.setItem(k,'1');
     var fs='direct'; try{ var o=JSON.parse(localStorage.getItem('clover_first_src')||'null'); if(o&&o.s) fs=o.s; }catch(e){}
     _trackEvent('signup_src_'+fs);
+    try{ if(localStorage.getItem('clover_guest_trial_done')==='1') _trackEvent('signup_after_trial'); }catch(e){}
     _askHowFound(user);
   }catch(e){}
 }
@@ -19271,15 +19378,21 @@ function _multiRoomRun(){
     alert('공통 참고 디자인 이미지를 올리거나, 아래 방마다 전용 참고 이미지를 각각 넣어주세요.');
     return;
   }
-  if(!_supaUser){ openMd('account'); return; }
+  var _mrGuest=false;
+  if(!_supaUser){
+    // 2026-10-18 비회원 무료 체험: 공간 컨셉은 첫 번째 공간 1장만
+    if(!_guestTrialBegin('spaceset')) return;
+    _mrGuest=true;
+  }
   var _resMultCheck1 = spTab.multiRoomResolution==='4K' ? 2.25 : spTab.multiRoomResolution==='2K' ? 1.5 : 1.0;
   var totalCost = Math.round(n*20*_resMultCheck1*(spTab.scCandidateN||1));
-  if(G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCost){
+  if(!_mrGuest && G.supaRole!=='admin' && G.plan!=='admin' && G.cr<totalCost){
     alert('크레딧이 부족합니다. 필요: '+totalCost+'cr, 현재: '+G.cr+'cr');
     openMd('credits');
     return;
   }
-  spTab.multiRoomState={running:true, step:0, results:[], error:null};
+  spTab.multiRoomState={running:true, step:0, results:[], error:null, guestOne:_mrGuest};
+  if(_mrGuest && n>1) _guestSignupPrompt('intro');
   // ⚠️ 요청 반영(반복 지적): "여러 공간을 한 세트로 렌더링 걸면 방마다 창호(창틀) 색상·형태가
   // 제각각 나온다(건축외관은 블랙인데 거실은 화이트, 아이방은 우드, 주방은 월넛...) — 안팎이
   // 같은 창호여야 통일감 있는 거 아니냐"는 지적 — 원인을 찾음. 프롬프트 안내문에는 "외관 창호
@@ -19574,7 +19687,7 @@ function _multiRoomGenerateStep(pos){
   var st=spTab.multiRoomState;
   var rooms=spTab.multiRoomImages;
   var genOrder = (st.genOrder && st.genOrder.length===rooms.length) ? st.genOrder : rooms.map(function(_,i){return i;});
-  if(pos>=genOrder.length){ st.running=false; renderSB(); return; }
+  if(pos>=genOrder.length || (st.guestOne && pos>=1)){ st.running=false; renderSB(); return; }
   var idx = genOrder[pos];
   st.step=pos; st.running=true;
   renderSB();
@@ -19624,7 +19737,7 @@ function _multiRoomGenerateStep(pos){
   // 다음 공간으로 넘어감(한 번만). 첫 번째(후보1) 결과만 이 뷰의 "대표 결과"(st.results[idx])로
   // 남기고, 나머지 후보들은 메인 화면·갤러리에 별도 결과로만 추가함(이 세트의 다음 뷰가 참고하는
   // "창호 기준 이미지" 등은 대표 결과 하나만 쓰도록 유지해서 기존 로직과 충돌하지 않게 함).
-  var _mrCandN = _isAptForThisRun ? 1 : Math.min(3, Math.max(1, spTab.scCandidateN||1));
+  var _mrCandN = (_isAptForThisRun || st.guestOne) ? 1 : Math.min(3, Math.max(1, spTab.scCandidateN||1));
   var _mrDoneN = 0, _mrAdvanced = false;
   function _mrAfterOneCandidate(){
     _mrDoneN++;
@@ -19636,7 +19749,7 @@ function _multiRoomGenerateStep(pos){
   }
   for(var _mrCi=0; _mrCi<_mrCandN; _mrCi++){
     (function(_mrCi){
-      var task={id:Date.now()+idx*10+_mrCi+Math.random(), img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:spTab.multiRoomResolution||'1K'};
+      var task={id:Date.now()+idx*10+_mrCi+Math.random(), img:room.img, wf:'space', prompt:prompt, selK:null, eng:'nano2', resolution:st.guestOne?'1K':(spTab.multiRoomResolution||'1K')};
       var _candTag = (_mrCandN>1) ? (room.label+' (후보'+(_mrCi+1)+'/'+_mrCandN+')') : room.label;
       task.noRefRoles=true;
       procImgWithTask(task, function(resultUrl){
@@ -46060,7 +46173,7 @@ function _runToolWithPromptActual(translatedPrompt){
     selK:      tab.selK||null,
     // ⚠️ 요청 반영(긴급 되돌림): Nanobanana Pro 강제 전환이 실제 렌더링 실패 + 화면 표시·크레딧
     // 계산과 실제 사용 엔진이 다른 문제를 일으켜서, 검증된 나노바나나2로 되돌림.
-    eng:       (G.wf==='edit' && G.editMode==='mask') ? 'nano2' : ((_allowedEngs(G.wf) && _allowedEngs(G.wf).indexOf(G.eng)===-1) ? 'nano2' : G.eng),
+    eng:       (G._guestRun && !_supaUser) ? 'nano2' : (G.wf==='edit' && G.editMode==='mask') ? 'nano2' : ((_allowedEngs(G.wf) && _allowedEngs(G.wf).indexOf(G.eng)===-1) ? 'nano2' : G.eng),
     vidEng:    G.vidEng,
     // ⚠️ 버그 수정(치명적, "영상 렌더링 결과 배지에 해상도가 제대로 나오는지 확인해줘"로 점검하다
     // 발견): 이 필드가 아예 없어서, 결과 카드의 해상도 배지가 "이 영상을 만들 때 실제로 쓴
@@ -46071,7 +46184,7 @@ function _runToolWithPromptActual(translatedPrompt){
     vidRes:    G.vres||null,
     upscaleEng:G_UPSCALE_ENG||'topaz',
     scale:     tab.scale||G.tabs.upscale.scale||'2x',
-    resolution:tab.resolution||'1K',
+    resolution:(G._guestRun && !_supaUser) ? '1K' : (tab.resolution||'1K'),
     forcedAspect: tab.forcedAspect||'auto', // 작업을 넣은 시점의 출력 비율(대기 중 탭을 옮겨도 유지)
     c0:G.c0,h0:G.h0,r0:G.r0,f0:G.f0,
     optimFor:  G.optimFor,
@@ -47230,6 +47343,13 @@ function _rqbPost(origSrc, resUrl, onDone){
   });
 }
 function procImgWithTask(task, onDone, onErr){
+  // 2026-10-18 비회원 무료 체험: 1K·나노바나나 2.1 고정, 결과에 워터마크, 끝나면 가입 안내
+  if(G._guestRun && !_supaUser){
+    task.eng='nano2'; task.resolution='1K';
+    var _gDone=onDone, _gErr=onErr;
+    onDone=function(ri){ _guestWatermark(ri, function(wm){ _guestTrialFinished(); _gDone(wm); }); };
+    onErr=function(e){ G._guestRun=false; (_gErr||function(x){console.error(x);})(e); };
+  }
   try{ if(task && task.maskData && (task.wf||G.wf)==='edit'){ var _etR2=getTab('edit'); if(_etR2._resAutoBrush){ _etR2.resolution=_etR2._resBeforeBrush||'2K'; _etR2._resAutoBrush=false; if(G.wf==='edit' && typeof updateResBtnCr==='function') setTimeout(function(){ try{ renderSB(); }catch(e){} }, 0); } } }catch(e){}
   onErr = onErr || function(e){console.error('[procImgWithTask]',e);};
   var img     = task.img;
@@ -55116,14 +55236,20 @@ document.addEventListener('DOMContentLoaded',function(){try{
       if(!G.wf){ alert('상단 탭을 먼저 선택하세요.'); return; }
       var tab=getTab(G.wf);
       if(!tab.inputImg && G.wf!=='video'){ alert('이미지를 먼저 업로드해주세요.'); return; }
+      var _guestNow=false;
       if(!_supaUser){
-        if(_supa){
-          _supa.auth.getSession().then(function(r){
-            if(r.data&&r.data.session){_supaUser=r.data.session.user;onSupaLogin(r.data.session.user);setTimeout(_doActbtn,300);}
-            else openMd('account');
-          });
-        } else openMd('account');
-        return;
+        if(!G._guestRunConfirmed){
+          if(_supa){
+            _supa.auth.getSession().then(function(r){
+              if(r.data&&r.data.session){_supaUser=r.data.session.user;onSupaLogin(r.data.session.user);setTimeout(_doActbtn,300);}
+              // 2026-10-18: 비회원 무료 체험 1장
+              else if(G.wf==='edit' && G.editMode && G.editMode!=='normal'){ _guestSignupPrompt('feature'); }
+              else if(_guestTrialBegin(G.wf)){ getTab(G.wf).resolution='1K'; G._guestRunConfirmed=true; _actbtnBusy=false; try{ _doActbtn(); }finally{ G._guestRunConfirmed=false; } }
+            });
+          } else openMd('account');
+          return;
+        }
+        _guestNow=true;
       }
       var _curPresetForBudget=[].concat(PS_SPACE,PS_RENDER).find(function(x){return x.k===tab.selK;});
       var _isExtForBudget = _curPresetForBudget ? (_presetType(_curPresetForBudget.pt)==='ext') : false;
@@ -55131,7 +55257,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       tab._extFloorOverrideForThisRun = _floorOverrideActive; // 카메라 풀백 프롬프트 지시를 넣을지 판단하는 데 씀 (비율은 더 이상 이걸로 안 바꿈)
       var _floorOverrideExistF = parseFloat(tab.extExistingFloors)||0;
       var _floorOverrideTargetF = parseFloat(tab.extTargetFloors)||0;
-      if(G.supaRole!=='admin'&&G.plan!=='admin'){
+      if(G.supaRole!=='admin'&&G.plan!=='admin'&&!_guestNow){
         var cost=getCost();
         if(G.cr<cost){ alert('크레딧이 부족합니다. 현재: '+G.cr+'cr, 필요: '+cost+'cr'); openMd('credits'); return; }
       }
