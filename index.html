@@ -4323,6 +4323,9 @@ function _openImageLightbox(url, urls, idx){
   closeBtn.onclick=close;
   ov.onclick=function(){ if(!zoomCtl.isZoomed()) close(); }; // 확대 중엔 바깥 클릭으로 안 닫히게(드래그 실수 방지)
   document.addEventListener('keydown', onKey);
+  // 2026-10-18 버그 수정("쇼츠 화면 크게 보는데 우측 상단 X 눌러도 닫기가 안 돼"): 좌우 넘김 버튼의 투명 클릭 영역(위아래 꽉 찬 세로 띠)이
+  // 같은 높이(z-index 3)로 나중에 붙어서 X·포토샵 편집·확대 버튼을 덮고 있었음 → 이 버튼들을 그 위로 올림
+  closeBtn.style.zIndex='6'; psEditBtn.style.zIndex='6'; zoomCtl.zoomBar.style.zIndex='6';
   ov.appendChild(mediaWrap); ov.appendChild(zoomCtl.zoomBar); ov.appendChild(closeBtn); ov.appendChild(psEditBtn);
   if(hasNav){
     var prevBtn=_mkBigHitNavBtn('left', '&#10094;', function(){ showAt(curIdx-1); }, 60);
@@ -39939,13 +39942,16 @@ function _loadImageForCompositeFallback(url, cb){
 // 건물을 따라 그리는 건 잘함. 그래서 노후 외관 4종도 미완성 공사와 같은 구조로 바꿈: 원본 건물의 위치·바닥선·
 // 폭·처마 높이를 "기준"으로 삼고, 그보다 낮고 작게만 그리게 함. 예전 방식으로 되돌리려면 false.
 var AGED_STAGE_METHOD=true;
+// 2026-10-18 요청("노후된 주택 건물이 바닥면적 때문에 임의로 가로로 쭉 늘린 것 같은데"): 좁고 높은 원본(예: 2층 박공 2동)을
+// 단층으로 바꾸면서 같은 면적을 맞추려고 옆으로 넓게 펼쳐버리던 문제 — 원본 건물의 가로 폭·비율을 넘지 않게 고정
+var AGED_NO_WIDEN_RULE='⚠⚠⚠ NEVER STRETCH IT SIDEWAYS (매우 중요, 반복 실패): do NOT keep the current building\'s floor area by spreading the old house out horizontally. Its left and right walls must stay INSIDE the left and right walls of the current building (measure them in the photo) — the old building is never wider in the image than the current building, and it must NOT extend sideways into the yard, the side passage or toward the boundary walls. Keep the current building\'s footprint proportions: if the current building is narrow and tall (about as wide as it is tall, or narrower), the old house is equally narrow and compact — in that case give it TWO low storeys rather than one long, wide single storey; a small, narrow old house with less floor area than the current building is correct and normal. ';
 function _agedStagePrompt(k, onEmptyLot){
   function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
   var TYPE={
     // 2026-10-18 요청("노후주택은 왜 항상 70~80년대 똑같은 건물이냐 — 빨간벽돌처럼 주변 건물 보고 다양한 주택으로"): 1990~2010년대 주택 여러 유형 중 무작위
     aged_house:{
       what:'an ordinary, lived-in older Korean detached house (단독주택) about 15–25 years old (built in the late 1990s to early 2010s) — the same style family as the neighbouring houses in the photo, just older, smaller and more worn; NOT a 1970s–80s house (no slate roof, no old clay-tile hip roof, no tiny 새마을-era cement house)',
-      size:'It is a LOW house, at most '+pick(['ONE storey','TWO storeys'])+' and in any case LOWER than the current building and NO TALLER than the neighbouring houses in the photo — its roof must stay clearly below the roofline of the current building and at or below the neighbours\' rooflines. Each storey is exactly as tall in the image as one storey of the neighbouring houses (one window row). Ordinary ceiling height, NO raised plinth or podium — at most two low steps up to the door. Its windows are about the same size in the image as the neighbours\' windows.',
+      size:'It is a LOW house, at most '+pick(['ONE storey','TWO storeys'])+' (but TWO storeys whenever the current building is narrow and tall, so it never has to be stretched sideways) and in any case LOWER than the current building and NO TALLER than the neighbouring houses in the photo — its roof must stay clearly below the roofline of the current building and at or below the neighbours\' rooflines. Each storey is exactly as tall in the image as one storey of the neighbouring houses (one window row). Ordinary ceiling height, NO raised plinth or podium — at most two low steps up to the door. Its windows are about the same size in the image as the neighbours\' windows.',
       look:pick([
         'a hipped roof of dark grey asphalt shingles, beige stucco walls and brown aluminium sash windows',
         'red-brown face brick on the ground floor with cream stucco above and a flat roof with a low parapet',
@@ -39993,7 +39999,7 @@ function _agedStagePrompt(k, onEmptyLot){
   return 'Transform ONLY the main building in this photo (and its own lot) into how this same lot looked many years earlier, before the current new building was built: '+T.what+'. '+
   '⚠⚠⚠ CRITICAL — SIZE AND POSITION COME FROM THE CURRENT BUILDING (매우 중요, 이 프리셋이 실패하는 가장 흔한 이유는 건물이 커지는 것): before drawing, look carefully at the current building in the photo — its exact position on the lot, its width, the line where its walls meet the ground, and the height of its eaves. '+
   'The old building stands at the back of the same spot, never closer to the camera. '+T.size+' '+
-  'It must fit entirely INSIDE the current building\'s silhouette — smaller and lower, never taller or wider. '+
+  'It must fit entirely INSIDE the current building\'s silhouette — smaller and lower, never taller or wider. '+AGED_NO_WIDEN_RULE+
   '⚠⚠⚠ BUILDING AND YARD ARE SIZED SEPARATELY — DO NOT SCALE THE WHOLE LOT UP TOGETHER (반복 실패 원인, 매우 중요): the lot itself keeps exactly its real size; only the building inside it is small. '+
   'The old building\'s footprint covers only about 60–70% of the current building\'s width, set toward the back of the lot, leaving a WIDER open yard in front of it and some space on its sides. '+
   'SCALE RULER — use only the things that do NOT change: the public road (one traffic lane is about 3 m wide), the sidewalk paving stones, the parked car(s) (about 1.5 m tall, 4.5 m long) and the neighbouring houses\' doors and windows. '+
@@ -47998,12 +48004,12 @@ function procImgWithTask(task, onDone, onErr){
         if(_agedTextScaleOK){
           rp = 'SIZE, ORIENTATION AND SCALE RULES (read first, override every other size/storey rule below): '+
             '(1) ORIENTATION — rebuild the old building on exactly the same spot, facing exactly the same direction as the current building, seen from exactly the same camera angle and perspective as the photo. Do not rotate it, turn it towards the camera, or move it. '+
-            '(2) FLOOR HEIGHTS — MATCH THE NEIGHBOURS FLOOR BY FLOOR (most important height rule): use the floors of the neighbouring buildings in the photo as a ruler. Whatever number of storeys the old building has, each of its floors must line up with the same floor of the neighbouring buildings: its ground-floor doors and windows at the same height as the neighbours\' ground-floor doors and windows, its second-floor windows (if it has a second floor) at the same height as the neighbours\' second-floor windows, and so on — one storey of the old building = one storey of the neighbours (about 2.7–3 m), never taller. Its roof or parapet sits just above its own top floor. A single-storey old house therefore stays clearly below the neighbours\' second-floor windows. If there are no neighbouring buildings in the photo, use the current building\'s own floors as the ruler in the same way (its ground-floor door and window tops = the old building\'s ground-floor door and window tops). Its footprint may be the same as or a little smaller than the current building, never larger. '+
+            '(2) FLOOR HEIGHTS — MATCH THE NEIGHBOURS FLOOR BY FLOOR (most important height rule): use the floors of the neighbouring buildings in the photo as a ruler. Whatever number of storeys the old building has, each of its floors must line up with the same floor of the neighbouring buildings: its ground-floor doors and windows at the same height as the neighbours\' ground-floor doors and windows, its second-floor windows (if it has a second floor) at the same height as the neighbours\' second-floor windows, and so on — one storey of the old building = one storey of the neighbours (about 2.7–3 m), never taller. Its roof or parapet sits just above its own top floor. A single-storey old house therefore stays clearly below the neighbours\' second-floor windows. If there are no neighbouring buildings in the photo, use the current building\'s own floors as the ruler in the same way (its ground-floor door and window tops = the old building\'s ground-floor door and window tops). Its footprint may be the same as or a little smaller than the current building, never larger. '+AGED_NO_WIDEN_RULE+
             '(3) NO INVENTED STRUCTURES — the old house is the only building on this lot; do not add any extra house, shed or annex, and do not add new large trees or a forest that were not in the photo. '+
             '(4) SMALL OBJECTS — bicycles, doors, gates, pots and steps must use the same real-world scale as the cars in the photo (a bicycle is about half a car long; a door is about 2 m tall). '+
             '(5) NO REMNANTS — because the old house is lower (and may be narrower) than the current building, every place where the current building used to be taller or wider must now show what is behind it (sky, trees, the neighbouring houses) — no leftover roof, gable, wall or metal edge of the current building may remain above, behind or beside the old roof. '+
             '(6) CAMERA AND SURROUNDINGS LOCKED — keep exactly the same camera position, height, angle, lens and framing as the photo (do not lower, raise, rotate or zoom the view). Everything outside the lot — neighbouring houses, their walls and fences, parked cars, road, sidewalk, street trees — must stay exactly as in the photo; boundary walls must continue to their real ends, and parked cars must stay complete and in place. --- '
-            + rp + ' ⚠️ FINAL CHECK: same camera and framing as the photo; same position and facing direction; no leftover parts of the current building; neighbouring walls and parked cars unchanged and complete; every floor lined up with the same floor of the neighbouring buildings (ground-floor doors/windows level with theirs; one storey never taller than one of their storeys); no new buildings or new forest; bicycles clearly smaller than cars.';
+            + rp + ' ⚠️ FINAL CHECK: same camera and framing as the photo; same position and facing direction; never wider than the current building and not stretched sideways; no leftover parts of the current building; neighbouring walls and parked cars unchanged and complete; every floor lined up with the same floor of the neighbouring buildings (ground-floor doors/windows level with theirs; one storey never taller than one of their storeys); no new buildings or new forest; bicycles clearly smaller than cars.';
           console.log('[노후 외관] 원본 그대로 + 글 크기 지시 + 대지 밖 원본 복원 방식');
         }
         if(_agedShrunkOK){
@@ -52282,7 +52288,7 @@ function _simpleImageZoomShow(urlList, idx){
     ov.appendChild(prevBtn); ov.appendChild(nextBtn); ov.appendChild(counter);
   }
   var closeBtn=document.createElement('button');closeBtn.type='button';closeBtn.textContent='✕';
-  closeBtn.style.cssText='position:absolute;top:16px;left:20px;width:36px;height:36px;border-radius:50%;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:16px;cursor:pointer;z-index:2';
+  closeBtn.style.cssText='position:absolute;top:16px;left:20px;width:36px;height:36px;border-radius:50%;border:none;background:rgba(255,255,255,.12);color:#fff;font-size:16px;cursor:pointer;z-index:6';
   closeBtn.onclick=function(e){ e.stopPropagation(); ov.remove(); };
   ov.appendChild(closeBtn);
   document.body.appendChild(ov);
@@ -52350,7 +52356,7 @@ function _galleryZoomShow(list, idx){
   counter.style.cssText='position:absolute;top:16px;right:20px;color:#ccc;font-size:12.5px;background:rgba(0,0,0,.4);padding:4px 12px;border-radius:20px;z-index:2';
   if(list.length>1){ ov.appendChild(prevBtn); ov.appendChild(nextBtn); ov.appendChild(counter); }
   var btns=document.createElement('div');
-  btns.style.cssText='display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center';
+  btns.style.cssText='display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center;position:relative;z-index:6';
   var dlB=document.createElement('button');
   dlB.textContent='↓ 다운로드';
   dlB.style.cssText='padding:10px 20px;background:var(--ac);border:none;color:#000;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit';
@@ -56665,7 +56671,7 @@ function _mobGalleryShowSingle(item, idx){
   }
   mediaWrap.appendChild(mediaEl);
   var btns=document.createElement('div');
-  btns.style.cssText='display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center';
+  btns.style.cssText='display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center;position:relative;z-index:6';
   if(!isVidItem){
     var vidB=document.createElement('button');
     vidB.textContent='▶ 영상';
