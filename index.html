@@ -30748,7 +30748,7 @@ function _consultSpaceMats(st, v, spName){
   if(_consultMatsLocked(v)) return [];
   if(!v) return [];
   if(!v.sched || !v.sched.items) return (v.materials||[]).filter(function(m){return m&&m.v;}).map(function(m){ return {k:m.k, v:m.v, img:m.img}; });
-  return _consultSpaceSchedIds(st, spName).map(function(id){ var it=v.sched.items[id]; if(!it || !it.ko) return null; return {id:id, k:_consultSchedLabel(st,id), v:it.ko, hex:it.hex, img:it.img, prod:_consultProd(id, it)}; }).filter(Boolean);
+  return _consultSpaceSchedIds(st, spName).map(function(id){ var it=v.sched.items[id]; if(!it || !it.ko) return null; if(v.sched.fromRender && !it.read && !it.edited) return null; return {id:id, k:_consultSchedLabel(st,id), v:it.ko, hex:it.hex, img:it.img, prod:_consultProd(id, it)}; }).filter(Boolean);
 }
 // 시안 전체 보드(스케줄 순서대로)
 // 2026-10-09 요청: 가져온 이미지(렌더링 없이)는 '글로 읽은 무료 마감재'를 보여주지 않고, 20cr 추출(이미지에서 읽기 + 실제 재질 사진)을 해야만 마감재 보드가 채워짐
@@ -30765,7 +30765,9 @@ function _consultBoardMats(st, v){
   var used={}; _consultSp(st).forEach(function(s){ _consultSpaceSchedIds(st, s.name).forEach(function(id){ used[id]=1; }); });
   if(st.type==='home' && !_consultIsPart(st)){ ['floor','wall','ceiling','door','window','light'].forEach(function(id){ used[id]=1; }); }
   if(v.sched.items.kfloor && v.sched.items.floor && v.sched.items.kfloor.ko===v.sched.items.floor.ko) delete used.kfloor; // 같으면 한 번만
-  return _consultSchedDefs(st).filter(function(d){ return used[d[0]] && v.sched.items[d[0]] && v.sched.items[d[0]].ko; }).map(function(d){ var it=v.sched.items[d[0]]; return {id:d[0], k:d[1], area:d[2], v:it.ko, hex:it.hex, img:it.img, prod:_consultProd(d[0], it)}; });
+  // 2026-10-18 지적("욕실 이미지에 없는 강마루가 마감재 보드에 나온다"): 렌더링 이미지 기준으로 읽었으면 이미지에서 실제로 읽힌 항목만
+  var _fr=!!v.sched.fromRender;
+  return _consultSchedDefs(st).filter(function(d){ var it=v.sched.items[d[0]]; return used[d[0]] && it && it.ko && (!_fr || it.read || it.edited); }).map(function(d){ var it=v.sched.items[d[0]]; return {id:d[0], k:d[1], area:d[2], v:it.ko, hex:it.hex, img:it.img, prod:_consultProd(d[0], it)}; });
 }
 
 // ── 스타일 사진 ↔ 공간 매칭 (2026-10-07: "주방 참고이미지랑 우리가 만든 주방이 완전히 다르면 참고이미지 넣는 의미가 없다") ──
@@ -30924,7 +30926,8 @@ function _consultSchedPrompt(st, v, fromResults){
     '4) ko: 18자 이내 한국어 자재명(색+재질, 예: "라이트 오크 광폭 강마루"). en: 영어로 구체적인 자재 설명(색·재질·마감·크기). hex: 대표 색 "#rrggbb".',
     '키 목록: '+defs.map(function(d){ return d[0]+'('+d[1]+')'; }).join(', '),
     (fromResults && v.imported) ? '5) 이 이미지는 이미 완성된 디자인이야 — 위 마감 등급과 상관없이 이미지에 실제로 보이는 마감 수준을 판단해서 최상위에 "grade" 숫자를 넣어 ('+CONSULT_TIERS.map(function(t,i){ return i+'='+t.name; }).join(', ')+'). 천연석·원목·맞춤가구·디자이너 조명이 많을수록 높게, 도배·장판·기본 타일 위주면 낮게.' : '',
-    '형식: {"concept":"한 줄 컨셉",'+((fromResults && v.imported)?'"grade":0~'+(CONSULT_TIERS.length-1)+',':'')+'"items":{"'+defs[0][0]+'":{"ko":"…","en":"…","hex":"#……"}, …모든 키…}}'
+    fromResults ? '6) ⚠️ 이미지에 실제로 보이는 마감재만 적어. 이미지에 없는 공간·항목(예: 욕실 이미지만 있으면 거실 바닥 floor·주방 항목)은 키 자체를 빼 — 짐작해서 채우면 안 돼.'+(st.type==='home'?' 욕실 바닥·벽은 bfloor·bwall에만 적어.':' 화장실·주방 타일은 ctile에 적어.') : '',
+    '형식: {"concept":"한 줄 컨셉",'+((fromResults && v.imported)?'"grade":0~'+(CONSULT_TIERS.length-1)+',':'')+'"items":{"'+defs[0][0]+'":{"ko":"…","en":"…","hex":"#……"}, '+(fromResults?'…이미지에 보이는 키만…':'…모든 키…')+'}}'
   ];
   return lines.filter(Boolean).join('\n');
 }
@@ -30934,9 +30937,9 @@ function _consultSchedParse(st, res){
   Object.keys(base.items).forEach(function(k){
     var x=j.items[k]; if(!x || !x.ko) return;
     ok++;
-    base.items[k]={ko:String(x.ko).slice(0,24), en:String(x.en||base.items[k].en).slice(0,220), hex:/^#[0-9a-f]{6}$/i.test(String(x.hex||''))?x.hex:base.items[k].hex};
+    base.items[k]={ko:String(x.ko).slice(0,24), en:String(x.en||base.items[k].en).slice(0,220), hex:/^#[0-9a-f]{6}$/i.test(String(x.hex||''))?x.hex:base.items[k].hex, read:true};
   });
-  if(ok<3) return null;
+  if(ok<2) return null;
   base.concept=String(j.concept||'').slice(0,80); base.def=false;
   var _g=parseInt(j.grade,10); if(!isNaN(_g) && _g>=0 && _g<CONSULT_TIERS.length) base.grade=_g;
   return base;
@@ -31334,7 +31337,7 @@ function _consultCalcEstimate(st, ti, opt){
     if(cpart){
       _consultSp(st).forEach(function(s){
         if(/화장실/.test(s.name)){ add(s.name, P.toilet.n, '', P.toilet.p[ti], '1식'); return; }
-        var spy=s.estPy>0 ? s.estPy : Math.max(3, Math.min(cpy, 8));
+        var spy=s.estPy>0 ? s.estPy : (/카운터|바$/.test(s.name)?3:/입구|파사드|외관/.test(s.name)?3:/주방/.test(s.name)?5:/룸|대기/.test(s.name)?4:Math.max(3, Math.min(cpy, 10))); // 2026-10-18 점검: 카운터도 8평으로 잡혀 견적이 부풀던 문제 → 공간별 기본 평수
         add(s.name, '인테리어 공사', bk+' 기준', P.base[bk]*m*spy, pb(P.base[bk]*m,spy));
         if(/파사드|입구|외관/.test(s.name)) add(s.name, P.sign.n, '', P.sign.p[ti]);
       });
@@ -32177,6 +32180,7 @@ function _consultTakeoffPrompt(spName, hasSite){
     '2) 바닥·벽 마감·천장·주방 가구·욕실은 각각 하나만. 보이는 재질과 가장 가까운 것을 골라.',
     '3) 소파·식탁·의자·침대·러그·소품·스탠드/펜던트 등기구 자체는 가구라서 제외. 벽·바닥에 고정된 벤치·수납·선반은 붙박이로 넣어.',
     '4) 철거는 기본적으로 demo_full(단, 현장이 이미 철거된 상태면 철거 항목 없음). 전기는 보이는 조명 방식에 맞춰 넣고, 최소 el_basic.',
+    '4-1) ⚠️ 욕실·화장실 이미지면 ba_ 항목 딱 하나만 골라(욕실 패키지 안에 철거·방수·벽/바닥 타일·천장·변기·세면대·수전·샤워 파티션·욕실 조명이 전부 포함). 바닥(fl_)·벽(wl_)·천장(cl_)·세면(pw_vanity)·유리 파티션·조명(el_)·철거(demo_)는 따로 넣지 마 — 중복 계산이야. 욕실 문 교체만 따로 넣을 수 있어.',
     '5) qty: 단위가 py인 항목은 qty 생략. m는 대략 길이(m), ea는 개수, face는 벽 면 수, set은 1.',
     '6) note: 사진에서 무엇을 보고 골랐는지 12자 이내(예: "오크 원목 바닥").',
     '7) py: 이 공간 바닥 면적을 평으로 추정(가구 크기·천장 높이 기준).',
@@ -32198,9 +32202,12 @@ function _consultTakeoffParse(res){
   });
   if(!out.length) return null;
   var _demolished = (j.demolished===true || j.demolished==='true');
+  // 2026-10-18 지적("욕실 하나에 1,030만원"): 욕실 패키지(ba_)에는 철거·방수·타일·천장·도기·파티션·조명이 다 포함 → 겹치는 항목 제거
+  var _isBath = out.some(function(x){ return /^ba_/.test(x.id); });
+  if(_isBath) out=out.filter(function(x){ return !/^(fl_|wl_|cl_|el_|demo_)/.test(x.id) && x.id!=='pw_vanity' && x.id!=='glass_part'; });
   if(_demolished) out=out.filter(function(x){ return !/^demo_/.test(x.id); }); // 이미 철거된 현장 → 철거비 없음
-  else if(!out.some(function(x){ return /^demo_/.test(x.id); })) out.unshift({id:'demo_full', qty:1, note:''});
-  if(!out.some(function(x){ return /^el_(basic|downlight)$/.test(x.id); })) out.push({id:'el_basic', qty:1, note:''}); // 레일·라인 조명만 있어도 스위치·콘센트 등 기본 전기는 필요
+  else if(!_isBath && !out.some(function(x){ return /^demo_/.test(x.id); })) out.unshift({id:'demo_full', qty:1, note:''});
+  if(!_isBath && !out.some(function(x){ return /^el_(basic|downlight)$/.test(x.id); })) out.push({id:'el_basic', qty:1, note:''}); // 레일·라인 조명만 있어도 스위치·콘센트 등 기본 전기는 필요
   var py=parseFloat(j.py); py=(py>0)?Math.max(0.5, Math.min(60, Math.round(py*10)/10)):0;
   return {py:py, items:out, demolished:_demolished};
 }
@@ -32568,7 +32575,7 @@ function _consultDrawSpacePage(data, st, v, vi, sp, rec, loaded, num, pageIndex,
   ctx.fillStyle=t.muted; ctx.font='700 13px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('OPTION '+v.key+'  ·  '+_cEsc(v.plan.name).toUpperCase(), tx, y+8); _propEdLS(ctx,0);
   ctx.fillStyle=t.ink; _propEdFitFont(ctx, v.key+'안 · '+sp.name, '800', 44, 26, tw); ctx.fillText(v.key+'안 · '+sp.name, tx, y+32);
   var amt=_consultSpaceAmt(v, sp.name, st);
-  if(amt){ ctx.fillStyle=t.desc; ctx.font='500 18px '+PROPOSAL_FONT; ctx.fillText('예상 공사비  약 '+_consultFmtMan(amt).replace(/^약\s*/,'')+'  (공간 면적 비율 개산)', tx, y+88); }
+  if(amt){ ctx.fillStyle=t.desc; ctx.font='500 18px '+PROPOSAL_FONT; var _own=(v.estimate.items||[]).some(function(x){ return x.space===sp.name; }); ctx.fillText('예상 공사비  약 '+_consultFmtMan(amt).replace(/^약\s*/,'')+(_own?'  (이 공간 공사 항목 합계)':'  (공간 면적 비율 개산)'), tx, y+88); }
   y+=146;
   var A=loaded['v'+vi+'_'+sp.id], B=loaded['bf_'+sp.id];
   var mats=_consultSpaceMats(st, v, sp.name);
@@ -32716,6 +32723,37 @@ function _consultDownloadPdf(){
 // 2026-10-07 요청("상담패키지 뭔가 복잡하다, 더 간단하고 쉽게"): 3단계(종류 → 사진 → 시안 개수) + 큰 버튼만
 // 보이게 하고, 나머지(고객명·요청사항·법규 상세·해상도·시안 이름 편집)는 "상세 설정" 안에 접어둠.
 // 사진은 여러 장을 한 번에 올리면 공간 이름(거실·주방…)이 자동으로 붙고, 이름만 눌러서 고치면 됨.
+// 2026-10-18 지적("욕실 사진을 넣었는데 거실로 판단"): 현장 사진을 넣으면 사진을 보고 공간 이름을 자동으로 정함
+// (예전엔 기본 순서 거실→주방→안방→욕실로 이름만 붙여서, 욕실 사진 1장이면 '거실'로 렌더·마감재·견적이 전부 틀어짐). 직접 고친 이름은 안 바꿈.
+function _consultClassifySite(st, sp){
+  try{
+    if(!sp || !sp.photo || _consultIsBuild(st)) return;
+    var list=(CONSULT_SPACE_SUGGEST[st.type]||[]).slice(); if(!list.length) return;
+    sp._clsTok=Math.random(); var tok=sp._clsTok, tries=0;
+    function apply(t){
+      if(sp._clsTok!==tok || sp.nameAuto===false) return;
+      t=String(t||'');
+      var hit=list.filter(function(x){ return t.indexOf(x)>=0 || t.indexOf(x.split('(')[0])>=0; })[0];
+      if(!hit && /화장실|욕실|bath|toilet/i.test(t)) hit=list.filter(function(x){return /욕실|화장실/.test(x);})[0];
+      if(!hit && /부엌|키친|kitchen/i.test(t)) hit=list.filter(function(x){return /주방/.test(x);})[0];
+      if(!hit && /침실|bed/i.test(t)) hit=list.filter(function(x){return /안방|침실/.test(x);})[0];
+      if(!hit) return;
+      var used={}; st.spaces.forEach(function(o){ if(o!==sp) used[o.name]=1; });
+      var nm=hit, k=2; while(used[nm]){ nm=hit+' '+k; k++; }
+      sp.name=nm; _consultSave(); try{ if(G.wf==='consult'){ renderSB(); renderMain('consult', true); } }catch(e){}
+    }
+    function attempt(){
+      _proposalImgToB64(sp.photo, function(b64){
+        if(!b64){ if(++tries<2) setTimeout(attempt, 1500); return; }
+        _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:'이 현장 사진이 어떤 공간인지 다음 중 하나만 단어로 답해(철거 중이거나 비어 있어도 변기·욕조·타일·배관·싱크대 위치 등으로 판단): '+list.join(', ')+'. 다른 말은 하지 마.'}]}]}, function(res){
+          var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t);
+          apply(t);
+        }, function(){ if(++tries<2) setTimeout(attempt, 1500); });
+      });
+    }
+    attempt();
+  }catch(e){}
+}
 function _consultNextSpaceName(st){
   var used={}; st.spaces.forEach(function(s){ used[s.name]=1; });
   var pool=(CONSULT_DEFAULT_SPACES[st.type]||[]).concat(CONSULT_SPACE_SUGGEST[st.type]||[]);
@@ -32798,13 +32836,13 @@ function sbConsult(p){
     im.title='눌러서 크게 보기';
     im.style.cursor='zoom-in';
     im.onclick=function(){ if(sp.photo) _consultZoomOne(sp.photo, sp.name+' (현장 사진)'); else if(!running) _consultPick(false, function(d){ _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); }); };
-    if(!running && sp.photo){ var rpl=mk('button',''); rpl.type='button'; rpl.textContent='↻'; rpl.title='사진 바꾸기'; rpl.style.cssText='position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:11px;cursor:pointer;padding:0;line-height:20px'; rpl.onclick=function(e){ e.stopPropagation(); _consultPick(false, function(d){ _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); }); }; im.appendChild(rpl); }
+    if(!running && sp.photo){ var rpl=mk('button',''); rpl.type='button'; rpl.textContent='↻'; rpl.title='사진 바꾸기'; rpl.style.cssText='position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:11px;cursor:pointer;padding:0;line-height:20px'; rpl.onclick=function(e){ e.stopPropagation(); _consultPick(false, function(d){ _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); _consultClassifySite(st, sp); }); }; im.appendChild(rpl); }
     var x=mk('button',''); x.type='button'; x.textContent='✕';
     x.style.cssText='position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:10px;cursor:pointer;padding:0;line-height:20px';
     x.onclick=function(e){ e.stopPropagation(); if(running) return; st.spaces.splice(si,1); _consultSave(); renderSB(); renderMain('consult', true); };
     var nm=mk('input',''); nm.value=sp.name; nm.title='공간 이름 (눌러서 고치기)';
     nm.style.cssText='width:100%;margin-top:3px;padding:3px 4px;border:none;border-bottom:1px dashed var(--bd2);background:transparent;color:var(--t);font-size:11.5px;font-weight:700;font-family:inherit;text-align:center;box-sizing:border-box';
-    nm.oninput=function(){ sp.name=nm.value; _consultSave(); clearTimeout(window._cNmT); window._cNmT=setTimeout(function(){ renderMain('consult', true); }, 250); }; // 메인 화면에도 바로 반영
+    nm.oninput=function(){ sp.name=nm.value; sp.nameAuto=false; _consultSave(); clearTimeout(window._cNmT); window._cNmT=setTimeout(function(){ renderMain('consult', true); }, 250); }; // 메인 화면에도 바로 반영
     c.appendChild(im); if(!running) im.appendChild(x); c.appendChild(nm); pg.appendChild(c);
   });
   if(st.spaces.length<8 && !running){
@@ -32812,7 +32850,7 @@ function sbConsult(p){
     var add=dv(''); add.style.cssText='height:62px;border-radius:8px;border:1.5px dashed var(--ac);background:var(--acg);display:flex;flex-direction:column;overflow:hidden';
     var addPc=dv(''); addPc.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;gap:3px;cursor:pointer;font-size:11px;font-weight:800;color:var(--ac);border-bottom:1px dashed rgba(0,229,204,.4)'; addPc.innerHTML='＋ 내 PC';
     var addGal=dv(''); addGal.style.cssText='flex:1;display:flex;align-items:center;justify-content:center;gap:3px;cursor:pointer;font-size:11px;font-weight:800;color:var(--ac)'; addGal.innerHTML='🖼 갤러리';
-    function _addSite(d, isUrl){ if(st.spaces.length>=8) return; var sp={id:'s'+Math.random().toString(36).slice(2,8), name:_consultNextSpaceName(st), photo:null}; st.spaces.push(sp); if(isUrl) sp.photo=d; else _consultUploadInto(sp,'photo',d); _consultSave(); renderSB(); renderMain('consult', true); }
+    function _addSite(d, isUrl){ if(st.spaces.length>=8) return; var sp={id:'s'+Math.random().toString(36).slice(2,8), name:_consultNextSpaceName(st), photo:null, nameAuto:true}; st.spaces.push(sp); if(isUrl) sp.photo=d; else _consultUploadInto(sp,'photo',d); _consultClassifySite(st, sp); _consultSave(); renderSB(); renderMain('consult', true); }
     addPc.onclick=function(){ _consultPick(true, function(d){ _addSite(d, false); }); };
     addGal.onclick=function(){ _openGalleryPickerForAnchor(function(src){ _addSite(src, /^https?:/.test(src)); }); };
     add.appendChild(addPc); add.appendChild(addGal);
