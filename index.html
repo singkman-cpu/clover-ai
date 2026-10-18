@@ -39825,7 +39825,8 @@ function _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedC
     } else {
       getTab(G.wf).prompt = combined;
     }
-    if(refImgs.length){ getTab(G.wf).refs=refImgs; } else { getTab(G.wf).refs=[]; }
+    // 2026-10-18 요청("수정하면 자동으로 레퍼런스에 들어가는데? 자동으로 레퍼런스에 넣지마"): 마스크·표시 사진은 화면의 교체 레퍼런스 칸(tab.refs)에 넣지 않고 이번 실행에만 따로 실어 보냄
+    getTab(G.wf)._autoRefs = refImgs.length ? refImgs : [];
     getTab(G.wf)._markedRefIsPositionOnly = false;
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
@@ -39844,7 +39845,7 @@ function _mkMaskExecuteAfterMask(_compositeMaskDataUrl, combined, refImgs, usedC
       getTab(G.wf).prompt = combined + ' ⚠️ 매우 중요: 첨부한 참고 이미지 중 하나는 원본 사진 위에 브러시로 칠하거나 화살표·다각형 테두리로 표시를 남긴 "위치 확인용" 사진입니다. 이 표시용 사진의 유일한 목적은 "위에서 설명한 각 수정을 정확히 어느 위치에 적용해야 하는지" 알려주는 것입니다 — 표시된 위치를 정확히 확인한 다음, 위에서 설명한 수정 지시사항(삭제·교체·색상 변경 등)을 그 위치에 실제로 적용하는 게 핵심 목표입니다. 표시를 "지우고 깨끗하게 만드는 것" 자체는 목적이 아니라 부수 효과일 뿐입니다 — 실제 지시사항을 실행하지 않고 표시만 지운 원본에 가까운 결과를 내놓으면 완전한 실패입니다. 결과물에는 색칠·화살표·다각형 테두리 자체가 조금이라도 남으면 안 되지만, 그것과 별개로 지시사항은 반드시 실제로 실행되어야 합니다.';
       getTab(G.wf)._markedRefIsPositionOnly = !_hadRealStyleRefs;
     }
-    if(refImgs.length){ getTab(G.wf).refs=refImgs; }
+    if(refImgs.length){ getTab(G.wf)._autoRefs=refImgs; } // 화면의 교체 레퍼런스 칸엔 안 넣음(이번 실행에만 사용)
     G.maskColorPrompts={}; G.maskColorRefImg={};
     G.arrows=[]; G.polyAreas=[]; _saveMaskAnnotations();
     G._pendingMaskCanvasRestore=null; idbDeleteDraft('clover_edit_mask_canvas').catch(function(){});
@@ -46278,6 +46279,7 @@ function _runToolWithPromptActual(translatedPrompt){
     maskData:  (G.wf==='edit' ? getTab('edit')._pendingCompositeMask : null) || null,
     agedEnvelope: (G.wf==='edit' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1) ? _getAgedEnvelope(tab) : null, // 📐 노후 외관 스케일 가이드 박스
     rawInstrForFlux: (G.wf==='edit' ? getTab('edit')._pendingRawInstrForFlux : null) || null,
+    autoRefs: (G.wf==='edit' ? getTab('edit')._autoRefs : null) || null, // 브러시·화살표 실행 때 만든 참고 사진(화면 레퍼런스 칸과 별개)
     agedOnEmptyLot: (G.wf==='edit' && !!tab.agedOnEmptyLot) || false,
     status:    'queued',
     priority:  (G.plan==='agency' || G.plan==='admin'), // Business 플랜 전용 우선순위 처리 혜택
@@ -46285,6 +46287,7 @@ function _runToolWithPromptActual(translatedPrompt){
   };
   if(G.wf==='edit') getTab('edit')._pendingCompositeMask = null;
   if(G.wf==='edit') getTab('edit')._pendingRawInstrForFlux = null;
+  if(G.wf==='edit') getTab('edit')._autoRefs = null;
   setTabStatus(G.wf,'queued');
   // ⚠️ 요청 반영("투시도 한 번에 여러 후보 뽑고 싶다"): candidateCount(1~3)가 1보다 크면, 완전히
   // 같은 설정으로 task를 그 개수만큼 복제해서 큐에 나란히 넣음 — 각자 독립적으로 생성되니 결과가
@@ -46920,8 +46923,10 @@ function executeSingleRender(task){
         }
 
         // ── 1.5. 프리셋 대표 썸네일 자동 기록 (있으면 조용히 무시됨, 없으면 이번 결과로 채워짐) ──
+        // 2026-10-18 요청("프리셋에 이렇게 이미지 생기는거 하지마"): 생성 결과가 프리셋 대표 사진으로 자동 등록되던 것을 끔(관리자 수동 지정은 그대로)
+        var PRESET_THUMB_AUTO=false;
         try{
-          if(item.result && item.result.indexOf('.fal.media')>-1 &&
+          if(PRESET_THUMB_AUTO && item.result && item.result.indexOf('.fal.media')>-1 &&
              (task.wf==='space'||task.wf==='render'||task.wf==='edit') && task.selK &&
              !(window.PRESET_THUMBS && window.PRESET_THUMBS[task.selK]) && _supa && _supaUser){
             _supa.auth.getSession().then(function(sr){
@@ -47846,7 +47851,7 @@ function procImgWithTask(task, onDone, onErr){
         + CAMERA_LOCK;
     }
 
-    var editRefs2=(getTab('edit').refs||[]).filter(function(r){return !!r;}).slice(0,getMaxRefs());
+    var editRefs2=((task.autoRefs||getTab('edit').refs)||[]).filter(function(r){return !!r;}).slice(0,getMaxRefs());
     // ⚠️ 요청 반영("화질개선 프리셋 진짜 너무 변화가 없다"): 근본 원인 파악 — 이 프리셋(bg_quality_match)은
     // 사진 1장만 던져주고 "고쳐라"라고 시키는 전형적인 단일 이미지 편집(conservative i2i edit) 방식이라,
     // 모델이 "원본을 최대한 보존하며 다듬기"로 해석해버림. 반면 '실제 대지 배경 합성' 프리셋들은 메인
@@ -48205,7 +48210,7 @@ function procImgWithTask(task, onDone, onErr){
   // Recraft - text-to-image only (현장사진/렌더 탭에서는 NB2로 대체)
   if(eng==='recraft' && (wf==='space'||wf==='render')){
     console.warn('[Recraft] 현장사진/렌더 탭에서 지원 안됨, NB2로 대체');
-    var _refs1=(getTab(wf).refs||[]).filter(Boolean).slice(0,getMaxRefs());
+    var _refs1=((task.autoRefs||getTab(wf).refs)||[]).filter(Boolean).slice(0,getMaxRefs());
     uploadImgToFal(img, function(imgUrl){
       if(!_refs1.length){
         _withExplicitAspect(img, function(_asp){
@@ -48237,7 +48242,7 @@ function procImgWithTask(task, onDone, onErr){
     // Seedream v4.5: text-to-image (이미지 편집 미지원 → NB2로 대체)
     if(wf==='space'||wf==='render'||wf==='edit'){
       console.warn('[Seedream] i2i 미지원, NB2로 대체');
-      var _refs2=(getTab(wf).refs||[]).filter(Boolean).slice(0,getMaxRefs());
+      var _refs2=((task.autoRefs||getTab(wf).refs)||[]).filter(Boolean).slice(0,getMaxRefs());
       uploadImgToFal(img, function(imgUrl){
         if(!_refs2.length){
           _withExplicitAspect(img, function(_asp){
@@ -48297,7 +48302,7 @@ function procImgWithTask(task, onDone, onErr){
   var _nbSlug3 = (eng==='nano_pro') ? 'fal-ai/nano-banana-pro/edit' : 'google/nano-banana-2.1/edit';
   var _curTabForRef3 = getTab(wf);
   var _isRealismOnlyForRef3 = _curTabForRef3 && (_curTabForRef3.selK==='hq_real' || _curTabForRef3.selK==='hq_real_pro' || _curTabForRef3.selK==='render_quality_boost');
-  var _refs3 = _isRealismOnlyForRef3 ? [] : (getTab(wf).refs||[]).filter(Boolean).slice(0,getMaxRefs());
+  var _refs3 = _isRealismOnlyForRef3 ? [] : ((task.autoRefs||getTab(wf).refs)||[]).filter(Boolean).slice(0,getMaxRefs());
   // 2026-10-12(사용자 요청 "카메라 절대 유지"): 고품질화는 원본 비율이 AI 지원 비율(16:9 등)과 다르면 결과가 잘려서 확대돼 보였음 —
   // 원본 둘레에 여백을 붙여 지원 비율로 보낸 뒤, 결과에서 그 여백만 정확히 잘라내서 원본 화면 범위를 그대로 유지
   var _rqbOn = !!(task && task.selK==='render_quality_boost');
