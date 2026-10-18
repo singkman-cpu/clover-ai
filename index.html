@@ -940,7 +940,7 @@ function _guestId(){
 // 브라우저 기록을 지워도 같은 기기·브라우저면 같은 값이 나오는 기기 특징값(개인정보 아님, 해시값만 보냄)
 function _guestFp(){
   if(window._guestFpCache) return window._guestFpCache;
-  var parts=[navigator.userAgent, navigator.language, (navigator.languages||[]).join(','), screen.width+'x'+screen.height+'x'+screen.colorDepth, (window.devicePixelRatio||1), new Date().getTimezoneOffset(), navigator.hardwareConcurrency||0, navigator.platform||''];
+  var parts=[navigator.userAgent, screen.width+'x'+screen.height+'x'+screen.colorDepth, (window.devicePixelRatio||1), new Date().getTimezoneOffset(), navigator.hardwareConcurrency||0, navigator.platform||''];
   try{ var c=document.createElement('canvas'); c.width=200; c.height=40; var x=c.getContext('2d'); x.textBaseline='top'; x.font='16px Arial'; x.fillStyle='#f60'; x.fillRect(10,5,60,20); x.fillStyle='#069'; x.fillText('Clover AI 체험',2,12); parts.push(c.toDataURL().slice(-80)); }catch(e){}
   var str=parts.join('|'), h1=0x811c9dc5, h2=0x12345;
   for(var i=0;i<str.length;i++){ var ch=str.charCodeAt(i); h1=Math.imul(h1^ch,16777619)>>>0; h2=Math.imul(h2+ch,2654435761)>>>0; }
@@ -958,6 +958,16 @@ function _guestFreeNow(wf){
     return true;
   }catch(e){ return false; }
 }
+// 페이지를 열면(비회원) 서버에 "이 기기·인터넷에서 이미 체험했는지" 물어봐서, 이미 했으면 버튼을 처음부터 일반 표시로
+// (같은 컴퓨터의 다른 크롬 프로필·브라우저에서도 "무료 체험"으로 보이지 않게)
+setTimeout(function(){
+  try{
+    if(_supaUser || _guestTrialUsedLocal() || localStorage.getItem('clover_cr') || localStorage.getItem('clover_plan')) return;
+    _guestTrialCall('check', {}, function(d){
+      if(d && d.used && !_supaUser){ try{ localStorage.setItem('clover_guest_trial_done','1'); }catch(e){} try{ updBtn(); if(G.wf==='spaceset') renderSB(); }catch(e){} }
+    }, function(){});
+  }catch(e){}
+}, 4000);
 function _guestTrialCall(action, body, cb, errCb){
   var payload=Object.assign({action:action, guest_id:_guestId(), guest_fp:_guestFp()}, body||{});
   fetch(SUPA_URL+'/functions/v1/guest-trial', {method:'POST', headers:{'apikey':SUPA_KEY, 'Content-Type':'application/json'}, body:JSON.stringify(payload)})
@@ -1010,7 +1020,7 @@ function _guestSignupPrompt(reason){
       used:['무료 체험은 기기당 1장이에요','이미 무료 체험을 사용하셨어요. 지금 가입하면 <b style="color:var(--ac)">100cr을 바로 드려요</b> — 워터마크 없이 계속 만들 수 있어요.'],
       soldout:['오늘 무료 체험이 마감됐어요','오늘 준비한 무료 체험이 모두 소진됐어요. 가입하면 <b style="color:var(--ac)">100cr을 바로 드려서</b> 지금 바로 만들어볼 수 있어요.'],
       feature:['가입 후 이용할 수 있어요','이 기능은 회원 전용이에요. 가입하면 <b style="color:var(--ac)">100cr을 바로 드려요</b>.<br>(비회원 무료 체험: 현장사진 디자인·공간 컨셉·AI 편집(일반)·렌더 실사화·빈집 홈스테이징 중 1장)'],
-      intro:['비회원 무료 체험 1장','가입 없이 1장을 무료로 만들어볼 수 있어요 (1K 화질 · 작은 로고 포함).<br>공간 컨셉 디자인은 첫 번째 공간 1장만 만들어져요.']
+      intro:['비회원 무료 체험 1장','가입 없이 1장을 무료로 만들어볼 수 있어요 (1K 화질).<br>공간 컨셉 디자인은 첫 번째 공간 1장만 만들어져요.']
     }[reason]||['가입하면 100cr 무료',''];
     var ov=document.createElement('div'); ov.id='guest-signup-ov';
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100001;display:flex;align-items:center;justify-content:center;padding:16px';
@@ -47355,7 +47365,8 @@ function procImgWithTask(task, onDone, onErr){
   if(G._guestRun && !_supaUser){
     task.eng='nano2'; task.resolution='1K';
     var _gDone=onDone, _gErr=onErr;
-    onDone=function(ri){ _guestWatermark(ri, function(wm){ _guestTrialFinished(); _gDone(wm); }); };
+    // 2026-10-18 요청: 결과 화면엔 로고 없이 — 다운로드할 때만 무료 회원처럼 우측 하단 작은 로고(saveBlobWithFreeWatermark)
+    onDone=function(ri){ _guestTrialFinished(); _gDone(ri); };
     onErr=function(e){ G._guestRun=false; (_gErr||function(x){console.error(x);})(e); };
   }
   try{ if(task && task.maskData && (task.wf||G.wf)==='edit'){ var _etR2=getTab('edit'); if(_etR2._resAutoBrush){ _etR2.resolution=_etR2._resBeforeBrush||'2K'; _etR2._resAutoBrush=false; if(G.wf==='edit' && typeof updateResBtnCr==='function') setTimeout(function(){ try{ renderSB(); }catch(e){} }, 0); } } }catch(e){}
