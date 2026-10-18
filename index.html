@@ -18058,6 +18058,11 @@ function _scBuildInteriorBoard(anchors, cb){
     }catch(e){ cb(null); }
   }
 }
+// 2026-10-18 요청("왜 자꾸 투시도 똑같은 이미지가 렌더링 되는거야"): 같은 뷰를 다시 만들 때 직전에 만든 "같은 뷰" 결과를 참고로 붙여서 거의 똑같이 복제되던 문제 —
+// 각 결과가 어떤 뷰인지 기록해두고, 지금 만드는 뷰와 같은 뷰의 이전 결과는 참고에서 뺌(다른 뷰끼리의 일관성 참고는 그대로 유지).
+function _scTagGen(spTab,url,typeName){ try{ if(!url||!spTab) return; if(!spTab.autoRoomGenViewOf) spTab.autoRoomGenViewOf={}; spTab.autoRoomGenViewOf[url]=typeName; }catch(e){} }
+function _scPoolNoSame(spTab,pool,typeName){ try{ if(!pool||!pool.length) return pool; var m=(spTab&&spTab.autoRoomGenViewOf)||{}; return pool.filter(function(u){ return m[u]!==typeName; }); }catch(e){ return pool; } }
+function _scWaNoSame(spTab,typeName){ try{ var w=spTab.autoRoomWindowAnchor; if(!w) return w; var m=spTab.autoRoomGenViewOf||{}; return m[w]===typeName?null:w; }catch(e){ return spTab&&spTab.autoRoomWindowAnchor; } }
 function _scPrepExtFromInterior(spTab, typeName, input, cb){
   try{
     if(!_isExteriorViewType(typeName)){ cb(); return; }
@@ -18082,7 +18087,7 @@ function _scPrepExtFromInterior(spTab, typeName, input, cb){
     _scBuildInteriorBoard(others, function(board){
       // 2026-10-05: 이 세트에서 이미 만든 외관 사진이 있으면(예: 투시뷰를 먼저 만들고 지금 조감뷰) 그 사진을 맨 앞에 같이 보내서
       // 같은 건물로 이어지게 함(예전엔 실내 사진으로만 바꿔치기해서 뷰마다 다른 건물이 나올 수 있었음)
-      var _prevExt=input._noPrevExt?[]:(spTab.autoRoomGenExtUrls||[]).filter(Boolean); // 후보 여러 장일 땐 서로 다른 건물이어야 하므로 이전 외관을 안 붙임
+      var _prevExt=input._noPrevExt?[]:_scPoolNoSame(spTab, (spTab.autoRoomGenExtUrls||[]), typeName).filter(Boolean); // 후보 여러 장일 땐 서로 다른 건물이어야 하므로 이전 외관을 안 붙임
       var _prevExtUrl=_prevExt.length?_prevExt[_prevExt.length-1]:null;
       input.image_urls=(_prevExtUrl?[_prevExtUrl]:[]).concat([living.img]).concat(board?[board]:[]);
       input._prevExtUrl=_prevExtUrl||null;
@@ -21764,7 +21769,7 @@ function mkAutoRoomCamera(p){
             var ct=document.createElement('img'); ct.src=cu; ct.title='후보 '+(ci+1)+' — 누르면 대표 결과로 선택';
             var on=(cu===result.url);
             ct.style.cssText='flex:1;min-width:0;aspect-ratio:3/4;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid '+(on?'var(--ac)':'transparent')+';opacity:'+(on?'1':'.75');
-            ct.onclick=function(){ var _old=result.url; result.url=cu; if(_isExteriorViewType(typeName) && spTab.autoRoomGenExtUrls){ var _k=spTab.autoRoomGenExtUrls.indexOf(_old); if(_k!==-1) spTab.autoRoomGenExtUrls[_k]=cu; else spTab.autoRoomGenExtUrls.push(cu); } _showRoomResultInMain(null, cu, typeName+' (후보'+(ci+1)+')'); renderSB(); }; // 고른 후보가 다음 외관 뷰(조감뷰 등)의 기준 건물이 됨
+            ct.onclick=function(){ var _old=result.url; result.url=cu; _scTagGen(spTab,cu,typeName); if(_isExteriorViewType(typeName) && spTab.autoRoomGenExtUrls){ var _k=spTab.autoRoomGenExtUrls.indexOf(_old); if(_k!==-1) spTab.autoRoomGenExtUrls[_k]=cu; else spTab.autoRoomGenExtUrls.push(cu); } _showRoomResultInMain(null, cu, typeName+' (후보'+(ci+1)+')'); renderSB(); }; // 고른 후보가 다음 외관 뷰(조감뷰 등)의 기준 건물이 됨
             cRow.appendChild(ct);
           });
           rRow.appendChild(cRow);
@@ -22674,7 +22679,7 @@ function _padExteriorTo916WithBlur(url, cb){
     // 업로드한 원본 참고 사진은 여전히 안 쓰지만(그건 "영감만 얻기"의 목적과 반대), 이미 이
     // 모드로 만들어둔 자기 자신의 결과물(genPool)은 참고로 붙여서 — "레퍼런스와는 다르게, 하지만
     // 내가 방금 만든 새 디자인끼리는 통일감 있게" 되도록 함.
-    var _looseGenPool = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+    var _looseGenPool = _scPoolNoSame(spTab, _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls, typeName); var _waX = _scWaNoSame(spTab, typeName);
     var _looseRefs = (_looseGenPool && _looseGenPool.length) ? [_looseGenPool[0], _looseGenPool[_looseGenPool.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
     // ⚠️ 치명적 버그 수정("컨셉 이미지랑 하나도 안 닮았다, 렌더링에 반영이 안 된다"): 진짜 원인을
     // 찾음 — image_urls 배열에 평면도·이전 생성 결과(genPool)가 먼저 들어가고, 정작 스타일의
@@ -22893,16 +22898,16 @@ function _padExteriorTo916WithBlur(url, cb){
     // 기준 이미지를 "추가로 첨부"하는 아래 로직 자체를 외관 뷰에서는 건너뜀(텍스트 지시만 남고
     // 정작 그 사진은 뒤에서 잘려나가 앞뒤가 안 맞는 프롬프트가 되는 걸 방지). 실내 뷰는 여러 장
     // 참고해도 안전하므로 그대로 둠.
-    if(spTab.autoRoomWindowAnchor && !_isExteriorViewType(typeName)){
+    if(_waX && !_isExteriorViewType(typeName)){
       // ⚠️ 버그 수정(핵심 원인, "바닥은 통일 잘 되는데 창호 색은 잘 안 맞는다"): 여기서도 위
       // _autoRoomGenerateStep의 다른 경로와 똑같은 문제가 있었음 — _looseRefs가 이미 최대 2장으로
       // 정리돼 있었는데(위 13687/13731/13793줄), 여기서 창호 기준을 추가하며 slice(0,3)으로
       // 3장까지 다시 늘어나서 창호 신호가 다른 참고 이미지들 사이에서 희석되고 있었음. 항상
       // [기존 참고 중 가장 마지막(최신) 1장 + 창호 기준 1장]으로만 유지해서 창호 신호 비중을 크게 함.
       var _looseOther = _looseRefs.length ? _looseRefs[_looseRefs.length-1] : null;
-      _looseRefs = _looseOther && _looseOther!==spTab.autoRoomWindowAnchor
-        ? [_looseOther, spTab.autoRoomWindowAnchor]
-        : [spTab.autoRoomWindowAnchor];
+      _looseRefs = _looseOther && _looseOther!==_waX
+        ? [_looseOther, _waX]
+        : [_waX];
       // ⚠️ 버그 수정(치명적, "서재·작은방·아이방이 전부 똑같은 구도로 나온다"): 이 지시가 "창호
       // 색상·형태만" 맞추라고 했는데도, 사진 전체를 참고 이미지로 통째로 첨부하다 보니 모델이
       // 창호뿐 아니라 카메라 구도·천장 높이·방 비율·창문 크기·가구 배치까지 통째로 따라 그리는
@@ -22910,7 +22915,7 @@ function _padExteriorTo916WithBlur(url, cb){
       // "창호만 같고 나머지는 완전히 다른 방"이라는 걸 훨씬 명시적으로, 무엇을 절대 따라하면
       // 안 되는지 구체적으로 나열해서 못박음.
       _looseP += ' ⚠️⚠️ 창호(창틀) 색상·형태만 통일(매우 중요, 다른 스타일 지시보다 창호에 관해서는 우선): 마지막으로 첨부된 참고 이미지는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에서 창호(창틀)의 색상·소재·형태(창틀 두께, 창을 몇 칸으로 나누는 분할 패턴/멀리언 개수와 배치까지 포함)를 뽑아서 이 공간에도 동일하게 적용하세요. 문(현관문·중문 등)이 보이는 공간이라면 문의 색상·소재도 이 창호와 어울리는 통일된 톤으로 맞추세요. ⚠️⚠️⚠️ 단, 그 사진의 나머지 요소는 절대 따라 그리지 마세요 — 카메라 구도·앵글, 천장 높이·방의 세로/가로 비율, 창문의 개수·크기·위치, 조명 기구의 종류·위치, 가구 배치·수납장 구조는 이 사진과 완전히 다르게, 지금 만드는 이 공간(용도·크기)에 맞게 새로 구성하세요. "창호 기준 사진과 이 공간이 거의 같은 구도·같은 방처럼 보인다"면 명백한 실패입니다 — 세트 안의 다른 뷰들과 구도가 겹치지 않게 매번 카메라 앵글과 방 형태를 의식적으로 다르게 만드세요. ⚠️ 단, 사용자가 직접 창문 프레임 색상을 지정했다면 그 색이 항상 우선합니다.';
-    } else if(spTab.autoRoomWindowAnchor && _isExteriorViewType(typeName)){
+    } else if(_waX && _isExteriorViewType(typeName)){
       // 사진은 안 붙이되(콜라주 위험), 색상 방향은 말로만 짧게 상기시킴 — 이 방 자신의 참고
       // 사진이 이미 실제 창호를 보여주고 있으니 그걸로 충분히 커버됨.
       _looseP += ' ⚠️ 창호(창틀) 색상은 이 세트의 다른 공간들과 통일되어야 합니다 — 이미 이 세트에서 확정된 창호 색과 다르게 나오지 않도록 유의하세요.';
@@ -22953,8 +22958,8 @@ function _padExteriorTo916WithBlur(url, cb){
       if(_looseRefs.length>1){
         _looseRefs = imgs0.primary && _looseRefs.indexOf(imgs0.primary)!==-1
           ? [imgs0.primary]
-          : (spTab.autoRoomWindowAnchor && _looseRefs.indexOf(spTab.autoRoomWindowAnchor)!==-1
-            ? [spTab.autoRoomWindowAnchor]
+          : (_waX && _looseRefs.indexOf(_waX)!==-1
+            ? [_waX]
             : _looseRefs.slice(0,1));
       }
     }
@@ -23103,8 +23108,8 @@ function _padExteriorTo916WithBlur(url, cb){
               st.results[idx]={url:finalUrl}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1);
               if(!spTab.autoRoomWindowAnchor) spTab.autoRoomWindowAnchor = finalUrl;
               var isExtType0 = _isExteriorViewType(typeName);
-              if(isExtType0){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(finalUrl); }
-              else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(finalUrl); }
+              if(isExtType0){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(finalUrl); _scTagGen(spTab,finalUrl,typeName); }
+              else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(finalUrl); _scTagGen(spTab,finalUrl,typeName); }
             }
             var _candTag0 = (_arCandN>1) ? (_tagLabel0+' (후보'+(_arCi+1)+'/'+_arCandN+')') : _tagLabel0;
             if(_arCandN>1){ st.cands=st.cands||{}; st.cands[idx]=st.cands[idx]||[]; st.cands[idx][_arCi]=finalUrl; if(G.wf==='spaceset'){ try{ renderSB(); }catch(e){} } } // 2026-10-05: 좌측 결과에 후보 전부 표시
@@ -23171,7 +23176,7 @@ function _padExteriorTo916WithBlur(url, cb){
   var origRefs = getTab('space').refs;
   var chainedRefs = imgs.ref ? imgs.ref.slice() : [];
   var isExtType = _isExteriorViewType(typeName);
-  var genPool = isExtType ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+  var genPool = _scPoolNoSame(spTab, isExtType ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls, typeName); var _waX = _scWaNoSame(spTab, typeName);
   if(genPool && genPool.length){
     // ⚠️ 요청 반영: "최근 2장까지만"으로는 뷰를 여러 개 만들다 보면 조금씩 드리프트(누적 변형)될
     // 수 있음 — 이 공간의 디자인을 처음 확정한 "첫 번째 생성 뷰"를 항상 고정 기준으로 같이
@@ -23196,7 +23201,7 @@ function _padExteriorTo916WithBlur(url, cb){
   // 이미 확정된 "창호 기준 이미지"가 있으면(외관·실내 풀과 별개로) 실제로 같이 첨부하고, 창호
   // (창틀) 색상·형태만큼은 최우선으로 맞추라고 명시함 — genPool은 외관/실내로 나뉘어 있어서
   // 서로를 참고 못 했던 문제를, 이 별도의 공용 기준 이미지로 보완함.
-  if(spTab.autoRoomWindowAnchor && chainedRefs.indexOf(spTab.autoRoomWindowAnchor)===-1){
+  if(_waX && chainedRefs.indexOf(_waX)===-1){
     // ⚠️ 버그 수정(핵심 원인, "바닥은 통일 잘 되는데 창호 색은 잘 안 맞는다"): 여기서 창호 기준을
     // 추가하면서 참고 이미지가 3장까지 늘어났었음(바로 위에서 "콜라주 방지 위해 최대 2장"으로
     // 이미 정리해놨는데도) — 참고 이미지 3장 중 2장은 "바닥·벽 등 전체적으로 맞춰라"는 넓은
@@ -23206,7 +23211,7 @@ function _padExteriorTo916WithBlur(url, cb){
     // 창호 기준이 있을 땐 항상 [창호 기준 이미지 1장 + genPool 중 가장 최근 것 1장]으로만 유지함
     // (창호 신호가 다른 참고 이미지에 묻히지 않도록 항상 비중을 크게 유지).
     var _otherRef = chainedRefs.length ? chainedRefs[chainedRefs.length-1] : null;
-    chainedRefs = _otherRef ? [_otherRef, spTab.autoRoomWindowAnchor] : [spTab.autoRoomWindowAnchor];
+    chainedRefs = _otherRef ? [_otherRef, _waX] : [_waX];
     // ⚠️ 버그 수정(치명적, "서재·작은방·아이방이 전부 똑같은 구도로 나온다"): 아래 자세한 이유는
     // 위 _autoRoomGenerateStep의 동일한 수정 참고 — 여기서도 "창호만 같고 나머지는 완전히 다른
     // 방"임을 구체적으로 못박음.
@@ -23214,7 +23219,7 @@ function _padExteriorTo916WithBlur(url, cb){
   }
   // ⚠️ 위에서 창호 기준이 있을 때 이미 [기존참고 1장+창호기준 1장]으로 최종 정리했으므로, 세로
   // 비율에서 또 손댈 필요는 없음(창호 기준이 없는 경우에만 아래 로직이 의미가 있음).
-  if(_tallAspect && chainedRefs.length>1 && chainedRefs.indexOf(spTab.autoRoomWindowAnchor)===-1){
+  if(_tallAspect && chainedRefs.length>1 && chainedRefs.indexOf(_waX)===-1){
     chainedRefs = chainedRefs.slice(0,1);
   }
   getTab('space').refs = chainedRefs;
@@ -23241,10 +23246,10 @@ function _padExteriorTo916WithBlur(url, cb){
           if(!spTab.autoRoomWindowAnchor) spTab.autoRoomWindowAnchor = resultUrl;
           if(isExtType){
             if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[];
-            spTab.autoRoomGenExtUrls.push(resultUrl);
+            spTab.autoRoomGenExtUrls.push(resultUrl); _scTagGen(spTab,resultUrl,typeName);
           } else {
             if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[];
-            spTab.autoRoomGenIntUrls.push(resultUrl);
+            spTab.autoRoomGenIntUrls.push(resultUrl); _scTagGen(spTab,resultUrl,typeName);
           }
         }
         var _candTag1 = (_arCandN2>1) ? (_tagLabel1+' (후보'+(_arCi2+1)+'/'+_arCandN2+')') : _tagLabel1;
@@ -23309,7 +23314,7 @@ function _autoRoomRetryOne(idx){
       var _viewInstrLoose2 = EXTERIOR_VIEW_PROMPTS[typeName] || ('이 사진은 "'+typeName+'" 앵글로 촬영된 건물 외관 사진이어야 합니다.');
       _looseP2 += ' ⚠️⚠️⚠️ 카메라 앵글(가장 중요, 반드시 지키세요): ' + _viewInstrLoose2;
     }
-    var _looseGenPool2 = _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+    var _looseGenPool2 = _scPoolNoSame(spTab, _isExteriorViewType(typeName) ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls, typeName); var _waX = _scWaNoSame(spTab, typeName);
     var _looseRefs2 = (_looseGenPool2 && _looseGenPool2.length) ? [_looseGenPool2[0], _looseGenPool2[_looseGenPool2.length-1]].filter(function(v,i,a){return a.indexOf(v)===i;}) : [];
     var _aptFloorPlanRefImg2 = (_isAptForThisRun && !_isExteriorViewType(typeName)) ? _aptFloorPlanGetBestPng(spTab.autoRoomAptBrand, spTab.autoRoomAptType, spTab.autoRoomAptPyeong) : null;
     // ⚠️ _autoRoomGenerateStep과 동일한 이유(컨셉 이미지가 뒷순위로 밀려서 반영이 안 되던 문제,
@@ -23403,10 +23408,10 @@ function _autoRoomRetryOne(idx){
       ? ' ⚠️⚠️⚠️ 마지막으로 다시 한번(가장 중요): 지금 첨부한 참고 사진의 색감·톤·가구 디자인과 완전히 동떨어진, 무난하고 평범한 "한국 아파트st 프리미엄 인테리어"가 나오면 명백한 실패입니다 — 참고 사진이 대담하고 개성 있는 색감·가구라면 이 결과도 그만큼 대담하고 개성 있어야 합니다.'
       : ' ⚠️⚠️⚠️ 마지막으로 다시 한번(가장 중요): 지금 첨부한 참고 사진의 색감·톤 방향은 반드시 이어받아야 합니다(가구 형태만 살짝 바꾸는 것이지 색감·분위기까지 무난한 "한국 아파트st 프리미엄 인테리어"로 바뀌면 안 됩니다).';
     _looseP2 = '⚠️⚠️ 가장 먼저 지켜야 할 절대 규칙들(다른 무엇보다 우선): ' + SINGLE_IMAGE_OUTPUT_RULE + AC_CONSISTENCY_RULE + MAIN_LIGHT_CONSISTENCY_RULE + (_looseP2.indexOf('사람')===-1 && _looseP2.indexOf('한국인')===-1 ? NO_PEOPLE_ANIMALS_RULE : '') + ' --- ' + _catGroundingTextR + _looseP2 + 'Professional architecture/interior photography of a ' + typeName + '. ' + prompt + ' High quality, sharp details, photorealistic, natural lighting.' + (imgs0b.primary ? _finalReinforceR : '');
-    if(spTab.autoRoomWindowAnchor && !_isExteriorViewType(typeName) && _looseRefs2.indexOf(spTab.autoRoomWindowAnchor)===-1){
-      _looseRefs2 = _looseRefs2.concat([spTab.autoRoomWindowAnchor]).slice(0,3);
+    if(_waX && !_isExteriorViewType(typeName) && _looseRefs2.indexOf(_waX)===-1){
+      _looseRefs2 = _looseRefs2.concat([_waX]).slice(0,3);
       _looseP2 += ' ⚠️⚠️ 창호(창틀) 색상·형태만 통일(매우 중요): 첨부된 참고 이미지 중 하나는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에서 창호(창틀)의 색상·소재·형태(창틀 두께, 창을 몇 칸으로 나누는 분할 패턴/멀리언 개수와 배치까지 포함)를 뽑아서 이 공간에도 동일하게 적용하세요. 문(현관문·중문 등)이 보이는 공간이라면 문의 색상·소재도 이 창호와 어울리는 통일된 톤으로 맞추세요. 단, 그 사진의 카메라 구도·천장 높이·방 비율·창문 개수/크기·가구 배치는 절대 따라 그리지 말고 이 공간에 맞게 완전히 다르게 구성하세요 — 창호 기준 사진과 거의 같은 구도로 보이면 실패입니다. ⚠️ 단, 사용자가 직접 창문 프레임 색상을 지정했다면 그 색이 항상 우선합니다.';
-    } else if(spTab.autoRoomWindowAnchor && _isExteriorViewType(typeName)){
+    } else if(_waX && _isExteriorViewType(typeName)){
       _looseP2 += ' ⚠️ 창호(창틀) 색상은 이 세트의 다른 공간들과 통일되어야 합니다.';
     }
     // ⚠️ 버그 수정(재시도 함수에도 동일하게 적용): 세로 비율에서 콜라주 방지를 위해 참고 이미지를
@@ -23416,8 +23421,8 @@ function _autoRoomRetryOne(idx){
     if((_looseAspect2==='9:16' || _looseAspect2==='3:4') && _looseRefs2.length>1){
       _looseRefs2 = imgs0b.primary && _looseRefs2.indexOf(imgs0b.primary)!==-1
         ? [imgs0b.primary]
-        : (spTab.autoRoomWindowAnchor && _looseRefs2.indexOf(spTab.autoRoomWindowAnchor)!==-1
-          ? [spTab.autoRoomWindowAnchor]
+        : (_waX && _looseRefs2.indexOf(_waX)!==-1
+          ? [_waX]
           : _looseRefs2.slice(0,1));
     }
     // ⚠️ 버그 수정(치명적, "2개 나오던 게 3개로 늘어남" — 재시도 함수에도 동일 적용): 비율
@@ -23487,8 +23492,8 @@ function _autoRoomRetryOne(idx){
         st.running=false;
         if(!spTab.autoRoomWindowAnchor) spTab.autoRoomWindowAnchor = finalUrl;
         var isExtType0b = _isExteriorViewType(typeName);
-        if(isExtType0b){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(finalUrl); }
-        else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(finalUrl); }
+        if(isExtType0b){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(finalUrl); _scTagGen(spTab,finalUrl,typeName); }
+        else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(finalUrl); _scTagGen(spTab,finalUrl,typeName); }
         var _tagLabel2 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
         _saveResultToCloudGallery('spaceset', Date.now()+idx, finalUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, _tagLabel2);
         _showRoomResultInMain((prevResult2&&prevResult2.url)||null, finalUrl, _tagLabel2, _isAptForThisRun);
@@ -23511,7 +23516,7 @@ function _autoRoomRetryOne(idx){
   var origRefs = getTab('space').refs;
   var chainedRefs2 = imgs.ref ? imgs.ref.slice() : [];
   var isExtType2 = _isExteriorViewType(typeName);
-  var genPool2 = isExtType2 ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls;
+  var genPool2 = _scPoolNoSame(spTab, isExtType2 ? spTab.autoRoomGenExtUrls : spTab.autoRoomGenIntUrls, typeName); var _waX = _scWaNoSame(spTab, typeName);
   if(genPool2 && genPool2.length){
     var _genRefsToUse2 = genPool2.length>1 ? [genPool2[0], genPool2[genPool2.length-1]] : genPool2.slice(-2);
     chainedRefs2 = chainedRefs2.concat(_genRefsToUse2);
@@ -23519,15 +23524,15 @@ function _autoRoomRetryOne(idx){
   if(chainedRefs2.length>2) chainedRefs2 = chainedRefs2.slice(0,2);
   var _tallAspect2b = (spTab.forcedAspect==='9:16' || spTab.forcedAspect==='3:4');
   if(_tallAspect2b && chainedRefs2.length>1) chainedRefs2 = chainedRefs2.slice(0,1);
-  if(spTab.autoRoomWindowAnchor && chainedRefs2.indexOf(spTab.autoRoomWindowAnchor)===-1){
-    chainedRefs2 = chainedRefs2.concat([spTab.autoRoomWindowAnchor]).slice(0,3);
+  if(_waX && chainedRefs2.indexOf(_waX)===-1){
+    chainedRefs2 = chainedRefs2.concat([_waX]).slice(0,3);
     task.prompt += ' ⚠️⚠️ 창호(창틀) 색상·형태만 통일(매우 중요): 첨부된 참고 이미지 중 하나는 이 세트에서 이미 확정된 "창호 기준" 사진입니다 — 그 사진에서 창호(창틀)의 색상·소재·형태(창틀 두께, 창을 몇 칸으로 나누는 분할 패턴/멀리언 개수와 배치까지 포함)를 뽑아서 이 공간에도 동일하게 적용하세요. 문(현관문·중문 등)이 보이는 공간이라면 문의 색상·소재도 이 창호와 어울리는 통일된 톤으로 맞추세요. 단, 그 사진의 카메라 구도·천장 높이·방 비율·창문 개수/크기·가구 배치는 절대 따라 그리지 말고 이 공간에 맞게 완전히 다르게 구성하세요 — 창호 기준 사진과 거의 같은 구도로 보이면 실패입니다. ⚠️ 단, 사용자가 직접 창문 프레임 색상을 지정했다면 그 색이 항상 우선합니다.';
   }
   // ⚠️ 버그 수정(재시도 함수에도 동일하게 적용): 세로 비율에서 콜라주 방지를 위해 참고 이미지를
   // 1장으로 최종 제한하되, 창호 기준 이미지가 있으면 그것을 우선해서 남김.
   if(_tallAspect2b && chainedRefs2.length>1){
-    chainedRefs2 = spTab.autoRoomWindowAnchor && chainedRefs2.indexOf(spTab.autoRoomWindowAnchor)!==-1
-      ? [spTab.autoRoomWindowAnchor]
+    chainedRefs2 = _waX && chainedRefs2.indexOf(_waX)!==-1
+      ? [_waX]
       : chainedRefs2.slice(0,1);
   }
   getTab('space').refs = chainedRefs2;
@@ -23537,8 +23542,8 @@ function _autoRoomRetryOne(idx){
     st.results[idx]={url:resultUrl, prevUrl:prevResult2&&prevResult2.url};
     st.running=false;
     if(!spTab.autoRoomWindowAnchor) spTab.autoRoomWindowAnchor = resultUrl;
-    if(isExtType2){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); }
-    else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); }
+    if(isExtType2){ if(!spTab.autoRoomGenExtUrls) spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenExtUrls.push(resultUrl); _scTagGen(spTab,resultUrl,typeName); }
+    else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(resultUrl); _scTagGen(spTab,resultUrl,typeName); }
     var _tagLabel3 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
     _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution, null, _tagLabel3);
     // ⚠️ 요청 반영: "다시 생성"으로 재생성한 경우엔 직전 시도(prevResult2)가 있으니 그걸 "이전"으로
