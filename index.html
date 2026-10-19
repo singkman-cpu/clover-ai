@@ -17881,11 +17881,27 @@ function _compositeBudgetCaption(imgUrl, captionText, cb){
 // ⚠️ 요청 반영("SNAP 버튼, 관공서/분양마케팅 배너 클릭이랑 사이트 방문 횟수를 관리자모드에서
 // 보고싶다"): 이벤트 하나를 Supabase analytics_events 테이블에 기록함. 실패해도 사용자 경험에
 // 영향 없게 조용히 무시함(분석 실패가 실제 기능을 막으면 안 되므로).
+// 2026-10-19 요청("방문자 구분 — 같은 사람인지 다른 사람인지"): 기록마다 브라우저 고유번호(visitor_id)를 같이 저장 →
+// 관리자 화면에서 "방문자 A·B"로 같은 사람끼리 묶이고, 관리자 기기는 통계에서 뺄 수 있음.
+// (visitor_id 칸이 아직 없으면(ANALYTICS_VISITOR.sql 실행 전) 예전처럼 그 칸 없이 저장)
+function _visitorId(){
+  var adm=false;
+  try{
+    if((typeof G!=='undefined' && G.supaRole==='admin') || (_supaUser && typeof ADMIN_EMAILS!=='undefined' && ADMIN_EMAILS.indexOf(_supaUser.email)>-1)) localStorage.setItem('clover_admin_device','1');
+    adm=localStorage.getItem('clover_admin_device')==='1';
+  }catch(e){}
+  var id=''; try{ id=(typeof _guestId==='function')?_guestId():''; }catch(e){}
+  return id ? ((adm?'admin-':'')+id).slice(0,80) : null;
+}
 function _trackEvent(eventType){
   try{
     if(!_supa) return;
-    _supa.from('analytics_events').insert({event_type:eventType, user_id:(_supaUser?_supaUser.id:null)})
-      .then(function(){}).catch(function(){});
+    var row={event_type:eventType, user_id:(_supaUser?_supaUser.id:null)};
+    var vid=window._noVisitorCol?null:_visitorId();
+    if(vid) row.visitor_id=vid;
+    _supa.from('analytics_events').insert(row).then(function(res){
+      if(res && res.error && row.visitor_id && /visitor_id/i.test(res.error.message||'')){ window._noVisitorCol=true; delete row.visitor_id; _supa.from('analytics_events').insert(row).then(function(){}, function(){}); }
+    }, function(){});
   }catch(e){}
 }
 // ⚠️ 요청 반영(2026-10-06, "크레딧 없는 회원이 계속 접속하는데 뭘 하는지 알고 싶다"): 로그인 회원이
@@ -50203,7 +50219,8 @@ function admAnalytics(c){
   // auth.users를 참조하고 있어서(profiles가 아니라) 자동 조인이 실패했음(400 에러). SQL을 더
   // 안 건드리고, 두 테이블을 각각 따로 조회해서 코드에서 직접 합치는 방식으로 바꿔 이 문제
   // 자체를 회피함 — 테이블 FK 구조가 어떻든 항상 안전하게 동작함.
-  _supa.from('analytics_events').select('event_type,created_at,user_id').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
+  _supa.from('analytics_events').select('event_type,created_at,user_id,visitor_id').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
+    .then(function(res){ if(res && res.error && /visitor_id/i.test(res.error.message||'')){ window._admNoVisitorCol=true; return _supa.from('analytics_events').select('event_type,created_at,user_id').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000); } return res; })
     .then(function(res){
       if(res.error){
         c.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">analytics_events 조회에 실패했어요: <b>'+(res.error.message||'')+'</b><br>테이블이 없다면 Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
@@ -50231,6 +50248,22 @@ function _admSec(k,t){ var cl=_admSecClosed(k); return '<div class="adm-sec" sty
 function _admSecEnd(){ return '</div></div>'; }
 function _admSecToggle(h,k){ var b=h.nextElementSibling; if(!b) return; var open=b.style.display==='none'; b.style.display=open?'block':'none'; var a=h.querySelector('.adm-sec-ar'); if(a) a.textContent=open?'접기 ▴':'열기 ▾'; try{ localStorage.setItem('clover_adm_sec_'+k, open?'1':'0'); }catch(e){} }
 function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
+    // 2026-10-19: 관리자 기기(관리자로 로그인한 적 있는 브라우저)의 기록은 통계에서 뺌(비로그인으로 테스트한 것까지) — 위 버튼으로 켜고 끌 수 있음
+    var _isAdmEm=function(uid){ var em=uid&&emailByUid&&emailByUid[uid]; return !!(em && typeof ADMIN_EMAILS!=='undefined' && ADMIN_EMAILS.indexOf(em)>-1); };
+    var _admVis={}; rows.forEach(function(r){ if(r.visitor_id && (String(r.visitor_id).indexOf('admin-')===0 || _isAdmEm(r.user_id))) _admVis[r.visitor_id]=1; });
+    var _exclSelf=true; try{ _exclSelf=localStorage.getItem('clover_adm_excl_self')!=='0'; }catch(e){}
+    var _rowsAll=rows.length;
+    if(_exclSelf) rows=rows.filter(function(r){ return !_isAdmEm(r.user_id) && !(r.visitor_id && _admVis[r.visitor_id]); });
+    // 방문자 이름표: 같은 브라우저(visitor_id)는 같은 이름("방문자 A3")으로 — 회원은 이메일, 비로그인 회원 기기면 그 회원 이메일로
+    var _vidEmail={}; rows.forEach(function(r){ if(r.visitor_id && r.user_id && emailByUid && emailByUid[r.user_id]) _vidEmail[r.visitor_id]=emailByUid[r.user_id]; });
+    window._admVisitorLabel=function(r){
+      if(r.user_id) return (emailByUid[r.user_id]||'(탈퇴/알수없음)');
+      if(!r.visitor_id) return '👤 비로그인';
+      if(_vidEmail[r.visitor_id]) return '👤 비로그인 ('+_vidEmail[r.visitor_id]+' 기기)';
+      var h=0, v=String(r.visitor_id); for(var i=0;i<v.length;i++) h=(h*31+v.charCodeAt(i))>>>0;
+      return '👤 방문자 '+String.fromCharCode(65+h%26)+(h%97);
+    };
+    window._admVisitorStats={all:_rowsAll, shown:rows.length, excl:_exclSelf, hasVid:rows.some(function(r){return !!r.visitor_id;})};
     // 2026-10-09 요청("하루 접속수가 같은 아이디 중복으로 잡히면 안 된다"): 사이트 방문은 같은 아이디면 하루(한국 날짜) 1번만 세고,
     // 관리자 본인 접속은 빼고 셈(예전에 쌓인 중복 기록도 화면에서는 자동으로 하나로 합쳐짐)
     (function(){
@@ -50273,6 +50306,17 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         if(d.slice(0,7)===monthStr) monthCount[r.event_type]=(monthCount[r.event_type]||0)+1;
       });
       var html='<div style="font-size:11px;color:var(--m2);margin-bottom:14px">최근 30일 집계 (한국 시간 KST 기준, 관리자 화면을 볼 때마다 다시 조회돼요) · 각 칸 제목을 누르면 접고 열 수 있어요(상태 기억)</div>';
+      // 2026-10-19: 실제 사람 수(같은 브라우저·같은 회원은 1명) + 관리자 기기 제외 켜기/끄기
+      (function(){
+        var st=window._admVisitorStats||{}, td={}, all={};
+        rows.forEach(function(r){ var k=r.user_id?('u:'+r.user_id):(r.visitor_id?('v:'+r.visitor_id):null); if(!k) return; all[k]=1; if(_kst(r.created_at).date===todayStr) td[k]=1; });
+        html+='<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px;padding:12px 14px;border:1px solid var(--acb);background:var(--acg);border-radius:10px">'+
+          '<div style="font-size:13px;font-weight:800;color:var(--t)">👥 실제 방문자(사람 수)</div>'+
+          '<div style="font-size:13px;color:var(--t2)">오늘 <b style="color:var(--ac);font-size:18px">'+Object.keys(td).length+'</b>명 · 최근 30일 <b style="color:var(--ac);font-size:18px">'+Object.keys(all).length+'</b>명</div>'+
+          '<div style="font-size:11px;color:var(--m2);flex:1;min-width:200px">같은 브라우저·같은 회원은 1명으로 셈'+(st.hasVid?'':' — <b style="color:#fbbf24">ANALYTICS_VISITOR.sql을 실행하고 이 버전을 올린 뒤부터 쌓여요</b>')+'</div>'+
+          '<button type="button" onclick="try{localStorage.setItem(\'clover_adm_excl_self\',\''+(st.excl?'0':'1')+'\')}catch(e){};admRenderTab()" style="padding:6px 12px;border-radius:7px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit">'+(st.excl?'✅ 관리자 기기 제외 중 (끄기)':'관리자 기기 포함 중 (제외하기)')+'</button>'+
+        '</div>';
+      })();
       html+=_admSec('summary','📊 오늘·이번달 요약');
       // 오늘 / 이번달 요약 카드
       html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">';
@@ -50411,7 +50455,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
         '<th style="padding:6px 8px;text-align:left">일시</th><th style="padding:6px 8px;text-align:left">이벤트</th><th style="padding:6px 8px;text-align:left">회원</th></tr></thead><tbody>'+
         rows.slice(0,200).map(function(r){
           var evDef=EVENT_DEFS.find(function(e){return e.k===r.event_type;});
-          var email=r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인';
+          var email=window._admVisitorLabel?window._admVisitorLabel(r):(r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인');
           var kt=_kst(r.created_at);
           return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+kt.date+' '+kt.time+'</td>'+
             '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:({guest_trial_start:'🎁 비회원 체험 시작',qs_open:'🧭 첫 화면 선택 창',qs_pick_space:'🧭 선택: 인테리어',qs_pick_staging:'🧭 선택: 빈 집 가구',qs_pick_spaceset:'🧭 선택: 공간 컨셉',qs_pick_render:'🧭 선택: 렌더 실사',lead_open:'🏗 상담 창 열림',lead_submit:'🏗 상담 신청',guest_trial_done:'🎁 비회원 체험 완료',guest_signup_click:'🎁 체험 후 가입 버튼 클릭',signup_after_trial:'🎁 체험 후 가입'}[r.event_type])||(r.event_type.indexOf('how_')===0?('🙋 가입 응답: '+(((typeof HOW_OPTS!=='undefined'?HOW_OPTS:[]).find(function(o){return o[0]===r.event_type.slice(4);})||[0,r.event_type.slice(4)])[1])):r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
