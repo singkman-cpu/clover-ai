@@ -27935,6 +27935,182 @@ function _shortsGenerateSNSCopy(){
 
 
 // ── 사이드바 UI ───────────────────────────────────────────────────
+// ══ 2026-10-19 🤖 원클릭 자동 쇼츠 (관리자 전용 — "일단 나만 써보게") ═══════════════════════
+// 쇼츠에 넣어둔 사진들을 AI가 보고 ① 컷 순서(가장 임팩트 있는 컷 1번, 배치도·평면도는 마지막) ② 1번 컷 레터박스 제목
+// ③ 유튜브·인스타·틱톡 업로드 제목·해시태그를 대표님 규칙대로 만들고, 원하면 바로 영상까지 생성.
+// 음악은 쇼츠 탭에 한 번 올려둔 배경음악이 그대로 들어감(제거하기 전까지 유지되는 기존 기능).
+var AUTO_SHORTS_RULES=
+  '너는 한국 인테리어·건축 쇼츠 편집자야. 첨부한 사진들(번호 순서대로 #0, #1 …)은 이번 쇼츠에 들어갈 컷이야. 규칙:\n'+
+  '1) 컷 순서 — 먼저 사진 종류를 보고 둘 중 하나로 정해(모든 번호를 빠짐없이 한 번씩):\n'+
+  '   A. "변신 스토리" 세트(오래된·낡은 건물, 철거 중, 공사 중(골조·거푸집·타설 등) 사진이 하나라도 있으면) — 이 채널의 기본 방식이니 반드시 이 순서: 오래된 건물 → 철거 중 → 공사 1단계 → 2단계 → 3단계(공정이 덜 된 것부터 많이 된 순) → 완성 외관(항공뷰·조감뷰 먼저, 그다음 투시뷰·정면) → 인테리어(거실 → 주방·다이닝 → 방 → 욕실 → 테라스·옥상 등) → 배치도·평면도는 맨 마지막.\n'+
+  '   B. 변신 과정 사진이 없는 일반 세트 — 가장 임팩트 있는 사진을 1번 컷, 그다음 외관 → 거실·주방 → 방·욕실, 배치도·평면도는 맨 마지막.\n'+
+  '2) 레터박스 제목(1번 컷 위 검은 여백에 들어가는 문구): 두 줄, 각 줄 4~5글자 안팎으로 아주 짧게. 화면이 1.25초마다 넘어가서 한눈에 읽혀야 함. 궁금증 유발형·감탄형 톤.\n'+
+  '   가장 좋은 패턴: "지역 + 어디에 + 이런 [스펙]이??" (예: "수도권 어디에\\n이런 집이??"). 다른 패턴: "장소/타입 + ~같은 + 한국인에게 익숙한 비교 대상 + ??" (예: "카페같은\\n홈 하우스??") — 비교 대상은 펜션·글램핑·별장·호텔·카페처럼 누구나 아는 단어만(료칸 같은 낯선 외국어 금지).\n'+
+  '   "실화?", "미쳤다", "역대급" 같은 반응 유도 클리셰는 절대 쓰지 말고, 사진에 실제로 보이는 구체적 디테일(옥상정원, 탑층, 중정, 복층, 통창 등)로 궁금증을 만들어.\n'+  '   A(변신 스토리) 세트면 1번 컷이 낡은 건물이므로, 제목은 "이 낡은 집이 어떻게 바뀔지" 궁금하게 만드는 쪽으로(위 패턴을 살려서, 완성된 모습의 구체적 디테일을 한 단어 넣어도 좋아).\n'+
+
+  '3) 업로드용 플랫폼 제목은 레터박스와 달라도 되고 조금 더 길어도 됨(한 줄, 40자 이내). 해시태그 기본 조합(사진 내용에 맞게 1~2개만 바꿔도 됨):\n'+
+  '   유튜브: #신축빌라 #탑층인테리어 #옥상정원 #하우스투어 #shorts / 틱톡: #인테리어 #housetour #신축빌라 #탑층뷰 #fyp / 인스타 릴스: #신축빌라 #탑층인테리어 #옥상정원 #인테리어디자인 #reels\n'+
+  '반드시 JSON만 답해: {"order":[번호들],"top":"첫줄\\n둘째줄","youtube":{"title":"","desc":"","tags":"#.. #.."},"instagram":{"caption":""},"tiktok":{"caption":""}}';
+function _autoShortsThumb(src, cb){
+  var im=new Image(); im.crossOrigin='anonymous';
+  im.onload=function(){ try{ var sc=Math.min(1, 512/Math.max(im.naturalWidth,im.naturalHeight)), c=document.createElement('canvas'); c.width=Math.round(im.naturalWidth*sc); c.height=Math.round(im.naturalHeight*sc); c.getContext('2d').drawImage(im,0,0,c.width,c.height); cb(c.toDataURL('image/jpeg',0.72).split(',')[1]); }catch(e){ cb(null); } };
+  im.onerror=function(){ cb(null); };
+  im.src=src;
+}
+function _autoShortsRun(btn, statusEl, resultEl, makeVideo){
+  var imgs=(G_SHORTS.images||[]).filter(function(x){ return x && x.img && !x.isVideo; });
+  if(imgs.length<2){ statusEl.textContent='먼저 아래에서 사진을 2장 이상 넣어주세요 (갤러리에서 불러오기 또는 공간 컨셉의 "쇼츠로 보내기").'; return; }
+  if(imgs.length>16){ statusEl.textContent='사진이 많아서 앞쪽 16장만 AI가 봐요.'; imgs=imgs.slice(0,16); }
+  btn.disabled=true; statusEl.textContent='🤖 AI가 사진 '+imgs.length+'장을 보는 중… (20~40초)';
+  var b64=new Array(imgs.length), left=imgs.length;
+  imgs.forEach(function(x,i){ _autoShortsThumb(x.img, function(d){ b64[i]=d; if(--left===0) ask(); }); });
+  function ask(){
+    var content=[];
+    b64.forEach(function(d,i){ if(d){ content.push({type:'text', text:'#'+i+(imgs[i].customLabel?(' ('+imgs[i].customLabel+')'):'')}); content.push({type:'image', source:{type:'base64', media_type:'image/jpeg', data:d}}); } });
+    if(!content.length){ btn.disabled=false; statusEl.textContent='사진을 불러오지 못했어요. 잠시 후 다시 시도해주세요.'; return; }
+    content.push({type:'text', text:AUTO_SHORTS_RULES});
+    _falProxyCall('chat-assistant', {messages:[{role:'user', content:content}]}, function(res){
+      try{
+        var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t);
+        var m=String(t||'').match(/\{[\s\S]*\}/); if(!m) throw new Error('AI 답변을 읽지 못했어요');
+        var j=JSON.parse(m[0]);
+        // ① 순서 적용 (AI가 빠뜨린 번호는 원래 순서대로 뒤에 붙임, 영상 클립은 맨 뒤 그대로)
+        var seen={}, ordered=[];
+        (j.order||[]).forEach(function(n){ n=parseInt(n,10); if(n>=0 && n<imgs.length && !seen[n]){ seen[n]=1; ordered.push(imgs[n]); } });
+        imgs.forEach(function(x,i){ if(!seen[i]) ordered.push(x); });
+        var rest=(G_SHORTS.images||[]).filter(function(x){ return ordered.indexOf(x)<0; });
+        G_SHORTS.images=ordered.concat(rest);
+        // ② 레터박스 제목(1번 컷) — 레터박스 모드로
+        if(j.top){ G_SHORTS.opts.fitMode='contain'; G_SHORTS.opts.topText=String(j.top).replace(/\\n/g,'\n').slice(0,40); }
+        // ③ 업로드 문구
+        window._autoShortsCopy=j;
+        btn.disabled=false;
+        statusEl.textContent='✅ 순서·제목 적용 완료'+(makeVideo?' — 영상 만드는 중…':' — 아래 미리보기를 확인하세요');
+        renderSB(); renderMain('shorts');
+        if(makeVideo){ setTimeout(function(){ try{ _shortsGenerate(); }catch(e){ console.warn('[자동 쇼츠] 영상 생성 시작 실패', e); } }, 400); }
+      }catch(e){ btn.disabled=false; statusEl.textContent='⚠️ '+(e.message||e)+' — 다시 눌러주세요.'; }
+    }, function(err){ btn.disabled=false; statusEl.textContent='⚠️ AI 요청 실패: '+String(err).slice(0,120); });
+  }
+}
+function _mkAutoShortsPanel(p){
+  if(!(typeof G!=='undefined' && G.supaRole==='admin')) return; // 관리자만
+  var w=dv('ss'); w.style.cssText='padding:12px;border-radius:11px;border:1.5px solid var(--acb);background:var(--acg);margin-bottom:8px';
+  w.innerHTML='<div style="font-size:13.5px;font-weight:800;color:var(--ac)">🤖 원클릭 자동 쇼츠 <span style="font-size:10px;color:var(--m2);font-weight:600">관리자 전용 시험판</span></div>'+
+    '<div style="font-size:11px;color:var(--t2);line-height:1.6;margin:5px 0 9px">사진만 넣어두고 누르면 AI가 <b>컷 순서</b>(노후→철거→공사 1~3단계→항공·투시→인테리어→배치도 순, 변신 사진이 없으면 임팩트 컷 1번), <b>1번 컷 레터박스 제목</b>, <b>유튜브·인스타·틱톡 제목·해시태그</b>를 대표님 규칙대로 정하고 영상까지 만들어요. 음악은 아래 "배경음악"에 한 번 올려둔 곡이 계속 들어가요.</div>';
+  var row=dv(''); row.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:11.5px;color:var(--t2)';
+  var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=true; cb.id='auto-shorts-mkvid';
+  var lb=document.createElement('label'); lb.htmlFor='auto-shorts-mkvid'; lb.textContent='순서·제목 정한 뒤 영상까지 바로 만들기';
+  row.appendChild(cb); row.appendChild(lb); w.appendChild(row);
+  var btn=mk('button',''); btn.type='button'; btn.textContent='🤖 자동으로 쇼츠 만들기';
+  btn.style.cssText='width:100%;padding:12px;border-radius:9px;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit';
+  var st=dv(''); st.style.cssText='font-size:11px;color:var(--t2);margin-top:7px;line-height:1.5;white-space:pre-wrap';
+  if(!G_SHORTS.opts.bgmFile) st.innerHTML='<span style="color:#fbbf24">🎵 배경음악이 아직 없어요 — 아래 "배경음악"에 한 번 올려두면 계속 들어가요.</span>';
+  var res=dv(''); res.style.cssText='margin-top:8px;display:flex;flex-direction:column;gap:6px';
+  function card(t,v){ var c=dv(''); c.style.cssText='background:var(--card);border:1px solid var(--bd2);border-radius:8px;padding:8px'; var h=dv(''); h.style.cssText='display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:800;color:var(--ac);margin-bottom:4px'; h.textContent=t; var cp=mk('button',''); cp.type='button'; cp.textContent='복사'; cp.style.cssText='padding:3px 9px;border-radius:6px;border:1px solid var(--ac);background:transparent;color:var(--ac);font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit'; var ta=document.createElement('textarea'); ta.value=v||''; ta.style.cssText='width:100%;box-sizing:border-box;font-size:11.5px;color:var(--t);background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:6px;min-height:46px;resize:vertical;font-family:inherit'; cp.onclick=function(){ try{ navigator.clipboard.writeText(ta.value).then(function(){ cp.textContent='✓ 복사됨'; setTimeout(function(){cp.textContent='복사';},1400); }); }catch(e){ ta.select(); try{document.execCommand('copy');}catch(e2){} } }; h.appendChild(cp); c.appendChild(h); c.appendChild(ta); return c; }
+  var j=window._autoShortsCopy;
+  if(j){
+    if(j.top) res.appendChild(card('🎬 1번 컷 레터박스 제목', String(j.top).replace(/\\n/g,'\n')));
+    if(j.youtube){ res.appendChild(card('▶ 유튜브 제목', j.youtube.title)); if(j.youtube.desc) res.appendChild(card('▶ 유튜브 설명란', j.youtube.desc)); res.appendChild(card('▶ 유튜브 태그', j.youtube.tags)); }
+    if(j.instagram) res.appendChild(card('📷 인스타 캡션', j.instagram.caption));
+    if(j.tiktok) res.appendChild(card('🎵 틱톡 캡션', j.tiktok.caption));
+  }
+  btn.onclick=function(){ _autoShortsRun(btn, st, res, cb.checked); };
+  w.appendChild(btn); w.appendChild(st); w.appendChild(res);
+  p.appendChild(w);
+}
+// ══ 2026-10-19 🏗 변신 세트 자동 만들기 (관리자 전용) ═══════════════════════════════════════
+// 완성 외관 사진 한 장 → 노후 건물 → 실내 철거(노후 사진에 적용) → 빈 땅(0단계) → 공사 1·1.5·2·3단계 를 AI 편집 프리셋으로
+// 차례대로 자동 생성하고, 완성 사진까지 순서대로 쇼츠에 넣음(그다음 인테리어 컷을 더 넣고 🤖 자동 편집을 누르면 됨).
+// 기존 AI 편집 실행 경로(_doActbtn)를 그대로 써서 결과물·갤러리 저장이 평소와 똑같이 됨. 끝나면 AI 편집 탭의 원래 사진은 되돌려둠.
+var XFORM_STEPS=[
+  {k:'@aged', from:'final', label:'노후 건물'},
+  {k:'unfinished_interior_stage1', from:'@aged', label:'철거 중'},
+  {k:'unfinished_stage0', from:'final', label:'빈 땅(착공 전)'},
+  {k:'unfinished_stage1', from:'final', label:'공사 1단계'},
+  {k:'unfinished_stage1b', from:'final', label:'공사 1.5단계'},
+  {k:'unfinished_stage2', from:'final', label:'공사 2단계'},
+  {k:'unfinished_stage3', from:'final', label:'공사 3단계'}
+];
+function _xformRunStep(src, key, cb){
+  try{
+    var ps=(PS_EDIT||[]).find(function(x){ return x.k===key; });
+    if(!ps){ cb(null,'프리셋을 찾지 못했어요: '+key); return; }
+    if(G.wf!=='edit') selectWF('edit');
+    G.editMode='normal';
+    var t=getTab('edit'); t.inputImg=src; t.selK=key; t.prompt=ps.pt; t.agedOnEmptyLot=false; t.refs=[]; t.extraPrompt='';
+    var before={}; (G.renderQueue||[]).forEach(function(x){ before[x.id]=1; });
+    window._doActbtn();
+    var task=null, t0=Date.now();
+    (function poll(){
+      if(window._xformStop){ cb(null,'중단됨'); return; }
+      if(!task) task=(G.renderQueue||[]).filter(function(x){ return !before[x.id] && x.wf==='edit' && x.selK===key; })[0]||null;
+      if(!task){ if(Date.now()-t0>20000){ cb(null,'실행이 시작되지 않았어요'); return; } setTimeout(poll,500); return; }
+      if((G.renderQueue||[]).indexOf(task)>=0 && Date.now()-t0<6*60*1000){ setTimeout(poll,1500); return; }
+      var it=task._resultItem;
+      if(it && (it.cloud_url||it.result)) cb(it.cloud_url||it.result, null); else cb(null, task.status==='cancelled'?'취소됨':'생성 실패');
+    })();
+  }catch(e){ cb(null, e.message||String(e)); }
+}
+function _xformRun(finalSrc, agedK, statusEl, done){
+  window._xformStop=false;
+  var et=getTab('edit'), keep={inputImg:et.inputImg, selK:et.selK, prompt:et.prompt, refs:et.refs, extraPrompt:et.extraPrompt};
+  var out={final:finalSrc}, results=[], i=0;
+  function restore(){ try{ var t=getTab('edit'); t.inputImg=keep.inputImg; t.selK=keep.selK; t.prompt=keep.prompt; t.refs=keep.refs; t.extraPrompt=keep.extraPrompt; }catch(e){} }
+  function next(){
+    if(i>=XFORM_STEPS.length){ restore(); finish(); return; }
+    var s=XFORM_STEPS[i], key=(s.k==='@aged')?agedK:s.k, src=out[s.from==='@aged'?'@aged':'final'];
+    if(!src){ results.push({label:s.label, err:'앞 단계 실패로 건너뜀'}); i++; next(); return; }
+    statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… (한 장에 30초~1분)';
+    _xformRunStep(src, key, function(url, err){
+      if(url){ if(s.k==='@aged') out['@aged']=url; results.push({label:s.label, url:url}); }
+      else { results.push({label:s.label, err:err}); if(err==='중단됨'){ restore(); finish(); return; } }
+      i++; next();
+    });
+  }
+  function finish(){
+    var ok=results.filter(function(r){ return r.url; });
+    ok.forEach(function(r){ G_SHORTS.images.push({id:Date.now()+Math.random(), img:r.url, orig:null, role:'auto', autoRole:'ai_design', customLabel:r.label, source:'clover'}); });
+    G_SHORTS.images.push({id:Date.now()+Math.random(), img:finalSrc, orig:null, role:'auto', autoRole:'ai_design', customLabel:'완성 외관', source:'clover'});
+    var bad=results.filter(function(r){ return !r.url; });
+    done('✅ '+ok.length+'장 완성'+(bad.length?(' · 실패 '+bad.length+'장('+bad.map(function(r){return r.label;}).join(', ')+') — AI 편집에서 그 단계만 다시 돌려 넣어주세요'):'')+'\n쇼츠에 순서대로 넣었어요. 인테리어 컷을 더 넣고 🤖 자동으로 쇼츠 만들기를 누르세요.');
+  }
+  next();
+}
+function _mkXformPanel(p){
+  if(!(typeof G!=='undefined' && G.supaRole==='admin')) return;
+  var w=dv('ss'); w.style.cssText='padding:12px;border-radius:11px;border:1.5px solid rgba(245,158,11,.5);background:rgba(245,158,11,.07);margin-bottom:8px';
+  w.innerHTML='<div style="font-size:13.5px;font-weight:800;color:#fbbf24">🏗 변신 세트 자동 만들기 <span style="font-size:10px;color:var(--m2);font-weight:600">관리자 전용</span></div>'+
+    '<div style="font-size:11px;color:var(--t2);line-height:1.6;margin:5px 0 9px">완성 외관 사진 한 장을 고르면 <b>노후 건물 → 철거 중 → 빈 땅 → 공사 1·1.5·2·3단계</b>를 자동으로 만들고, 완성 사진까지 순서대로 쇼츠에 넣어요. (7장, 약 5~8분)</div>';
+  var sel=document.createElement('select'); sel.style.cssText='width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit;margin-bottom:8px';
+  [['aged_house','노후된 주택'],['aged_villa','노후된 빌라'],['aged_redbrick','노후된 빨간벽돌 건물'],['aged_commercial_ext','노후된 상가건물']].forEach(function(o){ var op=document.createElement('option'); op.value=o[0]; op.textContent='노후 스타일: '+o[1]; sel.appendChild(op); });
+  w.appendChild(sel);
+  var btn=mk('button',''); btn.type='button'; btn.textContent='🖼 완성 외관 사진 고르고 시작';
+  btn.style.cssText='width:100%;padding:11px;border-radius:9px;border:none;background:#f59e0b;color:#000;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit';
+  var stop=mk('button',''); stop.type='button'; stop.textContent='⏹ 중단'; stop.style.cssText='display:none;width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:12px;cursor:pointer;font-family:inherit';
+  var st=dv(''); st.style.cssText='font-size:11px;color:var(--t2);margin-top:7px;line-height:1.5;white-space:pre-wrap';
+  if(window._xformBusy){ btn.disabled=true; stop.style.display='block'; st.textContent=window._xformStatus||'만드는 중…'; }
+  stop.onclick=function(){ window._xformStop=true; stop.textContent='중단 중… (지금 만드는 장이 끝나면 멈춰요)'; };
+  btn.onclick=function(){
+    _openGalleryPickerForAnchor(function(src){
+      if(!src) return;
+      window._xformBusy=true; btn.disabled=true; stop.style.display='block';
+      // 진행 중엔 AI 편집 화면으로 넘어가므로, 어느 화면에서든 보이게 화면 위쪽에 떠 있는 진행 표시
+      var fl=document.getElementById('xform-float'); if(!fl){ fl=document.createElement('div'); fl.id='xform-float'; fl.style.cssText='position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:100005;background:var(--card);border:1.5px solid rgba(245,158,11,.6);color:var(--t);border-radius:12px;padding:10px 14px;font-size:12.5px;font-weight:700;box-shadow:0 10px 30px rgba(0,0,0,.5);display:flex;gap:10px;align-items:center;max-width:92vw;font-family:inherit'; document.body.appendChild(fl); }
+      fl.innerHTML='<span id="xform-float-t"></span><button type="button" style="padding:4px 10px;border-radius:7px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit">⏹ 중단</button>';
+      fl.querySelector('button').onclick=function(){ window._xformStop=true; this.textContent='중단 중…'; };
+      var stEl={ set textContent(v){ window._xformStatus=v; var e=document.getElementById('xform-st'); if(e) e.textContent=v; var f=document.getElementById('xform-float-t'); if(f) f.textContent=v; } };
+      _xformRun(src, sel.value, stEl, function(msg){
+        window._xformBusy=false; window._xformStatus=msg;
+        try{ var f=document.getElementById('xform-float'); if(f) f.remove(); }catch(_e){}
+        selectWF('shorts'); renderSB(); renderMain('shorts');
+        var e=document.getElementById('xform-st'); if(e) e.textContent=msg;
+      });
+    });
+  };
+  st.id='xform-st';
+  w.appendChild(btn); w.appendChild(stop); w.appendChild(st);
+  p.appendChild(w);
+}
 function sbShorts(p){
   var images = G_SHORTS.images;
   var opts = G_SHORTS.opts;
@@ -28002,6 +28178,8 @@ function sbShorts(p){
     return outer;
   }
 
+  try{ _mkXformPanel(p); }catch(e){ console.warn('[변신 세트] 패널 오류', e); }
+  try{ _mkAutoShortsPanel(p); }catch(e){ console.warn('[자동 쇼츠] 패널 오류', e); }
   // 안내
   var note=dv('');
   note.style.cssText='font-size:12px;color:var(--t2);line-height:1.6;padding:10px;background:var(--acg);border-radius:9px;margin-bottom:4px;border:1px solid var(--acb)';
@@ -47002,6 +47180,7 @@ function executeSingleRender(task){
       tags.push(cost+'cr');
       if(!G.HIST[task.wf])G.HIST[task.wf]=[];
       var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,vidRes:task.vidRes||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null,isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined};
+      try{ task._resultItem=item; }catch(_e){} // 변신 세트 자동 만들기가 이 작업의 결과를 이어받을 수 있게
 
       function _finishItem(){
         // ── 1. 결과 저장 (DB 오류와 무관하게 무조건 실행) ──────────
