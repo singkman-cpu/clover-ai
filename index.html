@@ -5498,7 +5498,7 @@ function _openColorAdjustPanel(srcUrl, wfForSave){
       var saveWf = wfForSave || G.wf;
       if(!G.HIST[saveWf]) G.HIST[saveWf]=[];
       var newId=Date.now()+Math.random();
-      G.HIST[saveWf].unshift({id:newId, orig:srcUrl, origThumb:null, result:dataUrl, tags:['색상보정'], ai:'', cx:50, fav:false, wf:saveWf, preview:false});
+      G.HIST[saveWf].unshift({id:newId, orig:srcUrl, origThumb:null, result:dataUrl, tags:['색상보정'], ai:'', cx:50, fav:false, wf:saveWf, preview:false, siteSet:(saveWf==='spaceset')?!!G._siteSetMode:undefined, isApt:(saveWf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined});
       if(G.wf===saveWf && typeof renderMain==='function') renderMain(saveWf);
       if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery(saveWf, newId, dataUrl, srcUrl, '색상 보정', '', null, '');
       var origLabel=galBtn.innerHTML;
@@ -9837,7 +9837,9 @@ function renderMain(callWf, preserveScroll){
   // 옛날 항목(이 수정 이전에 만들어진 것)은 원래 동작대로 공간 컨셉 디자인 쪽에 계속 보이게 둠.
   if(wf==='spaceset'){
     var _curIsApt = !!getTab('spaceset').isAptSimpleMode;
-    var _filteredItems = items.filter(function(x){ return !!x.isApt === _curIsApt; });
+    // 2026-10-19 분리: 현장사진 세트(G._siteSetMode)와 공간 컨셉 결과를 서로 안 보이게(표시 없는 옛 결과는 공간 컨셉 쪽)
+    var _curSS = !_curIsApt && !!G._siteSetMode;
+    var _filteredItems = items.filter(function(x){ return !!x.isApt === _curIsApt && (_curIsApt || !!x.siteSet === _curSS); });
     // ⚠️ 버그 방어("컨셉확장으로 방금 만든 결과가 메인화면에 전혀 안 뜬다"는 신고 — 정확한
     // 재현 조건은 아직 못 찾았지만, isApt 태그가 어떤 이유로든(타이밍 등) 잘못 찍혀서 위 필터가
     // 실제로는 존재하는 결과를 전부 걸러버리는 경우를 의심할 수 있음): 필터링 후 0개가 됐는데
@@ -9847,7 +9849,7 @@ function renderMain(callWf, preserveScroll){
     // ⚠️ 버그 수정(2026-10-05, "공간컨셉디자인에서 만든 건축외관이 아파트 컨셉 디자인 메인화면에 보인다"):
     // 아파트 모드에서 아파트 결과가 아직 0개면 위 방어 로직이 "필터 없이 전부"를 보여줘서 공간컨셉
     // 결과가 통째로 섞여 보였음 — 아파트 모드에서는 절대 섞지 않고 빈 화면(업로드 화면)을 보여줌.
-    if(_filteredItems.length || !items.length || _curIsApt){
+    if(_filteredItems.length || !items.length || _curIsApt || _curSS || items.some(function(x){ return !!x.siteSet; })){
       items = _filteredItems;
     } else {
       console.warn('[renderMain] spaceset isApt 필터가 결과를 전부 가려서(총 '+items.length+'개), 필터 없이 그대로 표시함 — isApt 태그 확인 필요');
@@ -9871,7 +9873,7 @@ function renderMain(callWf, preserveScroll){
   // 영원히 막혀 있었음). 이제 저장 시각(t)도 같이 기록해서 일정 시간(6시간)이 지나면 자동으로
   // 무효화하고, 레거시 값(시각 정보 없는 예전 순수 숫자)은 즉시 무효화해서 지금 이 문제를 바로
   // 풀어줌. 또한 정상적으로 다시 보이게 된 뒤에는 이 값 자체를 지워서 재발을 원천 차단함.
-  var _suppressKey='clover_suppress_hist_'+wf;
+  var _suppressKey='clover_suppress_hist_'+wf+((wf==='spaceset'&&G._siteSetMode)?'_ss':'');
   var _suppressCount=null;
   try{
     var _sv=localStorage.getItem(_suppressKey);
@@ -18528,7 +18530,7 @@ function _stageRootFor(src){
     return root;
   }catch(e){ return null; }
 }
-function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel){
+function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel, siteSetFlag){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
     // ⚠️ executeSingleRender 쪽과 같은 이유로 여기도 영상 URL이면 .jpg/image-jpeg로 잘못
@@ -18553,7 +18555,7 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
           var _row2={
             user_id:_supaUser.id, wf:wf, storage_path:filePath, public_url:publicUrl,
             orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:roomLabel||'', budget_snapshot:budgetSnapshot||null,
-            meta:{prompt:String((_sp&&_sp.autoRoomPrompt)||'').slice(0,1000), preset:roomLabel||'', eng:engineName||'', mode:''}
+            meta:{prompt:String((_sp&&(siteSetFlag?_sp.multiRoomPrompt:_sp.autoRoomPrompt))||'').slice(0,1000), preset:roomLabel||'', eng:engineName||'', mode:(siteSetFlag?'siteset':'')}
           };
           _supa.from('gallery').insert(_row2).select().single().then(function(ins){
             if(ins && ins.error && /meta/i.test(ins.error.message||'')){ delete _row2.meta; return _supa.from('gallery').insert(_row2).select().single(); }
@@ -18577,7 +18579,9 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
     }).catch(function(e){console.warn('[Gallery] fetch 오류:',e);});
   }catch(e){ console.warn('[Gallery] 오류:', e); }
 }
-function _showRoomResultInMain(origUrl, resultUrl, roomLabel, isAptOverride){
+function _showRoomResultInMain(origUrl, resultUrl, roomLabel, isAptOverride, siteSetOverride){
+  // 2026-10-19 분리("공간컨셉디자인이 현장사진 여러장세트랑 연결되어 있다"): 결과마다 현장사진 세트(siteSet:true)인지 공간 컨셉인지 표시 → 메인화면에서 각자 것만 보임
+  var _ssTag = (typeof siteSetOverride!=='undefined' && siteSetOverride!==null) ? !!siteSetOverride : !!G._siteSetMode;
   // ⚠️ 재설계: "공간 컨셉 디자인"이 "현장사진 디자인"이랑 G.HIST.space를 같이 써서 메인화면이
   // 두 탭에서 똑같이 보이는 문제가 있었음 — 이제 이 함수는 오직 "공간 컨셉 디자인"(spaceset)
   // 전용이므로 G.HIST.spaceset(독립된 배열)에 저장하고 그 탭 화면만 갱신함.
@@ -18596,7 +18600,7 @@ function _showRoomResultInMain(origUrl, resultUrl, roomLabel, isAptOverride){
   // 넘겨받아 그걸 그대로 쓰고, 넘어온 값이 없을 때만(예: 현장사진세트 쪽 호출) 지금 시점의
   // spTab.isAptSimpleMode를 읽는 것으로 폴백함.
   var _isAptTag = (typeof isAptOverride!=='undefined' && isAptOverride!==null) ? !!isAptOverride : !!getTab('spaceset').isAptSimpleMode;
-  G.HIST.spaceset.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:[roomLabel||'공간 세트'], ai:'', cx:50, fav:false, wf:'spaceset', preview:false, isApt:_isAptTag });
+  G.HIST.spaceset.unshift({ id:Date.now()+Math.random(), orig:origUrl||null, result:resultUrl, origThumb:null, tags:[roomLabel||'공간 세트'], ai:'', cx:50, fav:false, wf:'spaceset', preview:false, isApt:_isAptTag, siteSet:(_isAptTag?false:_ssTag) });
   getTab('spaceset').resultImg=resultUrl;
   if(G.wf==='spaceset') renderMain('spaceset');
 }
@@ -18693,7 +18697,7 @@ function _addMultiRoomPhotosFromFiles(fileList){
         _mrDetectRoom(newRoom);
         // 업로드하자마자 우측 메인 화면에 바로 보이게 함 — 예전엔 사이드바 썸네일에만 나오고
         // 메인 화면엔 아무 반응이 없어서 "업로드가 안 된 건가?" 헷갈렸음.
-        if(G.wf==='spaceset') _showRoomResultInMain(null, resized, newRoom.label);
+        if(G.wf==='spaceset') _showRoomResultInMain(null, resized, newRoom.label, null, true);
         remaining--;
         if(remaining<=0) renderSB();
       });
@@ -18711,7 +18715,7 @@ function _addMultiRoomPhotoFromGallerySrc(src){
   var newRoom={id:Date.now()+Math.random(), img:src, label:MULTIROOM_LABELS[Math.min(nextIdx,MULTIROOM_LABELS.length-1)]};
   spTab.multiRoomImages.push(newRoom);
   _mrDetectRoom(newRoom);
-  if(G.wf==='spaceset') _showRoomResultInMain(null, src, newRoom.label);
+  if(G.wf==='spaceset') _showRoomResultInMain(null, src, newRoom.label, null, true);
   renderSB();
 }
 // 여러 장을 연달아 고를 수 있는 갤러리 모달 — 표준 _openGalleryPickerForUpload와 달리 하나
@@ -18843,21 +18847,26 @@ function mkMultiRoomSpace(p){
   // 눈에 띄게 만듦.
   resetAllBtn.style.cssText='width:100%;margin-top:10px;padding:13px;border-radius:10px;border:1.5px solid rgba(239,68,68,.5);background:rgba(239,68,68,.12);color:#f87171;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit';
   resetAllBtn.onclick=function(){
-    if(!confirm('현장사진세트·컨셉확장에 올려둔 사진과 입력한 문구(전체 공통 스타일 등)가 모두 삭제됩니다. 계속할까요?')) return;
+    // 2026-10-19 분리: 메뉴가 나뉘었으므로 지금 보고 있는 쪽(현장사진 세트 / 공간 컨셉)만 지움 — 다른 쪽 사진·문구는 그대로
+    var _rsSS=!!G._siteSetMode;
+    if(!confirm((_rsSS?'현장사진 세트':'공간 컨셉 디자인')+'에 올려둔 사진과 입력한 문구(전체 공통 스타일 등)가 모두 삭제됩니다. 계속할까요?')) return;
+    if(_rsSS){
     spTab.multiRoomImages=[];
     spTab.multiRoomRefDesignImg=null;
     // ⚠️ 요청 반영("공간컨셉디자인 밑에 자주쓰는문구 이건 전체리셋할때 같이 리셋 시켜줘"): 이미지만
     // 지우고 "전체 공통 스타일" 텍스트박스에 토글로 넣는 자주 쓰는 문구(바닥재 통일, 가구소품
     // 다양하게 등)는 안 지워지고 있었음 — 두 모드(현장사진세트/컨셉확장) 프롬프트 다 같이 초기화.
     spTab.multiRoomPrompt='';
+    idbSaveDraft(_multiRoomDraftKey(), {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
+    } else {
     spTab.autoRoomPrompt='';
     spTab.autoRoomExtAnchors=[{img:null,label:'파사드뷰(정면)'}];
     spTab.autoRoomIntAnchors=[{img:null,label:SPACE_CATEGORIES[spTab.autoRoomCategory||'residential'].types[0]}];
     spTab.autoRoomSelected = _autoRoomTypesForCategory(spTab.autoRoomCategory||'residential').slice();
     spTab._cloudAnchorSyncTried=true; // 리셋 직후 클라우드에서 다시 복원되지 않도록 막음
     if(_supa && _supaUser) _supa.from('user_workspace_state').delete().eq('user_id',_supaUser.id).eq('tab_key','spaceset_anchors').then(function(){}).catch(function(){});
-    idbSaveDraft(_multiRoomDraftKey(), {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
     idbSaveDraft(_autoRoomDraftKey(), {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity, autoRoomSelected:spTab.autoRoomSelected}).catch(function(){});
+    }
     G._suppressHistOnce=true; // 이번 리셋 직후 화면엔 예전 결과물 대신 빈 업로드 화면을 보여줌(결과물 자체는 갤러리에 그대로 남음)
     // ⚠️ 버그 수정(방금 발견): "공간 컨셉 디자인"(spaceset)은 실제 화면에 보이는 개수가
     // G.HIST['spaceset'] 전체 개수가 아니라 지금 보고 있는 모드(아파트/공간)에 맞는 것만 걸러낸
@@ -18867,12 +18876,13 @@ function mkMultiRoomSpace(p){
     var _resetSnapshot = G.HIST[G.wf]||[];
     if(G.wf==='spaceset'){
       var _curIsAptNow = !!getTab('spaceset').isAptSimpleMode;
-      _resetSnapshot = _resetSnapshot.filter(function(x){ return !!x.isApt === _curIsAptNow; });
+      var _curSSNow = !_curIsAptNow && !!G._siteSetMode;
+      _resetSnapshot = _resetSnapshot.filter(function(x){ return !!x.isApt === _curIsAptNow && (_curIsAptNow || !!x.siteSet === _curSSNow); });
     }
     // ⚠️ 버그 수정: 저장 시각(t)도 같이 남겨서, renderMain 쪽에서 일정 시간이 지나면 자동으로
     // 무효화할 수 있게 함(자세한 이유는 renderMain의 관련 주석 참고 — 시각 정보 없이 개수만
     // 영구 저장하면, 나중에 그 개수를 다시 못 넘기는 경우 화면이 영영 안 뜨는 상태로 갇힐 수 있음).
-    try{ localStorage.setItem('clover_suppress_hist_'+G.wf, JSON.stringify({n:_resetSnapshot.length, t:Date.now()})); }catch(e){} // 새로고침해도 잠시 빈 화면 유지(새 결과물이 생기거나 일정 시간이 지나면 자동 해제)
+    try{ localStorage.setItem('clover_suppress_hist_'+G.wf+((G.wf==='spaceset'&&G._siteSetMode)?'_ss':''), JSON.stringify({n:_resetSnapshot.length, t:Date.now()})); }catch(e){} // 새로고침해도 잠시 빈 화면 유지(새 결과물이 생기거나 일정 시간이 지나면 자동 해제)
     renderSB();
     renderMain(G.wf); // ⚠️ 버그 수정(같은 클래스): 사이드바만 갱신하고 메인화면(오른쪽 미리보기)은 안 새로 그려서, 리셋했는데도 오른쪽엔 방금 지운 사진들이 그대로 남아있는 것처럼 보일 수 있었음
   };
@@ -19556,7 +19566,7 @@ function mkMultiRoomSpace(p){
       if(result && result.url){
         var rImg=document.createElement('img');rImg.src=result.url;
         rImg.style.cssText='width:100%;border-radius:7px;cursor:pointer';
-        rImg.onclick=function(origU,resU,lbl){ return function(){ _showRoomResultInMain(origU,resU,lbl); }; }(result.prevUrl||(room2?room2.img:null), result.url, room2?room2.label:null);
+        rImg.onclick=function(origU,resU,lbl){ return function(){ _showRoomResultInMain(origU,resU,lbl,null,true); }; }(result.prevUrl||(room2?room2.img:null), result.url, room2?room2.label:null);
         rRow.appendChild(rImg);
         var retryBtn=mk('button','');retryBtn.type='button';retryBtn.textContent='🔄 이 공간만 다시 생성';
         retryBtn.style.cssText='width:100%;margin-top:6px;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--card);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit';
@@ -19979,12 +19989,12 @@ function _multiRoomGenerateStep(pos){
           st.results[idx]={url:resultUrl};
           if(!spTab.multiRoomWindowAnchor) spTab.multiRoomWindowAnchor = resultUrl;
         }
-        _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution, null, _candTag);
+        _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution, null, _candTag, true);
         // ⚠️ "내 집 사진(수동)" 모드는 진짜 원본 사진이 있으니, 첫 렌더링이 끝나면 바로
         // 원본 vs 결과 비교 슬라이더를 보여줘도 됨(비교할 게 실제로 있으니까) — "컨셉 확장(자동)"
         // 모드와 다른 점: 그쪽은 상상으로 만든 공간이라 비교 대상이 없어서 첫 렌더링엔 슬라이더를
         // 안 보여주고 재생성할 때만 보여줌.
-        _showRoomResultInMain(room.img, resultUrl, _candTag, _isAptForThisRun);
+        _showRoomResultInMain(room.img, resultUrl, _candTag, _isAptForThisRun, true);
         _mrAfterOneCandidate();
       }, function(err){
         if(_mrCi===0){ st.results[idx]={error:String(err).slice(0,120)}; }
@@ -20044,10 +20054,10 @@ function _multiRoomRetryOne(idx){
     getTab('space').refs=origRefs;
     st.results[idx]={url:resultUrl, prevUrl:prevResult&&prevResult.url};
     st.running=false; st.retryingIdx=null;
-    _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution, null, room.label);
+    _saveResultToCloudGallery('spaceset', task.id, resultUrl, room.img, 'nano2', task.resolution, null, room.label, true);
     // 재생성 끝나면 바로 메인 화면에 "직전 버전 vs 새 버전" 비교로 보여줘서, 클릭 한 번 더
     // 안 해도 바로 비교하며 마음에 드는 쪽을 고를 수 있게 함.
-    _showRoomResultInMain(prevResult&&prevResult.url, resultUrl, room.label, _isAptForThisRetry);
+    _showRoomResultInMain(prevResult&&prevResult.url, resultUrl, room.label, _isAptForThisRetry, true);
     renderSB();
   }, function(err){
     getTab('space').refs=origRefs;
@@ -21948,7 +21958,7 @@ function mkAutoRoomCamera(p){
         // ⚠️ 요청 반영: 컨셉 확장은 원본 사진이 없는 "AI 상상 생성"이라 처음 만든 결과는 비교할
         // 대상이 없으므로 슬라이더 없이 단일 이미지로 보여줌. 다만 "다시 생성"을 눌러 재생성한
         // 적이 있으면(prevUrl 존재) 그때는 "이전 시도 vs 새 시도"를 슬라이더로 비교해서 보여줌.
-        rImg.onclick=function(resU,lbl,prevU){ return function(){ _showRoomResultInMain(prevU||null,resU,lbl); }; }(result.url, typeName, result.prevUrl);
+        rImg.onclick=function(resU,lbl,prevU){ return function(){ _showRoomResultInMain(prevU||null,resU,lbl,null,false); }; }(result.url, typeName, result.prevUrl);
         rRow.appendChild(rImg);
         // 2026-10-05 요청("후보 3장 뽑았는데 좌측에 1장만 보인다"): 후보가 여러 장이면 아래에 작은 썸네일로 전부 보여주고,
         // 누르면 메인 화면에 크게 보이면서 이 뷰의 대표 결과(아래 버튼들이 쓰는 이미지)로 바뀜
@@ -23305,7 +23315,7 @@ function _padExteriorTo916WithBlur(url, cb){
             var _candTag0 = (_arCandN>1) ? (_tagLabel0+' (후보'+(_arCi+1)+'/'+_arCandN+')') : _tagLabel0;
             if(_arCandN>1){ st.cands=st.cands||{}; st.cands[idx]=st.cands[idx]||[]; st.cands[idx][_arCi]=finalUrl; if(G.wf==='spaceset'){ try{ renderSB(); }catch(e){} } } // 2026-10-05: 좌측 결과에 후보 전부 표시
             _saveResultToCloudGallery('spaceset', Date.now()+idx*10+_arCi, finalUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, _candTag0);
-            _showRoomResultInMain(null, finalUrl, _candTag0, _isAptForThisRun);
+            _showRoomResultInMain(null, finalUrl, _candTag0, _isAptForThisRun, false);
             // ⚠️ 요청 반영("계속 캡쳐해서 알려주는 것 말고 더 좋은 방법"): 방금 만든 이미지를 무료
             // ⚠️ 요청 반영("AI 자체검수 배너 삭제해줘, 하지마"): 이 검수 배지 자체를 UI에서 이미
             // 제거했었는데(22875줄 부근), 정작 이 검수용 API 호출(_verifyAcTvCount — 에어컨·TV·조명
@@ -23451,7 +23461,7 @@ function _padExteriorTo916WithBlur(url, cb){
         // 히스토리(G.HIST.spaceset)에 자동으로 추가해주는 _showRoomResultInMain 호출이 빠져있어서,
         // 사용자가 직접 클릭해야만 화면(왼쪽 히스토리·오른쪽 메인)에 나타나고 있었음 — 이제 생성되는
         // 즉시 자동으로 나타나게 함(현장사진세트와 동일하게 통일).
-        _showRoomResultInMain(null, resultUrl, _candTag1, _isAptForThisRun);
+        _showRoomResultInMain(null, resultUrl, _candTag1, _isAptForThisRun, false);
         _arAfterOneCandidate2();
       }, function(err){
         if(_arCi2===0){ st.results[idx]={error:String(err).slice(0,120)}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1); }
@@ -23687,7 +23697,7 @@ function _autoRoomRetryOne(idx){
         else { if(!spTab.autoRoomGenIntUrls) spTab.autoRoomGenIntUrls=[]; spTab.autoRoomGenIntUrls.push(finalUrl); _scTagGen(spTab,finalUrl,typeName); }
         var _tagLabel2 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName;
         _saveResultToCloudGallery('spaceset', Date.now()+idx, finalUrl, null, 'nano2', spTab.autoRoomResolution||'1K', null, _tagLabel2);
-        _showRoomResultInMain((prevResult2&&prevResult2.url)||null, finalUrl, _tagLabel2, _isAptForThisRun);
+        _showRoomResultInMain((prevResult2&&prevResult2.url)||null, finalUrl, _tagLabel2, _isAptForThisRun, false);
         // ⚠️ 요청 반영("AI 자체검수 배너 삭제해줘, 하지마"): 위와 같은 이유로 여기서도 검수용
         // API 호출을 완전히 제거함(배너가 이미 안 보이는데 계산만 계속 돌 이유가 없음).
         renderSB();
@@ -23739,7 +23749,7 @@ function _autoRoomRetryOne(idx){
     _saveResultToCloudGallery('spaceset', task.id, resultUrl, null, 'nano2', task.resolution, null, _tagLabel3);
     // ⚠️ 요청 반영: "다시 생성"으로 재생성한 경우엔 직전 시도(prevResult2)가 있으니 그걸 "이전"으로
     // 넘겨서 슬라이더로 비교되게 함 — 첫 생성일 때만(prevResult2 없음) 단일 이미지로 보여줌.
-    _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, _tagLabel3, _isAptForThisRun);
+    _showRoomResultInMain((prevResult2&&prevResult2.url)||null, resultUrl, _tagLabel3, _isAptForThisRun, false);
     renderSB();
   }, function(err){
     getTab('space').refs = origRefs;
@@ -47091,7 +47101,7 @@ function executeSingleRender(task){
     taskId: task.id,
     orig:task.img, result:null, origThumb:null,
     tags:['렌더링 중...'], ai:'', cx:50, fav:false,
-    wf:task.wf, preview:false, loading:true, isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined,
+    wf:task.wf, preview:false, loading:true, isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined, siteSet:(task.wf==='spaceset')?(task._siteSet!=null?task._siteSet:(task._siteSet=!!G._siteSetMode)):undefined,
     staging:(task.wf==='edit' && /^staging_/.test(task.selK||''))||undefined
   };
   G.HIST[task.wf].unshift(loadingItem);
@@ -47185,7 +47195,7 @@ function executeSingleRender(task){
       }
       tags.push(cost+'cr');
       if(!G.HIST[task.wf])G.HIST[task.wf]=[];
-      var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,vidRes:task.vidRes||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null,isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined};
+      var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,vidRes:task.vidRes||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null,isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined,siteSet:(task.wf==='spaceset')?(task._siteSet!=null?!!task._siteSet:!!G._siteSetMode):undefined};
       try{ task._resultItem=item; }catch(_e){} // 변신 세트 자동 만들기가 이 작업의 결과를 이어받을 수 있게
 
       function _finishItem(){
@@ -47790,7 +47800,7 @@ function _lensBloomApplyToItem(item, lv, btn){
     try{
       var wf=item.wf||G.wf, id=Date.now();
       var lvKo={soft:'은은하게',mid:'보통',strong:'강하게'}[lv]||'';
-      var ni={id:id, orig:item.result, result:out, tags:['✨ 빛번짐 '+lvKo].concat((item.tags||[]).slice(0,2)), ai:item.ai||'', preview:false, cx:50, fav:false, wf:wf, savedSelK:item.savedSelK};
+      var ni={id:id, orig:item.result, result:out, tags:['✨ 빛번짐 '+lvKo].concat((item.tags||[]).slice(0,2)), ai:item.ai||'', preview:false, cx:50, fav:false, wf:wf, savedSelK:item.savedSelK, isApt:item.isApt, siteSet:item.siteSet};
       if(!G.HIST[wf]) G.HIST[wf]=[];
       G.HIST[wf].unshift(ni);
       if(G.wf===wf) document.querySelectorAll('.hist-s').forEach(function(hs){ addHistEl(ni,true,hs); });
@@ -56671,6 +56681,9 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // ⚠️ 버그 수정: "공간 컨셉 디자인"에서 메인화면 빈 상태를 클릭하면 일반 단일 이미지 업로드
       // 경로(#fi, tab.inputImg)로 연결되어 있었는데, 이 탭은 그 필드를 아예 안 써서 클릭해도
       // 아무 반응이 없는 것처럼 보였음 — 방 목록에 여러 장을 한 번에 추가하는 전용 피커로 연결.
+      if(G.wf==='spaceset' && !G._siteSetMode && !getTab('spaceset').isAptSimpleMode){ // 2026-10-19 분리: 공간 컨셉 화면 클릭이 현장사진 세트 사진 목록에 들어가던 것 막음
+        if(typeof _qsToast==='function') _qsToast('공간 컨셉 디자인은 <b>왼쪽 메뉴</b>에서 참고 이미지(건물 외관·실내)를 올려주세요.'); return;
+      }
       if(G.wf==='spaceset'){
         var _mrPicker=document.createElement('input');
         _mrPicker.type='file'; _mrPicker.accept='image/*'; _mrPicker.multiple=true; _mrPicker.style.display='none';
@@ -56687,7 +56700,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       if(G.wf==='shorts')return;
       if(G.wf==='consult')return;
       if(G.wf==='proposal')return;
-      if(G.wf==='spaceset'){ _addMultiRoomPhotosFromFiles(e.dataTransfer&&e.dataTransfer.files); return; }
+      if(G.wf==='spaceset'){ if(!G._siteSetMode && !getTab('spaceset').isAptSimpleMode){ if(typeof _qsToast==='function') _qsToast('공간 컨셉 디자인은 <b>왼쪽 메뉴</b>에서 참고 이미지(건물 외관·실내)를 올려주세요.'); return; } _addMultiRoomPhotosFromFiles(e.dataTransfer&&e.dataTransfer.files); return; }
       if(G.wf==='psedit'){ e.stopPropagation(); _psDropFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); return; } // ⚠️ 포토샵 편집: 끌어다 놓은 이미지 → 문서가 없으면 새로 열고, 있으면 새 레이어로
       var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
       if(f)loadF(f,'main');
@@ -58255,7 +58268,9 @@ function loadCloudGallery(){
           cx: 50,
           preview: false,
           budgetSnapshot: _restoredBudgetSnap,
-          isApt: _restoredIsApt
+          isApt: _restoredIsApt,
+          // 2026-10-19 분리: 현장사진 세트 결과 표시(새 결과는 meta.mode='siteset', 예전 결과는 '원본 사진이 있는 기본 생성'이면 세트로 봄)
+          siteSet: (function(){ if(wf!=='spaceset' || _restoredIsApt) return undefined; var _m=null; try{ _m=row.meta && (typeof row.meta==='string'?JSON.parse(row.meta):row.meta); }catch(_e){} if(_m && _m.mode==='siteset') return true; if(_m && _m.mode) return false; return !!(row.orig_url && (row.engine||'')==='nano2'); })()
         });
         loaded++;
       });
