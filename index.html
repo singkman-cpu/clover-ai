@@ -46281,6 +46281,8 @@ function _runToolWithPromptActual(translatedPrompt){
     // 스냅샷으로 저장해서 그 영상 고유의 해상도가 항상 정확히 표시되게 함.
     vidRes:    G.vres||null,
     upscaleEng:G_UPSCALE_ENG||'topaz',
+    // 2026-10-19 요청("업스케일 좌측에서 조절한 수치를 결과 우측 상단에 표시 — 렌더링되고 나면 어떤 수치였는지 기억이 없다"): 실행 시점의 보강 방식·강도·샤픈을 기록
+    upParams: (G.wf==='upscale' && (G_UPSCALE_ENG||'topaz')==='topaz') ? (function(u){ u=u||{}; var m=u.topazModel||'Redefine'; return {m:m, c:(u.topazCreativity||2), s:(u.topazSharpen!=null?u.topazSharpen:0.5)}; })(G.tabs.upscale) : null,
     scale:     tab.scale||G.tabs.upscale.scale||'2x',
     resolution:(G._guestRun && !_supaUser) ? '1K' : (tab.resolution||'1K'),
     forcedAspect: tab.forcedAspect||'auto', // 작업을 넣은 시점의 출력 비율(대기 중 탭을 옮겨도 유지)
@@ -46766,6 +46768,7 @@ function executeSingleRender(task){
       if(task.wf!=='video'){
         tags.push(eng.n);
         if(task.wf==='upscale')tags.push(task.scale);
+        if(task.wf==='upscale' && task.upParams){ var _up=task.upParams; tags.push(_up.m==='Redefine' ? ('재질 보강 · 강도 '+_up.c+' · 샤픈 '+_up.s) : '선명도만 보강(안전 모드)'); }
         if(task.resolution)tags.push(task.resolution);
       }
       if(task.selK){
@@ -46905,7 +46908,7 @@ function executeSingleRender(task){
                     resolution:task.resolution||'',
                     style_key:task.selK||'',
                     budget_snapshot:task.budgetSnapshot||null,
-                    meta:{prompt:String(task.userText||'').slice(0,1000), preset:task.selK||'', eng:task.eng||'', mode:(task.wf==='edit'?(task.maskData?'mask':'full'):''), mask_url:maskUrl||null}
+                    meta:{prompt:String(task.userText||'').slice(0,1000), preset:task.selK||'', eng:task.eng||'', mode:(task.wf==='edit'?(task.maskData?'mask':'full'):''), mask_url:maskUrl||null, up:task.upParams||null}
                   };
                   _supa.from('gallery').insert(_row).select().single().then(function(ins){
                     if(ins && ins.error && /meta/i.test(ins.error.message||'')){ delete _row.meta; return _supa.from('gallery').insert(_row).select().single(); }
@@ -47263,13 +47266,13 @@ function _resizeToOriginalScale(origImg, ri, resolution, cb){
 // 큰 밝은 면(창문·하늘·흰 벽)은 크기로 걸러서 제외.
 function _lsGetBloom(){ var d={on:false,lv:'mid'}; try{ var v=JSON.parse(localStorage.getItem('clover_lens_bloom')||'null'); if(v&&typeof v==='object'){ d.on=!!v.on; if(v.lv) d.lv=v.lv; } }catch(e){} return d; }
 function _lsSetBloom(v){ try{ localStorage.setItem('clover_lens_bloom', JSON.stringify(v)); }catch(e){} }
-// 2026-10-19 개선("빛번짐이 너무 부자연스럽다 — 인테리어는 천장 할로겐·매입등·스팟·메인등·펜던트만 살짝, 야외는 태양·가로등·자동차 불빛만,
-// 조명 색에 맞게 사진처럼 자연스럽게"):
-//  ① (회원) AI가 사진을 보고 실내/야외와 "실제로 켜진 조명" 위치만 알려줌 → 그 안의 광원만 번지게(흰 물건·반사·창문·벽등·스탠드는 제외)
-//     AI 확인이 안 되면(비회원 등) 사진 위쪽의 작은 광원만 사용
-//  ② 광원 바로 둘레의 색을 읽어서 그 조명 색으로 번지게(전구색은 따뜻하게, 주광색은 하얗게, 나트륨 가로등은 주황, 후미등은 빨강)
-//  ③ 예전처럼 흐린 그림을 여러 번 겹쳐 밝기를 키우지 않고(계단·뿌연 덩어리의 원인), 소수점 계산으로 여러 크기의 가우시안 번짐을 더해 부드럽게 합성
-var LENS_BLOOM_INT_TYPES=['downlight','halogen','spot','main','pendant'], LENS_BLOOM_EXT_TYPES=['sun','streetlight','car'];
+// 2026-10-19 개선("빛번짐이 너무 부자연스럽다"): 예전엔 흐린 그림을 여러 번 겹쳐 밝기를 키워서 등고선 같은 원형 링·뿌연 덩어리가 생겼음
+// → 소수점 계산으로 여러 크기의 가우시안 번짐을 더해 부드럽게 합성하고, 광원 둘레의 실제 색으로 번지게 함(전구색·주광색·주황 가로등·빨간 후미등).
+// 2026-10-19 사용자 요청("천장에 조명이 엄청 많이 보이는데 없다고 뜬다 — 구별하지 말고 빛이 있는 곳엔 자연스럽게"): AI로 조명 종류를 고르던 단계를 빼고,
+// 주변보다 확실히 밝은 작은 광원(스팟·매입등·펜던트·간판 글씨 조명·가로등·차량 불빛 등)은 전부 번지게 함. 창문·흰 벽 같은 큰 밝은 면만 제외.
+// 2026-10-19 사용자 요청("실내가 뿌연 연기 가득한 것처럼 보인다 — 천장 조명이나 간판 로고 LED 들어간 곳만"): 포스터·흰 벽·벽에 비친 빛 자국까지
+// 광원으로 잡혀서 뿌옇게 됐음 → (회원) AI가 사진에서 "천장 조명(매입등·스팟·트랙·메인등·펜던트)"과 "간판·로고 LED" 위치만 찾아주고 그 안에만 번지게.
+// 실내·야외 구분은 안 함(예전에 매장 외관을 야외로 보고 천장 조명을 빼버렸던 문제). AI가 안 되면 사진 위쪽의 아주 작은 점 조명만.
 function _lensBloomDetect(src, cb){
   var done=false; function fin(x){ if(done) return; done=true; cb(x); }
   if(!(typeof _supa!=='undefined' && _supa && _supaUser) || typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(null); return; }
@@ -47277,22 +47280,21 @@ function _lensBloomDetect(src, cb){
   try{
     _proposalImgToB64(src, function(b64){
       if(!b64){ fin(null); return; }
-      var q='You will see one photo (an interior or exterior architectural render/photo). Find every light source that is actually SWITCHED ON and visibly glowing, but ONLY these kinds: '+
-        'INTERIOR → ceiling-mounted fixtures only: recessed downlights (매입등), halogen lights, spotlights/track spots, the main ceiling light (메인등, including a ceiling fan light), pendant lights. '+
-        'EXTERIOR → only the sun, street lamps (가로등), and car headlights/taillights. '+
-        'Do NOT include: wall sconces, floor/table lamps, LED strips or cove/indirect lighting, windows, sky, reflections or highlights on floors/glass/metal, white or bright objects, screens, signs. '+
-        'Reply with ONLY JSON, no other text: {"scene":"interior" or "exterior","lights":[{"type":"downlight|halogen|spot|main|pendant|sun|streetlight|car","box":[ymin,xmin,ymax,xmax]}]} '+
-        'with box = a tight box around the glowing part only, integers 0-1000 normalized to the image. If none, "lights":[].';
+      var q='Look at this architectural photo/render (interior, storefront or exterior). Find ONLY these light sources that are switched on and glowing: '+
+        '(1) "ceiling": ceiling lights of any kind — recessed downlights, spotlights / track spots, the main ceiling light, pendant lights (also ceiling lights seen through a shop window); '+
+        '(2) "sign": illuminated signboard / logo letters (LED channel letters, lit logo). '+
+        'Do NOT include: posters, light boxes with pictures, white walls, bright patches of light on walls, shelf/cabinet/display strip lights, cove lighting, windows, sky, floor lamps, reflections. '+
+        'Give one tight box per fixture (or per sign/logo). Reply with ONLY JSON: {"lights":[{"type":"ceiling|sign","box":[ymin,xmin,ymax,xmax]}]} with integers 0-1000 normalized to the image. If none: {"lights":[]}.';
       _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:q}]}]}, function(res){
         try{
           var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t);
           var m=String(t||'').match(/\{[\s\S]*\}/); if(!m){ fin(null); return; }
-          var j=JSON.parse(m[0]); var sc=(j.scene==='exterior')?'exterior':'interior', ok=(sc==='exterior')?LENS_BLOOM_EXT_TYPES:LENS_BLOOM_INT_TYPES;
-          var L=(j.lights||[]).filter(function(l){ return l && ok.indexOf(String(l.type||''))>=0 && Array.isArray(l.box) && l.box.length===4; }).map(function(l){
-            var b=l.box.map(Number); return {t:l.type, y0:Math.max(0,b[0]/1000), x0:Math.max(0,b[1]/1000), y1:Math.min(1,b[2]/1000), x1:Math.min(1,b[3]/1000)};
-          }).filter(function(b){ return b.x1>b.x0 && b.y1>b.y0 && (b.x1-b.x0)*(b.y1-b.y0)<0.25; });
-          console.log('[빛번짐] AI 조명 확인: '+sc+' · '+L.length+'개', L);
-          fin({scene:sc, lights:L});
+          var j=JSON.parse(m[0]);
+          var L=(j.lights||[]).filter(function(l){ return l && Array.isArray(l.box) && l.box.length===4; }).map(function(l){
+            var b=l.box.map(Number); return {t:String(l.type||''), y0:Math.max(0,b[0]/1000), x0:Math.max(0,b[1]/1000), y1:Math.min(1,b[2]/1000), x1:Math.min(1,b[3]/1000)};
+          }).filter(function(b){ return b.x1>b.x0 && b.y1>b.y0 && (b.x1-b.x0)*(b.y1-b.y0)<0.15; });
+          console.log('[빛번짐] AI 조명 위치: '+L.length+'개', L);
+          fin(L.length ? {lights:L} : null);
         }catch(e){ fin(null); }
       }, function(){ fin(null); });
     });
@@ -47301,10 +47303,7 @@ function _lensBloomDetect(src, cb){
 function _lensBloom(src, lv, cb){
   var done=false; function fin(x){ if(done) return; done=true; cb(x); }
   setTimeout(function(){ fin(null); }, 50000);
-  _lensBloomDetect(src, function(info){
-    if(info && !info.lights.length){ console.log('[빛번짐] 번질 조명이 없다고 판단 — 원본 그대로'); fin(null); return; }
-    _lensBloomRender(src, lv, info, fin);
-  });
+  _lensBloomDetect(src, function(info){ _lensBloomRender(src, lv, info, fin); });
 }
 function _lensBloomRender(src, lv, info, fin){
   try{
@@ -47313,24 +47312,38 @@ function _lensBloomRender(src, lv, info, fin){
     im.onload=function(){
       try{
         var W=im.naturalWidth, H=im.naturalHeight; if(!W||!H){ fin(null); return; }
-        var D=Math.max(W,H), sc=Math.min(1, 640/D), sw=Math.max(16,Math.round(W*sc)), sh=Math.max(16,Math.round(H*sc)), N=sw*sh;
+        var D=Math.max(W,H), sc=Math.min(1, 1600/D), sw=Math.max(16,Math.round(W*sc)), sh=Math.max(16,Math.round(H*sc)), N=sw*sh;
         var sm=document.createElement('canvas'); sm.width=sw; sm.height=sh; var sx=sm.getContext('2d'); sx.imageSmoothingEnabled=true; sx.imageSmoothingQuality='high'; sx.drawImage(im,0,0,sw,sh);
-        var px=sx.getImageData(0,0,sw,sh).data, MX=new Float32Array(N), core=new Uint8Array(N);
-        var boxes=info?info.lights.map(function(b){ var px2=(b.x1-b.x0)*0.15+0.006, py2=(b.y1-b.y0)*0.15+0.006; return {t:b.t, x0:(b.x0-px2)*sw, x1:(b.x1+px2)*sw, y0:(b.y0-py2)*sh, y1:(b.y1+py2)*sh, area:(b.x1-b.x0)*(b.y1-b.y0)*N}; }):null;
+        var px=sx.getImageData(0,0,sw,sh).data, MX=new Float32Array(N), YY=new Float32Array(N), core=new Uint8Array(N);
+        for(var i=0;i<N;i++){ var r=px[i*4],g=px[i*4+1],b=px[i*4+2]; MX[i]=Math.max(r,g,b); YY[i]=0.299*r+0.587*g+0.114*b; }
+        // 주변 평균 밝기(넓게 흐린 값) — 낮 장면처럼 전체가 밝아도, 주변보다 확실히 튀는 작은 점(스팟·매입등)을 광원으로 찾기 위함
+        var LM=(function(){ var r0=Math.max(4,Math.round(Math.max(sw,sh)*0.012)), t1=new Float32Array(N), t2=new Float32Array(N);
+          for(var y=0;y<sh;y++){ var row=y*sw, acc=0, w=2*r0+1; for(var x=-r0;x<=r0;x++) acc+=YY[row+Math.min(sw-1,Math.max(0,x))]; for(var x2=0;x2<sw;x2++){ t1[row+x2]=acc/w; acc+=YY[row+Math.min(sw-1,x2+r0+1)]-YY[row+Math.max(0,x2-r0)]; } }
+          for(var xx=0;xx<sw;xx++){ var acc2=0, w2=2*r0+1; for(var yy=-r0;yy<=r0;yy++) acc2+=t1[Math.min(sh-1,Math.max(0,yy))*sw+xx]; for(var y2=0;y2<sh;y2++){ t2[y2*sw+xx]=acc2/w2; acc2+=t1[Math.min(sh-1,y2+r0+1)*sw+xx]-t1[Math.max(0,y2-r0)*sw+xx]; } }
+          return t2; })();
+        var boxes=(info&&info.lights)?info.lights.map(function(b){ var ex=(b.x1-b.x0)*0.2+0.004, ey=(b.y1-b.y0)*0.2+0.004; return {x0:(b.x0-ex)*sw, x1:(b.x1+ex)*sw, y0:(b.y0-ey)*sh, y1:(b.y1+ey)*sh, area:(b.x1-b.x0+2*ex)*(b.y1-b.y0+2*ey)*N}; }):null;
         function boxAt(x,y){ if(!boxes) return null; for(var k=0;k<boxes.length;k++){ var b=boxes[k]; if(x>=b.x0&&x<=b.x1&&y>=b.y0&&y<=b.y1) return b; } return null; }
-        for(var i=0;i<N;i++){ var r=px[i*4],g=px[i*4+1],b=px[i*4+2], mx=Math.max(r,g,b), mn=Math.min(r,g,b), Y=0.299*r+0.587*g+0.114*b; MX[i]=mx;
-          if(boxes){ if(mx>=245 && Y>=120 && boxAt(i%sw,(i/sw)|0)) core[i]=1; }        // AI가 알려준 조명 안: 색 있는 조명(후미등·나트륨등)도 포함
-          else if(mx>=250 && Y>=232 && mx-mn<70 && ((i/sw)|0)<sh*0.62) core[i]=1;    // AI 확인 없음: 사진 위쪽의 하얀 작은 광원만(바닥 반사 등 제외)
-        }
-        var lab=new Int32Array(N).fill(-1), gate=new Float32Array(N), colR=new Float32Array(N), colG=new Float32Array(N), colB=new Float32Array(N), stack=new Int32Array(N), kept=0;
+        for(var i2=0;i2<N;i2++){ var y0v=YY[i2], mx0=MX[i2];
+          if(boxes){ if(mx0>=235 && (mx0>=248 || mx0-LM[i2]>=30) && boxAt(i2%sw,(i2/sw)|0)) core[i2]=1; continue; } // AI가 알려준 천장 조명·간판 안에서만
+          if(mx0>=248 && y0v>=200) core[i2]=1;                                   // 하얗게 날아간 광원
+          else if((y0v>=190 && y0v-LM[i2]>=38) || (mx0>=240 && mx0-LM[i2]>=70)) core[i2]=2; } // 주변보다 확실히 튀는 작은 점(밝은 낮 장면의 스팟·매입등)
+        var lab=new Int32Array(N).fill(-1), gate=new Float32Array(N), amp=new Float32Array(N), colR=new Float32Array(N), colG=new Float32Array(N), colB=new Float32Array(N), stack=new Int32Array(N), kept=0;
         for(var s0=0;s0<N;s0++){
           if(!core[s0]||lab[s0]!==-1) continue;
           var sp=0, area=0, x0=sw,y0=sh,x1=0,y1=0, list=[]; stack[sp++]=s0; lab[s0]=s0;
           while(sp){ var c=stack[--sp]; list.push(c); area++; var cx=c%sw, cy=(c/sw)|0; if(cx<x0)x0=cx; if(cx>x1)x1=cx; if(cy<y0)y0=cy; if(cy>y1)y1=cy;
             var nb=[cx>0?c-1:-1, cx<sw-1?c+1:-1, cy>0?c-sw:-1, cy<sh-1?c+sw:-1];
             for(var k=0;k<4;k++){ var q=nb[k]; if(q>=0&&core[q]&&lab[q]===-1){ lab[q]=s0; stack[sp++]=q; } } }
-          var bx=(x1-x0+1)*(y1-y0+1), hb=boxAt((x0+x1)/2,(y0+y1)/2);
-          var okSize = boxes ? (hb && area<=Math.min(N*0.08, Math.max(N*0.004, hb.area*1.4)) && (hb.t==='sun' || bx<=N*0.08)) : (area<=N*0.004 && bx<=N*0.02);
+          var bx=(x1-x0+1)*(y1-y0+1), pk=0, clip=false; for(var li=0;li<list.length;li++){ var q2=list[li]; if(MX[q2]>pk) pk=MX[q2]; if(core[q2]===1) clip=true; }
+          var bw2=x1-x0+1, bh2=y1-y0+1, asp=Math.max(bw2,bh2)/Math.min(bw2,bh2);
+          // 하얗게 날아간 광원: 작은 것(라인조명·간판 글씨 포함) / 주변보다 튀는 점: 동글동글한 작은 점만(창틀·흰 벽 가장자리 같은 가는 띠 제외)
+          var pkL=0; for(var li2=0;li2<list.length;li2++){ var q3=list[li2], dl=MX[q3]-LM[q3]; if(dl>pkL) pkL=dl; }
+          // 작은 점·글자만(벽에 비친 둥근 빛 자국·라이트박스·포스터 같은 넓은 면은 제외)
+          var okSize, hb=boxes?boxAt((x0+x1)/2,(y0+y1)/2):null;
+          if(boxes) okSize = !!hb && area<=Math.min(N*0.01, Math.max(N*0.0008, hb.area*1.5));
+          else okSize = pk>=225 && area<=N*0.00008 && bx<=N*0.00015 && asp<=2.2 && pkL>=55 && (y0+y1)/2<=sh*0.45; // AI 없이: 사진 위쪽의 아주 작은 점 조명만
+          // 2026-10-19 사용자 요청("실내가 뿌연 연기 가득한 것처럼 보인다 — 천장 조명이나 간판 로고 LED만"): 사진 위쪽(천장·간판 높이)에 있는
+          // 점 모양 광원(매입등·스팟·펜던트·메인등)과 간판 글자만 남김 — 선반·진열장 라인조명(가늘고 긴 띠), 아래쪽 조명·반사는 제외
           if(!okSize) continue;
           // 조명 색: 하얗게 날아간 심지 바로 바깥 1~5px 둘레의 색(실제 빛 색이 남아있는 곳)
           var pad=5, sr=0,sg=0,sb=0,sw2=0, cr=0,cg=0,cbb=0,cn=0;
@@ -47341,20 +47354,23 @@ function _lensBloomRender(src, lv, info, fin){
           var lr,lg,lb2; if(sw2>0){ lr=sr/sw2; lg=sg/sw2; lb2=sb/sw2; } else { lr=cr/cn; lg=cg/cn; lb2=cbb/cn; }
           // 심지가 하얀 경우에도 색감이 보이게 둘레 색을 진하게(채도 1.7배), 밝기는 1로 맞춤
           var lm=Math.max(lr,lg,lb2,1); lr/=lm; lg/=lm; lb2/=lm; lr=Math.max(0,1-(1-lr)*1.7); lg=Math.max(0,1-(1-lg)*1.7); lb2=Math.max(0,1-(1-lb2)*1.7);
-          var gp=2;
-          for(var yy2=Math.max(0,y0-gp); yy2<=Math.min(sh-1,y1+gp); yy2++) for(var xx2=Math.max(0,x0-gp); xx2<=Math.min(sw-1,x1+gp); xx2++){ var p2=yy2*sw+xx2; gate[p2]=1; colR[p2]=lr; colG[p2]=lg; colB[p2]=lb2; }
+          // 아주 작은 광원(몇 px짜리 스팟 렌즈)은 실제로는 사진에 찍힌 것보다 훨씬 밝은 빛이라, 작을수록 번짐 에너지를 키움(그래야 작은 스팟도 은은하게 번짐)
+          var _amp=Math.min(8, Math.max(1, 30/area));
+          var gp=2; // 광원 픽셀 주변 2px만(네모난 영역 전체가 아니라)
+          for(var li3=0;li3<list.length;li3++){ var c3=list[li3], cx3=c3%sw, cy3=(c3/sw)|0; for(var dy=-gp;dy<=gp;dy++){ var yy3=cy3+dy; if(yy3<0||yy3>=sh) continue; for(var dx=-gp;dx<=gp;dx++){ var xx3=cx3+dx; if(xx3<0||xx3>=sw) continue; var p2=yy3*sw+xx3; gate[p2]=1; amp[p2]=_amp; colR[p2]=lr; colG[p2]=lg; colB[p2]=lb2; } } }
           kept+=area;
         }
         if(!kept){ console.log('[빛번짐] 번질 광원을 못 찾아서 원본 그대로'); fin(null); return; }
-        var thr=200, eR=new Float32Array(N), eG=new Float32Array(N), eB=new Float32Array(N);
-        for(var j=0;j<N;j++){ if(!gate[j]) continue; var t=(MX[j]-thr)/(255-thr); if(t<=0) continue; t=t*t; eR[j]=colR[j]*t; eG[j]=colG[j]*t; eB[j]=colB[j]*t; }
+        var eR=new Float32Array(N), eG=new Float32Array(N), eB=new Float32Array(N);
+        // 번짐의 세기 = 광원이 주변보다 얼마나 더 밝은지(밝은 낮 장면에서 흰 벽까지 뿌옇게 번지지 않게)
+        for(var j=0;j<N;j++){ if(!gate[j] || MX[j]<200) continue; var t=(MX[j]-LM[j]-15)/90; if(t<=0) continue; if(t>1) t=1; t=t*t*amp[j]; eR[j]=colR[j]*t; eG[j]=colG[j]*t; eB[j]=colB[j]*t; }
         function boxH(a,o,r){ var w=2*r+1; for(var y=0;y<sh;y++){ var row=y*sw, acc=0; for(var x=-r;x<=r;x++) acc+=a[row+Math.min(sw-1,Math.max(0,x))]; for(var x2=0;x2<sw;x2++){ o[row+x2]=acc/w; acc+=a[row+Math.min(sw-1,x2+r+1)]-a[row+Math.max(0,x2-r)]; } } }
         function boxV(a,o,r){ var w=2*r+1; for(var x=0;x<sw;x++){ var acc=0; for(var y=-r;y<=r;y++) acc+=a[Math.min(sh-1,Math.max(0,y))*sw+x]; for(var y2=0;y2<sh;y2++){ o[y2*sw+x]=acc/w; acc+=a[Math.min(sh-1,y2+r+1)*sw+x]-a[Math.max(0,y2-r)*sw+x]; } } }
         function gauss(a,sigma){ var r=Math.max(1,Math.round(sigma*0.87)), t1=new Float32Array(N), t2=new Float32Array(N); boxH(a,t1,r); boxV(t1,t2,r); boxH(t2,t1,r); boxV(t1,t2,r); boxH(t2,t1,r); boxV(t1,t2,r); return t2; }
-        var Ds=Math.max(sw,sh), ext=!!(info && info.scene==='exterior');
+        var Ds=Math.max(sw,sh);
         // 가까운 번짐은 밝고 좁게, 먼 번짐은 넓고 아주 옅게 — 실제 렌즈처럼 거리에 따라 서서히 줄어듦
-        var SIG=[Ds*0.004, Ds*0.011, Ds*0.028, Ds*0.06], WGT=[1.6, 2.2, 3.2, 4.0];
-        var GAIN=({soft:1.1, mid:1.9, strong:3.0}[lv]||1.9) * (ext?1.0:0.65); // 실내는 "살짝"
+        var SIG=[Ds*0.003, Ds*0.008, Ds*0.02], WGT=[1.4, 1.6, 1.3]; // 넓게 퍼지는 층은 빼서 뿌연 안개처럼 안 보이게
+        var GAIN=({soft:0.6, mid:1.0, strong:1.6}[lv]||1.0);
         var bR=new Float32Array(N), bG=new Float32Array(N), bB=new Float32Array(N);
         for(var z=0;z<SIG.length;z++){ var gr=gauss(eR,SIG[z]), gg=gauss(eG,SIG[z]), gb=gauss(eB,SIG[z]), w=WGT[z]*GAIN;
           for(var n=0;n<N;n++){ bR[n]+=gr[n]*w; bG[n]+=gg[n]*w; bB[n]+=gb[n]*w; } }
@@ -47365,7 +47381,7 @@ function _lensBloomRender(src, lv, info, fin){
         var out=document.createElement('canvas'); out.width=W; out.height=H; var ox=out.getContext('2d'); ox.drawImage(im,0,0);
         ox.globalCompositeOperation='screen'; ox.imageSmoothingEnabled=true; ox.imageSmoothingQuality='high'; ox.drawImage(Lc,0,0,W,H);
         ox.globalCompositeOperation='source-over';
-        console.log('[빛번짐] 광원 '+kept+'px 처리 ('+lv+(info?', AI 확인 '+info.scene:', 자동')+')');
+        console.log('[빛번짐] 광원 '+kept+'px 처리 ('+lv+')');
         fin(out.toDataURL('image/jpeg',0.95));
       }catch(e){ console.warn('[빛번짐] 실패 — 원본 그대로', e); fin(null); }
     };
@@ -47392,7 +47408,7 @@ function _lensBloomApplyToItem(item, lv, btn){
   function restore(){ if(btn){ btn.disabled=false; btn.innerHTML=label; } }
   _lensBloom(item.result, lv, function(out){
     restore();
-    if(!out){ alert('빛번짐을 넣을 조명(실내: 천장 매입등·할로겐·스팟·메인등·펜던트 / 야외: 태양·가로등·자동차 불빛)을 찾지 못했거나, 이미지를 불러오지 못했어요.'); return; }
+    if(!out){ alert('빛번짐을 넣을 천장 조명·간판 LED를 찾지 못했거나, 이미지를 불러오지 못했어요.'); return; }
     try{
       var wf=item.wf||G.wf, id=Date.now();
       var lvKo={soft:'은은하게',mid:'보통',strong:'강하게'}[lv]||'';
@@ -47421,7 +47437,7 @@ function mkLensBloom(p){
   });
   w.appendChild(g);
   var note=dv(''); note.style.cssText='font-size:10px;color:var(--m2);margin-top:5px;line-height:1.5';
-  note.textContent='크레딧이 들지 않고 구도·사물은 그대로예요. 실내는 천장 조명(매입등·할로겐·스팟·메인등·펜던트)만, 야외는 태양·가로등·자동차 불빛만 그 조명 색으로 살짝 번지게 해요. 창문·흰 벽·반사는 건드리지 않아요.';
+  note.textContent='크레딧이 들지 않고 구도·사물은 그대로예요. 천장 조명(매입등·스팟·펜던트·메인등)과 간판 로고 LED만 그 조명 색으로 은은하게 번지게 해요. 포스터·흰 벽·진열장 조명은 건드리지 않아요.';
   w.appendChild(note);
   p.appendChild(w);
 }
@@ -57682,6 +57698,8 @@ function loadCloudGallery(){
           return;
         }
         var tags = wf==='world3d' ? ['VR 투어'] : [row.engine||'AI', row.resolution||'1K'];
+        // 2026-10-19: 업스케일 수치(보강 방식·강도·샤픈)도 새로고침 후 계속 보이게 복원
+        try{ var _upm=row.meta && (typeof row.meta==='string'?JSON.parse(row.meta):row.meta); if(wf==='upscale' && _upm && _upm.up){ tags.push(_upm.up.m==='Redefine' ? ('재질 보강 · 강도 '+_upm.up.c+' · 샤픈 '+_upm.up.s) : '선명도만 보강(안전 모드)'); } }catch(_e){}
         // style_key에는 사용한 프리셋의 key가 저장되어 있다(world3d는 JSON 메타라서 제외) —
         // 이걸 프리셋 이름으로 되살려서 태그에 넣어야, 새로고침 후에도 우측 상단에 어떤 프리셋으로
         // 만들었는지가 계속 보인다 (예전엔 engine/resolution만 복원해서 새로고침하면 사라졌음).
