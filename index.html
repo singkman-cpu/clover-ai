@@ -832,7 +832,7 @@ select option{background:var(--c2)}
 <div id="mfaq" class="mbg"><div class="md" style="width:600px"><div class="mdh"><h2>FAQ · 자주 묻는 질문</h2><button class="mdc" id="faq-close">&#10005;</button></div><div class="mdb" id="faq-b"></div></div></div>
 <div id="mpricing" class="mbg"><div class="md" style="width:780px"><div class="mdh"><h2>요금제</h2><button class="mdc" id="pricing-close">&#10005;</button></div><div class="mdb" id="pr-b"></div></div></div>
 <div id="maccount" class="mbg"><div class="md" style="width:420px"><div class="mdh"><h2 id="account-title">계정</h2><button class="mdc" id="account-close">&#10005;</button></div><div class="mdb" id="ac-b"></div></div></div>
-<div id="madmin" class="mbg"><div class="md" style="width:860px;max-height:90vh"><div class="mdh"><h2>🔧 관리자 대시보드</h2><button class="mdc" onclick="closeMd('admin')">&#10005;</button></div><div class="mdb" id="adm-b" style="padding:0"></div></div></div>
+<div id="madmin" class="mbg"><div class="md" style="width:97vw;max-width:1700px;height:95vh;max-height:95vh"><div class="mdh"><h2>🔧 관리자 대시보드</h2><button class="mdc" onclick="closeMd('admin')">&#10005;</button></div><div class="mdb" id="adm-b" style="padding:0;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden"></div></div></div>
 <div id="mcredits" class="mbg"><div class="md" style="width:480px"><div class="mdh"><h2>&#128179; 크레딧 관리</h2><button class="mdc" id="credits-close">&#10005;</button></div><div class="mdb" id="cr-b"></div></div></div>
 <div id="mprojects" class="mbg"><div class="md" style="width:640px;max-height:88vh"><div class="mdh"><h2>📁 프로젝트</h2><button class="mdc" onclick="closeMd('projects')">&#10005;</button></div><div class="mdb" id="proj-b"></div></div></div>
 <div id="mbizinfo" class="mbg"><div class="md" style="width:460px"><div class="mdh"><h2>🏢 사업자 정보</h2><button class="mdc" onclick="closeMd('bizinfo')">&#10005;</button></div><div class="mdb">
@@ -1028,11 +1028,13 @@ function _guestSignupPrompt(reason){
       '<div style="font-size:19px;font-weight:800;margin-bottom:10px">'+t[0]+'</div>'+
       '<div style="font-size:13.5px;line-height:1.7;color:var(--t2);margin-bottom:18px">'+t[1]+'</div>'+
       (reason==='intro'?'':'<button id="guest-signup-go" type="button" style="width:100%;padding:13px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">무료 가입하고 100cr 받기</button>')+
+      ((reason==='done'||reason==='used')?'<button id="guest-lead-go" type="button" style="width:100%;margin-top:8px;padding:11px;border-radius:10px;border:1.5px solid rgba(245,158,11,.55);background:rgba(245,158,11,.10);color:#fbbf24;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit">🏗 이 디자인으로 시공·인테리어 상담 신청</button>':'')+
       '<button id="guest-signup-later" type="button" style="width:100%;margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:13px;cursor:pointer;font-family:inherit">'+(reason==='intro'?'확인':'나중에')+'</button></div>';
     document.body.appendChild(ov);
     ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
     var go=document.getElementById('guest-signup-go'); if(go) go.onclick=function(){ ov.remove(); try{ _trackEvent('guest_signup_click'); }catch(e){} openMd('account'); };
     document.getElementById('guest-signup-later').onclick=function(){ ov.remove(); };
+    var lg=document.getElementById('guest-lead-go'); if(lg) lg.onclick=function(){ ov.remove(); _leadForm({from:reason==='done'?'체험 완료 후':'체험 사용 후', img:window._guestLastResult||null}); };
   }catch(e){ try{ openMd('account'); }catch(e2){} }
 }
 // 비회원 체험 시작 (실행 버튼에서 호출) — true면 체험으로 진행, false면 안내/로그인 창
@@ -1045,6 +1047,121 @@ function _guestTrialBegin(wf){
   try{ _trackEvent('guest_trial_start'); }catch(e){}
   var stl=gE('stl'); if(stl) stl.textContent='비회원 무료 체험 1장 진행 중 (1K)';
   return true;
+}
+// ══ 2026-10-19 영상 보고 들어온 비회원 → 가입·상담으로 이어지게 ═══════════════════════════════
+// 요청: "비회원이 한 번 보고 나가는 경우가 많다 — 회원으로, 결제·상담까지 이어지게 알아서 해줘"
+//  ① 첫 화면 "무료로 시작하기"를 누른 비회원에게 쉬운 말로 "무엇을 해볼지" 고르는 창(가입 없이 무료 1장)
+//  ② 집 짓기·인테리어 무료 상담 신청 창 — 신청 내용은 consult_leads 표(관리자만 열람)에 저장(CONSULT_LEADS.sql)
+function _qsToast(msg){
+  try{
+    var old=document.getElementById('qs-toast'); if(old) old.remove();
+    var t=document.createElement('div'); t.id='qs-toast';
+    t.style.cssText='position:fixed;left:50%;top:70px;transform:translateX(-50%);z-index:100002;max-width:min(92vw,460px);background:var(--card);border:1.5px solid var(--acb);color:var(--t);border-radius:12px;padding:12px 16px;font-size:13.5px;line-height:1.6;box-shadow:0 10px 30px rgba(0,0,0,.45);font-family:inherit;text-align:center';
+    t.innerHTML=msg+'<div style="margin-top:6px"><button type="button" style="border:none;background:transparent;color:var(--m2);font-size:12px;cursor:pointer;font-family:inherit">닫기</button></div>';
+    t.querySelector('button').onclick=function(){ t.remove(); };
+    document.body.appendChild(t);
+    setTimeout(function(){ try{ t.remove(); }catch(e){} }, 9000);
+  }catch(e){}
+}
+function _qsChooser(){
+  try{
+    var old=document.getElementById('qs-ov'); if(old) old.remove();
+    try{ _trackEvent('qs_open'); }catch(e){}
+    var used=_guestTrialUsedLocal();
+    var ov=document.createElement('div'); ov.id='qs-ov';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100001;display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto';
+    var box=document.createElement('div');
+    box.style.cssText='background:var(--card);border:1px solid var(--acb);border-radius:18px;max-width:520px;width:100%;padding:22px 18px 16px;color:var(--t);font-family:inherit;max-height:calc(100vh - 28px);overflow:auto';
+    box.innerHTML='<div style="font-size:19px;font-weight:800;text-align:center">무엇을 해볼까요?</div>'+
+      '<div style="font-size:12.5px;color:var(--t2);text-align:center;margin:6px 0 14px;line-height:1.6">'+(used?'고르면 바로 그 화면으로 이동해요.':'<b style="color:var(--ac)">가입 없이 무료로 1장</b> 만들어볼 수 있어요. 사진 한 장만 있으면 돼요.')+'</div>';
+    var opts=[
+      ['space','🛋','우리 집 인테리어 바꿔보기','거실·방·주방 사진 한 장 → 원하는 스타일로'],
+      ['staging','📦','빈 집에 가구 채워보기','이사 전 빈 집·빈 방 사진 → 가구가 놓인 모습'],
+      ['spaceset','🏡','영상 속 같은 집 만들기','공간 사진·참고 사진 → 한 집의 여러 공간을 같은 스타일로'],
+      ['render','🎨','3D 렌더링을 실사 사진으로','스케치업 등 렌더 이미지 → 진짜 사진처럼']
+    ];
+    var grid=document.createElement('div'); grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px';
+    opts.forEach(function(o){
+      var b=document.createElement('button'); b.type='button';
+      b.style.cssText='display:flex;gap:10px;align-items:flex-start;text-align:left;padding:12px;border-radius:12px;border:1.5px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer;font-family:inherit';
+      b.innerHTML='<span style="font-size:24px;line-height:1">'+o[1]+'</span><span><span style="display:block;font-size:13.5px;font-weight:800">'+o[2]+'</span><span style="display:block;font-size:11px;color:var(--m2);margin-top:3px;line-height:1.45">'+o[3]+'</span></span>';
+      b.onclick=function(){
+        ov.remove();
+        try{ _trackEvent('qs_pick_'+o[0]); }catch(e){}
+        try{ if(o[0]==='staging') _openStaging(); else selectWF(o[0]); }catch(e){ try{ selectWF(o[0]); }catch(e2){} }
+        var tip={space:'사진을 올리고 원하는 스타일(프리셋)을 고른 다음',staging:'빈 방 사진을 올리고 스타일을 고른 다음',spaceset:'공간 사진을 올리고 원하는 스타일을 적은 다음',render:'렌더 이미지를 올린 다음'}[o[0]];
+        _qsToast('📷 '+tip+' 아래 '+(used||_supaUser?'<b>실행 버튼</b>':'<b style="color:var(--ac)">🎁 무료 체험 1장</b> 버튼')+'을 누르면 돼요.');
+      };
+      grid.appendChild(b);
+    });
+    box.appendChild(grid);
+    var lead=document.createElement('button'); lead.type='button';
+    lead.style.cssText='width:100%;margin-top:10px;padding:12px;border-radius:12px;border:1.5px solid rgba(245,158,11,.55);background:rgba(245,158,11,.10);color:#fbbf24;font-size:13.5px;font-weight:800;cursor:pointer;font-family:inherit';
+    lead.textContent='🏗 집 짓기·인테리어 무료 상담 신청';
+    lead.onclick=function(){ ov.remove(); _leadForm({from:'첫 화면'}); };
+    box.appendChild(lead);
+    var later=document.createElement('button'); later.type='button';
+    later.style.cssText='width:100%;margin-top:8px;padding:9px;border-radius:10px;border:none;background:transparent;color:var(--m2);font-size:12.5px;cursor:pointer;font-family:inherit';
+    later.textContent='둘러보기';
+    later.onclick=function(){ ov.remove(); try{ goHome(); }catch(e){} };
+    box.appendChild(later);
+    ov.appendChild(box);
+    ov.onclick=function(e){ if(e.target===ov){ ov.remove(); try{ goHome(); }catch(e2){} } };
+    document.body.appendChild(ov);
+  }catch(e){ try{ goHome(); }catch(e2){} }
+}
+function _leadForm(ctx){
+  ctx=ctx||{};
+  try{
+    var old=document.getElementById('lead-ov'); if(old) old.remove();
+    try{ _trackEvent('lead_open'); }catch(e){}
+    var ov=document.createElement('div'); ov.id='lead-ov';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100003;display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto';
+    var inp='width:100%;box-sizing:border-box;padding:10px 11px;border-radius:9px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:14px;font-family:inherit;margin-top:4px';
+    var lbl='display:block;font-size:12px;font-weight:700;color:var(--t2);margin-top:10px';
+    ov.innerHTML='<div style="background:var(--card);border:1px solid rgba(245,158,11,.5);border-radius:16px;max-width:420px;width:100%;padding:22px 20px 16px;color:var(--t);font-family:inherit;max-height:calc(100vh - 28px);overflow:auto">'+
+      '<div style="font-size:18px;font-weight:800">🏗 무료 상담 신청</div>'+
+      '<div style="font-size:12.5px;color:var(--t2);margin-top:6px;line-height:1.6">집 짓기·리모델링·인테리어 계획이 있으시면 남겨주세요. 확인 후 연락드려요.</div>'+
+      (ctx.img?'<img src="'+String(ctx.img).replace(/"/g,'')+'" style="width:100%;max-height:160px;object-fit:cover;border-radius:10px;margin-top:10px" alt="">':'')+
+      '<label style="'+lbl+'">이름 *<input id="ld-name" maxlength="40" style="'+inp+'" placeholder="홍길동"></label>'+
+      '<label style="'+lbl+'">연락처 *<input id="ld-phone" maxlength="20" inputmode="tel" style="'+inp+'" placeholder="010-0000-0000"></label>'+
+      '<label style="'+lbl+'">지역<input id="ld-region" maxlength="60" style="'+inp+'" placeholder="예: 파주 운정, 양평"></label>'+
+      '<label style="'+lbl+'">하려는 공사<select id="ld-kind" style="'+inp+'"><option>신축(집 짓기)</option><option>리모델링</option><option>인테리어</option><option>상업공간(매장·사무실)</option><option>기타</option></select></label>'+
+      '<label style="'+lbl+'">대략 평수·예산<input id="ld-size" maxlength="80" style="'+inp+'" placeholder="예: 30평, 3억 정도"></label>'+
+      '<label style="'+lbl+'">문의 내용<textarea id="ld-memo" maxlength="1000" rows="3" style="'+inp+';resize:vertical" placeholder="원하시는 내용을 자유롭게 적어주세요"></textarea></label>'+
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:11.5px;color:var(--t2);margin-top:12px;line-height:1.55;cursor:pointer"><input id="ld-agree" type="checkbox" style="margin-top:3px"> <span>(필수) 상담 연락을 위해 이름·연락처·지역·문의 내용을 수집하며, 상담 목적으로만 쓰고 1년 뒤 파기합니다. 동의하지 않으면 신청할 수 없어요.</span></label>'+
+      '<div id="ld-err" style="display:none;color:#f87171;font-size:12px;margin-top:8px"></div>'+
+      '<button id="ld-send" type="button" style="width:100%;margin-top:12px;padding:13px;border-radius:10px;border:none;background:#f59e0b;color:#000;font-size:15px;font-weight:800;cursor:pointer;font-family:inherit">상담 신청하기</button>'+
+      '<button id="ld-close" type="button" style="width:100%;margin-top:8px;padding:9px;border-radius:10px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:13px;cursor:pointer;font-family:inherit">닫기</button>'+
+    '</div>';
+    document.body.appendChild(ov);
+    ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+    document.getElementById('ld-close').onclick=function(){ ov.remove(); };
+    if(_supaUser && _supaUser.user_metadata && _supaUser.user_metadata.full_name){ try{ document.getElementById('ld-name').value=String(_supaUser.user_metadata.full_name).slice(0,40); }catch(e){} }
+    var send=document.getElementById('ld-send'), err=document.getElementById('ld-err');
+    function v(id){ return String((document.getElementById(id)||{}).value||'').trim(); }
+    send.onclick=function(){
+      var name=v('ld-name').slice(0,40), phone=v('ld-phone').replace(/[^0-9\-+ ]/g,'').slice(0,20);
+      err.style.display='none';
+      if(!name){ err.textContent='이름을 적어주세요.'; err.style.display='block'; return; }
+      if(phone.replace(/[^0-9]/g,'').length<9){ err.textContent='연락처를 정확히 적어주세요.'; err.style.display='block'; return; }
+      if(!document.getElementById('ld-agree').checked){ err.textContent='개인정보 수집에 동의해야 신청할 수 있어요.'; err.style.display='block'; return; }
+      if(!_supa){ err.textContent='지금은 신청을 보낼 수 없어요. 잠시 후 다시 시도해주세요.'; err.style.display='block'; return; }
+      var src='direct'; try{ var o=JSON.parse(localStorage.getItem('clover_first_src')||'null'); if(o&&o.s) src=String(o.s).slice(0,30); }catch(e){}
+      var img=(ctx.img && /^https?:\/\//.test(ctx.img)) ? String(ctx.img).slice(0,600) : null;
+      var row={name:name, phone:phone, region:v('ld-region').slice(0,60)||null, kind:v('ld-kind').slice(0,30)||null, size:v('ld-size').slice(0,80)||null, memo:v('ld-memo').slice(0,1000)||null, src:src, from_where:String(ctx.from||'').slice(0,30)||null, img_url:img, user_id:(_supaUser&&_supaUser.id)||null};
+      send.disabled=true; send.textContent='보내는 중…';
+      _supa.from('consult_leads').insert(row).then(function(res){
+        if(res && res.error){ send.disabled=false; send.textContent='상담 신청하기'; err.textContent='신청을 보내지 못했어요. 잠시 후 다시 시도해주세요.'; err.style.display='block'; try{ _logErrorToServer('[상담 신청 실패] '+(res.error.message||''), '', 'lead'); }catch(e){} return; }
+        try{ _trackEvent('lead_submit'); }catch(e){}
+        ov.querySelector('div').innerHTML='<div style="text-align:center;padding:16px 4px"><div style="font-size:36px">✅</div><div style="font-size:17px;font-weight:800;margin-top:8px">상담 신청이 접수됐어요</div><div style="font-size:13px;color:var(--t2);margin-top:8px;line-height:1.6">확인 후 남겨주신 연락처로 연락드릴게요.</div>'+
+          (_supaUser?'':'<button id="ld-signup" type="button" style="width:100%;margin-top:16px;padding:12px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit">무료 가입하고 100cr 받기</button>')+
+          '<button id="ld-ok" type="button" style="width:100%;margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--bd2);background:transparent;color:var(--t2);font-size:13px;cursor:pointer;font-family:inherit">닫기</button></div>';
+        var su=document.getElementById('ld-signup'); if(su) su.onclick=function(){ ov.remove(); try{ _trackEvent('guest_signup_click'); }catch(e){} openMd('account'); };
+        document.getElementById('ld-ok').onclick=function(){ ov.remove(); };
+      }, function(){ send.disabled=false; send.textContent='상담 신청하기'; err.textContent='신청을 보내지 못했어요. 잠시 후 다시 시도해주세요.'; err.style.display='block'; });
+    };
+  }catch(e){ console.warn('[상담 신청] 창 열기 실패', e); }
 }
 function _falProxyCall(action, body, cb, errCb){
   if(!_supa){ errCb('로그인 시스템이 초기화되지 않았습니다.'); return; }
@@ -47516,7 +47633,7 @@ function procImgWithTask(task, onDone, onErr){
     task.eng='nano2'; task.resolution='1K';
     var _gDone=onDone, _gErr=onErr;
     // 2026-10-18 요청: 결과 화면엔 로고 없이 — 다운로드할 때만 무료 회원처럼 우측 하단 작은 로고(saveBlobWithFreeWatermark)
-    onDone=function(ri){ _guestTrialFinished(); _gDone(ri); };
+    onDone=function(ri){ try{ if(typeof ri==='string' && /^https?:/.test(ri)) window._guestLastResult=ri; }catch(e){} _guestTrialFinished(); _gDone(ri); };
     onErr=function(e){ G._guestRun=false; (_gErr||function(x){console.error(x);})(e); };
   }
   try{ if(task && task.maskData && (task.wf||G.wf)==='edit'){ var _etR2=getTab('edit'); if(_etR2._resAutoBrush){ _etR2.resolution=_etR2._resBeforeBrush||'2K'; _etR2._resAutoBrush=false; if(G.wf==='edit' && typeof updateResBtnCr==='function') setTimeout(function(){ try{ renderSB(); }catch(e){} }, 0); } } }catch(e){}
@@ -49756,6 +49873,8 @@ function showWelcomeModal(){
     // ⚠️ 요청 반영("무료로 시작하기 누르면 바로 메인 화면이 나오는 거야?"): 예전엔 바로
     // '현장사진 디자인' 작업 화면으로 던져버렸는데, 이제 홈 화면("무엇을 작업하시겠습니까?" +
     // 커뮤니티 쇼케이스)부터 보여주고 사용자가 직접 원하는 작업을 고르게 함.
+    // 2026-10-19: 비회원은 "무엇을 해볼지" 고르는 창(가입 없이 무료 1장)으로 — 영상 보고 온 사람이 바로 해보게
+    if(!_supaUser && typeof _qsChooser==='function'){ _qsChooser(); return; }
     if(typeof goHome==='function') goHome();
   };
   body.appendChild(cta);
@@ -49851,13 +49970,14 @@ function buildAdminDashboard(){
   var tabBar='<div style="display:flex;border-bottom:1px solid var(--bd);background:var(--c2)">';
   tabs.forEach(function(t){
     var on=_adminTab===t.k;
-    tabBar+='<button onclick="admSetTab(\''+t.k+'\')" style="flex:1;padding:10px 4px;border:none;background:'+(on?'var(--acg)':'none')+';color:'+(on?'var(--ac)':'var(--m2)')+';font-size:11px;font-weight:'+(on?'700':'400')+';cursor:pointer;font-family:inherit;border-bottom:2px solid '+(on?'var(--ac)':'transparent')+'">'+t.l+'</button>';
+    tabBar+='<button onclick="admSetTab(\''+t.k+'\')" style="flex:1;padding:12px 6px;border:none;background:'+(on?'var(--acg)':'none')+';color:'+(on?'var(--ac)':'var(--m2)')+';font-size:13px;font-weight:'+(on?'800':'500')+';cursor:pointer;font-family:inherit;border-bottom:2px solid '+(on?'var(--ac)':'transparent')+'">'+t.l+'</button>';
   });
   tabBar+='</div>';
   b.innerHTML=tabBar;
   var content=document.createElement('div');
   content.id='adm-content';
-  content.style.cssText='padding:16px;max-height:72vh;overflow-y:auto';
+  content.style.cssText='padding:20px 24px;flex:1;min-height:0;overflow-y:auto'; // 2026-10-19 요청("드래그하고 귀찮게 말고 크게"): 화면 거의 전체 크기로
+  if(window.innerWidth>=1200) content.style.zoom='1.15'; // 넓은 화면에선 글자·숫자도 15% 크게
   b.appendChild(content);
   admRenderTab();
 }
@@ -50215,6 +50335,17 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           : '<div style="font-size:11px;color:var(--m1)">아직 체험 후 가입한 회원이 없어요 — 이 버전을 올린 뒤부터 쌓여요.</div>')+
           _admSecEnd();
       })();
+      // 2026-10-19: 🏗 상담 신청(비회원 포함) + 첫 화면 선택 창에서 무엇을 골랐는지
+      (function(){
+        var qc={qs_open:0,qs_pick_space:0,qs_pick_staging:0,qs_pick_spaceset:0,qs_pick_render:0,lead_open:0,lead_submit:0};
+        rows.forEach(function(r){ if(qc.hasOwnProperty(r.event_type)) qc[r.event_type]++; });
+        function b2(l,v){ return '<div style="background:var(--c2);border:1px solid var(--bd2);border-radius:9px;padding:8px 10px"><div style="font-size:10.5px;color:var(--m2)">'+l+'</div><div style="font-size:16px;font-weight:800;color:var(--t)">'+v+'</div></div>'; }
+        html+=_admSec('leads','🏗 상담 신청 · 첫 화면 선택 (최근 30일)')+
+          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:7px;margin-bottom:10px">'+
+            b2('선택 창 열림',qc.qs_open+'번')+b2('🛋 인테리어',qc.qs_pick_space+'번')+b2('📦 빈 집 가구',qc.qs_pick_staging+'번')+b2('🏡 공간 컨셉',qc.qs_pick_spaceset+'번')+b2('🎨 렌더 실사',qc.qs_pick_render+'번')+b2('상담 창 열림',qc.lead_open+'번')+b2('✅ 상담 신청',qc.lead_submit+'건')+
+          '</div><div id="adm-leads-list" style="font-size:11.5px;color:var(--m2)">상담 신청 목록 불러오는 중…</div>'+
+          _admSecEnd();
+      })();
       html+=_admSec('recent','🕓 최근 이벤트 목록 (최대 200개, 한국 시간)');
       html+='<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2);position:sticky;top:0;background:var(--card)">'+
         '<th style="padding:6px 8px;text-align:left">일시</th><th style="padding:6px 8px;text-align:left">이벤트</th><th style="padding:6px 8px;text-align:left">회원</th></tr></thead><tbody>'+
@@ -50223,14 +50354,40 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           var email=r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인';
           var kt=_kst(r.created_at);
           return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+kt.date+' '+kt.time+'</td>'+
-            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:({guest_trial_start:'🎁 비회원 체험 시작',guest_trial_done:'🎁 비회원 체험 완료',guest_signup_click:'🎁 체험 후 가입 버튼 클릭',signup_after_trial:'🎁 체험 후 가입'}[r.event_type])||(r.event_type.indexOf('how_')===0?('🙋 가입 응답: '+(((typeof HOW_OPTS!=='undefined'?HOW_OPTS:[]).find(function(o){return o[0]===r.event_type.slice(4);})||[0,r.event_type.slice(4)])[1])):r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
+            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:({guest_trial_start:'🎁 비회원 체험 시작',qs_open:'🧭 첫 화면 선택 창',qs_pick_space:'🧭 선택: 인테리어',qs_pick_staging:'🧭 선택: 빈 집 가구',qs_pick_spaceset:'🧭 선택: 공간 컨셉',qs_pick_render:'🧭 선택: 렌더 실사',lead_open:'🏗 상담 창 열림',lead_submit:'🏗 상담 신청',guest_trial_done:'🎁 비회원 체험 완료',guest_signup_click:'🎁 체험 후 가입 버튼 클릭',signup_after_trial:'🎁 체험 후 가입'}[r.event_type])||(r.event_type.indexOf('how_')===0?('🙋 가입 응답: '+(((typeof HOW_OPTS!=='undefined'?HOW_OPTS:[]).find(function(o){return o[0]===r.event_type.slice(4);})||[0,r.event_type.slice(4)])[1])):r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
         }).join('')+
       '</tbody></table></div>';
       html+=_admSecEnd();
 
       c.innerHTML=html;
+      try{ _admLoadLeads(); }catch(e){}
     })();
+}
+// 상담 신청 목록(관리자) — consult_leads 표가 없으면(CONSULT_LEADS.sql 실행 전) 안내만 보여줌
+function _admLoadLeads(){
+  var box=document.getElementById('adm-leads-list'); if(!box || !_supa) return;
+  _supa.from('consult_leads').select('*').order('created_at',{ascending:false}).limit(200).then(function(res){
+    if(!document.body.contains(box)) return;
+    if(res.error){ box.innerHTML='<span style="color:#fbbf24">상담 신청 표가 아직 없어요 — Supabase SQL Editor에서 CONSULT_LEADS.sql을 한 번 실행해주세요.</span>'; return; }
+    var L=res.data||[];
+    if(!L.length){ box.innerHTML='아직 상담 신청이 없어요.'; return; }
+    function esc(x){ return String(x==null?'':x).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+    box.innerHTML='<div style="font-size:11px;color:var(--m2);margin-bottom:6px">새 신청 '+L.filter(function(x){return x.status!=='done';}).length+'건 · 전체 '+L.length+'건 (연락한 건 "연락함"을 눌러 표시)</div>'+
+      L.map(function(x){
+        var _d=new Date(new Date(x.created_at).getTime()+9*3600000).toISOString(), kt={date:_d.slice(0,10), time:_d.slice(11,16)}, done=x.status==='done';
+        return '<div style="border:1px solid '+(done?'var(--bd2)':'rgba(245,158,11,.55)')+';background:'+(done?'transparent':'rgba(245,158,11,.06)')+';border-radius:9px;padding:9px 10px;margin-bottom:6px;color:var(--t2);display:flex;gap:10px">'+
+          (x.img_url?'<a href="'+esc(x.img_url)+'" target="_blank" rel="noopener"><img src="'+esc(x.img_url)+'" style="width:70px;height:70px;object-fit:cover;border-radius:7px" alt=""></a>':'')+
+          '<div style="flex:1;min-width:0;line-height:1.6"><b style="color:var(--t);font-size:13px">'+esc(x.name)+'</b> · <a href="tel:'+esc(String(x.phone).replace(/[^0-9+]/g,''))+'" style="color:var(--ac)">'+esc(x.phone)+'</a>'+
+          (x.region?' · '+esc(x.region):'')+(x.kind?' · <b>'+esc(x.kind)+'</b>':'')+(x.size?' · '+esc(x.size):'')+
+          (x.memo?'<div style="white-space:pre-wrap;color:var(--t)">'+esc(x.memo)+'</div>':'')+
+          '<div style="font-size:10.5px;color:var(--m2)">'+kt.date+' '+kt.time+' · 유입: '+esc(x.src||'-')+(x.from_where?' · '+esc(x.from_where):'')+(x.user_id?' · 회원':' · 비회원')+'</div></div>'+
+          '<button type="button" data-lead="'+x.id+'" data-st="'+(done?'new':'done')+'" style="align-self:flex-start;padding:5px 9px;border-radius:7px;border:1px solid var(--bd2);background:'+(done?'transparent':'var(--ac)')+';color:'+(done?'var(--m2)':'#000')+';font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap">'+(done?'↩ 새 신청으로':'연락함')+'</button></div>';
+      }).join('');
+    box.querySelectorAll('button[data-lead]').forEach(function(btn){
+      btn.onclick=function(){ btn.disabled=true; _supa.from('consult_leads').update({status:btn.getAttribute('data-st')}).eq('id', +btn.getAttribute('data-lead')).then(function(){ _admLoadLeads(); }, function(){ btn.disabled=false; }); };
+    });
+  }, function(){ box.textContent='상담 신청 목록을 불러오지 못했어요.'; });
 }
 
 function admDashboard(c){
