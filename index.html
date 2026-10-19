@@ -1079,7 +1079,7 @@ function _qsChooser(){
     var ov=document.createElement('div'); ov.id='qs-ov';
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:100001;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto';
     var box=document.createElement('div');
-    box.style.cssText='position:relative;background:var(--card);border:1px solid var(--bd2);border-radius:20px;max-width:460px;width:100%;padding:28px 22px 18px;color:var(--t);font-family:inherit;box-shadow:0 30px 80px rgba(0,0,0,.6)';
+    box.style.cssText='position:relative;background:var(--card);border:1px solid var(--bd2);border-radius:20px;max-width:540px;width:100%;padding:28px 22px 18px;color:var(--t);font-family:inherit;box-shadow:0 30px 80px rgba(0,0,0,.6)';
     var x=document.createElement('button'); x.type='button'; x.setAttribute('aria-label','닫기'); x.innerHTML='&#10005;';
     x.style.cssText='position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:50%;border:none;background:transparent;color:var(--m2);font-size:15px;cursor:pointer';
     x.onclick=function(){ ov.remove(); try{ goHome(); }catch(e){} };
@@ -1089,22 +1089,38 @@ function _qsChooser(){
       '<div style="font-size:20px;font-weight:800;letter-spacing:-.02em">무엇을 만들어볼까요?</div>';
     box.appendChild(head);
     var grid=document.createElement('div'); grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px';
-    opts.forEach(function(o){
-      var b=document.createElement('button'); b.type='button';
-      b.style.cssText='display:flex;flex-direction:column;align-items:flex-start;gap:10px;text-align:left;padding:16px 14px;border-radius:14px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer;font-family:inherit;transition:border-color .15s,transform .15s';
-      b.onmouseenter=function(){ b.style.borderColor='var(--acb)'; b.style.transform='translateY(-2px)'; };
-      b.onmouseleave=function(){ b.style.borderColor='var(--bd2)'; b.style.transform=''; };
-      b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;color:var(--ac)">'+IC[o[0]]+'</svg>'+
-        '<span><span style="display:block;font-size:14px;font-weight:700;letter-spacing:-.01em">'+o[1]+'</span><span style="display:block;font-size:11.5px;color:var(--m2);margin-top:3px">'+o[2]+'</span></span>';
-      b.onclick=function(){
-        ov.remove();
-        try{ _trackEvent('qs_pick_'+o[0]); }catch(e){}
-        try{ if(o[0]==='staging') _openStaging(); else selectWF(o[0]); }catch(e){ try{ selectWF(o[0]); }catch(e2){} }
-        var tip={space:'사진을 올리고 스타일을 고른 다음',staging:'빈 방 사진을 올리고 스타일을 고른 다음',spaceset:'공간 사진을 올리고 원하는 스타일을 적은 다음',render:'렌더 이미지를 올린 다음'}[o[0]];
-        _qsToast(tip+' 아래 '+(used||_supaUser?'<b>실행 버튼</b>':'<b style="color:var(--ac)">무료 체험 1장</b> 버튼')+'을 누르면 돼요.');
-      };
-      grid.appendChild(b);
-    });
+    // 2026-10-19: 관리자 → 비포/애프터에 카테고리별로 올린 가장 최근 사진을 칸 배경으로(없으면 아이콘만)
+    var CAT={space:'site', staging:'staging', spaceset:'spaceset', render:'render'};
+    function buildCards(pairs){
+      grid.innerHTML='';
+      opts.forEach(function(o){
+        var pr=(pairs||[]).filter(function(p){ return p.category==='qs_'+o[0] && p.after_url; })[0] || // 관리자 → 커뮤니티 이미지에서 📌로 고른 사진 우선
+               (pairs||[]).filter(function(p){ return (CAT[o[0]]==='site' ? (!p.category || p.category==='site') : p.category===CAT[o[0]]) && p.after_url; })[0];
+        var b=document.createElement('button'); b.type='button';
+        b.style.cssText='position:relative;display:flex;flex-direction:column;align-items:stretch;text-align:left;padding:0;border-radius:14px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer;font-family:inherit;overflow:hidden;transition:border-color .15s,transform .15s';
+        b.onmouseenter=function(){ b.style.borderColor='var(--acb)'; b.style.transform='translateY(-2px)'; var im=b.querySelector('.qs-af'); if(im) im.style.transform='scale(1.05)'; };
+        b.onmouseleave=function(){ b.style.borderColor='var(--bd2)'; b.style.transform=''; var im=b.querySelector('.qs-af'); if(im) im.style.transform=''; };
+        var icon=pr?'':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;color:var(--ac);flex-shrink:0">'+IC[o[0]]+'</svg>'; // 사진이 있으면 아이콘 없이 글자만
+        var esc=function(u){ return String(u).replace(/["'()\\]/g,''); };
+        b.innerHTML=(pr?'<div style="position:relative;width:100%;aspect-ratio:4/3;overflow:hidden;background:#111">'+
+            '<img class="qs-af" src="'+esc(pr.after_url)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s">'+
+            (pr.before_url?'<div style="position:absolute;left:8px;bottom:8px;width:34%;aspect-ratio:4/3;border-radius:6px;overflow:hidden;border:1.5px solid rgba(255,255,255,.85);box-shadow:0 4px 12px rgba(0,0,0,.5)"><img src="'+esc(pr.before_url)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block">'+
+              '<span style="position:absolute;left:3px;top:3px;font-size:8.5px;font-weight:800;color:#fff;background:rgba(0,0,0,.6);padding:1px 4px;border-radius:3px;letter-spacing:.04em">BEFORE</span></div>':'')+
+          '</div>':'')+
+          '<div style="display:flex;gap:8px;align-items:'+(pr?'center':'flex-start')+';flex-direction:'+(pr?'row':'column')+';padding:'+(pr?'10px 12px 12px':'16px 14px')+'">'+icon+
+          '<span><span style="display:block;font-size:14px;font-weight:700;letter-spacing:-.01em">'+o[1]+'</span><span style="display:block;font-size:11.5px;color:var(--m2);margin-top:2px">'+o[2]+'</span></span></div>';
+        b.onclick=function(){
+          ov.remove();
+          try{ _trackEvent('qs_pick_'+o[0]); }catch(e){}
+          try{ if(o[0]==='staging') _openStaging(); else selectWF(o[0]); }catch(e){ try{ selectWF(o[0]); }catch(e2){} }
+          var tip={space:'사진을 올리고 스타일을 고른 다음',staging:'빈 방 사진을 올리고 스타일을 고른 다음',spaceset:'공간 사진을 올리고 원하는 스타일을 적은 다음',render:'렌더 이미지를 올린 다음'}[o[0]];
+          _qsToast(tip+' 아래 '+(used||_supaUser?'<b>실행 버튼</b>':'<b style="color:var(--ac)">무료 체험 1장</b> 버튼')+'을 누르면 돼요.');
+        };
+        grid.appendChild(b);
+      });
+    }
+    buildCards([]);
+    try{ if(typeof _loadBeforeAfterPairs==='function') _loadBeforeAfterPairs(function(pairs){ if(pairs && pairs.length) buildCards(pairs); }); }catch(e){}
     box.appendChild(grid);
     var lead=document.createElement('button'); lead.type='button';
     lead.style.cssText='display:block;width:100%;margin-top:16px;padding:8px;border:none;background:transparent;color:var(--m2);font-size:12.5px;cursor:pointer;font-family:inherit';
@@ -49825,7 +49841,7 @@ function showWelcomeModal(){
   // 등록해줘야 이 칸이 실제로 채워집니다(다른 두 칸도 같은 방식으로 관리되고 있음).
   _loadBeforeAfterPairs(function(pairs){
     if(!document.getElementById('welcome-modal')) return; // 이미 닫혔으면 스킵
-    var sitePairs = pairs.filter(function(p){ return p.category!=='render' && p.category!=='spaceset'; });
+    var sitePairs = pairs.filter(function(p){ return !p.category || p.category==='site'; }); // staging·qs_*는 '무엇을 만들어볼까요?' 선택 창 전용
     var spacesetPairs = pairs.filter(function(p){ return p.category==='spaceset'; });
     var renderPairs = pairs.filter(function(p){ return p.category==='render'; });
     _fillHeroHalf(heroLeft, sitePairs, function(t){_heroTimerL=t;}, '현장사진 디자인');
@@ -50889,6 +50905,41 @@ function admCoupon(c){
 // innerHTML에 넣고 있었음 — 악의적인 회원이 Supabase API로 직접 따옴표·스크립트가 섞인 값을 넣으면
 // 관리자 브라우저에서 코드가 실행될 수 있었음(관리자 세션·키 탈취 위험). 화면에 넣기 전에 이스케이프함.
 function _admEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+var _QS_PIN_LABEL={space:'인테리어', staging:'빈 집 가구', spaceset:'공간 컨셉', render:'렌더 실사'};
+// 선택 창 사진(home_before_after의 qs_* 카테고리) → {image_url:[space,…]}
+function _qsLoadPinMap(cb){
+  if(!_supa){ cb&&cb(); return; }
+  _supa.from('home_before_after').select('id,after_url,category').like('category','qs_%').then(function(r){
+    var m={}; ((r&&r.data)||[]).forEach(function(x){ var k=String(x.category).slice(3); (m[x.after_url]=m[x.after_url]||[]).push(k); });
+    window._qsPinMap=m; cb&&cb();
+  }, function(){ cb&&cb(); });
+}
+function _qsPinMenu(url, anchor, done){
+  var old=document.getElementById('qs-pin-menu'); if(old){ old.remove(); return; }
+  var cur=(window._qsPinMap&&window._qsPinMap[url])||[];
+  var m=document.createElement('div'); m.id='qs-pin-menu';
+  var rc=anchor.getBoundingClientRect();
+  m.style.cssText='position:fixed;z-index:100050;left:'+Math.max(8,Math.min(window.innerWidth-230,rc.left-120))+'px;top:'+Math.min(window.innerHeight-260,rc.bottom+4)+'px;width:220px;background:var(--card);border:1px solid var(--bd2);border-radius:10px;padding:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);font-family:inherit;color:var(--t)';
+  m.innerHTML='<div style="font-size:12px;font-weight:800;margin-bottom:4px">📌 선택 창 사진으로 쓰기</div><div style="font-size:10.5px;color:var(--m2);margin-bottom:6px;line-height:1.5">비회원 첫 화면 "무엇을 만들어볼까요?" 칸 사진이에요. 칸마다 가장 최근에 고른 1장이 나와요.</div>';
+  ['space','staging','spaceset','render'].forEach(function(k){
+    var on=cur.indexOf(k)>=0;
+    var b=document.createElement('button'); b.type='button';
+    b.textContent=(on?'✓ ':'')+_QS_PIN_LABEL[k]+(on?' (해제하려면 누르기)':'');
+    b.style.cssText='display:block;width:100%;margin:3px 0;padding:7px 8px;text-align:left;border-radius:7px;border:1px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c2)')+';color:'+(on?'var(--ac)':'var(--t)')+';font-size:12px;font-weight:700;cursor:pointer;font-family:inherit';
+    b.onclick=function(ev){
+      ev.stopPropagation(); b.disabled=true;
+      var q = on ? _supa.from('home_before_after').delete().eq('category','qs_'+k).eq('after_url',url)
+                 : _supa.from('home_before_after').insert({before_url:'', after_url:url, label:'선택 창', category:'qs_'+k, sort_order:Math.floor(Date.now()/1000), is_active:true});
+      q.then(function(r){
+        if(r && r.error){ b.disabled=false; alert('저장 실패: '+r.error.message+'\n\n(CONSULT_LEADS.sql을 Supabase에서 한 번 실행했는지 확인해주세요)'); return; }
+        m.remove(); window._beforeAfterPairs=null; _qsLoadPinMap(done);
+      }, function(e){ b.disabled=false; alert('저장 실패: '+(e&&e.message||e)); });
+    };
+    m.appendChild(b);
+  });
+  document.body.appendChild(m);
+  setTimeout(function(){ document.addEventListener('click', function cl(ev){ if(!m.contains(ev.target)){ m.remove(); document.removeEventListener('click', cl); } }); }, 0);
+}
 function admCommunity(c){
   setTimeout(function(){ try{ _admNotifyCheck(); }catch(e){} }, 1500);
   if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
@@ -50902,6 +50953,7 @@ function admCommunity(c){
         return;
       }
       var _all=res.data||[];
+      if(!window._qsPinLoaded){ window._qsPinLoaded=true; _qsLoadPinMap(function(){ admCommunity(c); }); }
       var _pend=_all.filter(function(p){ return p.approved===false; });
       _admCommunityRender(c, _all.filter(function(p){ return p.approved!==false; }));
       _admCommunityPending(c, _pend);
@@ -51017,6 +51069,15 @@ function _admCommunityRender(c, posts){
       });
     };
     card.appendChild(delBtn);
+    // 2026-10-19: 📌 이 사진을 비회원 "무엇을 만들어볼까요?" 선택 창의 칸 사진으로 쓰기
+    var pinBtn=document.createElement('button'); pinBtn.type='button';
+    var _pinCats=(window._qsPinMap&&window._qsPinMap[p.image_url])||[];
+    pinBtn.textContent=_pinCats.length?('📌 '+_pinCats.map(function(k){return _QS_PIN_LABEL[k]||k;}).join('·')):'📌';
+    pinBtn.title='비회원 첫 화면 "무엇을 만들어볼까요?" 선택 창의 사진으로 쓰기';
+    pinBtn.style.cssText='position:absolute;top:6px;right:30px;height:20px;padding:0 6px;border-radius:10px;border:none;background:'+(_pinCats.length?'var(--ac)':'rgba(0,0,0,.6)')+';color:'+(_pinCats.length?'#000':'#fff')+';font-size:10px;font-weight:800;cursor:pointer;z-index:6;max-width:calc(100% - 60px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    pinBtn.onmousedown=function(e){ e.stopPropagation(); };
+    pinBtn.onclick=function(e){ e.stopPropagation(); _qsPinMenu(p.image_url, pinBtn, function(){ admCommunity(c); }); };
+    card.appendChild(pinBtn);
 
     // ── 드래그 앤 드롭으로 순서 바꾸기 ──
     card.ondragstart=function(e){
@@ -51158,11 +51219,12 @@ function admBeforeAfter(c){
         '<div style="flex:1"><div style="font-size:10.5px;color:var(--m2);margin-bottom:4px">After (결과)</div>'+
         '<input id="ba-after-file" type="file" accept="image/*" style="width:100%;font-size:10.5px;color:var(--t2)"></div>'+
       '</div>'+
-      '<div style="margin-bottom:8px"><div style="font-size:10.5px;color:var(--m2);margin-bottom:4px">카테고리 (웰컴 화면 좌/중앙/우 배치에 사용)</div>'+
+      '<div style="margin-bottom:8px"><div style="font-size:10.5px;color:var(--m2);margin-bottom:4px">카테고리 (웰컴 화면 좌/중앙/우 + 비회원 \'무엇을 만들어볼까요?\' 선택 창 사진 — 카테고리마다 가장 최근에 올린 1장이 선택 창에 나와요)</div>'+
       '<select id="ba-category" style="width:100%;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box">'+
         '<option value="site">📷 현장사진 디자인 (왼쪽)</option>'+
         '<option value="spaceset">🏠 공간 컨셉 디자인 (가운데)</option>'+
         '<option value="render">🎨 3D 렌더링 (오른쪽)</option>'+
+        '<option value="staging">📦 빈 집 홈스테이징 (선택 창 전용)</option>'+
       '</select></div>'+
       '<input id="ba-label" type="text" placeholder="라벨 (예: 24평 거실 · 그레이지 모던)" style="width:100%;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:6px;outline:none;box-sizing:border-box;margin-bottom:8px">'+
       '<button id="ba-add-btn" style="width:100%;padding:10px;background:var(--ac);color:#000;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">+ 추가하기</button>'+
@@ -51276,7 +51338,7 @@ function admBeforeAfterLoadList(){
           '<div style="width:44px;height:44px;border-radius:6px;background-image:url(\''+row.before_url+'\');background-size:cover;background-position:center;flex-shrink:0"></div>'+
           '<div style="width:44px;height:44px;border-radius:6px;background-image:url(\''+row.after_url+'\');background-size:cover;background-position:center;flex-shrink:0"></div>'+
           '<div style="flex:1;min-width:0"><div style="font-size:11.5px;font-weight:700;color:var(--t);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(row.label||'(라벨 없음)')+'</div>'+
-          '<div style="font-size:10px;color:var(--m2)">'+(row.category==='render'?'🎨 3D 렌더링':row.category==='spaceset'?'🏠 공간 컨셉 디자인':'📷 현장사진')+' · '+(row.is_active?'노출 중':'숨김')+'</div></div>';
+          '<div style="font-size:10px;color:var(--m2)">'+(row.category==='render'?'🎨 3D 렌더링':row.category==='spaceset'?'🏠 공간 컨셉 디자인':row.category==='staging'?'📦 빈 집 홈스테이징':'📷 현장사진')+' · '+(row.is_active?'노출 중':'숨김')+'</div></div>';
         var editBtn=document.createElement('button');
         editBtn.textContent='수정';
         editBtn.style.cssText='padding:5px 10px;background:var(--card);border:1px solid var(--bd2);color:var(--t2);border-radius:6px;font-size:10.5px;cursor:pointer;font-family:inherit;flex-shrink:0';
@@ -51312,6 +51374,7 @@ function admBeforeAfterLoadList(){
             '<option value="site"'+(row.category==='site'?' selected':'')+'>📷 현장사진 디자인 (왼쪽)</option>'+
             '<option value="spaceset"'+(row.category==='spaceset'?' selected':'')+'>🏠 공간 컨셉 디자인 (가운데)</option>'+
             '<option value="render"'+(row.category==='render'?' selected':'')+'>🎨 3D 렌더링 (오른쪽)</option>'+
+            '<option value="staging"'+(row.category==='staging'?' selected':'')+'>📦 빈 집 홈스테이징 (선택 창 전용)</option>'+
           '</select>'+
           '<input id="'+uid+'-lbl" type="text" value="'+(row.label?row.label.replace(/"/g,'&quot;'):'')+'" placeholder="라벨" style="width:100%;background:var(--card);border:1px solid var(--bd2);color:var(--t);padding:6px 8px;font-size:11.5px;border-radius:6px;outline:none;box-sizing:border-box;margin-bottom:8px">'+
           '<div style="display:flex;gap:6px"><button id="'+uid+'-save" style="flex:1;padding:7px;background:var(--ac);color:#000;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">저장</button>'+
