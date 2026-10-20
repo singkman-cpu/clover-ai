@@ -28121,7 +28121,8 @@ var XFORM_GLASS_MASK_NOTE=' 🌫🌫🌫 THE SOFTLY BLURRED AREA IN THE INPUT IS
 var XFORM_NOT_DOUBLE_NOTE=' (Checked from the finished photo: the rooms behind the large glass are separate floors, not a double-height space — keep the floor slab at the upper-floor level behind the glass, set back from it.)';
 var XFORM_BACK_NOTE={
   s3:'',
-  s2:' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is NOT the finished building — it is this same building one construction stage LATER (finishes partly installed). Produce the bare structural-frame stage of exactly this structure: strip off cladding, glass, windows, scaffolding-mounted finishes and landscaping, but keep EVERY structural element exactly where it is in the input — same columns, walls, slabs, roof slope, same open double-height bay with no floor crossing it, same camera. Do not add any slab, beam or floor that is not in the input. ⚠⚠⚠⚠ WINDOW FRAMES ARE NOT STRUCTURE (2026-10-20 user-confirmed failure: the thin frames of the big gable glass wall were turned into concrete columns and a floor slab): the large glass wall / curtain wall in the input — including all its vertical mullions and horizontal transoms — is only a window, not structure. In this stage it disappears COMPLETELY: where the glass wall was, show ONE big empty opening bounded only by the building\'s outer concrete walls / edge beams and the sloped roof. Inside that opening there must be NO column, NO post, NO beam, NO floor slab and NO slab edge at any height — you look straight into the open double-height room up to the underside of the sloped roof. Never turn mullions into columns or transoms into floors.',
+  s2:' 🧱🧱 KEEP EVERY VOLUME (2026-10-20 user-confirmed failure: the small low wing at the left was left out): count the separate volumes of the building in the input — the main tall volume AND every smaller, lower wing or annex at the far left and far right (even a small one-storey wing partly hidden behind scaffolding or trees). Every one of them must still be there in the result as raw concrete structure (its walls/columns and its own small roof slab or sloped roof) at the same position and size — never drop a wing and never replace it with open ground or scaffolding only.'+
+  ' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is NOT the finished building — it is this same building one construction stage LATER (finishes partly installed). Produce the bare structural-frame stage of exactly this structure: strip off cladding, glass, windows, scaffolding-mounted finishes and landscaping, but keep EVERY structural element exactly where it is in the input — same columns, walls, slabs, roof slope, same open double-height bay with no floor crossing it, same camera. Do not add any slab, beam or floor that is not in the input. ⚠⚠⚠⚠ WINDOW FRAMES ARE NOT STRUCTURE (2026-10-20 user-confirmed failure: the thin frames of the big gable glass wall were turned into concrete columns and a floor slab): the large glass wall / curtain wall in the input — including all its vertical mullions and horizontal transoms — is only a window, not structure. In this stage it disappears COMPLETELY: where the glass wall was, show ONE big empty opening bounded only by the building\'s outer concrete walls / edge beams and the sloped roof. Inside that opening there must be NO column, NO post, NO beam, NO floor slab and NO slab edge at any height — you look straight into the open double-height room up to the underside of the sloped roof. Never turn mullions into columns or transoms into floors.',
   s1b:' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is this same building one stage LATER — the full concrete frame. Produce the earlier moment where only the lower part is poured and the upper part is still rebar and formwork: remove the upper concrete (replace it with rebar cages and formwork panels in the same positions), keep the lower concrete exactly as in the input, keep the open double-height bay open (no slab, props or deck across it), same footprint, same camera. Never add any slab or floor that the input does not have. ⚠⚠⚠⚠ WINDOW FRAMES ARE NOT STRUCTURE (2026-10-20 user-confirmed failure: the thin frames of the big gable glass wall were turned into concrete columns and a floor slab): the large glass wall / curtain wall in the input — including all its vertical mullions and horizontal transoms — is only a window, not structure. In this stage it disappears COMPLETELY: where the glass wall was, show ONE big empty opening bounded only by the building\'s outer concrete walls / edge beams and the sloped roof. Inside that opening there must be NO column, NO post, NO beam, NO floor slab and NO slab edge at any height — you look straight into the open double-height room up to the underside of the sloped roof. Never turn mullions into columns or transoms into floors.',
   s1:' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is this same building one stage LATER — lower floor poured, upper floor in formwork. Produce the earlier moment before any concrete is poured: only vertical rebar cages and formwork at the same column/wall positions, on the same footprint, same camera — no poured walls or slabs anywhere.'
 };
@@ -28168,6 +28169,28 @@ function _xformMaskGlass(src, cb, analyzeSrc){
     });
   }catch(e){ fin(src,false); }
 }
+// 2026-10-20: 2단계 결과를 AI(비전)로 점검 — 복층 통창 자리에 2층 슬라브·가로보가 생겼거나 양옆 낮은 동이 빠졌으면 한 번만 다시 만듦
+function _xformCheckS2(resultSrc, finalSrc, cb){
+  var done=false; function fin(x){ if(done) return; done=true; cb(x); }
+  setTimeout(function(){ fin(null); }, 30000);
+  try{
+    if(typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(null); return; }
+    _proposalImgToB64(finalSrc, function(fb){ _proposalImgToB64(resultSrc, function(rb){
+      if(!fb || !rb){ fin(null); return; }
+      var q='Image 1 is a finished house; its large tall glass wall opens onto a DOUBLE-HEIGHT living room. Image 2 is the same house (same camera) at the bare concrete-frame construction stage. Check image 2: '+
+        '(a) "slab": inside the opening where the big glass wall of image 1 is, is there any horizontal floor slab, slab edge or beam crossing the opening at an upper-floor level (anything between the ground and the roof)? '+
+        '(b) "wing": is every volume of image 1 present as structure in image 2, including small low side wings at the far left or right? Answer false if a wing is missing. '+
+        'Reply with ONLY JSON: {"slab":true|false,"wing":true|false}';
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:fb}}, {type:'image', source:{type:'base64', media_type:'image/jpeg', data:rb}}, {type:'text', text:q}]}]}, function(res){
+        try{
+          var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t);
+          var m=String(t||'').match(/\{[\s\S]*\}/); if(!m){ fin(null); return; }
+          var j=JSON.parse(m[0]); fin({slab:j.slab===true, wing:j.wing!==false});
+        }catch(e){ fin(null); }
+      }, function(){ fin(null); });
+    }); });
+  }catch(e){ fin(null); }
+}
 function _xformRunStep(src, key, cb){
   try{
     var ps=(PS_EDIT||[]).find(function(x){ return x.k===key; });
@@ -28198,9 +28221,23 @@ function _xformRun(finalSrc, agedK, statusEl, done){
     var s=XFORM_STEPS[i], key=(s.k==='@aged')?agedK:s.k, src=out[s.from];
     if(!src){ results.push({label:s.label, err:'앞 단계 실패로 건너뜀', ord:s.ord}); i++; next(); return; }
     statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… (한 장에 30초~1분)';
-    var _runIt=function(src){
+    var _runIt=function(src, _try){
+    var _noteNow=window._xformBackNote;
     _xformRunStep(src, key, function(url, err){
       window._xformBackNote='';
+      // 2단계 점검: 복층인데 통창 자리에 슬라브가 생겼거나 옆 동이 빠졌으면 한 번만 다시
+      if(url && s.id==='s2' && !_try && window._xformS2Double){
+        statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 점검 중… (거실 복층·옆 동 확인)';
+        _xformCheckS2(url, out.final, function(chk){
+          if(chk && (chk.slab || !chk.wing)){
+            console.log('[변신 세트] 2단계 점검 실패 → 한 번 다시 만듦', chk);
+            statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 다시 만드는 중… ('+(chk.slab?'거실에 슬라브가 생겨서':'옆 동이 빠져서')+')';
+            window._xformBackNote=_noteNow+' ⚠️⚠️⚠️ PREVIOUS ATTEMPT FAILED: '+(chk.slab?'it wrongly put a floor slab/beam across the double-height opening — this time leave that opening completely empty from the ground to the roof. ':'')+(!chk.wing?'it left out a side wing — this time build every wing of the input as concrete structure. ':'');
+            _runIt(src, 1);
+          } else { out[s.id]=url; results.push({label:s.label, url:url, ord:s.ord}); i++; next(); }
+        });
+        return;
+      }
       if(url){ out[s.id]=url; results.push({label:s.label, url:url, ord:s.ord}); }
       else { results.push({label:s.label, err:err, ord:s.ord}); if(err==='중단됨'){ restore(); finish(); return; } }
       i++; next();
@@ -28209,7 +28246,9 @@ function _xformRun(finalSrc, agedK, statusEl, done){
     window._xformBackNote=XFORM_BACK_NOTE[s.id]||'';
     if(s.id==='s2'){ // 2단계: 통창 창살을 지운 사진으로
       statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 준비 중… (거실 통창 위치 찾는 중)';
+      window._xformS2Double=false;
       _xformMaskGlass(src, function(u, ok, info){
+        window._xformS2Double=!!(info && info.double);
         if(ok) window._xformBackNote += XFORM_GLASS_MASK_NOTE;
         else if(info && !info.double) window._xformBackNote += XFORM_NOT_DOUBLE_NOTE;
         statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… '+(info?(info.double?'(복층 거실로 판단 — 통창 자리를 비워서) ':'(복층 아님으로 판단) '):'')+'(한 장에 30초~1분)';
