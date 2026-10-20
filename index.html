@@ -27966,7 +27966,8 @@ var AUTO_SHORTS_RULES=
 
   '3) 업로드용 플랫폼 제목은 레터박스와 달라도 되고 조금 더 길어도 됨(한 줄, 40자 이내). 해시태그 기본 조합(사진 내용에 맞게 1~2개만 바꿔도 됨):\n'+
   '   유튜브: #신축빌라 #탑층인테리어 #옥상정원 #하우스투어 #shorts / 틱톡: #인테리어 #housetour #신축빌라 #탑층뷰 #fyp / 인스타 릴스: #신축빌라 #탑층인테리어 #옥상정원 #인테리어디자인 #reels\n'+
-  '반드시 JSON만 답해: {"order":[번호들],"top":"첫줄\\n둘째줄","youtube":{"title":"","desc":"","tags":"#.. #.."},"instagram":{"caption":""},"tiktok":{"caption":""}}';
+  '4) 변신 스토리 사진 분류: 오래된·낡은 건물 사진 번호는 "aged"에, 철거 중·빈 땅·공사 중(골조·거푸집·타설·외장 공사 등) 사진 번호는 "work"에 넣어(완성된 건물·인테리어·배치도는 어디에도 넣지 마, 없으면 빈 배열).\n'+
+  '반드시 JSON만 답해: {"order":[번호들],"aged":[번호들],"work":[번호들],"top":"첫줄\\n둘째줄","youtube":{"title":"","desc":"","tags":"#.. #.."},"instagram":{"caption":""},"tiktok":{"caption":""}}';
 function _autoShortsThumb(src, cb){
   var im=new Image(); im.crossOrigin='anonymous';
   im.onload=function(){ try{ var sc=Math.min(1, 512/Math.max(im.naturalWidth,im.naturalHeight)), c=document.createElement('canvas'); c.width=Math.round(im.naturalWidth*sc); c.height=Math.round(im.naturalHeight*sc); c.getContext('2d').drawImage(im,0,0,c.width,c.height); cb(c.toDataURL('image/jpeg',0.72).split(',')[1]); }catch(e){ cb(null); } };
@@ -27996,6 +27997,9 @@ function _autoShortsRun(btn, statusEl, resultEl, makeVideo){
         imgs.forEach(function(x,i){ if(!seen[i]) ordered.push(x); });
         var rest=(G_SHORTS.images||[]).filter(function(x){ return ordered.indexOf(x)<0; });
         G_SHORTS.images=ordered.concat(rest);
+        // ①-2 (2026-10-20 요청) 장면 시간: 오래된 건물 1.5초, 철거~공사 단계 1초 (직접 초를 정해둔 장면은 그대로)
+        (j.aged||[]).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=1.5; });
+        (j.work||[]).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=1; });
         // ② 레터박스 제목(1번 컷) — 레터박스 모드로
         if(j.top){ G_SHORTS.opts.fitMode='contain'; G_SHORTS.opts.topText=String(j.top).replace(/\\n/g,'\n').slice(0,40); }
         // ③ 업로드 문구
@@ -28085,7 +28089,8 @@ function _xformRun(finalSrc, agedK, statusEl, done){
   }
   function finish(){
     var ok=results.filter(function(r){ return r.url; });
-    ok.forEach(function(r){ G_SHORTS.images.push({id:Date.now()+Math.random(), img:r.url, orig:null, role:'auto', autoRole:'ai_design', customLabel:r.label, source:'clover'}); });
+    // 2026-10-20 요청: 노후 건물 1.5초, 철거~공사 1~3단계 1초
+    ok.forEach(function(r){ G_SHORTS.images.push({id:Date.now()+Math.random(), img:r.url, orig:null, role:'auto', autoRole:'ai_design', customLabel:r.label, source:'clover', customDuration:(r.label==='노후 건물'?1.5:1)}); });
     G_SHORTS.images.push({id:Date.now()+Math.random(), img:finalSrc, orig:null, role:'auto', autoRole:'ai_design', customLabel:'완성 외관', source:'clover'});
     var bad=results.filter(function(r){ return !r.url; });
     done('✅ '+ok.length+'장 완성'+(bad.length?(' · 실패 '+bad.length+'장('+bad.map(function(r){return r.label;}).join(', ')+') — AI 편집에서 그 단계만 다시 돌려 넣어주세요'):'')+'\n쇼츠에 순서대로 넣었어요. 인테리어 컷을 더 넣고 🤖 자동으로 쇼츠 만들기를 누르세요.');
