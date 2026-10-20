@@ -1378,8 +1378,26 @@ function _uploadLocalImageForShare(dataUrl, cb){
     }).catch(function(e){ console.warn('[공유용 이미지 변환 오류]', e); cb(null); });
   }catch(e){ console.warn('[공유용 업로드 전체 오류]', e); cb(null); }
 }
+// 2026-10-20 카톡 공유 화면 개선: 공유하는 결과의 원본(비포)·기능 이름을 같이 넘겨서, 받는 사람 화면에서 비포/애프터 비교가 되게
+var _SHARE_WF_LABEL={space:'현장사진 디자인',spaceset:'공간 컨셉 디자인',render:'3D 렌더 실사화',edit:'AI 편집',upscale:'업스케일',agent:'AI 에이전트',budget:'AI 견적',consult:'상담 패키지',psedit:'포토샵 편집'};
+function _shareFindItem(src){
+  var hit=null;
+  try{ Object.keys(G.HIST||{}).some(function(wf){ return (G.HIST[wf]||[]).some(function(it){ if(it && (it.result===src || it.cloud_url===src)){ hit=it; return true; } return false; }); }); }catch(e){}
+  return hit;
+}
+function _shareResolveOrig(item, cb){
+  try{
+    if(!item || item.wf==='video' || item.wf==='shorts') return cb(null);
+    var o=item.orig_cloud_url || item.orig;
+    if(!o || o===item.result || o===item.cloud_url) return cb(null);
+    if(/^https:\/\//.test(o) && !/(^|\.)fal\.(media|run)\b/.test(o)) return cb(o);
+    var fin=false, t=setTimeout(function(){ if(!fin){ fin=true; cb(null); } }, 15000); // 원본 올리기가 늦으면 원본 없이 공유
+    _uploadLocalImageForShare(o, function(u){ if(fin) return; fin=true; clearTimeout(t); cb(u||null); });
+  }catch(e){ cb(null); }
+}
 function cloverShare(src, fname){
   fname = fname || ('clover-ai-'+Date.now()+'.jpg');
+  var _shItem=_shareFindItem(src), _shOrig=null, _shOrigDone=!_shItem, _shTitle=_shItem?(_SHARE_WF_LABEL[_shItem.wf]||''):'';
   var ov=document.createElement('div');
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box';
   ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
@@ -1435,15 +1453,21 @@ function cloverShare(src, fname){
       note.textContent='이 이미지는 카톡 공유 카드로 바로 못 보내서 기기에 저장했어요. 카카오톡에서 사진 첨부로 보내주세요.';
       return;
     }
+    if(!_shOrigDone){ // 원본(비포)도 같이 보여줄 수 있게 먼저 준비
+      kakaoBtn.disabled=true; kakaoBtn.textContent='준비 중...';
+      _shareResolveOrig(_shItem, function(u){ _shOrig=u; _shOrigDone=true; kakaoBtn.disabled=false; kakaoBtn.innerHTML='💬 카카오톡으로 보내기'; kakaoBtn.onclick(); });
+      return;
+    }
     kakaoBtn.disabled=true; kakaoBtn.textContent='연결 중...';
     _loadKakaoSdk().then(function(){
       // 링크 목적지는 우리 도메인(등록된 도메인)의 "공유 보기" 페이지로 — fal.media 원본 URL을
       // 그대로 링크에 넣으면 카카오가 미등록 도메인이라고 판단해서 홈으로 돌려보내던 문제가 있었음.
-      var shareViewUrl = location.origin + '/?shareImg=' + encodeURIComponent(src);
+      var shareViewUrl = location.origin + '/?shareImg=' + encodeURIComponent(src) + (_shOrig ? '&shareOrig='+encodeURIComponent(_shOrig) : '') + (_shTitle ? '&shareT='+encodeURIComponent(_shTitle) : '');
       window.Kakao.Share.sendDefault({
         objectType: 'feed',
         content: {
-          title: 'CLOVER AI 렌더링 결과',
+          title: _shOrig ? ('사진 한 장이 이렇게 바뀌었어요'+(_shTitle?' · '+_shTitle:'')) : 'CLOVER AI 렌더링 결과',
+          description: '눌러서 비포/애프터 비교 · 가입 없이 무료 1장',
           imageUrl: src,
           link: { mobileWebUrl: shareViewUrl, webUrl: shareViewUrl }
         }
@@ -17565,7 +17589,8 @@ var EXTERIOR_VIEW_PROMPTS={
   '후면뷰':'이 사진은 건물의 뒷면(후면)이 주된 피사체로 보이는 사진이어야 합니다 — 건물 뒤쪽에서 바라본 구도입니다.',
   '정원·조경뷰':'이 사진은 건물 자체보다 주변 정원·조경(식재, 조경 동선, 야외 조경 시설물, 데크 등)이 주인공인 사진이어야 합니다 — 건물은 배경으로 자연스럽게 보이되, 프레임의 중심은 조경·정원 공간입니다. ⚠️ 매우 중요: 이 대지에 실제로 없는 넓은 새 정원을 지어내지 마세요 — 앞서 첨부된 다른 뷰(파사드뷰·투시뷰·조감뷰 등)에 이미 보이는 실제 조경(화단, 나무, 데크, 마당 등)의 규모와 위치를 그대로 기준으로, 그 조경에 그냥 더 가까이 다가가서 찍은 클로즈업 구도로 만드세요. 다른 뷰들에 없던 큰 정원·잔디밭을 새로 만들어내면 안 됩니다. ⚠️ 단, 이 "규모·위치를 그대로 기준으로" 라는 지시는 나무·식재의 "배치"에만 적용되고, 계절·날씨 연출이 별도로 선택되어 있다면 그 나무들의 "색상(나뭇잎 색)"은 이 지시와 무관하게 선택된 계절에 맞게 다시 칠해야 합니다 — 참고 사진 속 나무가 초록색이어도 계절 지시가 가을이면 단풍색으로, 겨울이면 눈 덮인 모습으로 바꿔 그리세요.',
   // 2026-10-20 요청("건물 안에 마당 같은 것도 넣어줘 — 중정은 아닌 것 같고"): 건물이 ㄷ자·ㄱ자로 감싸고 한쪽은 트인 안마당
-  '안마당뷰(ㄷ·ㄱ자 마당)':'이 사진은 건물이 ㄷ자 또는 ㄱ자로 꺾이며 두세 면을 감싸고 있고 나머지 한쪽은 트여 있는 "안마당(앞마당)" 안에 사람이 서서 눈높이(약 1.6m)로 찍은 실사 사진이어야 합니다 — 사방이 완전히 막힌 중정(ㅁ자)이 아니라, 건물 매스(동)들이 서로 직각으로 만나는 안쪽 모서리를 정면으로 바라보는 구도로, 양쪽 날개 벽면과 그 사이의 마당이 함께 프레임을 채웁니다. 마당 바닥(흙·마사토·잔디·디딤석·데크 등)이 화면 아래쪽 1/4~1/3 정도 넓게 보이고, 1층에는 마당으로 바로 열리는 큰 폴딩도어·통창과 처마 밑 반외부 공간(필로티·캐노피), 위층에는 돌출된 창(박스형 창틀)과 테라스가 보이면 좋습니다. 위쪽에는 두 매스의 지붕선 사이로 하늘이 시원하게 열려 있어야 합니다. 건물의 재료·색·창호 디자인은 다른 외관 뷰와 반드시 같은 건물로 일치시키고, 마당을 위해 건물 형태를 바꾸지 말고 기존 건물에서 이렇게 꺾여 만나는 안쪽 면을 찾아 그 앞에 선 구도로 보여주세요(원래 형태가 일자형이면 가장 자연스럽게 꺾이는 부분을 마당 쪽으로 보여주되 건물 크기·층수는 유지).',
+  // 2026-10-20 수정("안마당을 임의로 정하지 말고 건축 참고이미지나 안마당 참고이미지를 올리면 그 이미지에 맞게"): 특정 사진의 마당 모습(바닥재·창 형태)을 지시하던 문구를 빼고, 올린 참고 이미지를 따르게 함
+  '안마당뷰(ㄷ·ㄱ자 마당)':'이 사진은 참고 이미지 속 바로 그 건물의 "안마당" 안에 사람이 서서 눈높이(약 1.6m)로 찍은 실사 사진이어야 합니다 — 안마당은 건물 매스(동)가 ㄷ자·ㄱ자로 꺾이며 두세 면을 감싸고 한쪽은 트여 있는 마당입니다(사방이 막힌 ㅁ자 중정이 아님). ⚠️ 마당의 모습은 임의로 지어내지 말고 반드시 첨부된 참고 이미지를 따르세요: (1) "안마당" 참고 사진이 첨부돼 있으면 그 사진의 마당 형태·바닥재·조경·마당 쪽 창호와 문 배치를 그대로 따르고, (2) 없으면 첨부된 건물 외관 참고 이미지의 매스 구성에서 실제로 꺾여 만나는 안쪽 면을 찾아 그 앞 마당을 보여주되, 마당 쪽 벽의 재료·색·창호 디자인은 참고 건물과 똑같이, 마당 바닥과 조경은 참고 건물의 분위기에 자연스럽게 어울리게 하세요. 참고 이미지에 없는 동을 새로 붙이거나 층수·건물 크기를 바꾸지 마세요(건물이 일자형이라 꺾이는 면이 없으면 건물과 담장·부속 매스가 감싸는 마당 쪽을 보여주세요).',
   '야간뷰':'이 사진은 해질녘 또는 야간에 촬영된 건물 외관 사진이어야 합니다 — 건물의 경관 조명, 창문 너머로 새어 나오는 따뜻한 실내 조명, 야간 하늘을 함께 보여주는 나이트뷰입니다.',
   '디테일뷰(입구·자재)':'이 사진은 건물 전체가 아니라 현관·입구, 외장 마감재의 질감, 특징적인 디자인 디테일 중 하나를 가까이서 확대 촬영한 클로즈업 디테일컷이어야 합니다 — 건물 전체를 보여주는 구도가 아니라 좁고 집중된 프레임입니다.'
 };
@@ -21556,7 +21581,7 @@ function mkAutoRoomCamera(p){
   }
 
   // ── 건물 외관 사진: 뷰 이름표를 붙여서 최대 6장까지 ────────────────────
-  var EXT_ANCHOR_TYPE_OPTIONS = ['파사드뷰(정면)','투시뷰(스트리트뷰)','좌측면뷰','우측면뷰','후면뷰','조감뷰','광역조감뷰','배치도'];
+  var EXT_ANCHOR_TYPE_OPTIONS = ['파사드뷰(정면)','투시뷰(스트리트뷰)','좌측면뷰','우측면뷰','후면뷰','조감뷰','광역조감뷰','배치도','안마당뷰(ㄷ·ㄱ자 마당)']; // 2026-10-20: 안마당 참고 사진도 올릴 수 있게
   var upsWrap=dv('ss');upsWrap.innerHTML='<div class="lbl">🏗️ 건물 외관 사진 <span class="lbl-en">뷰 이름표를 붙여서 최대 6장까지</span></div>';
   mkAnchorSlotList(upsWrap, spTab.autoRoomExtAnchors, EXT_ANCHOR_TYPE_OPTIONS, 6, 'autoRoomGenExtUrls');
   p.appendChild(upsWrap);
@@ -46837,7 +46862,7 @@ function _openBatchReviewModal(newFiles){
 
   var head=document.createElement('div');
   head.style.cssText='padding:16px 18px;border-bottom:1px solid var(--bd2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0';
-  head.innerHTML='<div style="font-size:14px;font-weight:800;color:var(--t)">📦 일괄 업로드 확인</div>';
+  head.innerHTML='<div style="font-size:17px;font-weight:800;color:var(--t)">📦 일괄 업로드 확인</div>';
   var closeX=document.createElement('button');closeX.type='button';closeX.textContent='✕';
   closeX.style.cssText='width:28px;height:28px;border-radius:50%;border:none;background:var(--c2);color:var(--t2);cursor:pointer;font-size:13px';
   closeX.onclick=function(){ ov.remove(); };
@@ -46845,7 +46870,7 @@ function _openBatchReviewModal(newFiles){
   modal.appendChild(head);
 
   var sub=document.createElement('div');
-  sub.style.cssText='padding:10px 18px 0;font-size:11px;color:var(--m2);line-height:1.6;flex-shrink:0';
+  sub.style.cssText='padding:12px 18px 0;font-size:13.5px;color:var(--t2);line-height:1.6;flex-shrink:0';
   sub.textContent='업로드된 사진이에요. 잘못 들어간 사진은 ✕로 빼고, "+"로 더 추가할 수 있어요.';
   modal.appendChild(sub);
 
@@ -46900,7 +46925,7 @@ function _openBatchReviewModal(newFiles){
     foot.innerHTML='';
     if(wf==='render') foot.appendChild(_batchToneOptions(totalCount, renderFoot)); // 2026-10-20 여러 장 같은 톤
     var info=document.createElement('div');
-    info.style.cssText='font-size:11.5px;color:var(--t2);text-align:center';
+    info.style.cssText='font-size:14px;color:var(--t2);text-align:center;font-weight:600';
     info.textContent = totalCount===0 ? '사진이 없어요' : (totalCount+'장 선택됨'+(totalCost>0?(' · 총 '+totalCost+'cr'):'')+(readyCount<totalCount?' (불러오는 중...)':''));
     foot.appendChild(info);
     var okBtn=document.createElement('button');okBtn.type='button';
@@ -46956,28 +46981,28 @@ function _openBatchReviewModal(newFiles){
 function _batchToneOptions(totalCount, rerender){
   var T=G._batchTone||(G._batchTone={on:false, mode:'first', confirm:true, pickImg:null});
   var box=document.createElement('div');
-  box.style.cssText='padding:11px 12px;border-radius:10px;border:1px solid '+(T.on?'var(--acb)':'var(--bd2)')+';background:'+(T.on?'var(--acg)':'var(--c2)')+';font-size:12px;color:var(--t2);line-height:1.6;text-align:left';
-  var row=function(html, on, click, sub){ var l=document.createElement('div'); l.style.cssText='display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-top:6px'; l.innerHTML='<span style="flex-shrink:0;width:17px;height:17px;margin-top:1px;border-radius:'+(sub?'50%':'5px')+';border:1.5px solid '+(on?'var(--ac)':'var(--m2)')+';background:'+(on?'var(--ac)':'transparent')+';color:#000;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center">'+(on?(sub?'●':'✓'):'')+'</span><span>'+html+'</span>'; l.onclick=click; return l; };
-  box.appendChild(row('<b style="color:var(--t);font-size:13px">🎨 같은 톤으로 맞추기</b><br><span style="font-size:11px;color:var(--m2)">거실·주방·침실처럼 한 프로젝트의 여러 장면을 <b>같은 날 같은 사진가가 찍은 것처럼</b> 조명·색감·분위기를 맞춰요. 각 사진의 가구·구도·재질은 그대로예요.</span>', T.on, function(){ T.on=!T.on; rerender(); }));
+  box.style.cssText='padding:14px 15px;border-radius:11px;border:1px solid '+(T.on?'var(--acb)':'var(--bd2)')+';background:'+(T.on?'var(--acg)':'var(--c2)')+';font-size:14px;color:var(--t2);line-height:1.65;text-align:left';
+  var row=function(html, on, click, sub){ var l=document.createElement('div'); l.style.cssText='display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:9px'; l.innerHTML='<span style="flex-shrink:0;width:21px;height:21px;margin-top:1px;border-radius:'+(sub?'50%':'5px')+';border:1.5px solid '+(on?'var(--ac)':'var(--m2)')+';background:'+(on?'var(--ac)':'transparent')+';color:#000;font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:center">'+(on?(sub?'●':'✓'):'')+'</span><span>'+html+'</span>'; l.onclick=click; return l; };
+  box.appendChild(row('<b style="color:var(--t);font-size:16.5px">🎨 같은 톤으로 맞추기</b><br><span style="font-size:13.5px;color:var(--t2)">거실·주방·침실처럼 한 프로젝트의 여러 장면을 <b>같은 날 같은 사진가가 찍은 것처럼</b> 조명·색감·분위기를 맞춰요. 각 사진의 가구·구도·재질은 그대로예요.</span>', T.on, function(){ T.on=!T.on; rerender(); }));
   if(T.on){
-    var sub=document.createElement('div'); sub.style.cssText='margin:8px 0 0 25px;padding-top:8px;border-top:1px dashed var(--bd2)';
-    sub.appendChild(row('<b>1번 사진 결과를 기준으로</b> <span style="font-size:11px;color:var(--m2)">— 1번을 먼저 만들고, 그 결과의 톤에 나머지를 맞춰요</span>', T.mode==='first', function(){ T.mode='first'; rerender(); }, true));
+    var sub=document.createElement('div'); sub.style.cssText='margin:10px 0 0 31px;padding-top:10px;border-top:1px dashed var(--bd2)';
+    sub.appendChild(row('<b>1번 사진 결과를 기준으로</b> <span style="font-size:13px;color:var(--m2)">— 1번을 먼저 만들고, 그 결과의 톤에 나머지를 맞춰요</span>', T.mode==='first', function(){ T.mode='first'; rerender(); }, true));
     if(T.mode==='first'){
-      var c=row('<span style="font-size:11.5px">1번이 나오면 <b>먼저 보여주고 물어보기</b> <span style="color:var(--m2)">(마음에 안 들면 1번만 다시 만들 수 있어 크레딧 낭비가 없어요)</span></span>', T.confirm, function(){ T.confirm=!T.confirm; rerender(); });
-      c.style.marginLeft='25px'; sub.appendChild(c);
+      var c=row('<span style="font-size:13.5px">1번이 나오면 <b>먼저 보여주고 물어보기</b> <span style="color:var(--m2)">(마음에 안 들면 1번만 다시 만들 수 있어 크레딧 낭비가 없어요)</span></span>', T.confirm, function(){ T.confirm=!T.confirm; rerender(); });
+      c.style.marginLeft='31px'; sub.appendChild(c);
     }
-    sub.appendChild(row('<b>내가 고른 기준 이미지로</b> <span style="font-size:11px;color:var(--m2)">— 이미 마음에 드는 결과나 레퍼런스 사진의 톤으로 전부 맞춰요</span>', T.mode==='pick', function(){ T.mode='pick'; rerender(); }, true));
+    sub.appendChild(row('<b>내가 고른 기준 이미지로</b> <span style="font-size:13px;color:var(--m2)">— 이미 마음에 드는 결과나 레퍼런스 사진의 톤으로 전부 맞춰요</span>', T.mode==='pick', function(){ T.mode='pick'; rerender(); }, true));
     if(T.mode==='pick'){
-      var pk=document.createElement('div'); pk.style.cssText='margin:6px 0 0 25px;display:flex;gap:8px;align-items:center;flex-wrap:wrap';
-      if(T.pickImg){ var im=document.createElement('img'); im.src=T.pickImg; im.style.cssText='width:64px;height:44px;object-fit:cover;border-radius:6px;border:1.5px solid var(--ac)'; pk.appendChild(im); }
+      var pk=document.createElement('div'); pk.style.cssText='margin:8px 0 0 31px;display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+      if(T.pickImg){ var im=document.createElement('img'); im.src=T.pickImg; im.style.cssText='width:84px;height:58px;object-fit:cover;border-radius:6px;border:1.5px solid var(--ac)'; pk.appendChild(im); }
       var b1=document.createElement('button'); b1.type='button'; b1.textContent='🖼 내 갤러리에서'; var b2=document.createElement('button'); b2.type='button'; b2.textContent='📁 파일에서';
-      [b1,b2].forEach(function(b){ b.style.cssText='padding:6px 10px;border-radius:7px;border:1px solid var(--bd2);background:var(--card);color:var(--t);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit'; pk.appendChild(b); });
+      [b1,b2].forEach(function(b){ b.style.cssText='padding:9px 13px;border-radius:8px;border:1px solid var(--bd2);background:var(--card);color:var(--t);font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit'; pk.appendChild(b); });
       b1.onclick=function(){ _openGalleryPickerForAnchor(function(src){ T.pickImg=src; rerender(); }); };
       b2.onclick=function(){ var inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f) return; var r=new FileReader(); r.onload=function(){ _downscaleForMemorySafety(r.result, function(v){ T.pickImg=v; rerender(); }); }; r.readAsDataURL(f); }; inp.click(); };
-      if(!T.pickImg){ var w=document.createElement('span'); w.style.cssText='font-size:11px;color:#f59e0b'; w.textContent='기준 이미지를 골라주세요'; pk.appendChild(w); }
+      if(!T.pickImg){ var w=document.createElement('span'); w.style.cssText='font-size:13px;color:#f59e0b'; w.textContent='기준 이미지를 골라주세요'; pk.appendChild(w); }
       sub.appendChild(pk);
     }
-    if(totalCount<2){ var n=document.createElement('div'); n.style.cssText='margin-top:6px;font-size:11px;color:#f59e0b'; n.textContent='같은 톤 맞추기는 2장 이상일 때 써요.'; sub.appendChild(n); }
+    if(totalCount<2){ var n=document.createElement('div'); n.style.cssText='margin-top:8px;font-size:13px;color:#f59e0b'; n.textContent='같은 톤 맞추기는 2장 이상일 때 써요.'; sub.appendChild(n); }
     box.appendChild(sub);
   }
   return box;
@@ -50778,7 +50803,7 @@ function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
           var email=window._admVisitorLabel?window._admVisitorLabel(r):(r.user_id?(emailByUid[r.user_id]||'(탈퇴/알수없음)'):'👤 비로그인');
           var kt=_kst(r.created_at);
           return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:5px 8px;color:var(--m2)">'+kt.date+' '+kt.time+'</td>'+
-            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:({guest_trial_start:'🎁 비회원 체험 시작',qs_open:'🧭 첫 화면 선택 창',qs_pick_space:'🧭 선택: 인테리어',qs_pick_staging:'🧭 선택: 빈 집 가구',qs_pick_spaceset:'🧭 선택: 공간 컨셉',qs_pick_render:'🧭 선택: 렌더 실사',lead_open:'🏗 상담 창 열림',lead_submit:'🏗 상담 신청',guest_trial_done:'🎁 비회원 체험 완료',guest_signup_click:'🎁 체험 후 가입 버튼 클릭',signup_after_trial:'🎁 체험 후 가입'}[r.event_type])||(r.event_type.indexOf('how_')===0?('🙋 가입 응답: '+(((typeof HOW_OPTS!=='undefined'?HOW_OPTS:[]).find(function(o){return o[0]===r.event_type.slice(4);})||[0,r.event_type.slice(4)])[1])):r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
+            '<td style="padding:5px 8px;color:var(--t2)">'+(evDef?evDef.l:({guest_trial_start:'🎁 비회원 체험 시작',qs_open:'🧭 첫 화면 선택 창',qs_pick_space:'🧭 선택: 인테리어',qs_pick_staging:'🧭 선택: 빈 집 가구',qs_pick_spaceset:'🧭 선택: 공간 컨셉',qs_pick_render:'🧭 선택: 렌더 실사',lead_open:'🏗 상담 창 열림',lead_submit:'🏗 상담 신청',share_view:'🔗 카톡 공유 링크 열람',share_cta:'🔗 공유 링크 → 해보기 클릭',guest_trial_done:'🎁 비회원 체험 완료',guest_signup_click:'🎁 체험 후 가입 버튼 클릭',signup_after_trial:'🎁 체험 후 가입'}[r.event_type])||(r.event_type.indexOf('how_')===0?('🙋 가입 응답: '+(((typeof HOW_OPTS!=='undefined'?HOW_OPTS:[]).find(function(o){return o[0]===r.event_type.slice(4);})||[0,r.event_type.slice(4)])[1])):r.event_type.indexOf('signup_src_')===0?('🆕 가입 · 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(11)])||r.event_type.slice(11))):r.event_type.indexOf('src_')===0?('📣 유입: '+((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[r.event_type.slice(4)])||r.event_type.slice(4))):r.event_type.indexOf('tab_')===0?('탭 열기: '+(_ADM_WF_LABEL[r.event_type.slice(4)]||r.event_type.slice(4))):r.event_type))+'</td>'+
             '<td style="padding:5px 8px;color:'+(r.user_id?'var(--t2)':'var(--m1)')+'">'+email+'</td></tr>';
         }).join('')+
       '</tbody></table></div>';
@@ -55650,46 +55675,84 @@ document.addEventListener('DOMContentLoaded',function(){try{
   // 볼 수 있는 전용 보기 페이지를 만들고, 공유 링크는 항상 여기로 오게 함.
   var _shareImgParam = new URLSearchParams(location.search).get('shareImg');
   if(_shareImgParam){
+    // 2026-10-20 개선: 비포/애프터 슬라이더 + "내 사진으로도 해보기" + 링크 복사 + 원본 저장. 열람·클릭 수는 관리자 방문 통계에 기록
     try{
-      var _shareUrl = decodeURIComponent(_shareImgParam);
-      var _safeUrl = /^https:\/\//.test(_shareUrl) ? _shareUrl : ''; // 이상한 스킴 방지
+      var _sq = new URLSearchParams(location.search);
+      var _shareUrl = _shareImgParam; // URLSearchParams가 이미 디코딩해줌
+      var _safeUrl = /^https:\/\//.test(_shareUrl) ? _shareUrl : '';
+      var _origP = _sq.get('shareOrig')||''; var _safeOrig = /^https:\/\//.test(_origP) ? _origP : '';
+      var _tP = String(_sq.get('shareT')||'').replace(/[<>"&]/g,'').slice(0,30);
+      var _isVid = /\.(mp4|webm|mov)(\?|#|$)/i.test(_safeUrl);
+      if(_isVid) _safeOrig='';
+      var esc=function(u){ return String(u).replace(/"/g,'&quot;'); };
+      var media = !_safeUrl ? '<div style="color:#999;font-size:14px;padding:40px 0;text-align:center">이미지를 불러올 수 없어요</div>' :
+        _isVid ? '<video src="'+esc(_safeUrl)+'" controls playsinline autoplay muted loop style="width:100%;border-radius:14px;display:block;background:#000"></video>' :
+        _safeOrig ? ('<div id="shCmp" style="position:relative;border-radius:14px;overflow:hidden;background:#000;touch-action:pan-y;user-select:none;-webkit-user-select:none;cursor:ew-resize">'+
+            '<img id="shAfter" src="'+esc(_safeUrl)+'" style="width:100%;display:block" draggable="false">'+
+            '<div id="shBeforeWrap" style="position:absolute;inset:0;overflow:hidden;clip-path:inset(0 50% 0 0)"><img id="shBefore" src="'+esc(_safeOrig)+'" style="width:100%;height:100%;object-fit:cover;display:block" draggable="false"></div>'+
+            '<div id="shLine" style="position:absolute;top:0;bottom:0;left:50%;width:3px;background:#fff;transform:translateX(-50%);box-shadow:0 0 8px rgba(0,0,0,.5)"></div>'+
+            '<div id="shKnob" style="position:absolute;top:50%;left:50%;width:44px;height:44px;border-radius:50%;background:#fff;color:#000;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;transform:translate(-50%,-50%);box-shadow:0 4px 14px rgba(0,0,0,.5)">⇆</div>'+
+            '<span style="position:absolute;left:10px;top:10px;font-size:11px;font-weight:800;color:#fff;background:rgba(0,0,0,.65);padding:3px 8px;border-radius:5px">BEFORE</span>'+
+            '<span style="position:absolute;right:10px;top:10px;font-size:11px;font-weight:800;color:#000;background:#00e5cc;padding:3px 8px;border-radius:5px">AFTER</span>'+
+          '</div><div style="text-align:center;font-size:13px;color:#9aa;margin-top:9px">← 가운데를 좌우로 끌어서 비교해보세요 →</div>') :
+        '<img id="shareImgEl" src="'+esc(_safeUrl)+'" style="width:100%;display:block;border-radius:14px">';
       document.body.innerHTML =
-        '<div style="min-height:100vh;background:#0b0d10;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font-family:-apple-system,sans-serif">'+
-          (_safeUrl?('<img id="shareImgEl" src="'+_safeUrl.replace(/"/g,'&quot;')+'" style="max-width:100%;max-height:70vh;border-radius:14px;box-shadow:0 8px 40px rgba(0,0,0,.5)">'):'<div style="color:#999;font-size:13px">이미지를 불러올 수 없어요</div>')+
-          '<div id="shareImgErr" style="display:none;color:#999;font-size:13px;text-align:center;max-width:280px;line-height:1.6">이미지를 불러올 수 없어요 — 링크가 만료되었거나 삭제된 이미지일 수 있어요.</div>'+
-          '<div style="margin-top:22px;text-align:center">'+
-            '<div style="color:#fff;font-size:15px;font-weight:800;margin-bottom:14px">CLOVER AI로 만든 렌더링 결과예요</div>'+
-            (_safeUrl?'<button id="shareDlBtn" type="button" style="display:inline-block;padding:11px 22px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:12.5px;cursor:pointer;font-family:inherit;margin-right:8px">⬇ 원본 다운로드</button>':'')+
-            '<a href="/" style="display:inline-block;padding:12px 26px;border-radius:10px;background:#00e5cc;color:#000;font-weight:800;font-size:13px;text-decoration:none;font-family:inherit">나도 무료로 만들어보기</a>'+
+        '<div style="min-height:100vh;background:#05050a;color:#fff;font-family:Pretendard,-apple-system,BlinkMacSystemFont,sans-serif">'+
+          '<div style="position:sticky;top:0;z-index:3;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;background:rgba(5,5,10,.9);backdrop-filter:blur(6px)">'+
+            '<div style="font-weight:800;font-size:15px">🍀 CLOVER AI</div>'+
+            '<a href="/" class="shCta" style="background:#00e5cc;color:#000;font-weight:800;font-size:13px;padding:8px 15px;border-radius:999px;text-decoration:none">나도 만들어보기 →</a>'+
+          '</div>'+
+          '<div style="max-width:720px;margin:0 auto;padding:14px 16px 110px;box-sizing:border-box">'+
+            (_tP?'<div style="font-size:13px;color:#5eead4;font-weight:700">'+_tP+'</div>':'')+
+            '<div style="font-size:21px;font-weight:800;margin:4px 0 14px;line-height:1.35">'+(_safeOrig?'사진 한 장이 이렇게 바뀌었어요':'CLOVER AI로 만든 결과예요')+'</div>'+
+            media+
+            '<div id="shareImgErr" style="display:none;color:#999;font-size:14px;text-align:center;line-height:1.6;padding:30px 0">이미지를 불러올 수 없어요 — 링크가 만료되었거나 삭제된 이미지일 수 있어요.</div>'+
+            '<div style="margin-top:20px;padding:20px 16px;border-radius:16px;background:#10161a;border:1px solid rgba(0,229,204,.35);text-align:center">'+
+              '<div style="font-size:18px;font-weight:800">내 사진으로도 해볼까요?</div>'+
+              '<div style="font-size:14px;color:#9aa;margin:6px 0 15px;line-height:1.5">가입 없이 무료 1장 · 사진 한 장이면 1분 안에 끝나요</div>'+
+              '<a href="/" class="shCta" style="display:inline-block;padding:15px 30px;border-radius:12px;background:#00e5cc;color:#000;font-weight:800;font-size:16px;text-decoration:none">무료로 바로 해보기 →</a>'+
+            '</div>'+
+            '<div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">'+
+              '<button id="shCopy" type="button" style="padding:11px 18px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">🔗 링크 복사</button>'+
+              (_safeUrl?'<button id="shareDlBtn" type="button" style="padding:11px 18px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">⬇ 원본 저장</button>':'')+
+            '</div>'+
           '</div>'+
         '</div>';
-      // ⚠️ 버그 수정("카톡 공유했는데 결과가 안 보인다"): <img>가 실제로 로드 실패했을 때(링크
-      // 만료 등) 지금까지는 그냥 빈 화면으로 남아서 "고장났나?" 헷갈렸음 — 로드 실패를 감지해서
-      // 이미지 자리를 지우고 위에 미리 넣어둔 안내 문구를 대신 보여주도록 함.
-      var _shareImgEl = document.getElementById('shareImgEl');
-      if(_shareImgEl){
-        _shareImgEl.onerror = function(){
-          _shareImgEl.style.display='none';
-          var _errEl = document.getElementById('shareImgErr');
-          if(_errEl) _errEl.style.display='block';
-        };
+      document.body.style.overflow='auto';
+      // 통계(관리자 방문 화면): 공유 링크 열람 / 해보기 클릭
+      try{ if(!_supa && SUPA_URL && SUPA_KEY && window.supabase) _supa=supabase.createClient(SUPA_URL, SUPA_KEY, {auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}}); _trackEvent('share_view'); }catch(_e){} // 기록용 가벼운 연결(앱 로그인 처리는 안 돌림)
+      [].forEach.call(document.querySelectorAll('.shCta'), function(a){ a.onclick=function(ev){ ev.preventDefault(); try{ _trackEvent('share_cta'); }catch(_e){} setTimeout(function(){ location.href='/'; }, 350); }; });
+      // 비포/애프터 슬라이더
+      var cmp=document.getElementById('shCmp');
+      if(cmp){
+        var setPos=function(clientX){ var r=cmp.getBoundingClientRect(); var pc=Math.max(0,Math.min(100,(clientX-r.left)/r.width*100)); document.getElementById('shBeforeWrap').style.clipPath='inset(0 '+(100-pc)+'% 0 0)'; document.getElementById('shLine').style.left=pc+'%'; document.getElementById('shKnob').style.left=pc+'%'; };
+        var drag=false;
+        cmp.addEventListener('pointerdown', function(e){ drag=true; try{ cmp.setPointerCapture(e.pointerId); }catch(_e){} setPos(e.clientX); });
+        cmp.addEventListener('pointermove', function(e){ if(drag) setPos(e.clientX); });
+        cmp.addEventListener('pointerup', function(){ drag=false; });
+        cmp.addEventListener('pointercancel', function(){ drag=false; });
+        var bi=document.getElementById('shBefore'); if(bi) bi.onerror=function(){ var w=document.getElementById('shBeforeWrap'); if(w) w.style.display='none'; ['shLine','shKnob'].forEach(function(id){ var x=document.getElementById(id); if(x) x.style.display='none'; }); };
       }
+      var errFn=function(){ var m=document.getElementById('shCmp')||document.getElementById('shareImgEl'); if(m) m.style.display='none'; var er=document.getElementById('shareImgErr'); if(er) er.style.display='block'; };
+      var ai=document.getElementById('shAfter')||document.getElementById('shareImgEl'); if(ai) ai.onerror=errFn;
+      var cp=document.getElementById('shCopy');
+      if(cp) cp.onclick=function(){ var u=location.href; var ok=function(){ cp.textContent='✓ 복사됐어요'; setTimeout(function(){ cp.textContent='🔗 링크 복사'; },1800); };
+        try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(u).then(ok, function(){ prompt('아래 링크를 복사하세요', u); }); } else prompt('아래 링크를 복사하세요', u); }catch(_e){ prompt('아래 링크를 복사하세요', u); } };
       if(_safeUrl){
         var _dlBtn = document.getElementById('shareDlBtn');
         if(_dlBtn) _dlBtn.onclick = function(){
-          _dlBtn.textContent='다운로드 중...';
+          _dlBtn.textContent='저장 중...';
           fetch(_safeUrl).then(function(r){ return r.blob(); }).then(function(blob){
             var a = document.createElement('a');
             var blobUrl = URL.createObjectURL(blob);
             a.href = blobUrl;
-            a.download = 'clover-ai-'+Date.now()+'.jpg';
+            a.download = 'clover-ai-'+Date.now()+(_isVid?'.mp4':'.jpg');
             document.body.appendChild(a); a.click();
             setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 500);
-            _dlBtn.textContent='⬇ 원본 다운로드';
+            _dlBtn.textContent='⬇ 원본 저장';
           }).catch(function(){
-            // fetch가 막히면(드문 CORS 케이스) 그냥 새 탭으로 열어서 수동 저장하도록 폴백
             window.open(_safeUrl, '_blank');
-            _dlBtn.textContent='⬇ 원본 다운로드';
+            _dlBtn.textContent='⬇ 원본 저장';
           });
         };
       }
