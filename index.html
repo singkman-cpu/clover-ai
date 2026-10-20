@@ -28118,6 +28118,7 @@ var XFORM_STEPS=[
   {k:'unfinished_stage1', id:'s1', from:'s1b', label:'공사 1단계', ord:3}
 ];
 var XFORM_GLASS_MASK_NOTE=' 🌫🌫🌫 THE SOFTLY BLURRED AREA IN THE INPUT IS THE BIG GLASS WALL, BLURRED OUT ON PURPOSE (absolute): in the result that whole blurred area becomes ONE big EMPTY opening in the concrete shell — through it you see straight into the open double-height room (its back wall, maybe a staircase) from the ground floor all the way up to the underside of the sloped roof. Draw NOTHING structural inside that area: no column, no post, no beam, no floor slab, no slab edge, no props, and do NOT redraw window frames or a grid there. Everything outside the blurred area follows the input exactly.';
+var XFORM_NOT_DOUBLE_NOTE=' (Checked from the finished photo: the rooms behind the large glass are separate floors, not a double-height space — keep the floor slab at the upper-floor level behind the glass, set back from it.)';
 var XFORM_BACK_NOTE={
   s3:'',
   s2:' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is NOT the finished building — it is this same building one construction stage LATER (finishes partly installed). Produce the bare structural-frame stage of exactly this structure: strip off cladding, glass, windows, scaffolding-mounted finishes and landscaping, but keep EVERY structural element exactly where it is in the input — same columns, walls, slabs, roof slope, same open double-height bay with no floor crossing it, same camera. Do not add any slab, beam or floor that is not in the input. ⚠⚠⚠⚠ WINDOW FRAMES ARE NOT STRUCTURE (2026-10-20 user-confirmed failure: the thin frames of the big gable glass wall were turned into concrete columns and a floor slab): the large glass wall / curtain wall in the input — including all its vertical mullions and horizontal transoms — is only a window, not structure. In this stage it disappears COMPLETELY: where the glass wall was, show ONE big empty opening bounded only by the building\'s outer concrete walls / edge beams and the sloped roof. Inside that opening there must be NO column, NO post, NO beam, NO floor slab and NO slab edge at any height — you look straight into the open double-height room up to the underside of the sloped roof. Never turn mullions into columns or transoms into floors.',
@@ -28127,20 +28128,24 @@ var XFORM_BACK_NOTE={
 // 2026-10-20 신고("거실 창문엔 창호 프레임만 있는데 계속 기둥이 만들어지고, 복층이라 천장이 없는데 슬라브가 생긴다"): 글 지시만으로는 AI가
 // 통창의 세로 창살을 기둥으로, 가로 창살을 슬라브로 바꿔버림 → 2단계를 만들기 전에 AI(비전)로 큰 통창 위치를 찾아서 그 부분을 흐리게(창살 선이
 // 사라지게) 지운 사진을 넣고, "흐린 곳은 텅 빈 개구부"라고 지시함. 위치를 못 찾으면 원래 사진 그대로 씀.
-function _xformMaskGlass(src, cb){
-  var done=false; function fin(u,ok){ if(done) return; done=true; cb(u,ok); }
+// 2026-10-20 요청("2단계가 중요 — 복층인지 아닌지 정확하게 파악돼야"): 판단은 완공 사진(analyzeSrc — 유리 너머 실내가 가장 잘 보임)으로 하고, 지우기는 3단계 사진(src)에 함(카메라 고정이라 같은 위치)
+function _xformMaskGlass(src, cb, analyzeSrc){
+  var done=false; function fin(u,ok,info){ if(done) return; done=true; cb(u,ok,info||null); }
   setTimeout(function(){ fin(src,false); }, 30000);
   try{
     if(typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(src,false); return; }
-    _proposalImgToB64(src, function(b64){
+    _proposalImgToB64(analyzeSrc||src, function(b64){
       if(!b64){ fin(src,false); return; }
-      var q='This is a photo of a house under construction (or finished). Find the single LARGEST glass wall / curtain wall / tall window area that spans two or more storeys (for example a tall glazed gable end with a grid of window frames). Reply with ONLY JSON: {"glass":[ymin,xmin,ymax,xmax]} with integers 0-1000 normalized to the image, as a tight box around the glazing including its frames (not the solid walls around it). If there is no glass area taller than one storey, reply {"glass":null}.';
+      var q='This is a photo of a finished house. Step 1: find the single LARGEST glass wall / curtain wall / tall window area that spans two or more storeys (for example a tall glazed gable end with a grid of window frames) and give a tight box around the glazing including its frames (not the solid walls around it). '+
+        'Step 2 (most important): decide whether the room BEHIND that glass is a DOUBLE-HEIGHT (open-to-above, 복층/오픈 천장) space. Answer true when, looking through the glass, the interior reads as one tall continuous space — e.g. a mezzanine/landing railing set back from the glass, a staircase rising inside, a tall curtain running the full height, a pendant hanging from a high ceiling, the sloped roof visible from below — and no floor slab edge, spandrel panel or separate upper room sits right behind the glass at the upper-floor level. Answer false when there are clearly two separate floors behind the glass (a slab edge/spandrel at the floor level, different rooms stacked). '+
+        'Reply with ONLY JSON: {"glass":[ymin,xmin,ymax,xmax], "double":true|false, "why":"한국어로 짧게 근거"} with integers 0-1000 normalized to the image. If there is no glass area taller than one storey, reply {"glass":null,"double":false,"why":""}.';
       _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:q}]}]}, function(res){
         try{
           var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t);
           var m=String(t||'').match(/\{[\s\S]*\}/); if(!m){ fin(src,false); return; }
-          var j=JSON.parse(m[0]); var g=j.glass;
-          if(!Array.isArray(g) || g.length!==4){ fin(src,false); return; }
+          var j=JSON.parse(m[0]); var g=j.glass, info={double:j.double===true, why:String(j.why||'').slice(0,80)};
+          console.log('[변신 세트] 복층 판단:', info.double?'복층(오픈 천장)':'복층 아님', info.why);
+          if(!Array.isArray(g) || g.length!==4 || !info.double){ fin(src,false,info); return; } // 복층이 아니면 지우지 않음
           var y0=g[0]/1000, x0=g[1]/1000, y1=g[2]/1000, x1=g[3]/1000;
           if(!(x1>x0 && y1>y0) || (x1-x0)*(y1-y0)<0.02 || (x1-x0)*(y1-y0)>0.6){ fin(src,false); return; }
           var im=new Image(); im.crossOrigin='anonymous';
@@ -28154,7 +28159,7 @@ function _xformMaskGlass(src, cb){
               var tc=document.createElement('canvas'); tc.width=4; tc.height=6; var tx=tc.getContext('2d'); tx.imageSmoothingEnabled=true; tx.imageSmoothingQuality='high'; tx.drawImage(im,bx,by,bw,bh,0,0,4,6);
               x.save(); x.beginPath(); x.rect(bx,by,bw,bh); x.clip(); x.imageSmoothingEnabled=true; x.imageSmoothingQuality='high'; x.drawImage(tc,0,0,4,6,bx,by,bw,bh); x.filter='blur('+r+'px)'; x.drawImage(tc,0,0,4,6,bx-r,by-r,bw+2*r,bh+2*r); x.restore();
               console.log('[변신 세트] 통창 위치를 찾아 흐리게 처리:', [x0,y0,x1,y1].map(function(v){return v.toFixed(2);}).join(','));
-              fin(c.toDataURL('image/jpeg',0.93), true);
+              fin(c.toDataURL('image/jpeg',0.93), true, info);
             }catch(e){ fin(src,false); }
           };
           im.src=src;
@@ -28204,11 +28209,12 @@ function _xformRun(finalSrc, agedK, statusEl, done){
     window._xformBackNote=XFORM_BACK_NOTE[s.id]||'';
     if(s.id==='s2'){ // 2단계: 통창 창살을 지운 사진으로
       statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 준비 중… (거실 통창 위치 찾는 중)';
-      _xformMaskGlass(src, function(u, ok){
+      _xformMaskGlass(src, function(u, ok, info){
         if(ok) window._xformBackNote += XFORM_GLASS_MASK_NOTE;
-        statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… (한 장에 30초~1분)';
+        else if(info && !info.double) window._xformBackNote += XFORM_NOT_DOUBLE_NOTE;
+        statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… '+(info?(info.double?'(복층 거실로 판단 — 통창 자리를 비워서) ':'(복층 아님으로 판단) '):'')+'(한 장에 30초~1분)';
         _runIt(u);
-      });
+      }, out.final);
     } else _runIt(src);
   }
   function finish(){
