@@ -28107,15 +28107,22 @@ function _mkAutoShortsPanel(p){
 // 완성 외관 사진 한 장 → 노후 건물 → 실내 철거(노후 사진에 적용) → 빈 땅(0단계) → 공사 1·1.5·2·3단계 를 AI 편집 프리셋으로
 // 차례대로 자동 생성하고, 완성 사진까지 순서대로 쇼츠에 넣음(그다음 인테리어 컷을 더 넣고 🤖 자동 편집을 누르면 됨).
 // 기존 AI 편집 실행 경로(_doActbtn)를 그대로 써서 결과물·갤러리 저장이 평소와 똑같이 됨. 끝나면 AI 편집 탭의 원래 사진은 되돌려둠.
+// 2026-10-20 요청("3단계 만들고 2단계 만들고 1.5단계 만들어야 하는 거 아니야? 1단계부터 만드니까 거실 천장이 생긴다"): 공사 단계는 완공 → 3단계 → 2단계 → 1.5단계 → 1단계
+// 순서로 '한 단계씩 거꾸로' 만들어서 앞 단계 구조(오픈 천장·매스)가 그대로 이어지게 함. 쇼츠에 넣는 순서(ord)는 시간 순서 그대로.
 var XFORM_STEPS=[
-  {k:'@aged', from:'final', label:'노후 건물'},
-  {k:'unfinished_interior_stage1', from:'@aged', label:'철거 중'},
-  // 2026-10-20 요청: 0단계(빈 땅)는 빼기
-  {k:'unfinished_stage1', from:'final', label:'공사 1단계'},
-  {k:'unfinished_stage1b', from:'final', label:'공사 1.5단계'},
-  {k:'unfinished_stage2', from:'final', label:'공사 2단계'},
-  {k:'unfinished_stage3', from:'final', label:'공사 3단계'}
+  {k:'@aged', id:'aged', from:'final', label:'노후 건물', ord:1},
+  {k:'unfinished_interior_stage1', id:'demo', from:'aged', label:'철거 중', ord:2},
+  {k:'unfinished_stage3', id:'s3', from:'final', label:'공사 3단계', ord:6},
+  {k:'unfinished_stage2', id:'s2', from:'s3', label:'공사 2단계', ord:5},
+  {k:'unfinished_stage1b', id:'s1b', from:'s2', label:'공사 1.5단계', ord:4},
+  {k:'unfinished_stage1', id:'s1', from:'s1b', label:'공사 1단계', ord:3}
 ];
+var XFORM_BACK_NOTE={
+  s3:'',
+  s2:' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is NOT the finished building — it is this same building one construction stage LATER (finishes partly installed). Produce the bare structural-frame stage of exactly this structure: strip off cladding, glass, windows, scaffolding-mounted finishes and landscaping, but keep EVERY structural element exactly where it is in the input — same columns, walls, slabs, roof slope, same open double-height bay with no floor crossing it, same camera. Do not add any slab, beam or floor that is not in the input.',
+  s1b:' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is this same building one stage LATER — the full concrete frame. Produce the earlier moment where only the lower part is poured and the upper part is still rebar and formwork: remove the upper concrete (replace it with rebar cages and formwork panels in the same positions), keep the lower concrete exactly as in the input, keep the open double-height bay open (no slab, props or deck across it), same footprint, same camera. Never add any slab or floor that the input does not have.',
+  s1:' 🔙🔙 GO ONE STEP BACK IN TIME FROM THE INPUT (absolute, highest priority): the input photo is this same building one stage LATER — lower floor poured, upper floor in formwork. Produce the earlier moment before any concrete is poured: only vertical rebar cages and formwork at the same column/wall positions, on the same footprint, same camera — no poured walls or slabs anywhere.'
+};
 function _xformRunStep(src, key, cb){
   try{
     var ps=(PS_EDIT||[]).find(function(x){ return x.k===key; });
@@ -28143,17 +28150,19 @@ function _xformRun(finalSrc, agedK, statusEl, done){
   function restore(){ try{ var t=getTab('edit'); t.inputImg=keep.inputImg; t.selK=keep.selK; t.prompt=keep.prompt; t.refs=keep.refs; t.extraPrompt=keep.extraPrompt; t.resolution=keep.resolution; }catch(e){} }
   function next(){
     if(i>=XFORM_STEPS.length){ restore(); finish(); return; }
-    var s=XFORM_STEPS[i], key=(s.k==='@aged')?agedK:s.k, src=out[s.from==='@aged'?'@aged':'final'];
-    if(!src){ results.push({label:s.label, err:'앞 단계 실패로 건너뜀'}); i++; next(); return; }
+    var s=XFORM_STEPS[i], key=(s.k==='@aged')?agedK:s.k, src=out[s.from];
+    if(!src){ results.push({label:s.label, err:'앞 단계 실패로 건너뜀', ord:s.ord}); i++; next(); return; }
     statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… (한 장에 30초~1분)';
+    window._xformBackNote=XFORM_BACK_NOTE[s.id]||'';
     _xformRunStep(src, key, function(url, err){
-      if(url){ if(s.k==='@aged') out['@aged']=url; results.push({label:s.label, url:url}); }
-      else { results.push({label:s.label, err:err}); if(err==='중단됨'){ restore(); finish(); return; } }
+      window._xformBackNote='';
+      if(url){ out[s.id]=url; results.push({label:s.label, url:url, ord:s.ord}); }
+      else { results.push({label:s.label, err:err, ord:s.ord}); if(err==='중단됨'){ restore(); finish(); return; } }
       i++; next();
     });
   }
   function finish(){
-    var ok=results.filter(function(r){ return r.url; });
+    var ok=results.filter(function(r){ return r.url; }).sort(function(a,b){ return (a.ord||0)-(b.ord||0); }); // 쇼츠에는 시간 순서(노후→철거→1→1.5→2→3)
     // 2026-10-20 요청: 노후 건물 1.5초, 철거~공사 1~3단계 1초
     ok.forEach(function(r){ G_SHORTS.images.push({id:Date.now()+Math.random(), img:r.url, orig:null, role:'auto', autoRole:'ai_design', customLabel:r.label, source:'clover', customDuration:(r.label==='노후 건물'?1.5:1)}); });
     G_SHORTS.images.push({id:Date.now()+Math.random(), img:finalSrc, orig:null, role:'auto', autoRole:'ai_design', customLabel:'완성 외관', source:'clover'});
@@ -28169,7 +28178,7 @@ function _mkXformPanel(p){
   if(!(typeof G!=='undefined' && G.supaRole==='admin')) return;
   var w=dv('ss'); w.style.cssText='padding:12px;border-radius:11px;border:1.5px solid rgba(245,158,11,.5);background:rgba(245,158,11,.07);margin-bottom:8px';
   w.innerHTML='<div style="font-size:13.5px;font-weight:800;color:#fbbf24">🏗 변신 세트 자동 만들기 <span style="font-size:10px;color:var(--m2);font-weight:600">관리자 전용</span></div>'+
-    '<div style="font-size:11px;color:var(--t2);line-height:1.6;margin:5px 0 9px">완성 외관 사진 한 장을 고르면 <b>노후 건물 → 철거 중 → 공사 1·1.5·2·3단계</b>를 자동으로 만들고, 완성 사진까지 순서대로 쇼츠에 넣어요. (7장, 약 5~8분)</div>';
+    '<div style="font-size:11px;color:var(--t2);line-height:1.6;margin:5px 0 9px">완성 외관 사진 한 장을 고르면 <b>노후 건물 → 철거 중 → 공사 1·1.5·2·3단계</b>(공사 단계는 완공 사진에서 3→2→1.5→1단계로 거꾸로 만들어 구조가 그대로 이어지게)를 자동으로 만들고, 완성 사진까지 순서대로 쇼츠에 넣어요. (7장, 약 5~8분)</div>';
   var sel=document.createElement('select'); sel.style.cssText='width:100%;padding:8px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:12px;font-family:inherit;margin-bottom:8px';
   [['aged_house','노후된 주택'],['aged_villa','노후된 빌라'],['aged_redbrick','노후된 빨간벽돌 건물'],['aged_commercial_ext','노후된 상가건물']].forEach(function(o){ var op=document.createElement('option'); op.value=o[0]; op.textContent='노후 스타일: '+o[1]; sel.appendChild(op); });
   w.appendChild(sel);
@@ -56854,10 +56863,12 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // 2026-10-20 신고("거실 쪽 천장이 뚫려있는데 슬라브가 생겼다, 1.5단계는 완전히 다른 건물처럼 나오고 건물·사람이 다 작게 나왔다"):
       // 공사 1~3단계는 완공 건물의 매스(동별 위치·크기·지붕 모양)와 사람 크기, 오픈 천장(복층) 부분을 그대로 지키도록 맨 끝에 고정 규칙 추가
       if(['unfinished_stage1','unfinished_stage1b','unfinished_stage2','unfinished_stage3'].indexOf(tab.selK)!==-1){
+        if(window._xformBackNote) _finalPrompt += window._xformBackNote; // 변신 세트: 한 단계 뒤(나중) 사진에서 거꾸로 만들 때
         _finalPrompt += ' ⚠️⚠️⚠️⚠️ FINAL CHECK — SAME BUILDING, SAME SIZE, SAME VOIDS (overrides anything above; user-confirmed failures: a floor slab was added across a double-height living room, and a stage came out as a different, larger building with tiny people): '+
           '(1) MASSING LOCK — read the finished building in the input as its separate volumes (e.g. a tall gable-roofed main volume plus lower side wings). The structure must sit in exactly the same place and outline in the frame: every volume keeps its own position, width, height and roof shape (a gable volume becomes a gable-shaped frame, never a flat box; a low side wing stays low). Do NOT widen, enlarge, shrink, add or rearrange volumes, and do NOT pull the camera back — the building fills the same portion of the frame as in the input. '+
           '(2) SCALE — people, cars, doors, ladders and scaffolding keep the same real-world scale as in the input (a standing person is about door height, about 1/2 of one storey); never draw tiny people next to an oversized frame. '+
           '(3) DOUBLE-HEIGHT / OPEN-TO-ABOVE SPACES — wherever the finished facade shows ONE tall continuous window or glass wall spanning two storeys (typical gable-end living room with tall glazing, an open double-height ceiling), that part has NO intermediate floor slab: show columns/walls rising the full double height with open air inside up to the roof, and put a 2nd-floor slab only under the parts that have two separate rows of stacked windows. If a stage description above says to show a 2nd-floor slab everywhere, this rule wins for the double-height part — concretely: the slab edge stops at the back of that bay, the bay is open from the ground to the roof, and you can see up through it; no props or formwork deck span across it. '+
+          '(3b) NO HORIZONTAL FLOOR LINES ACROSS THE DOUBLE-HEIGHT BAY — no beam, slab edge or floor band may cross that tall bay at a 2nd- or 3rd-floor level (2026-10-20 user-confirmed failure); only the roof/gable structure spans across its top. '+
           '(4) ONE STRUCTURAL SYSTEM FOR THE WHOLE SEQUENCE — every construction stage is the same cast-in-place reinforced-concrete (RC) building going up (grey concrete columns, walls, beams and slabs; sloped RC roof for a gable). NEVER switch to a timber/wood stud frame, wooden trusses or a light steel frame in any stage, even if the finished building has wood or panel cladding (cladding is applied at the very end).';
       }
       _runToolWithPrompt(_finalPrompt);
