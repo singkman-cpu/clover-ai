@@ -22467,6 +22467,24 @@ function _scBizContinuityRule(cat, typeName, ceil){
   else if(ceil==='finished') t+='(4) 천장 지정(사용자 선택): 모든 뷰를 평평한 일반 마감 천장(석고보드+도장, 화이트 계열)으로 — 노출천장·덕트가 보이면 실패. 매입 다운라이트·라인 조명과 4방향 카세트를 천장에 매립. ';
   return t;
 }
+// 2026-10-20 요청("건물 외관 참고이미지 넣고 '비슷하게'로 렌더링했는데 너무 똑같이 나온다"): 60~80%만 비슷하게라는 말만으로는 거의 복제됨 →
+// 이 세트의 첫 외관이면 실제로 바꿀 항목을 2가지 무작위로 콕 집어 지시(카메라 각도도 다르게), 이미 만든 외관이 있으면 그 결과(우리 건물)를 따르게 함
+var SC_EXT_VARY_POOL=[
+  '지붕 형태를 바꾸세요 — 참고 사진의 지붕선과 다르게(예: 박공이면 경사 방향·높이·개수가 다른 박공이나 한쪽 경사 지붕, 평지붕이면 단차 있는 평지붕이나 낮은 박공)',
+  '매스(동) 구성을 바꾸세요 — 동의 개수·배치·높낮이 조합을 참고 사진과 다르게(예: 두 동이면 세 동으로 나누거나 하나로 합치고, 높은 동과 낮은 동의 위치를 바꾸기)',
+  '창 구성을 바꾸세요 — 창의 개수·크기·위치·비례를 새로(예: 세로로 긴 창이면 가로 띠창이나 코너창, 작은 펀칭창이면 큰 통창 위주로)',
+  '1층 구성을 바꾸세요 — 차고·현관·대문의 위치와 순서를 참고 사진과 다르게(좌우를 바꾸거나 필로티·캐노피·담장 형태를 다르게)',
+  '발코니·테라스를 바꾸세요 — 위치·크기·난간 디자인을 참고 사진과 다르게(예: 2층 전면 테라스면 측면 발코니나 옥상 테라스로)'
+];
+function _scExtVaryText(spTab, typeName){
+  try{
+    var made=(typeof _scPoolNoSame==='function' ? _scPoolNoSame(spTab, (spTab && spTab.autoRoomGenExtUrls)||[], typeName) : ((spTab && spTab.autoRoomGenExtUrls)||[])).filter(Boolean).length; // 같은 뷰를 다시 만드는 경우 그 뷰의 예전 결과는 빼고 셈
+    if(made) return ' 🔁 이 세트에서 이미 만든 외관 결과가 "우리 건물"입니다 — 다른 뷰는 참고 사진의 건물이 아니라 앞서 만든 그 결과물과 같은 건물(같은 지붕·매스·창 배치·재료)로 이어서 그리세요.';
+    var pool=SC_EXT_VARY_POOL.slice(), pick=[];
+    while(pick.length<2 && pool.length){ pick.push(pool.splice(Math.floor(Math.random()*pool.length),1)[0]); }
+    return ' 🔁🔁 반드시 바꿀 것(이번이 이 세트의 첫 외관 — 참고 사진은 실제로 있는 다른 사람의 건물이라 그대로 복제하면 실패입니다): ① '+pick[0]+'. ② '+pick[1]+'. ③ 카메라 위치도 참고 사진과 다르게 — 좌우로 15~30도 돌아간 각도에서 찍은 것처럼. 유지할 것은 재료 조합과 색(예: 회색 벽돌+붉은 벽돌, 노출콘크리트), 전체 분위기, 대략적인 층수·규모뿐입니다. 완성본을 참고 사진과 나란히 놓았을 때 "같은 건물"이 아니라 "같은 건축가가 같은 재료로 설계한 다른 집"처럼 보여야 합니다.';
+  }catch(e){ return ''; }
+}
 function _autoRoomPromptFor(basePrompt, typeName){
   var spTab=getTab('spaceset');
   // ⚠️ 요청 반영("천장 화이트로 해달라고 적으니 반영도 안 해주고 계속 콘크리트로 하네"): 지금까지
@@ -22558,7 +22576,7 @@ function _autoRoomPromptFor(basePrompt, typeName){
     if(true){ // ⚠️ 요청 반영: '비슷하게'에 다양성 강화를 항상 합쳐서 적용(체크박스 제거)
       _fidelitySuffix += ' ⚠️⚠️⚠️ 형태 변경 강화(위 (B)를 더 강하게, 최종 지시): 위 (B)에서 "형태를 다르게 하라"고 했는데, 실제로는 그 정도 지시로는 참고 이미지 속 가구와 거의 구분이 안 될 정도로 똑같은 실루엣이 나오는 경우가 많았습니다 — 그러니 "형태를 살짝만 바꾸는 것"은 부족합니다, 소파·의자·테이블·조명·러그·액자·화병 등 눈에 띄는 가구·소품은 참고 이미지 속 그 특정 제품의 실루엣·비례·디테일(팔걸이 모양, 다리 형태, 등받이 구획, 조명 갓 형태 등)을 확실하게, 눈에 띄게 다른 디자인으로 새로 그리세요 — 옆에 나란히 놓고 봐도 "다른 제품"이라고 바로 알아볼 정도여야 합니다. ⚠️⚠️ 단, 위 (A)는 절대 건드리지 마세요 — 재질(패브릭/원목/금속 등 소재 종류)과 색상(정확한 톤)은 이 형태 변경과 무관하게 참고 이미지와 계속 동일하게 유지하세요. "형태는 다른데 재질·색상은 똑같은 제품"이 목표이지, 재질·색상까지 다른 완전히 새로운 스타일의 가구를 만들라는 뜻이 아닙니다. 벽에 걸린 그림·액자의 그림 내용(구도·소재)은 새로 창작해도 되지만, 액자 프레임의 재질·색상은 참고 이미지와 동일하게 유지하세요.';
       if(_isExteriorViewType(typeName)){
-        _fidelitySuffix += ' ⚠️⚠️⚠️ 건축 외관 다양성("비슷하게"의 정확한 정의, 매우 중요): 지금 만드는 건 건물 외관입니다 — "비슷하게"는 "거의 똑같이"가 아닙니다. 참고 이미지 속 건물의 매싱·비례·창문 배치·지붕 형태를 목표로 60~80% 정도만 비슷하게 만드세요 — 즉 스타일 장르(재료 언어·톤)와 대략적인 규모감(층수·크기 느낌)은 참고 이미지를 따라가되, 정확한 창문 개수·배치, 지붕/파라펫의 세부 형태, 발코니 위치 같은 세부 디테일은 원본과 다르게 자유롭게 재구성하세요. ⚠️ 사용자가 추가 요청사항에 "형태를 다르게/똑같지 않게 해달라"는 취지의 문장을 직접 적었다면 그 요청이 이 지시보다 항상 우선합니다 — 그 경우 재질·색감·전체 톤만 참고 이미지와 비슷하게 유지하고, 형태(매싱·창문 배치·지붕 등)는 참고 이미지와 무관하게 자유롭게 새로 설계하세요.';
+        _fidelitySuffix += ' ⚠️⚠️⚠️ 건축 외관 다양성("비슷하게"의 정확한 정의, 매우 중요): 지금 만드는 건 건물 외관입니다 — "비슷하게"는 "거의 똑같이"가 아닙니다. 참고 이미지 속 건물의 매싱·비례·창문 배치·지붕 형태를 목표로 60~80% 정도만 비슷하게 만드세요 — 즉 스타일 장르(재료 언어·톤)와 대략적인 규모감(층수·크기 느낌)은 참고 이미지를 따라가되, 정확한 창문 개수·배치, 지붕/파라펫의 세부 형태, 발코니 위치 같은 세부 디테일은 원본과 다르게 자유롭게 재구성하세요. ⚠️ 사용자가 추가 요청사항에 "형태를 다르게/똑같지 않게 해달라"는 취지의 문장을 직접 적었다면 그 요청이 이 지시보다 항상 우선합니다 — 그 경우 재질·색감·전체 톤만 참고 이미지와 비슷하게 유지하고, 형태(매싱·창문 배치·지붕 등)는 참고 이미지와 무관하게 자유롭게 새로 설계하세요.' + _scExtVaryText(getTab('spaceset'), typeName);
       }
       if(!_isExteriorViewType(typeName)){
         // 2026-10-04 요청("공간컨셉 '비슷하게'인데 거실이 소파만 바뀌고 창호·천장·벽난로 등 공간이 참고 이미지와 계속 똑같이 나온다")
@@ -22995,7 +23013,7 @@ function _padExteriorTo916WithBlur(url, cb){
         if(true){ // ⚠️ 요청 반영: '비슷하게'에 다양성 강화를 항상 합쳐서 적용(체크박스 제거)
           _looseP += ' ⚠️⚠️⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션, 매우 중요 — 지침이 바뀌었습니다): 위 (1)에서 "형태만 살짝 바꿔라"라고 했는데, 실제로는 그렇게 해도 참고 이미지 속 가구와 거의 구분이 안 될 정도로 똑같이 나오는 경우가 많았습니다 — 그러니 "살짝 다르게"는 그만두고, 이번엔 아예 완전히 다른 제품으로 바꾸세요. 소파·의자·테이블·조명·수납장 등 눈에 띄는 가구·소품은 참고 이미지 속 그 특정 제품의 실루엣·비례·디테일을 절대 따라 그리지 말고, 이 공간의 전체적인 분위기·톤·컬러 팔레트에만 어울리는 완전히 다른 실제 가구를 새로 골라서 그리세요 — "재질은 비슷한데 다른 제품"이 아니라 "아예 다른 브랜드·다른 디자인의 제품인데 이 방과는 잘 어울리는" 수준으로 바꾸는 게 목표입니다. 유지할 것은 딱 하나, 이 공간의 전체적인 색감·분위기 방향뿐입니다 — 구체적인 가구 형태·브랜드·디자인 언어는 참고 이미지와 무관하게 새로 창작하세요.';
         if(_isExteriorViewType(typeName)){
-          _looseP += ' ⚠️⚠️⚠️ 건축 외관 다양성("비슷하게"의 정확한 정의, 매우 중요): 지금 만드는 건 실내가 아니라 건물 외관입니다 — "비슷하게"는 "거의 똑같이"가 아닙니다. 참고 이미지 속 건물의 매싱·비례·창문 배치·지붕 형태를 목표로 60~80% 정도만 비슷하게 만드세요 — 스타일 장르(예: 모던, 미니멀, 노출콘크리트+우드 조합 같은 재료 언어와 톤)와 대략적인 규모감(층수·크기 느낌)은 참고 이미지를 따라가되, 정확한 창문 개수·배치·비례, 지붕/파라펫의 세부 형태, 발코니·테라스 위치, 파사드 세부 구성은 원본과 다르게 자유롭게 재구성하세요. ⚠️ 사용자가 추가 요청사항에 "형태를 다르게/똑같지 않게 해달라"는 취지의 문장을 직접 적었다면 그 요청이 이 지시보다 항상 우선합니다 — 그 경우 재질·색감·전체 톤만 참고 이미지와 비슷하게 유지하고, 형태는 참고 이미지와 무관하게 자유롭게 새로 설계하세요.';
+          _looseP += ' ⚠️⚠️⚠️ 건축 외관 다양성("비슷하게"의 정확한 정의, 매우 중요): 지금 만드는 건 실내가 아니라 건물 외관입니다 — "비슷하게"는 "거의 똑같이"가 아닙니다. 참고 이미지 속 건물의 매싱·비례·창문 배치·지붕 형태를 목표로 60~80% 정도만 비슷하게 만드세요 — 스타일 장르(예: 모던, 미니멀, 노출콘크리트+우드 조합 같은 재료 언어와 톤)와 대략적인 규모감(층수·크기 느낌)은 참고 이미지를 따라가되, 정확한 창문 개수·배치·비례, 지붕/파라펫의 세부 형태, 발코니·테라스 위치, 파사드 세부 구성은 원본과 다르게 자유롭게 재구성하세요. ⚠️ 사용자가 추가 요청사항에 "형태를 다르게/똑같지 않게 해달라"는 취지의 문장을 직접 적었다면 그 요청이 이 지시보다 항상 우선합니다 — 그 경우 재질·색감·전체 톤만 참고 이미지와 비슷하게 유지하고, 형태는 참고 이미지와 무관하게 자유롭게 새로 설계하세요.' + _scExtVaryText(getTab('spaceset'), typeName);
         }
         }
       }
@@ -23598,7 +23616,7 @@ function _autoRoomRetryOne(idx){
         if(true){ // ⚠️ 요청 반영: '비슷하게'에 다양성 강화를 항상 합쳐서 적용(체크박스 제거)
           _looseP2 += ' ⚠️⚠️⚠️ 가구 다양성 강화(사용자가 직접 켠 옵션, 매우 중요 — 지침이 바뀌었습니다): "형태만 살짝 다르게"는 그만두고, 이번엔 아예 완전히 다른 제품으로 바꾸세요. 소파·의자·테이블·조명·수납장 등 눈에 띄는 가구·소품은 참고 이미지 속 그 특정 제품의 실루엣·비례·디테일을 절대 따라 그리지 말고, 이 공간의 전체적인 분위기·톤·컬러 팔레트에만 어울리는 완전히 다른 실제 가구를 새로 골라서 그리세요. 유지할 것은 딱 하나, 전체적인 색감·분위기 방향뿐입니다 — 구체적인 가구 형태·브랜드는 참고 이미지와 무관하게 새로 창작하세요.';
         if(_isExteriorViewType(typeName)){
-          _looseP2 += ' ⚠️⚠️⚠️ 건축 외관 다양성("비슷하게"의 정확한 정의, 매우 중요): 참고 이미지 속 건물의 매싱·비례·창문 배치·지붕 형태를 목표로 60~80% 정도만 비슷하게 만드세요 — "거의 똑같이"가 아닙니다. 스타일 장르와 재료 언어, 대략적인 규모감은 유지하되, 정확한 창문 배치·비례·개수, 지붕/파라펫 형태, 발코니 위치는 원본과 다르게 자유롭게 재구성하세요. ⚠️ 사용자가 추가 요청사항에 "형태를 다르게/똑같지 않게 해달라"는 취지의 문장을 직접 적었다면 그 요청이 최우선입니다 — 그 경우 재질·색감만 비슷하게 유지하고 형태는 자유롭게 새로 설계하세요.';
+          _looseP2 += ' ⚠️⚠️⚠️ 건축 외관 다양성("비슷하게"의 정확한 정의, 매우 중요): 참고 이미지 속 건물의 매싱·비례·창문 배치·지붕 형태를 목표로 60~80% 정도만 비슷하게 만드세요 — "거의 똑같이"가 아닙니다. 스타일 장르와 재료 언어, 대략적인 규모감은 유지하되, 정확한 창문 배치·비례·개수, 지붕/파라펫 형태, 발코니 위치는 원본과 다르게 자유롭게 재구성하세요. ⚠️ 사용자가 추가 요청사항에 "형태를 다르게/똑같지 않게 해달라"는 취지의 문장을 직접 적었다면 그 요청이 최우선입니다 — 그 경우 재질·색감만 비슷하게 유지하고 형태는 자유롭게 새로 설계하세요.' + _scExtVaryText(getTab('spaceset'), typeName);
         }
         }
       }
@@ -37747,6 +37765,10 @@ function buildUpscaleSliders(eng,container){
       modeRow.appendChild(b);
     });
     modeWrap.appendChild(modeRow);
+    // 2026-10-20 요청: 작은 건물이 많은 도시·조감도는 안전 모드 추천 안내
+    var cityTip=dv(''); cityTip.style.cssText='margin-top:8px;padding:9px 11px;border-radius:8px;border:1px solid rgba(96,165,250,.4);background:rgba(96,165,250,.1);font-size:12px;line-height:1.6;color:var(--t2)';
+    cityTip.innerHTML='💡 <b style="color:#93c5fd">도시·조감도처럼 작은 건물·창문·나무가 아주 많은 이미지</b>는 <b style="color:var(--t)">안전 모드</b>를 추천해요. 재질 보강은 작은 것들을 다시 그리다가 뭉개거나 하늘에 점이 생길 수 있어요. 실내나 건물 하나가 크게 나온 사진은 재질 보강이 좋아요.';
+    modeWrap.appendChild(cityTip);
     container.appendChild(modeWrap);
 
     if(utT.topazModel==='Redefine'){
@@ -46216,7 +46238,8 @@ function _checkAndResizeForUpscaler(url, ldst, eng, scaleFactor, onDone, onErr){
         // 외곽선 하얀색으로변하는거 안되게 해줘"): denoise를 완전히 0으로 두면 sharpen이 높을 때
         // (기본 0.8) 경계선에 링잉/헤일로(하얀 테두리)가 그대로 다 드러남 — denoise를 아주
         // 약하게(0.1)만 남겨서 그 링잉만 살짝 눌러주고, 재질/그레인 디테일 자체는 거의 그대로 둠.
-        _tzParams.denoise = 0.1;
+        _tzParams.denoise = 0.25; // 2026-10-20 요청("업스케일했더니 하늘에 점이 생기고 덜 선명"): 잡티 제거를 0.1→0.25로 올리고, 하늘 같은 매끈한 면에 점·별·그레인을 만들지 말라고 지시 추가
+        _tzParams.prompt = (_tzParams.prompt||'') + ' Keep smooth areas such as the sky, plain walls and water perfectly clean — never add specks, white dots, star-like points, grain or noise to them.';
         _tzParams.sharpen = (G.tabs.upscale && G.tabs.upscale.topazSharpen!=null) ? G.tabs.upscale.topazSharpen : 0.5;
       }
       falRun('fal-ai/topaz/upscale/image', _tzParams, function(d){
@@ -48167,7 +48190,8 @@ function procImgWithTask(task, onDone, onErr){
           // ⚠️ 요청 반영("디테일선명보만 이거 외곽선 하얀색으로변하는거 안되게 해줘"): 위 다른
           // Topaz 호출과 동일한 이유로 denoise를 완전히 0으로 두지 않고 0.1만 남겨서 헤일로(하얀
           // 테두리) 링잉을 눌러줌.
-          _tzParams2.denoise = 0.1;
+          _tzParams2.denoise = 0.25; // 2026-10-20 요청("업스케일했더니 하늘에 점이 생기고 덜 선명"): 잡티 제거를 0.1→0.25로 올리고, 하늘 같은 매끈한 면에 점·별·그레인을 만들지 말라고 지시 추가
+          _tzParams2.prompt = (_tzParams2.prompt||'') + ' Keep smooth areas such as the sky, plain walls and water perfectly clean — never add specks, white dots, star-like points, grain or noise to them.';
           _tzParams2.sharpen = (G.tabs.upscale && G.tabs.upscale.topazSharpen!=null) ? G.tabs.upscale.topazSharpen : 0.5;
         }
         falRun('fal-ai/topaz/upscale/image', _tzParams2,
@@ -48293,6 +48317,10 @@ function procImgWithTask(task, onDone, onErr){
       'Re-render every surface as the real material: real brick with depth, mortar recesses and slight colour variation; real timber with grain, gaps and shadow lines; real concrete/stone with micro texture; real glass with true reflections of the surroundings and visible interiors. '+
       'LANDSCAPE MUST BE REAL, NOT TEXTURE MAPS: flat or mapped-looking ground (mulch, soil, sand, gravel, grass) must become real 3D ground cover — individual wood chips/pebbles/grass blades with depth and contact shadows; ⚠️ GROUND CLOSEST TO THE CAMERA (2026-10-12 user-confirmed failure: the foreground mulch looked like a flat, smeared, stretched texture image): the nearer the ground is to the camera, the MORE detail it must show — in the foreground every bark chip, pebble or gravel stone must be clearly individual and three-dimensional (visible edges and thickness, small height differences, tiny shadows between pieces, some pieces lying on top of others, a few fallen leaves or twigs), sharply in focus, at true real-world size relative to the paving slabs (bark chips about 2–5 cm, gravel about 1–3 cm). Edges where the ground meets paving slabs must show real loose material touching the slab edge with contact shadow. NEVER a blurred, smeared, flat, repeated or stretched texture; no depth-of-field blur on the near ground. every tree, shrub, flower and grass clump must become a real living plant of the same kind, size and position, with real leaves, branches and natural irregularity — never cardboard cut-out or low-poly vegetation. '+
       'Use physically real light: soft natural shadows, ambient occlusion in corners and under eaves and natural photographic dynamic range — no plastic, uniform CG shading. Paving slabs, steps and decking must show real concrete/stone surfaces with correct scale and perspective — never a stretched or smeared texture. Keep the image clean and crisp: NO added film grain, sensor noise or speckle.';
+    // 2026-10-20 신고("메인건물 1층은 막혀있고 삼각형으로 뚫린 패널인데 렌더 돌리니 유리로 다 해버렸다 — 형태 무조건 원본 유지"): 흰 모델 면을 '유리 커튼월'로 바꾸는 것 차단
+    ap += ' ⚠️⚠️⚠️⚠️ SOLID vs GLASS — NEVER TURN SOLID SURFACES INTO GLASS (2026-10-20 user-confirmed failure, absolute rule): in the input, every surface drawn as an opaque solid (white/grey/flat-coloured panels, walls, slabs, parapets, solid podium bands, vertical fins and louvers) must stay an OPAQUE SOLID material in the result — white solid → real white metal panel / GRC / painted concrete / white stone, never glass. Only areas that are clearly drawn as glass in the input (transparent, see-through or reflective blue/grey glazing with mullions) may become glass. '+
+      'PERFORATED / PATTERNED SCREENS MUST KEEP THEIR EXACT PATTERN: if a solid wall has a pattern of openings (triangles, diamonds, hexagons, circles, slots, parametric perforations, vertical slits), keep that solid screen with the SAME opening shapes, sizes, count and spacing — the openings stay openings (dark recess or view through), the solid between them stays solid. Do NOT replace a patterned screen or a solid band with a continuous glass curtain wall, and do NOT add extra glazing, mullions or glass floors that are not drawn. '+
+      'Keep the ratio of solid to glass on every facade exactly as in the input — before finishing, compare the podium/base, the bridge and each tower: anything that was solid must still read as solid.';
     // 2026-10-12("3D 캡처 배경이 검은색이라 계속 야간으로 렌더된다 — 따로 요청 안 하면 무조건 맑은 날 주간"): 야간 요청이 없으면 주간 고정
     if(task.selK!=='render_quality_boost' && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){ // 2026-10-12: 고품질화는 이미 렌더링된 이미지의 시간대·조명 분위기를 그대로 유지
       var _sky = task.renderSky || 'clear';
@@ -48905,6 +48933,7 @@ function procImgWithTask(task, onDone, onErr){
       var _night=/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(_ut);
       _sdP = 'Turn this 3D render into a REAL PHOTOGRAPH taken with a full-frame camera — it must not look like a render. '+
         'Keep exactly the same building, shapes, proportions, camera angle, framing, object positions and the colours of every material. '+
+        'Every surface drawn as an opaque solid (white panels, walls, solid bands, fins) stays an opaque solid material — never turn it into glass; keep perforated/patterned screens (e.g. triangle openings) with exactly the same pattern; only surfaces already drawn as glass become glass. '+
         (_night ? 'Time of day: as the user asked. ' : 'Time of day: BRIGHT, CLEAR DAYTIME — blue sky with a few soft clouds and natural sunlight with soft shadows. The black or dark background is only an empty 3D background, NOT night: replace it with a realistic daytime sky and natural surroundings. Exterior lights off. ')+
         'Re-texture every surface as the real material: real brick with depth and mortar joints, real timber with grain and gaps, real concrete and stone texture, real glass reflecting the sky and showing interiors. '+
         'Replace flat CG plants and mapped ground with real living plants of the same kind and position and real 3D ground cover (wood-chip mulch, gravel, grass) with depth and contact shadows. '+
