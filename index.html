@@ -44605,14 +44605,36 @@ function falPoll(baseUrlOrCandidates, reqId, onDone, onErr, attempt, candidateId
 // 무관한 다른 작업도 전부 조용히 중단됐음 → FAL에선 완료됐는데 화면엔 결과가 안 뜨는 버그의 원인).
 var G_CANCEL_IDS = {};
 function cancelRun(){
-  try{
-    var jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');
-    // 지금 보고 있는 탭(wf)의 진행 중인 작업만 취소 — 백그라운드에서 동시 진행 중인 다른 탭 작업은 그대로 둠
-    jobs.filter(function(j){return j.wf===G.wf;}).forEach(function(j){ G_CANCEL_IDS[j.reqId]=true; });
-  }catch(e){}
+  // 2026-10-21 신고("잘못 클릭해서 작업이 돼서 작업중 취소를 해도 안 된다, 2번이나 — 크레딧만 날렸다"): 예전 취소는 화면만 닫고
+  // 결과 받기를 멈출 뿐이라, AI 쪽 작업은 그대로 돌아서 크레딧은 빠지고 결과는 버려졌음 →
+  // ① 서버에 진짜 취소 요청: 아직 대기열(시작 전)이면 AI 작업을 멈추고 크레딧 환불
+  // ② 이미 만들기 시작했으면 멈출 수 없으니(AI 비용이 이미 나감) 결과를 버리지 않고 평소처럼 갤러리에 저장, 안내만 띄움
+  var jobs=[];
+  try{ jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]').filter(function(j){return j.wf===G.wf;}); }catch(e){}
   var ldov = gE('ldov');
   if(ldov) ldov.style.display = 'none';
-  gE('stl').textContent = '취소됨';
+  var stl=gE('stl');
+  if(!jobs.length){ if(stl) stl.textContent = '취소됨'; return; }
+  if(stl) stl.textContent='취소 확인 중…';
+  var left=jobs.length, nCancel=0, nRun=0, refund=0;
+  function fin(){
+    if(--left>0) return;
+    if(nRun===0){
+      if(stl) stl.textContent='취소됨'+(refund>0?' — '+refund+'cr 돌려드렸어요':'');
+      try{ _showJobRecoveryBanner('✅ 작업을 취소했어요.'+(refund>0?'<br>사용된 <b>'+refund+'cr</b>은 돌려드렸어요.':''), false); }catch(e){}
+    } else {
+      if(stl) stl.textContent='이미 생성이 시작돼서 결과를 갤러리에 저장해요';
+      try{ _showJobRecoveryBanner('⏳ AI가 이미 이미지를 만들기 시작해서 중간에 멈출 수 없어요.<br>크레딧이 이미 쓰였기 때문에 <b>결과는 버리지 않고 완성되면 갤러리에 그대로 저장</b>해 드려요.'+(nCancel?'<br>(시작 전이던 '+nCancel+'건은 취소하고 '+refund+'cr 돌려드렸어요)':''), false); }catch(e){}
+    }
+  }
+  jobs.forEach(function(j){
+    if(!(j.reqId && j.baseUrl)){ nRun++; fin(); return; }
+    _falProxyCall('cancel', {baseUrl:j.baseUrl, reqId:j.reqId}, function(d){
+      if(d && d.cancelled){ G_CANCEL_IDS[j.reqId]=true; nCancel++; refund+=(Number(d.refunded)||0); }
+      else nRun++;
+      fin();
+    }, function(){ nRun++; fin(); }); // 서버가 아직 취소를 모르면(예전 버전) 결과를 버리지 않고 그대로 받음
+  });
 }
 // ── 진행 중인 작업 추적 (새로고침해도 추적 가능) ───────────────────
 function _saveActiveJob(reqId, baseUrl, label){
