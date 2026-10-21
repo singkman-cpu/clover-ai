@@ -26756,6 +26756,12 @@ function _shortsMigrateHold(src){
     o._hold1=true;
   }catch(e){}
 }
+// 2026-10-21 요청("메인화면 이미지를 복사해서 한 개 더 만들 수 있게"): 쇼츠 장면 하나를 똑같이 복제(새 id, 화면용 임시값은 비움)
+function _shortsCloneImage(im){
+  var c={}; Object.keys(im||{}).forEach(function(k){ if(k.charAt(0)!=='_' || k==='_thumb') c[k]=im[k]; });
+  c.id=Date.now()+Math.random();
+  return c;
+}
 var SHORTS_END_VIDEO_MAX_SEC = 12; // 영상 클립은 최대 이만큼만 재생(그 이상은 앞부분만 사용)
 
 // ── 작업 중 임시저장(자동 백업) ────────────────────────────────────────────
@@ -28163,7 +28169,8 @@ var AUTO_SHORTS_RULES=
   '3) 업로드용 플랫폼 제목은 레터박스와 달라도 되고 조금 더 길어도 됨(한 줄, 40자 이내). 해시태그 기본 조합(사진 내용에 맞게 1~2개만 바꿔도 됨):\n'+
   '   유튜브: #신축빌라 #탑층인테리어 #옥상정원 #하우스투어 #shorts / 틱톡: #인테리어 #housetour #신축빌라 #탑층뷰 #fyp / 인스타 릴스: #신축빌라 #탑층인테리어 #옥상정원 #인테리어디자인 #reels\n'+
   '4) 변신 스토리 사진 분류: 오래된·낡은 건물 사진 번호는 "aged"에, 철거 중·빈 땅·공사 중(골조·거푸집·타설·외장 공사 등) 사진 번호는 "work"에 넣어(완성된 건물·인테리어·배치도는 어디에도 넣지 마, 없으면 빈 배열). 변신 스토리 세트일 때만, 공사 단계 바로 다음에 오는 첫 번째 완성 외관 사진 번호 하나를 "done"에 넣어(변신 스토리가 아니면 빈 배열).\n'+
-  '반드시 JSON만 답해: {"order":[번호들],"aged":[번호들],"work":[번호들],"done":[번호],"top":"첫줄\\n둘째줄","youtube":{"title":"","desc":"","tags":"#.. #.."},"instagram":{"caption":""},"tiktok":{"caption":""}}';
+  '5) 변신 스토리 세트일 때만: 전체 사진 중 가장 눈길을 끄는 완성 사진(완성 외관이나 가장 특이하고 멋진 실내) 번호 하나를 "hook"에 넣어 — 영상 맨 앞에 0.5초 미리보기로 한 번 더 보여줄 컷이야(낡은 건물·공사 사진은 안 됨, 변신 스토리가 아니면 null).\n'+
+  '반드시 JSON만 답해: {"order":[번호들],"aged":[번호들],"work":[번호들],"done":[번호],"hook":번호,"top":"첫줄\\n둘째줄","youtube":{"title":"","desc":"","tags":"#.. #.."},"instagram":{"caption":""},"tiktok":{"caption":""}}';
 function _autoShortsThumb(src, cb){
   var im=new Image(); im.crossOrigin='anonymous';
   im.onload=function(){ try{ var sc=Math.min(1, 512/Math.max(im.naturalWidth,im.naturalHeight)), c=document.createElement('canvas'); c.width=Math.round(im.naturalWidth*sc); c.height=Math.round(im.naturalHeight*sc); c.getContext('2d').drawImage(im,0,0,c.width,c.height); cb(c.toDataURL('image/jpeg',0.72).split(',')[1]); }catch(e){ cb(null); } };
@@ -28171,6 +28178,7 @@ function _autoShortsThumb(src, cb){
   im.src=src;
 }
 function _autoShortsRun(btn, statusEl, resultEl, makeVideo){
+  G_SHORTS.images=(G_SHORTS.images||[]).filter(function(x){ return !(x && x._hookCopy); }); // 예전에 자동으로 넣은 맨 앞 0.5초 미리보기 컷은 빼고 다시 판단
   var imgs=(G_SHORTS.images||[]).filter(function(x){ return x && x.img && !x.isVideo; });
   if(imgs.length<2){ statusEl.textContent='먼저 아래에서 사진을 2장 이상 넣어주세요 (갤러리에서 불러오기 또는 공간 컨셉의 "쇼츠로 보내기").'; return; }
   if(imgs.length>16){ statusEl.textContent='사진이 많아서 앞쪽 16장만 AI가 봐요.'; imgs=imgs.slice(0,16); }
@@ -28197,6 +28205,14 @@ function _autoShortsRun(btn, statusEl, resultEl, makeVideo){
         (j.aged||[]).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=1.5; });
         (j.work||[]).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=0.7; });
         if((j.aged||[]).length || (j.work||[]).length) (j.done||[]).slice(0,1).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=1.5; });
+        // ①-3 (2026-10-21 요청) 변신 스토리면 가장 잘 나온 완성 컷을 맨 앞에 0.5초 미리보기로 한 번 더 넣음(스크롤 멈추게 하는 훅)
+        try{
+          var _hk=imgs[parseInt(j.hook,10)];
+          if(((j.aged||[]).length || (j.work||[]).length) && _hk && (j.aged||[]).map(Number).indexOf(parseInt(j.hook,10))<0 && (j.work||[]).map(Number).indexOf(parseInt(j.hook,10))<0){
+            var _cp=_shortsCloneImage(_hk); _cp.customDuration=0.5; _cp._hookCopy=true;
+            G_SHORTS.images.unshift(_cp);
+          }
+        }catch(_eh){}
         // ② 레터박스 제목(1번 컷) — 레터박스 모드로
         if(j.top){ G_SHORTS.opts.fitMode='contain'; G_SHORTS.opts.topText=String(j.top).replace(/\\n/g,'\n').slice(0,40); }
         // ③ 업로드 문구
@@ -35097,6 +35113,14 @@ function _shortsRenderCanvas(ub){
       extendIcon.onclick=function(e){ e.stopPropagation(); _shortsExtendTo916(idx, extendIcon); };
       extendIcon.onmousedown=function(e){ e.stopPropagation(); };
       tile.appendChild(extendIcon);
+      // 2026-10-21 요청: 이 장면을 복사해서 바로 뒤에 하나 더 만들기(그다음 끌어서 원하는 자리로 옮기면 됨)
+      var copyIcon=document.createElement('button');
+      copyIcon.type='button'; copyIcon.innerHTML='⧉';
+      copyIcon.title='이 장면 복사(바로 뒤에 하나 더 생겨요 — 끌어서 원하는 자리로 옮기세요)';
+      copyIcon.style.cssText='position:absolute;top:6px;right:66px;z-index:2;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:13px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1';
+      copyIcon.onclick=function(e){ e.stopPropagation(); var _at=G_SHORTS.images.indexOf(im); if(_at<0) return; G_SHORTS.images.splice(_at+1,0,_shortsCloneImage(im)); renderSB(); renderMain('shorts'); };
+      copyIcon.onmousedown=function(e){ e.stopPropagation(); };
+      tile.appendChild(copyIcon);
     } else {
       // ⚠️ 요청 반영("영상 클립은 왜 크게 보기가 안 되냐"): 영상 타일에도 🔍 크게 보기 추가 — 큰 화면에서
       // 실제 영상을 재생해서 보여주고, 사용 구간(시작~끝)을 정해뒀으면 그 구간만 반복 재생함.
