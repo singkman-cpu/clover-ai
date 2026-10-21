@@ -9407,6 +9407,7 @@ function selectWF(wf){
           d.images.forEach(function(im){ delete im._thumb; delete im._thumbFailed; delete im._thumbPending; });
           G_SHORTS.images=d.images;
           Object.assign(G_SHORTS.opts, d.opts||{});
+          try{ _shortsMigrateHold(d.opts); }catch(e){}
         } else {
           _draftClear(_shortsDraftKey());
           // ⚠️ 버그 수정(치명적, "'아니요'를 눌렀는데도 이전 작업이 계속 불러와진다" + "새로고침하면
@@ -9432,6 +9433,7 @@ function selectWF(wf){
           if(confirm('다른 브라우저/기기에서 작업하던 쇼츠 내용이 있어요 (사진 '+cloudDraft.data.images.length+'장). 불러올까요?')){
             G_SHORTS.images=cloudDraft.data.images;
             Object.assign(G_SHORTS.opts, cloudDraft.data.opts||{});
+            try{ _shortsMigrateHold(cloudDraft.data.opts); }catch(e){}
             renderSB(); renderMain('shorts');
           } else {
             if(typeof _saveWorkspaceState==='function') _saveWorkspaceState('shorts_images', {images:[], opts:G_SHORTS.opts});
@@ -26704,12 +26706,21 @@ var G_SHORTS = {
     spaceType: '', // SNS 업로드 문구 생성용 — 주거공간/카페/음식점/상업매장/사무공간/기타
     fontFamily: 'default', // 화면 문구 폰트: default|blackhan|jua|dohyeon|gugi
     kenBurns: true, // 켄번즈(자동 확대/축소) 효과 기본 ON
-    holdByRole: {site:1.25, ai_design:1.25, furniture:1.25, 'default':1.25}, // 역할별 머무는 시간(초) — 기본 전부 1.25초
+    holdByRole: {site:1, ai_design:1, furniture:1, 'default':1}, // 역할별 머무는 시간(초) — 기본 전부 1초(2026-10-21 요청: 1.25초 → 1초)
+    _hold1: true,
   },
   generating: false,
   progress: 0,
   resultUrl: null,
 };
+// 2026-10-21 요청("쇼츠 기본 장면별 머무는 시간 1.25초 → 1초"): 예전 기본값(1.25초)이 저장된 작업도 한 번만 1초로 바꿈(회원이 직접 다른 값으로 바꾼 칸은 그대로)
+function _shortsMigrateHold(src){
+  try{
+    var o=G_SHORTS.opts; if(!o || !src || src._hold1) return; // src = 불러온 저장본(예전 저장본엔 _hold1 표시가 없음)
+    var h=o.holdByRole||{}; Object.keys(h).forEach(function(k){ if(h[k]===1.25) h[k]=1; });
+    o._hold1=true;
+  }catch(e){}
+}
 var SHORTS_END_VIDEO_MAX_SEC = 12; // 영상 클립은 최대 이만큼만 재생(그 이상은 앞부분만 사용)
 
 // ── 작업 중 임시저장(자동 백업) ────────────────────────────────────────────
@@ -28116,8 +28127,8 @@ var AUTO_SHORTS_RULES=
 
   '3) 업로드용 플랫폼 제목은 레터박스와 달라도 되고 조금 더 길어도 됨(한 줄, 40자 이내). 해시태그 기본 조합(사진 내용에 맞게 1~2개만 바꿔도 됨):\n'+
   '   유튜브: #신축빌라 #탑층인테리어 #옥상정원 #하우스투어 #shorts / 틱톡: #인테리어 #housetour #신축빌라 #탑층뷰 #fyp / 인스타 릴스: #신축빌라 #탑층인테리어 #옥상정원 #인테리어디자인 #reels\n'+
-  '4) 변신 스토리 사진 분류: 오래된·낡은 건물 사진 번호는 "aged"에, 철거 중·빈 땅·공사 중(골조·거푸집·타설·외장 공사 등) 사진 번호는 "work"에 넣어(완성된 건물·인테리어·배치도는 어디에도 넣지 마, 없으면 빈 배열).\n'+
-  '반드시 JSON만 답해: {"order":[번호들],"aged":[번호들],"work":[번호들],"top":"첫줄\\n둘째줄","youtube":{"title":"","desc":"","tags":"#.. #.."},"instagram":{"caption":""},"tiktok":{"caption":""}}';
+  '4) 변신 스토리 사진 분류: 오래된·낡은 건물 사진 번호는 "aged"에, 철거 중·빈 땅·공사 중(골조·거푸집·타설·외장 공사 등) 사진 번호는 "work"에 넣어(완성된 건물·인테리어·배치도는 어디에도 넣지 마, 없으면 빈 배열). 변신 스토리 세트일 때만, 공사 단계 바로 다음에 오는 첫 번째 완성 외관 사진 번호 하나를 "done"에 넣어(변신 스토리가 아니면 빈 배열).\n'+
+  '반드시 JSON만 답해: {"order":[번호들],"aged":[번호들],"work":[번호들],"done":[번호],"top":"첫줄\\n둘째줄","youtube":{"title":"","desc":"","tags":"#.. #.."},"instagram":{"caption":""},"tiktok":{"caption":""}}';
 function _autoShortsThumb(src, cb){
   var im=new Image(); im.crossOrigin='anonymous';
   im.onload=function(){ try{ var sc=Math.min(1, 512/Math.max(im.naturalWidth,im.naturalHeight)), c=document.createElement('canvas'); c.width=Math.round(im.naturalWidth*sc); c.height=Math.round(im.naturalHeight*sc); c.getContext('2d').drawImage(im,0,0,c.width,c.height); cb(c.toDataURL('image/jpeg',0.72).split(',')[1]); }catch(e){ cb(null); } };
@@ -28147,9 +28158,10 @@ function _autoShortsRun(btn, statusEl, resultEl, makeVideo){
         imgs.forEach(function(x,i){ if(!seen[i]) ordered.push(x); });
         var rest=(G_SHORTS.images||[]).filter(function(x){ return ordered.indexOf(x)<0; });
         G_SHORTS.images=ordered.concat(rest);
-        // ①-2 (2026-10-20 요청) 장면 시간: 오래된 건물 1.5초, 철거~공사 단계 1초 (직접 초를 정해둔 장면은 그대로)
+        // ①-2 장면 시간(2026-10-21 요청): 오래된 건물 1.5초, 철거~공사 단계 0.7초, 공사 다음 첫 완성 외관 1.5초 (직접 초를 정해둔 장면은 그대로)
         (j.aged||[]).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=1.5; });
-        (j.work||[]).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=1; });
+        (j.work||[]).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=0.7; });
+        if((j.aged||[]).length || (j.work||[]).length) (j.done||[]).slice(0,1).forEach(function(n){ var x=imgs[parseInt(n,10)]; if(x && !(x.customDuration>0)) x.customDuration=1.5; });
         // ② 레터박스 제목(1번 컷) — 레터박스 모드로
         if(j.top){ G_SHORTS.opts.fitMode='contain'; G_SHORTS.opts.topText=String(j.top).replace(/\\n/g,'\n').slice(0,40); }
         // ③ 업로드 문구
@@ -28343,9 +28355,9 @@ function _xformRun(finalSrc, agedK, statusEl, done){
   }
   function finish(){
     var ok=results.filter(function(r){ return r.url; }).sort(function(a,b){ return (a.ord||0)-(b.ord||0); }); // 쇼츠에는 시간 순서(노후→철거→1→1.5→2→3)
-    // 2026-10-20 요청: 노후 건물 1.5초, 철거~공사 1~3단계 1초
-    ok.forEach(function(r){ G_SHORTS.images.push({id:Date.now()+Math.random(), img:r.url, orig:null, role:'auto', autoRole:'ai_design', customLabel:r.label, source:'clover', customDuration:(r.label==='노후 건물'?1.5:1)}); });
-    G_SHORTS.images.push({id:Date.now()+Math.random(), img:finalSrc, orig:null, role:'auto', autoRole:'ai_design', customLabel:'완성 외관', source:'clover'});
+    // 2026-10-21 요청: 노후 건물 1.5초, 철거~공사 1~3단계 0.7초, 완성 외관 1.5초
+    ok.forEach(function(r){ G_SHORTS.images.push({id:Date.now()+Math.random(), img:r.url, orig:null, role:'auto', autoRole:'ai_design', customLabel:r.label, source:'clover', customDuration:(r.label==='노후 건물'?1.5:0.7)}); });
+    G_SHORTS.images.push({id:Date.now()+Math.random(), img:finalSrc, orig:null, role:'auto', autoRole:'ai_design', customLabel:'완성 외관', source:'clover', customDuration:1.5});
     var bad=results.filter(function(r){ return !r.url; });
     done('✅ '+ok.length+'장 완성'+(bad.length?(' · 실패 '+bad.length+'장('+bad.map(function(r){return r.label;}).join(', ')+') — AI 편집에서 그 단계만 다시 돌려 넣어주세요'):'')+'\n쇼츠에 순서대로 넣었어요. 인테리어 컷을 더 넣고 🤖 자동으로 쇼츠 만들기를 누르세요.');
   }
@@ -28520,6 +28532,7 @@ function sbShorts(p){
         data.images.forEach(function(im){ delete im._thumb; delete im._thumbFailed; delete im._thumbPending; });
         G_SHORTS.images = data.images;
         if(data.opts) G_SHORTS.opts = Object.assign({}, G_SHORTS.opts, data.opts);
+        _shortsMigrateHold(data.opts);
         // ⚠️ 버그 수정("메인화면엔 이미지들이 그대로 있는데 왼쪽 사이드바만 0개로 리셋된 것 같다"):
         // 여기서 G_SHORTS.images를 바꾼 뒤 renderMain만 부르고 renderSB()는 안 불러서, 메인
         // 미리보기는 갱신되는데 정작 사이드바의 "이미지 N개" 목록은 그 시점 그대로 멈춰있는(오래된
