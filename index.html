@@ -18115,6 +18115,31 @@ function _olRenderAdmin(){
       '<div style="color:#666;font-size:10px;margin-top:8px">탭 이동은 20초 안에 반영돼요 · 창을 닫으면 몇 초 뒤 목록에서 빠져요</div>';
   }catch(e){}
 }
+// 2026-10-21 신고("로그인 전 무료로 1회 AI 사용 후 회원가입했는데 전 결과물이 사라졌어요"): 비회원 체험 결과는 회원 갤러리(클라우드)에 없어서
+// 가입·로그인하면 안 보였음 → 가입한 지 3일 안 된 계정이 처음 로그인할 때, 이 브라우저에 기억해둔 체험 결과(또는 이메일 가입 때 계정에 같이 실어 보낸 결과)를
+// 그 회원의 갤러리로 한 번 옮겨줌. 옮긴 뒤엔 기록을 지워서 두 번 들어가지 않게 함.
+function _guestClaimImport(user){
+  try{
+    if(!(_supa && user && user.id) || window._guestClaimBusy) return;
+    if(!user.created_at || Date.now()-new Date(user.created_at).getTime() > 3*24*3600*1000) return;
+    var src=null, fromMeta=false;
+    try{ src=JSON.parse(localStorage.getItem('clover_guest_pending')||'null'); }catch(e){}
+    if(!(src && src.url)){ try{ var m=user.user_metadata&&user.user_metadata.guest_result; if(m){ src=JSON.parse(m); fromMeta=true; } }catch(e){} }
+    if(!(src && src.url && /^https?:/.test(src.url))) return;
+    if(Date.now()-(src.ts||0) > 14*864e5){ try{ localStorage.removeItem('clover_guest_pending'); }catch(e){} return; }
+    var dk='clover_guest_claimed_'+user.id; if(localStorage.getItem(dk)===src.url) return;
+    window._guestClaimBusy=true;
+    var wf=src.wf||'space';
+    // 같은 화면에 남아있는 체험 카드(외부 주소)는 갤러리 사본과 겹치지 않게 빼고, 갤러리 사본으로 다시 불러옴
+    try{ if(G.HIST[wf]) G.HIST[wf]=G.HIST[wf].filter(function(h){ return !(h && h.result===src.url); }); }catch(e){}
+    _saveResultToCloudGallery(wf, Date.now(), src.url, src.orig||null, 'Nano Banana', '1K', null, '무료 체험', false);
+    try{ localStorage.setItem(dk, src.url); localStorage.removeItem('clover_guest_pending'); }catch(e){}
+    try{ if(fromMeta || (user.user_metadata && user.user_metadata.guest_result)) _supa.auth.updateUser({data:{guest_result:null}}).catch(function(){}); }catch(e){}
+    console.log('[무료 체험] 체험 결과를 회원 갤러리로 옮김', wf);
+    [7000,16000].forEach(function(t){ setTimeout(function(){ try{ loadCloudGallery(); setTimeout(function(){ try{ if(G.wf) renderMain(G.wf); }catch(e){} }, 2500); }catch(e){} }, t); });
+    setTimeout(function(){ window._guestClaimBusy=false; }, 20000);
+  }catch(e){ window._guestClaimBusy=false; }
+}
 function _trackSignupSrc(user){
   try{
     if(!user || !user.created_at) return;
@@ -18903,6 +18928,7 @@ function mkMultiRoomSpace(p){
     idbSaveDraft(_multiRoomDraftKey(), {multiRoomImages:[], multiRoomRefDesignImg:null, multiRoomPrompt:spTab.multiRoomPrompt, multiRoomCategory:spTab.multiRoomCategory, multiRoomResolution:spTab.multiRoomResolution}).catch(function(){});
     } else {
     spTab.autoRoomPrompt='';
+    spTab.autoRoomPromptByCat={}; // 전체 리셋 때는 공간 종류별로 보관한 프롬프트도 같이 지움
     spTab.autoRoomExtAnchors=[{img:null,label:'파사드뷰(정면)'}];
     spTab.autoRoomIntAnchors=[{img:null,label:SPACE_CATEGORIES[spTab.autoRoomCategory||'residential'].types[0]}];
     spTab.autoRoomSelected = _autoRoomTypesForCategory(spTab.autoRoomCategory||'residential').slice();
@@ -21189,6 +21215,7 @@ function mkAutoRoomCamera(p){
       spTab.autoRoomExtAnchors = (data.autoRoomExtAnchors && data.autoRoomExtAnchors.length) ? data.autoRoomExtAnchors : spTab.autoRoomExtAnchors;
       spTab.autoRoomIntAnchors = (data.autoRoomIntAnchors && data.autoRoomIntAnchors.length) ? data.autoRoomIntAnchors : spTab.autoRoomIntAnchors;
       spTab.autoRoomPrompt = data.autoRoomPrompt || spTab.autoRoomPrompt || '';
+      if(data.autoRoomPromptByCat && typeof data.autoRoomPromptByCat==='object') spTab.autoRoomPromptByCat = data.autoRoomPromptByCat;
       // ⚠️ 버그 수정(중요): "상업공간(카페)인데 거실이 섞여 나온다, 11개 체크했는데 22컷으로
       // 나온다" — 원인 발견: 카테고리는 저장된 값(예: 카페)으로 비동기로 바뀌는데, 그 전에 이미
       // 기본 카테고리(주거공간) 기준으로 만들어져 있던 "선택된 뷰 목록"(autoRoomSelected)은 전혀
@@ -21237,6 +21264,7 @@ function mkAutoRoomCamera(p){
       autoRoomExtAnchors: spTab.autoRoomExtAnchors,
       autoRoomIntAnchors: spTab.autoRoomIntAnchors,
       autoRoomPrompt: spTab.autoRoomPrompt,
+      autoRoomPromptByCat: spTab.autoRoomPromptByCat||{},
       autoRoomCategory: spTab.autoRoomCategory,
       autoRoomFidelity: spTab.autoRoomFidelity,
       autoRoomWeather: spTab.autoRoomWeather,
@@ -21261,6 +21289,14 @@ function mkAutoRoomCamera(p){
     b.innerHTML=SPACE_CATEGORIES[catKey].icon+SPACE_CATEGORIES[catKey].label;
     b.onclick=function(){
       if(spTab.autoRoomCategory===catKey) return;
+      // 2026-10-21 요청("오피스에서 쓴 프롬프트·문구 클릭이 주거공간에도 그대로 남아있다 — 공간마다 따로 저장"): 공간 종류별로 프롬프트(문구·창호·주변 배경 포함)와 날씨를 따로 보관
+      try{
+        var _pbc=spTab.autoRoomPromptByCat=spTab.autoRoomPromptByCat||{};
+        _pbc[spTab.autoRoomCategory||'residential']={p:spTab.autoRoomPrompt||'', w:spTab.autoRoomWeather||''};
+        var _nx=_pbc[catKey];
+        spTab.autoRoomPrompt=_nx?(_nx.p||''):'';
+        spTab.autoRoomWeather=_nx?(_nx.w||''):'';
+      }catch(e){}
       spTab.autoRoomCategory=catKey;
       spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenIntUrls=[]; spTab.autoRoomWindowAnchor=null; spTab.autoRoomStyleAnalysis=null; spTab.autoRoomStyleAnalysisSrc=null; // 카테고리 바꾸면 완전히 다른 공간이니 일관성 기록(창호 기준·스타일 분석 포함)도 초기화
       var newTypes=_autoRoomTypesForCategory(catKey);
@@ -40591,7 +40627,7 @@ function _agedStagePrompt(k, onEmptyLot){
       look:'brick '+pick(['deep red-brown Korean red brick (적벽돌)','dark red-brown brick with slightly darker headers','classic reddish-brown red brick, a little faded'])+' with uneven, slightly varied bricks, '+pick(['silver aluminium sash windows','brown aluminium sash windows','windows of slightly different sizes per floor'])+', '+pick(['a flat roof with a low parapet','a small rooftop room','an old water tank on the roof'])+', '+pick(['a steel gate between brick pillars','a low brick wall with a steel gate','a concrete wall with a low steel gate'])
     },
     aged_commercial_ext:{
-      what:'an ordinary old Korean neighbourhood commercial building (근린생활시설/상가건물) that is still in business',
+      what:'an ordinary older Korean neighbourhood commercial building (근린생활시설/상가건물) about 15–25 years old (built in the 1990s–2000s) that is still in business — only moderately dated, like the ordinary neighbouring buildings on the same street, NOT a run-down 1970s–80s building',
       size:'⚠ STOREY COUNT IS FREE (2026-10-20 사용자: "노후 건물 4종류에 1층·2층 같은 층수 제안을 두지 마라"): do not force any particular number of storeys — use whatever is natural for this kind of old Korean building, as long as the whole building stays clearly SMALLER and LOWER in the image than the current building. (Old commercial buildings can be several storeys if the current building is tall enough.) Its roofline stays clearly BELOW the current building\'s roofline. Each storey is exactly as tall in the image as one storey of the neighbouring buildings.',
       look:'facade '+pick(['beige or light grey exterior tiles','red-brown brick','grey granite on the ground floor with plain painted upper floors','light grey stucco'])+', '+pick(['a mix of mismatched projecting signs','a row of plain horizontal signboards','some faded hand-painted signs'])+' with very short Korean shop names, '+pick(['some roller shutters half down','most shops open','a couple of shutters closed'])
     }
@@ -42712,6 +42748,7 @@ function _saveSpaceSetPersist(){
     localStorage.setItem('clover_spaceset_multiRoomPrompt', _sp.multiRoomPrompt||'');
     localStorage.setItem('clover_spaceset_autoRoomPrompt', _sp.autoRoomPrompt||'');
     localStorage.setItem('clover_spaceset_autoRoomWeather', _sp.autoRoomWeather||'');
+    localStorage.setItem('clover_spaceset_autoRoomPromptByCat', JSON.stringify(_sp.autoRoomPromptByCat||{}));
   }catch(e){}
 }
 function _loadSpaceSetPersist(){
@@ -42724,6 +42761,8 @@ function _loadSpaceSetPersist(){
     if(ap && !_sp.autoRoomPrompt) _sp.autoRoomPrompt=ap;
     var aw=localStorage.getItem('clover_spaceset_autoRoomWeather');
     if(aw && !_sp.autoRoomWeather) _sp.autoRoomWeather=aw;
+    var apc=localStorage.getItem('clover_spaceset_autoRoomPromptByCat');
+    if(apc && !_sp.autoRoomPromptByCat){ try{ var _o=JSON.parse(apc); if(_o && typeof _o==='object') _sp.autoRoomPromptByCat=_o; }catch(e2){} }
   }catch(e){ console.warn('[공간컨셉디자인 프롬프트 복원 실패]', e.message); }
 }
 try{ window.addEventListener('beforeunload', _saveSpaceSetPersist); setInterval(function(){ if(typeof _vrBusy==='function' && _vrBusy()) return; _saveSpaceSetPersist(); }, 4000); }catch(e){}
@@ -48230,7 +48269,9 @@ function procImgWithTask(task, onDone, onErr){
     task.eng='nano2'; task.resolution='1K';
     var _gDone=onDone, _gErr=onErr;
     // 2026-10-18 요청: 결과 화면엔 로고 없이 — 다운로드할 때만 무료 회원처럼 우측 하단 작은 로고(saveBlobWithFreeWatermark)
-    onDone=function(ri){ try{ if(typeof ri==='string' && /^https?:/.test(ri)) window._guestLastResult=ri; }catch(e){} _guestTrialFinished(); _gDone(ri); };
+    onDone=function(ri){ try{ if(typeof ri==='string' && /^https?:/.test(ri)){ window._guestLastResult=ri;
+      // 2026-10-21 신고("비회원 무료 1회 사용 후 회원가입했더니 결과물이 사라졌다"): 가입하면 내 갤러리로 옮겨지게 결과 주소를 기억해둠
+      try{ var _go=(typeof task.img==='string' && /^https?:/.test(task.img))?task.img:null; localStorage.setItem('clover_guest_pending', JSON.stringify({url:ri, wf:task.wf||G.wf||'space', orig:_go, ts:Date.now()})); }catch(e2){} } }catch(e){} _guestTrialFinished(); _gDone(ri); };
     onErr=function(e){ G._guestRun=false; (_gErr||function(x){console.error(x);})(e); };
   }
   try{ if(task && task.maskData && (task.wf||G.wf)==='edit'){ var _etR2=getTab('edit'); if(_etR2._resAutoBrush){ _etR2.resolution=_etR2._resBeforeBrush||'2K'; _etR2._resAutoBrush=false; if(G.wf==='edit' && typeof updateResBtnCr==='function') setTimeout(function(){ try{ renderSB(); }catch(e){} }, 0); } } }catch(e){}
@@ -56554,8 +56595,8 @@ document.addEventListener('DOMContentLoaded',function(){try{
           _rbRecipe += ' 그 외 조합 — 외벽 색상은 '+_pickRand(_vColor)+' 계열, 옥상은 '+_pickRand(_vRoof)+', 공동현관은 '+_pickRand(_vGate)+', 창문은 '+_pickRand(_vWindow)+', 발코니는 '+_pickRand(_vBalcony)+', 1층은 '+_pickRand(_vGround)+', 얼룩은 '+_pickRand(_vStain)+', 입구는 '+_pickRand(_vEntry)+', 계량기는 '+_pickRand(_vMeter)+'. 이 9가지는 서로 독립적으로 고른 것이니, 그 외 디테일도 이에 맞춰 실제 거리에서 우연히 찍힌 특정 건물처럼 개성 있게 채우세요.';
         } else if(tab.selK==='aged_commercial_ext'){
           var _cTile=['베이지 스크래치 타일','더스티 핑크 모자이크 타일','옅은 노란색 타일','오프화이트 도장 마감','짙은 회색 타일'];
-          var _cShutter=['일부는 내려져있고 일부는 열려있음','대부분 열려서 영업 중','일부 셔터에 녹 자국이 두드러짐','전부 내려가 있고 셔터에 낙서/전단 붙어있음'];
-          var _cSign=['가게마다 제각각인 돌출 간판이 뒤섞여있음','한 줄로 통일된 가로형 간판들','낡은 페인트 손글씨 간판이 섞여있음','일부 간판은 불이 나가서 글씨가 바랜 채로 남아있음'];
+          var _cShutter=['일부는 내려져있고 일부는 열려있음','대부분 열려서 영업 중','한두 곳만 셔터가 내려가 있음']; // 2026-10-21 요청("상가는 너무 오래돼 보인다, 옆 건물 정도면 된다"): 녹·낙서 셔터 선택지 뺌
+          var _cSign=['가게마다 제각각인 돌출 간판이 뒤섞여있음','한 줄로 통일된 가로형 간판들','간판 몇 개는 색이 조금 바램'];
           var _cShop=['편의점+미용실+부동산 조합','식당+철물점+세탁소 조합','옷가게+분식집+휴대폰가게 조합','문구점+약국+미용실 조합'];
           var _cWindow=['2층부터는 낡은 알루미늄 새시 창문','2층 창문에 빛바랜 블라인드가 걸려있음','일부 창문에 에어컨 실외기가 튀어나와있음'];
           var _cTop=['옥상에 낡은 광고판 구조물이 있음','옥상이 비어있고 난간만 있음','옥상에 물탱크가 있음'];
@@ -57003,6 +57044,15 @@ document.addEventListener('DOMContentLoaded',function(){try{
       if((typeof AGED_EXT_ENVELOPE_PRESETS!=='undefined' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1) || ['unfinished_interior_stage1','unfinished_stage0','unfinished_stage1','unfinished_stage1b','unfinished_stage2','unfinished_stage3'].indexOf(tab.selK)!==-1){
         _finalPrompt += ' 📐📐📐 CAMERA & SCALE LOCK — THE INPUT (FINISHED-BUILDING) PHOTO IS THE ONE AND ONLY SCALE REFERENCE (absolute, overrides anything above; user-confirmed failure: across the before/after sequence people and cars grew and shrank because the zoom changed): this image is shown back-to-back with the input photo in a time-lapse, so the camera must be IDENTICAL to the input — same position, height, focal length/zoom and framing. The road and its edges, the trees and treeline, neighbouring buildings, the skyline and the frame edges must stay at exactly the same pixel positions and the same size as in the input. Only the subject building/lot changes; even when the building in this stage is smaller or lower, NEVER zoom in or out to frame it. '+
           'PEOPLE AND CARS SIZED FROM THE INPUT PHOTO: take the scale from the finished building and its surroundings in the input — one storey of the finished building is about 3 m, its front door about 2.1 m — and draw every person (about 1.7 m) and car (about 1.5 m tall, 4.5 m long) at that real size for the spot where they stand. If the input already shows people or cars, new ones at the same distance must be the same pixel size. Never tiny, never giant.';
+      }
+      // 2026-10-21 요청("노후 상가가 너무 오래돼 보인다 — 옆 건물 정도로 오래된 느낌이면 된다"): 노후 상가는 '적당히 낡은' 정도로만 (맨 끝에 붙여서 위 문구보다 우선)
+      if(tab.selK==='aged_commercial_ext'){
+        _finalPrompt += ' 🏪🏪 HOW OLD IT LOOKS — ONLY MODERATELY DATED (absolute, overrides any weathering wording above; 2026-10-21 user: "the old shop building looks far too old"): it is an ordinary 15–25-year-old neighbourhood commercial building, about as old-looking as the ordinary neighbouring buildings on the same street — a little dated, NOT decrepit. Its facade is basically clean and intact: plain tile, brick or painted render with only light, even fading and a few faint rain streaks; NO heavy rust streaks, NO big dark water stains, NO peeling or flaking paint, NO cracked or crumbling concrete, NO exposed rebar, NO rusty or graffiti-covered shutters, NO tangled mess of hanging wires. Signs are ordinary and readable, windows clean and intact, shutters normal (open or neatly closed).';
+      }
+      // 2026-10-21 신고("노후 건물에 실내 미완성 1단계(철거) 프리셋을 쓰면 카메라가 확대된다, 저번에도"): 이 프리셋은 원래 '방 사진'용 문구라서
+      // 건물 외관 사진에 쓰면 AI가 건물/실내 쪽으로 다가가 크게 그림 → 외관 사진이면 바깥에서 본 철거 장면으로, 화면 크기·위치는 입력과 완전히 같게
+      if(tab.selK==='unfinished_interior_stage1'){
+        _finalPrompt += ' 🔒🔒🔒 NO ZOOM — SAME FRAME AS THE INPUT (absolute, overrides "interior room" wording above; user-confirmed failure: the camera zoomed in on the building): if the input is an OUTSIDE view of a building (street, sky, neighbouring buildings visible), keep it an outside view — show the demolition from exactly the same street viewpoint: the building\'s windows and doors stripped out into bare open holes, the bare stripped interior visible through them, debris bags, a small truck or workers in front. Do NOT step inside, do NOT crop, do NOT move closer, do NOT enlarge the building. The building\'s roofline, its left and right edges and its ground line, the road, the trees, the sky and the neighbouring buildings stay at EXACTLY the same pixel positions and the same size as in the input. Even for an indoor room photo, keep the identical framing — never zoom in.';
       }
       // 2026-10-20 신고("거실 쪽 천장이 뚫려있는데 슬라브가 생겼다, 1.5단계는 완전히 다른 건물처럼 나오고 건물·사람이 다 작게 나왔다"):
       // 공사 1~3단계는 완공 건물의 매스(동별 위치·크기·지붕 모양)와 사람 크기, 오픈 천장(복층) 부분을 그대로 지키도록 맨 끝에 고정 규칙 추가
@@ -57887,6 +57937,7 @@ function initSupabase(){
         _supaUser=session.user;
         onSupaLogin(session.user);
         try{ _trackSignupSrc(session.user); }catch(_e){}
+        try{ setTimeout(function(){ _guestClaimImport(session.user); }, 2500); }catch(_e){}
         // 구글 redirect 후 돌아온 경우 URL 해시/파라미터 정리
         if(window.location.hash&&window.location.hash.indexOf('access_token')!==-1){
           history.replaceState(null,'',window.location.pathname);
@@ -58128,7 +58179,7 @@ function _logoutWipeAndReload(){
   try{ clearTimeout(window._mainImgDraftTimer); }catch(e){}
   try{ clearTimeout(_consultSaveT); }catch(e){}
   var keys=['clover_maintab_imgs_guest','clover_multiroom_draft_guest','clover_autoroom_draft_guest','clover_autoroom_progress_apt_guest','clover_autoroom_progress_gen_guest','clover_shorts_draft_guest','clover_proposal_draft_guest','clover_psedit_doc_guest','clover_edit_mask_canvas'];
-  try{ ['clover_hist','clover_consult_v1_guest','clover_edit_arrows','clover_edit_maskprompts','clover_edit_maskrefimg','clover_edit_polyareas','clover_light_marks','clover_spaceset_multiRoomPrompt','clover_spaceset_autoRoomPrompt','clover_spaceset_autoRoomWeather','clover_shorts_draft_guest','clover_proposal_draft_guest'].forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} }); }catch(e){}
+  try{ ['clover_hist','clover_consult_v1_guest','clover_edit_arrows','clover_edit_maskprompts','clover_edit_maskrefimg','clover_edit_polyareas','clover_light_marks','clover_spaceset_multiRoomPrompt','clover_spaceset_autoRoomPrompt','clover_spaceset_autoRoomWeather','clover_spaceset_autoRoomPromptByCat','clover_shorts_draft_guest','clover_proposal_draft_guest'].forEach(function(k){ try{ localStorage.removeItem(k); }catch(e){} }); }catch(e){}
   var done=false; function go(){ if(done) return; done=true; try{ location.reload(); }catch(e){} }
   try{
     Promise.all(keys.map(function(k){ return idbDeleteDraft(k).catch(function(){}); })).then(go, go);
@@ -58256,7 +58307,8 @@ function supaEmailSignup(){
   }
   if(msg){msg.style.color='var(--m2)';msg.textContent='가입 처리 중...';}
   try{ localStorage.setItem('clover_terms_agreed','1'); }catch(e){}
-  _supa.auth.signUp({email:email,password:pw})
+  var _gpSU=null; try{ var _gp0=JSON.parse(localStorage.getItem('clover_guest_pending')||'null'); if(_gp0 && _gp0.url && Date.now()-(_gp0.ts||0)<14*864e5) _gpSU=JSON.stringify(_gp0); }catch(e){}
+  _supa.auth.signUp(_gpSU?{email:email,password:pw,options:{data:{guest_result:_gpSU}}}:{email:email,password:pw})
   .then(function(res){
     if(res.error){
       if(msg){msg.style.color='#fca5a5';msg.textContent=res.error.message.indexOf('already')>-1?'이미 가입된 이메일입니다. 로그인해주세요.':res.error.message;}
