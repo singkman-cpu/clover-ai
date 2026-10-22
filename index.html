@@ -28413,13 +28413,13 @@ function _xformCheckS2(resultSrc, finalSrc, cb){
     }); });
   }catch(e){ fin(null); }
 }
-function _xformRunStep(src, key, cb){
+function _xformRunStep(src, key, cb, opts){
   try{
     var ps=(PS_EDIT||[]).find(function(x){ return x.k===key; });
     if(!ps){ cb(null,'프리셋을 찾지 못했어요: '+key); return; }
     if(G.wf!=='edit') selectWF('edit');
     G.editMode='normal';
-    var t=getTab('edit'); t.inputImg=src; t.selK=key; t.prompt=ps.pt; t.agedOnEmptyLot=false; t.refs=[]; t.extraPrompt=''; if(window._xformRes) t.resolution=window._xformRes;
+    var t=getTab('edit'); t.inputImg=src; t.selK=key; t.prompt=ps.pt; t.agedOnEmptyLot=!!(opts && opts.emptyLot); t.refs=[]; t.extraPrompt=''; if(window._xformRes) t.resolution=window._xformRes;
     var before={}; (G.renderQueue||[]).forEach(function(x){ before[x.id]=1; });
     window._doActbtn();
     var task=null, t0=Date.now();
@@ -28443,7 +28443,7 @@ function _xformRun(finalSrc, agedK, statusEl, done){
     var s=XFORM_STEPS[i], key=(s.k==='@aged')?agedK:s.k, src=out[s.from];
     if(!src){ results.push({label:s.label, err:'앞 단계 실패로 건너뜀', ord:s.ord}); i++; next(); return; }
     statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… (한 장에 30초~1분)';
-    var _runIt=function(src, _try){
+    var _runIt=function(src, _try, _opts){
     var _noteNow=window._xformBackNote;
     _xformRunStep(src, key, function(url, err){
       window._xformBackNote='';
@@ -28463,7 +28463,7 @@ function _xformRun(finalSrc, agedK, statusEl, done){
       if(url){ out[s.id]=url; results.push({label:s.label, url:url, ord:s.ord}); }
       else { results.push({label:s.label, err:err, ord:s.ord}); if(err==='중단됨'){ restore(); finish(); return; } }
       i++; next();
-    });
+    }, _opts);
     };
     window._xformBackNote=XFORM_BACK_NOTE[s.id]||'';
     if(s.id==='s2'){ // 2단계: 통창 창살을 지운 사진으로
@@ -28476,6 +28476,15 @@ function _xformRun(finalSrc, agedK, statusEl, done){
         statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… '+(info?(info.double?'(복층 거실로 판단 — 통창 자리를 비워서) ':'(복층 아님으로 판단) '):'')+'(한 장에 30초~1분)';
         _runIt(u);
       }, out.final);
+    } else if(s.id==='aged'){
+      // 2026-10-22 신고("넓은 한옥 자리에 노후 빌라가 여전히 엄청 크다 — 바닥이 넓으면 여러 동으로 나누거나 건물은 작게, 마당을 크게 하라고 했잖아"):
+      // 완공 건물 위에 바로 그리면 AI가 큰 덩어리를 그대로 따라 그림 → 먼저 빈 대지(0단계)를 만들고(쇼츠엔 안 넣음) 그 위에 노후 건물을 지음
+      statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 준비 중… (먼저 빈 대지를 만들어서 그 위에 작게 지어요)';
+      _xformRunStep(out.final, 'unfinished_stage0', function(lotUrl){
+        if(window._xformStop){ restore(); finish(); return; }
+        statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… '+(lotUrl?'(빈 대지 위에)':'(빈 대지 실패 — 완공 사진에서 바로)');
+        if(lotUrl) _runIt(lotUrl, 0, {emptyLot:true}); else _runIt(src);
+      });
     } else _runIt(src);
   }
   function finish(){
@@ -40797,6 +40806,8 @@ function _agedStagePrompt(k, onEmptyLot){
     '⚠⚠⚠ CRITICAL — SIZE IT ONLY FROM THE SURROUNDINGS (매우 중요): the building is '+(SZ[k]||SZ.aged_house)+'. '+
     'Use only the existing things as the real-world ruler: the neighbouring houses\' storeys, doors and windows, the public road (one traffic lane is about 3 m wide), the sidewalk paving stones and any parked car (about 1.5 m tall, 4.5 m long). A front door is about 2 m tall, a bicycle about 1 m tall and about one third of a car\'s length, the boundary wall and gate only about 1.2–1.5 m tall (roughly a parked car\'s roof height). '+
     'Its footprint is modest — an ordinary small old building — set toward the back/middle of the lot with a wide open front yard; the lot keeps exactly its real size, only the building on it is small. It must never look bigger than the neighbouring houses. '+
+    // 2026-10-22 요청: 대지가 넓으면 큰 한 동이 아니라 작은 여러 동, 또는 작은 건물 + 넓은 마당
+    'IF THE LOT IS LARGE OR WIDE: do NOT fill it with one big building. Either place 2–4 separate small old buildings (each with its own roof, walls and entrance, slightly different age and colour, separated by narrow passages or low walls — like several small old houses on what used to be separate lots), or one small building with a very large yard. All buildings together cover at most about half of the lot area; the rest is yard, parking space or garden. '+
     'The lot around it, as it was back then: a plain cement-block or old brick boundary wall with a simple steel gate along the lot edges (one wall per side, replacing any fence there), a plain cement-paved yard or small parking space (maybe a bicycle or scooter), kept simple and tidy. Keep only very large, clearly decades-old trees. Do NOT add any vehicle anywhere. '+
     'Details for this one: '+T.look+'. STILL LIVED IN, NOT ABANDONED: intact glass with curtains behind some windows, modest realistic weathering (faded paint, rain streaks under sills, a little moss in shaded corners), a few exposed utility lines and meter boxes. No air-conditioner outdoor units. '+
     '⚠⚠⚠ ONLY THIS LOT CHANGES — every neighbouring building, the forest, the public road, sidewalk and curb, street trees outside the lot and the sky must remain exactly as in the photo. '+
@@ -57236,7 +57247,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       }
       // 2026-10-22 신고("엄청 큰 한옥(단층)인데 노후 빌라가 평수는 작은데 스케일이 훨씬 더 크다"): 낮고 넓은 완공 건물(단층 한옥 등)에서
       // 노후 건물이 3층 상자로 높이 솟아 더 커 보였음 → 층수를 정하진 않고(사용자 요청: 층수 제한 두지 말 것), '완공 건물의 지붕 높이보다 낮게, 전체 덩어리도 더 작게'만 맨 끝에 고정
-      if(typeof AGED_EXT_ENVELOPE_PRESETS!=='undefined' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1){
+      if(typeof AGED_EXT_ENVELOPE_PRESETS!=='undefined' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1 && !tab.agedOnEmptyLot){
         _finalPrompt += ' 📏📏📏 OLD BUILDING NEVER TALLER THAN THE CURRENT ONE (absolute final size check; user-confirmed failure: the current house was a wide, low one-storey hanok and the old villa came out as a tall 3-storey block that looked far bigger): first look at how HIGH the current building is in the photo (its roof ridge) and how much of the lot it covers. The old building\'s highest point — roof, parapet, rooftop room and water tank included — must stay clearly BELOW the current building\'s roof ridge, and its whole mass (height × width × depth as seen in the photo) must look clearly SMALLER than the current building. So when the current building is low and wide (for example a one-storey hanok or a low house spread around a courtyard), the old building is equally low — a compact low building that fits under the current roofline — never a taller multi-storey block towering over where the current roof is. Only when the current building is itself tall may the old one have more storeys, and still lower than it. '+
           // 2026-10-22 요청("바닥면적이 크면 건물 한 동으로 키우지 말고 2·3·4동으로 늘리면 되지 않나"): 넓은 대지는 작은 노후 건물 여러 채로
           'WIDE LOT = SEVERAL SMALL OLD BUILDINGS, NOT ONE BIG ONE: when the current building covers a large or wide footprint (several wings, a courtyard house, a long low building), do NOT make one large old block to fill it — show 2, 3 or 4 separate small old buildings of the chosen type standing side by side, the way several small old houses or shops stood on what were separate small lots before they were merged: each has its own roof, its own walls and entrance and slightly different age, colour and height, separated by narrow passages, small yards or low boundary walls. Each one is small and low (below the current roofline), and all of them together stay within the current building\'s footprint. A narrow, compact current building keeps a single old building.';
