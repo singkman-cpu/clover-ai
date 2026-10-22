@@ -9789,6 +9789,9 @@ function renderMain(callWf, preserveScroll){
   // null/undefined 항목은 먼저 걸러내서 이 문제 자체를 원천 차단함.
   if(G.HIST[wf]){
     G.HIST[wf]=G.HIST[wf].filter(function(x){ return !!x; });
+    // 2026-10-22 신고("새로고침하면 낮에 작업한 이미지가 새로 작업한 결과보다 위에 있다"): 새로고침 복원용 미리보기는 결과가 이미 있으면 메인화면에서 뺌(사이드바 '수정할 이미지'엔 그대로)
+    var _hasRealRes=G.HIST[wf].some(function(x){ return !x.preview && !x.loading && (x.result||x.origThumb); });
+    if(_hasRealRes) G.HIST[wf]=G.HIST[wf].filter(function(x){ return !(x.preview && x.restored); });
     G.HIST[wf]=G.HIST[wf].filter(function(x){
       if(x.loading)return true;
       // ⚠️ 버그 수정: 미리보기(preview) 항목이 orig만 있어야 살아남는 조건이었는데, _previewImageInMain
@@ -18434,8 +18437,43 @@ function _scPrepExtFromInterior(spTab, typeName, input, cb){
     });
   }catch(e){ cb(); }
 }
+// 2026-10-22 재신고("건축투시도가 아직도 실내 마감재를 외장재로 넣는다 — 창밖에 보였던 마감재·형태를 정확하게"): 문구만으로는 AI가 실내 마감을 옮겨 붙임 →
+// 실내 결과 사진들을 비전 AI로 한 번 보고 "창밖에 보이는 이 집의 외부(중정 벽·발코니·건너편 동·처마·창틀)"를 글로 정확히 뽑아서 외관 프롬프트 맨 끝에 못박음(세트당 1번, 캐시)
+function _scExtVisDesc(spTab, typeName, input, cb){
+  var done=false; function fin(){ if(done) return; done=true; cb(); }
+  try{
+    if(!_isExteriorViewType(typeName) || typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(); return; }
+    var ints=(spTab.autoRoomIntAnchors||[]).filter(function(a){ return a && a.img; });
+    if(!ints.length){ fin(); return; }
+    var pri=function(a){ var l=String(a.label||''); return /거실|리빙|living/i.test(l)?0:(/중정|발코니|테라스|베란다|현관|안마당/.test(l)?1:(/주방|다이닝/.test(l)?2:3)); };
+    var pick=ints.slice().sort(function(a,b){ return pri(a)-pri(b); }).slice(0,4);
+    var key=pick.map(function(a){ return String(a.img).slice(-60); }).join('|');
+    function apply(d){
+      if(d && d!=='NONE') input.prompt=(input.prompt||'')+' 🧱🧱🧱 EXACT EXTERIOR OF THIS HOUSE AS SEEN THROUGH ITS OWN INTERIOR WINDOWS (read from the interior photos of this set — this IS the facade; reproduce these materials, colours and forms exactly on the building, overriding any other facade-material or candidate-design wording): '+d+' Never use the interior wall panels, interior ceiling coves, flooring or furniture as exterior cladding.';
+      fin();
+    }
+    if(spTab._extVisKey===key && spTab._extVisDesc!==undefined){ apply(spTab._extVisDesc); return; }
+    setTimeout(fin, 30000);
+    var b64s=[], left=pick.length;
+    pick.forEach(function(a,i){ _proposalImgToB64(a.img, function(b){ b64s[i]=b||null; if(--left===0) ask(); }); });
+    function ask(){
+      var content=[];
+      pick.forEach(function(a,i){ if(b64s[i]){ content.push({type:'text', text:'Photo '+(i+1)+': '+String(a.label||'room')}); content.push({type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64s[i]}}); } });
+      if(!content.length){ fin(); return; }
+      content.push({type:'text', text:'These are interior photos of ONE house. Look ONLY at what is visible OUTSIDE through the windows and glass doors that belongs to THIS SAME house: courtyard walls, balconies or terraces (railing, floor, ceiling/soffit, walls), the facade of another wing seen across a courtyard, roof eaves, the outside of the window frames, garden walls. Ignore neighbouring buildings, the street and the distant city, and ignore every interior finish. Describe it precisely for an architect who must reproduce it on the facade: materials, colours, textures and shapes (e.g. white brick, curved slab edges, rounded corners, wood soffit, vertical louvers), railing type, window frame colour and profile. Plain English, at most 90 words, no preamble. If nothing of this house\'s own exterior is visible, reply exactly NONE.'});
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:content}]}, function(res){
+        var t=res; try{ if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t); }catch(e){ t=''; }
+        t=String(t||'').replace(/\s+/g,' ').trim().slice(0,900);
+        var d = (!t || /^NONE\b/i.test(t)) ? 'NONE' : t;
+        spTab._extVisKey=key; spTab._extVisDesc=d;
+        console.log('[공간컨셉] 외관 — 실내 창밖으로 보이는 외부 마감 읽기: '+d.slice(0,160));
+        if(!done) apply(d);
+      }, function(){ fin(); });
+    }
+  }catch(e){ fin(); }
+}
 function _scMaybeSwatch(spTab, typeName, primary, noDirectMatch, input, cb){
-  var _scOrigCb=cb; cb=function(){}; _scPrepExtFromInterior(spTab, typeName, input, function(){ _scMaybeSwatchInner(spTab, typeName, primary, noDirectMatch, input, _scOrigCb); });
+  var _scOrigCb=cb; cb=function(){}; _scPrepExtFromInterior(spTab, typeName, input, function(){ _scExtVisDesc(spTab, typeName, input, function(){ _scMaybeSwatchInner(spTab, typeName, primary, noDirectMatch, input, _scOrigCb); }); });
 }
 function _scMaybeSwatchInner(spTab, typeName, primary, noDirectMatch, input, cb){
   if(!SC_SWATCH_ENABLED){ cb(); return; } // 2026-10-04: 너무 다른 공간이 나와서 끔(사용자 기준: 전체 건축 디자인은 따라가고 창호만 다르게)
@@ -22707,7 +22745,7 @@ var SMART2050S_PHRASE_SITE=' 🤖🔥 2050 스마트 테크 강하게 디자인(
 function _robotThisShot(){ return Math.random()<0.4; }
 function _robotClause(ext, strong){
   return ext
-    ? ' 🤖 IN THIS SHOT, EXACTLY ONE ROBOT IS AT WORK OUTSIDE (only some shots of the set have a robot, this is one of them): just ONE of — an AI garden robot watering the plants, a robotic lawn mower cutting the lawn, a garden robot pruning a shrub, or one other single everyday task (e.g. a window-cleaning robot on the glass). Refined consumer-product design (soft rounded forms, white, silver-grey or warm grey), true real-world scale, clearly visible in mid-action.'
+    ? ' 🤖 IN THIS SHOT, EXACTLY ONE ROBOT IS AT WORK OUTSIDE (only some shots of the set have a robot, this is one of them): just ONE, and only inside OUR house\'s own garden or yard on the ground floor (never a neighbour\'s garden or the street) — an AI garden robot watering the plants, a robotic lawn mower cutting the lawn, a garden robot pruning a shrub, or one other single everyday task (e.g. a window-cleaning robot on the glass). Refined consumer-product design (soft rounded forms, white, silver-grey or warm grey), true real-world scale, clearly visible in mid-action.'
     : ' 🤖 IN THIS SHOT, A HOUSEHOLD ROBOT IS AT WORK (only some rooms of the set have robots, this is one of them): '+(strong?'at least two':'one or two')+' of — a sleek white or silver-grey humanoid home robot (slightly shorter than an adult, soft rounded body, simple face screen) folding laundry, tidying or clearing the table; a robot vacuum with a small robotic arm picking something up from the floor; a ceiling-rail robotic arm cooking at the kitchen counter; a small ball-shaped AI assistant robot projecting information onto a wall; a window-cleaning robot on the window glass; a robotic storage unit lowering from the ceiling. Refined consumer-product design, true scale, clearly visible in mid-action.';
 }
 var NO_ROBOT_CLAUSE=' (No robot in this particular shot — robots appear only in some rooms of the set; show the other future technology instead.)';
@@ -22761,7 +22799,7 @@ function _futureDesignFinalSiteCore(userStyle, roomLabel){
 // 2026-10-22 신고("실내 참고 이미지의 구조·마감재가 건축 투시도 10장 중 1~3장에만 적용된다"): 미래형 외관 최종 체크가 "참고 이미지는 대지·규모·색감만"이라고 해서
 // 실내 참고(곡선 띠·벽돌·우드 등)와 다른 뷰(외관 앵커)를 무시하고 매번 새 건물을 설계하던 문제 → 외관 뷰 맨 끝에 "실내 사진과 같은 집 + 세트 전체 같은 건물" 규칙 추가
 // 2026-10-22 요청("건물 외관 만들 때 AI 로봇이 너무 많이 밖에 나와 있다 — AI 정원사 1명(물 주기·잔디 깎기) 또는 다른 행동 로봇 1개 정도, 없어도 된다"): 외관 로봇 최대 1개
-var FUTURE_EXT_ROBOT_LIMIT=' [OUTDOOR ROBOT LIMIT — final rule, overrides every robot, drone and delivery-robot wording above] In this exterior shot show AT MOST ONE robot in total — for example a single AI garden robot watering plants or mowing the lawn, or one robot doing one other everyday task — or no robot at all. Never a group of robots: no second robot, no humanoid robots standing around the yard, no delivery drones or delivery robots in addition.';
+var FUTURE_EXT_ROBOT_LIMIT=' [OUTDOOR ROBOT LIMIT — final rule, overrides every robot, drone and delivery-robot wording above] In this exterior shot show AT MOST ONE robot in total — for example a single AI garden robot watering plants or mowing the lawn, or one robot doing one other everyday task — or no robot at all. The robot works only on OUR house\'s own lot — in our own ground-floor front garden or yard (for a detached house, the garden right in front of or beside our building), never in a neighbour\'s garden, never on the street or across the road. Never a group of robots: no second robot, no humanoid robots standing around the yard, no delivery drones or delivery robots in addition.';
 var FUTURE_EXT_SAME_HOUSE=' [SAME HOUSE AS THE INTERIOR PHOTOS — final rule, overrides "the reference only gives site, scale, use and colour tone" above for the FACADE] If any attached reference image is an INTERIOR photo of this house, look at what is visible OUTSIDE its windows and doors — the courtyard walls, the balcony or terrace (its railing, floor, ceiling/soffit and walls), the facades of other wings seen across a courtyard, the eaves, the outside of the window frames, the garden. Those visible outdoor parts ARE this building\'s exterior: reproduce exactly those exterior materials, colours and forms on this facade (for example, if the courtyard walls seen through the window are white brick with curved slab edges, the facade is white brick with those curved slab edges). Also match the window type, frame colour and proportions, and place the big living-room window, the balcony and the courtyard where the interior photos show them. Do NOT use the INDOOR finishes (interior wall panels, interior ceiling coves, flooring, furniture) as exterior cladding — only what the photos show outdoors. If nothing outdoors of this building is visible in the interior photos, match only the window frames and choose a facade that fits them. The future-design elements are added ON TOP of this exterior, never replacing it. If any attached reference is an EXTERIOR photo of this same building from another angle, copy that building exactly — same massing, roof shape, number of floors, facade materials, colours and window layout; only the camera changes. Every exterior view of this set must look like one and the same building.';
 function _futurePlantRule(typeName){
   if(_isExteriorViewType(typeName)) return '';
@@ -23688,10 +23726,12 @@ function _padExteriorTo916WithBlur(url, cb){
         var _candVar=[];
         if(_isExteriorViewType(typeName)){
           var _dPool=_candDesigns.slice().sort(function(){return Math.random()-0.5;});
+          var _hasIntPh=(spTab.autoRoomIntAnchors||[]).some(function(a){ return a && a.img; }); // 2026-10-22: 실내 사진이 있으면 후보끼리 외장재는 바꾸지 않음(창밖에 보인 외부 마감 그대로) — 매스·지붕만 다르게
+          if(_hasIntPh) _dPool=_dPool.map(function(d){ return String(d).split(',')[0]+' (외장재·색은 바꾸지 말고 실내 사진 창밖에 보이는 이 집의 외부 마감재·형태 그대로)'; });
           for(var _cv=0; _cv<_arCandN; _cv++){
             var _ang=15+Math.round(Math.random()*30), _side=Math.random()<0.5?'왼쪽':'오른쪽';
             var _angTxt=/투시/.test(typeName)?(' 카메라는 정면을 피해서 정면 축에서 '+_side+'으로 약 '+_ang+'도 틀어 선 2점 투시 구도로 찍으세요.'):'';
-            _candVar.push(_arCandN>1 ? (' ⚠️⚠️⚠️ 후보 '+(_cv+1)+'/'+_arCandN+' 전용 지시(가장 마지막, 매우 중요): 이 후보는 다른 후보들과 "완전히 다른 건물 디자인"이어야 합니다 — 지붕 형태·매스 구성·외장재 조합·창 배치가 확실히 달라야 하고, 같은 건물을 각도만 바꾼 것처럼 보이면 실패입니다. 이번 후보의 디자인 방향: '+_dPool[_cv%_dPool.length]+'. 단, 실내 사진에서 정해지는 조건(거실 창 모양, 층수, 공간 규모·깊이, 창틀 색, 주변 환경)은 그대로 지키세요. 첨부 이미지 중 이 세트에서 이전에 만든 외관 사진이 있더라도 그 건물을 따라 그리지 마세요.'+_angTxt) : _angTxt);
+            _candVar.push(_arCandN>1 ? (' ⚠️⚠️⚠️ 후보 '+(_cv+1)+'/'+_arCandN+' 전용 지시(가장 마지막, 매우 중요): 이 후보는 다른 후보들과 "완전히 다른 건물 디자인"이어야 합니다 — 지붕 형태·매스 구성'+(_hasIntPh?'':'·외장재 조합')+'·창 배치가 확실히 달라야 하고, 같은 건물을 각도만 바꾼 것처럼 보이면 실패입니다. 이번 후보의 디자인 방향: '+_dPool[_cv%_dPool.length]+'. 단, 실내 사진에서 정해지는 조건(거실 창 모양, 층수, 공간 규모·깊이, 창틀 색, 주변 환경)은 그대로 지키세요. 첨부 이미지 중 이 세트에서 이전에 만든 외관 사진이 있더라도 그 건물을 따라 그리지 마세요.'+_angTxt) : _angTxt);
           }
         } else {
           _candVar=['', ' ⚠️ 후보 2 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라만 방의 다른 모서리로 옮겨서 반대쪽 벽 방향을 바라본 구도로 그리세요(첫 번째 후보와 구도가 확실히 달라야 합니다).', ' ⚠️ 후보 3 전용 지시: 같은 공간·같은 디자인을 그대로 두고, 카메라를 방 입구 쪽 낮은 위치로 옮겨서 공간 깊이가 잘 보이는 구도로 그리세요(다른 후보들과 구도가 확실히 달라야 합니다).'];
@@ -27055,6 +27095,18 @@ function _saveMainTabImagesDraft(){
     idbSaveDraft(_mainImgDraftKey(), snap).catch(function(){});
   }, 600);
 }
+// 2026-10-22 신고("새로고침하면 수정할 이미지에 낮에 작업한 예전 사진이 들어가 있다"): 결과→편집 보내기 등 여러 경로가 저장을 안 불러서 예전 사진이 남아 있었음
+// → 4초마다 각 탭의 '수정할 이미지'가 바뀌었는지만 확인해서 바뀌었으면 저장(가벼운 비교만, 서버 호출 없음)
+var _mainImgSig=null;
+function _mainImgSigNow(){
+  var a=[]; try{
+    _MAIN_IMG_PERSIST_WFS.forEach(function(wf){ var t=(wf==='edit' && G._editTabStash) ? G._editTabStash : (G.tabs&&G.tabs[wf]); var v=t&&t.inputImg; a.push(wf+':'+(v?(String(v).length+String(v).slice(-40)):'')); });
+    var st=G._staging ? (G.tabs&&G.tabs.edit) : G._stagingTab; var sv=st&&st.inputImg; a.push('stg:'+(sv?(String(sv).length+String(sv).slice(-40)):''));
+  }catch(e){}
+  return a.join('|');
+}
+try{ _mainImgSig=_mainImgSigNow(); }catch(e){}
+setInterval(function(){ try{ var sg=_mainImgSigNow(); if(_mainImgSig===null){ _mainImgSig=sg; return; } if(sg!==_mainImgSig){ _mainImgSig=sg; _saveMainTabImagesDraft(); } }catch(e){} }, 4000);
 // 로그인 여부와 상관없이(게스트도 _draftKeyUid()가 'guest'로 동작) 새로고침 직후 한 번만 조용히
 // 복원 시도 — 이미 사진이 있는 탭(막 복원됐거나 이미 업로드된 경우)은 덮어쓰지 않음.
 function _restoreMainTabImagesDraft(){
@@ -27082,7 +27134,7 @@ function _restoreMainTabImagesDraft(){
         var _hasNonPreview = G.HIST[wf].some(function(x){ return !x.preview; });
         if(!_hasNonPreview){
           G.HIST[wf] = G.HIST[wf].filter(function(x){ return !x.preview; });
-          G.HIST[wf].unshift({id:Date.now(),orig:saved.inputImg,origName:saved.inputImgName||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:wf,preview:true});
+          G.HIST[wf].unshift({id:Date.now(),orig:saved.inputImg,origName:saved.inputImgName||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:wf,preview:true,restored:true});
         }
         changed=true;
       }
@@ -27100,7 +27152,7 @@ function _restoreMainTabImagesDraft(){
           var _hasStg=G.HIST.edit.some(function(x){ return !x.preview && _isStagingItem(x); });
           if(!_hasStg){
             G.HIST.edit = G.HIST.edit.filter(function(x){ return !(x.preview && _isStagingItem(x)); });
-            G.HIST.edit.unshift({id:Date.now()+1,orig:ss.inputImg,origName:ss.inputImgName||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:'edit',preview:true,staging:true});
+            G.HIST.edit.unshift({id:Date.now()+1,orig:ss.inputImg,origName:ss.inputImgName||'',result:null,origThumb:null,tags:[],ai:'',cx:50,fav:false,wf:'edit',preview:true,staging:true,restored:true});
           }
           changed=true;
         }
@@ -57548,8 +57600,13 @@ document.addEventListener('DOMContentLoaded',function(){try{
       }
       // 2026-10-22 요청("빈집 홈스테이징에 3D 렌더 이미지가 들어오면 실제 사진처럼 바꿔서"): 3D 렌더인지 AI(비전)로 한 번 확인 → 렌더면 공간 전체를 같은 구조·재질의 실사 사진으로 바꾸고 가구도 실사로
       if(/^staging_/.test(tab.selK||'') && tab.inputImg){
+        // 2026-10-22 신고("홈스테이징 렌더 누르고 몇 박자 뒤에야 렌더링이 떠서 두세 번 누르면 크레딧이 2~3번 나가는 거 아니냐"): 3D 판별 중엔 추가 클릭 무시 + 바로 '확인 중' 표시
+        if(G._stageCgChecking && Date.now()-G._stageCgChecking<30000){ try{ var _stb=gE('stl'); if(_stb) _stb.textContent='이미 실행 중이에요 — 잠시만 기다려 주세요 (중복 실행·중복 차감 없음)'; }catch(_e){} return; }
+        G._stageCgChecking=Date.now();
+        try{ var _stw=gE('stl'); if(_stw) _stw.textContent='사진 확인 중… 곧 렌더링이 시작돼요 (다시 누르지 않으셔도 돼요)'; }catch(_e){}
         var _fp=_finalPrompt; tab._stageCgOnce=false;
         _stageIsCgRender(tab.inputImg, function(isCg){
+          G._stageCgChecking=0;
           if(isCg){
             tab._stageCgOnce=true;
             _fp += STAGE_CG_TO_PHOTO_RULE;
