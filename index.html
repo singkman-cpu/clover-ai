@@ -28413,6 +28413,26 @@ function _xformCheckS2(resultSrc, finalSrc, cb){
     }); });
   }catch(e){ fin(null); }
 }
+// 2026-10-22 신고(빈 대지 위에 지었더니 바닥은 작아졌지만 4층 빌라가 단층 한옥보다 훨씬 높게 솟음): 완공 사진에서 건물 높이(층수)를 AI(비전)로 재서,
+// 빈 대지 위 노후 건물은 '나중에 지을 완공 건물보다 높지 않게'만 알려줌(고정 층수가 아니라 완공 건물 기준)
+function _xformMeasureFinal(finalSrc, cb){
+  var done=false; function fin(v){ if(done) return; done=true; cb(v); }
+  setTimeout(function(){ fin(null); }, 25000);
+  try{
+    if(typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(null); return; }
+    _proposalImgToB64(finalSrc, function(b64){
+      if(!b64){ fin(null); return; }
+      var q='This photo shows a newly finished main building in the centre of the frame (with neighbouring buildings around it). (1) How many above-ground storeys does that MAIN building have at its highest part (count a tall pitched roof or hanok roof as part of its top storey, not as an extra storey)? (2) Does it cover a WIDE footprint — several wings or separate roof volumes, a courtyard (ㄱ/ㄷ/ㅁ) plan, or a building clearly wider than it is tall? Reply with ONLY JSON: {"storeys":number,"wide":true|false}';
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:q}]}]}, function(res){
+        try{
+          var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t);
+          var m=String(t||'').match(/\{[\s\S]*\}/); var j=m?JSON.parse(m[0]):{}; var n=parseInt(j.storeys,10);
+          fin(n>=1 && n<=30 ? {n:n, wide:j.wide===true} : null);
+        }catch(e){ fin(null); }
+      }, function(){ fin(null); });
+    });
+  }catch(e){ fin(null); }
+}
 function _xformRunStep(src, key, cb, opts){
   try{
     var ps=(PS_EDIT||[]).find(function(x){ return x.k===key; });
@@ -28482,6 +28502,18 @@ function _xformRun(finalSrc, agedK, statusEl, done){
       statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 준비 중… (먼저 빈 대지를 만들어서 그 위에 작게 지어요)';
       _xformRunStep(out.final, 'unfinished_stage0', function(lotUrl){
         if(window._xformStop){ restore(); finish(); return; }
+        if(lotUrl){
+          _xformMeasureFinal(out.final, function(mz){
+            var n=mz?mz.n:null, wide=!!(mz&&mz.wide);
+            window._xformAgedNote = (n ? (' 📏📏📏 HEIGHT LIMIT FROM THE BUILDING THAT WILL REPLACE IT (absolute final size rule): the new building later built on this lot has about '+n+' storey'+(n>1?'s':'')+'. The old building(s) must NOT be taller than that — at most '+n+' storey'+(n>1?'s':'')+' including any rooftop room, and also no taller than the neighbouring houses right beside the lot. A small, low old building with a large yard is correct; a tall block that towers over the neighbours is a failure.') : '') +
+              // 2026-10-22 요청("저 정도 범위면 마당이 있어도 2동은 들어가겠구만 — 2동·3동으로"): 완공 건물이 넓으면 작은 노후 건물을 반드시 2~3채로
+              (wide ? ' 🏘🏘🏘 TWO OR THREE SEPARATE OLD BUILDINGS (absolute — the lot is wide; user request): place 2 or 3 separate small old buildings on this lot, not one. Each has its own roof, walls and entrance, a slightly different size, colour and age, set apart by a narrow passage, a small yard or a low wall — like neighbouring small old houses on what used to be separate lots. Keep a yard in front; together they still cover only about half of the lot.' : '');
+            console.log('[변신 세트] 완공 건물 층수·넓이(비전):', n, wide?'넓음 → 노후 건물 2~3동':'');
+            statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… (빈 대지 위에'+(n?(', 완공 건물 '+n+'층 이하로'):'')+(wide?', 작은 건물 2~3동':'')+')';
+            _runIt(lotUrl, 0, {emptyLot:true});
+          });
+          return;
+        }
         statusEl.textContent='🏗 '+(i+1)+'/'+XFORM_STEPS.length+' '+s.label+' 만드는 중… '+(lotUrl?'(빈 대지 위에)':'(빈 대지 실패 — 완공 사진에서 바로)');
         if(lotUrl) _runIt(lotUrl, 0, {emptyLot:true}); else _runIt(src);
       });
@@ -57247,6 +57279,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       }
       // 2026-10-22 신고("엄청 큰 한옥(단층)인데 노후 빌라가 평수는 작은데 스케일이 훨씬 더 크다"): 낮고 넓은 완공 건물(단층 한옥 등)에서
       // 노후 건물이 3층 상자로 높이 솟아 더 커 보였음 → 층수를 정하진 않고(사용자 요청: 층수 제한 두지 말 것), '완공 건물의 지붕 높이보다 낮게, 전체 덩어리도 더 작게'만 맨 끝에 고정
+      if(typeof AGED_EXT_ENVELOPE_PRESETS!=='undefined' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1 && tab.agedOnEmptyLot && window._xformAgedNote){ _finalPrompt += window._xformAgedNote; window._xformAgedNote=''; } // 변신 세트: 빈 대지 위 노후 건물 높이 상한
       if(typeof AGED_EXT_ENVELOPE_PRESETS!=='undefined' && AGED_EXT_ENVELOPE_PRESETS.indexOf(tab.selK)!==-1 && !tab.agedOnEmptyLot){
         _finalPrompt += ' 📏📏📏 OLD BUILDING NEVER TALLER THAN THE CURRENT ONE (absolute final size check; user-confirmed failure: the current house was a wide, low one-storey hanok and the old villa came out as a tall 3-storey block that looked far bigger): first look at how HIGH the current building is in the photo (its roof ridge) and how much of the lot it covers. The old building\'s highest point — roof, parapet, rooftop room and water tank included — must stay clearly BELOW the current building\'s roof ridge, and its whole mass (height × width × depth as seen in the photo) must look clearly SMALLER than the current building. So when the current building is low and wide (for example a one-storey hanok or a low house spread around a courtyard), the old building is equally low — a compact low building that fits under the current roofline — never a taller multi-storey block towering over where the current roof is. Only when the current building is itself tall may the old one have more storeys, and still lower than it. '+
           // 2026-10-22 요청("바닥면적이 크면 건물 한 동으로 키우지 말고 2·3·4동으로 늘리면 되지 않나"): 넓은 대지는 작은 노후 건물 여러 채로
