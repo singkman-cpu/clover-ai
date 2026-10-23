@@ -10146,6 +10146,23 @@ function mkEng(p,vid){
 }
 // 2026-10-12 점검: 탭마다 실제로 그 엔진으로 실행되는 것만 고를 수 있게 — 예전엔 AI 편집에서 GPT Image 2·Seedream 5.0 Pro를 골라도
 // 실제로는 나노바나나로 실행되는데 요금은 그 엔진 가격(35~60cr)으로 표시·차감됐음
+function _gptRenderConfirm(cb){
+  try{
+    var old=document.getElementById('gpt-render-confirm'); if(old) old.remove();
+    var ov=document.createElement('div'); ov.id='gpt-render-confirm';
+    ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+    var bx=document.createElement('div');
+    bx.style.cssText='max-width:420px;width:100%;background:var(--c1,#16181d);color:var(--t,#fff);border:1px solid var(--bd2,#333);border-radius:16px;padding:22px 20px;font-family:inherit;box-shadow:0 20px 60px rgba(0,0,0,.5)';
+    bx.innerHTML='<div style="font-size:16px;font-weight:800;margin-bottom:10px">GPT 엔진으로 렌더할까요?</div>'+
+      '<div style="font-size:13px;line-height:1.7;color:var(--t2,#ccc);margin-bottom:18px">GPT는 이미지를 <b style="color:#f59e0b">새로 그리는 방식</b>이라 구도·비율이 바뀌거나 산·하늘 같은 주변이 추가될 수 있어요.<br>원본 구도 그대로 실사화하려면 <b style="color:var(--ac,#2dd4bf)">Nano Banana 2.1</b>을 추천해요.</div>';
+    function btn(txt, css, v){ var b=document.createElement('button'); b.type='button'; b.textContent=txt; b.style.cssText='width:100%;padding:12px;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;margin-top:8px;'+css; b.onclick=function(){ ov.remove(); cb(v); }; return b; }
+    bx.appendChild(btn('Nano Banana 2.1로 바꿔서 렌더 (추천)', 'background:var(--ac,#2dd4bf);color:#000;border:none', 'nano'));
+    bx.appendChild(btn('네, GPT로 렌더할게요', 'background:transparent;color:var(--t,#fff);border:1px solid var(--bd2,#444)', 'gpt'));
+    bx.appendChild(btn('취소', 'background:transparent;color:var(--m2,#888);border:none', 'cancel'));
+    ov.onclick=function(e){ if(e.target===ov){ ov.remove(); cb('cancel'); } };
+    ov.appendChild(bx); document.body.appendChild(ov);
+  }catch(e){ cb('gpt'); }
+}
 function _allowedEngs(wf){
   if(wf==='edit') return ['nano2','nano_pro'];
   if(wf==='space'||wf==='render'||wf==='spaceset'||wf==='budget') return ['nano2','nano_pro','gpt2','seedream5pro'];
@@ -56899,6 +56916,16 @@ document.addEventListener('DOMContentLoaded',function(){try{
   function _doActbtn(){
     console.log('[actbtn] 실행 버튼 처리 시작 — 탭:', G.wf, '| 렌더 중:', G.activeRenders, '/', G.maxConcurrent, '| 대기:', (G.renderQueue||[]).filter(function(t){return t.status==='queued';}).length, '| 일괄대기:', (G._batchPendingQueue||[]).length, '| 업로드중:', !!G._uploadBusy);
     if(_actbtnBusy){ console.log('[actbtn] 0.8초 안에 다시 눌러서 무시됨'); return; } // 중복 클릭(터치+클릭 동시 발생) 방지
+    // 2026-10-23 요청("엔진 밑 안내는 볼 시간도 없다 — GPT 고르고 렌더 버튼 누르면 그때 창 띄워서 하시겠냐고 묻고, 네면 렌더"): 3D 렌더 실사화 + GPT 엔진 실행 전 확인창
+    if(G.wf==='render' && G.eng==='gpt2' && !G._gptRenderOk){
+      _gptRenderConfirm(function(choice){
+        if(choice==='cancel') return;
+        if(choice==='nano'){ G.eng='nano2'; G._engForced=false; try{ renderSB(); }catch(_e){} }
+        G._gptRenderOk=true; _actbtnBusy=false;
+        try{ _doActbtn(); } finally{ G._gptRenderOk=false; }
+      });
+      return;
+    }
     // ⚠️ 재설계(일괄 업로드): 검토 화면에서 "확인"을 눌러 대기 큐(G._batchPendingQueue)에
     // 담아둔 사진들이 있으면, 평소처럼 쓰던 이 공용 "실행" 버튼을 눌렀을 때 그 큐를 순차
     // 실행하는 쪽으로 넘김 — 사용자가 실제로 "실행"을 누르기 전까지는 아무 것도 돌아가지 않음.
