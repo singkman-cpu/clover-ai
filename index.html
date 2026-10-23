@@ -10163,6 +10163,19 @@ function _gptRenderConfirm(cb){
     ov.appendChild(bx); document.body.appendChild(ov);
   }catch(e){ cb('gpt'); }
 }
+// 2026-10-23 신고("스케치업 이미지를 실사화했더니 모델링 끝에 남은 검은 선들이 그대로 — 만화 느낌", "천장 조명이 켜질 때도 꺼질 때도 있다"): 실사화 공통 최종 규칙
+var REALISM_LINES_LIGHTS_FINAL=' ✏️ REMOVE ALL MODELLING EDGE LINES (final rule): the input may come from SketchUp or another 3D program that draws thin black or dark outline lines along every edge, corner and profile (edge/profile/sketchy line styles). A real photograph has NO drawn outlines — remove every such line completely; edges must be formed only by real light, shadow and material change (a soft highlight or a subtle shadow line where two surfaces meet), never by an ink-like black stroke. No cartoon, comic or illustration look. 💡 LIGHT STATE STAYS AS IN THE INPUT: every ceiling light, cove/indirect light, downlight, pendant and lamp keeps exactly the on/off state it has in the input — fixtures that glow in the input stay softly lit with realistic warm light, fixtures that look unlit stay off. Do not switch any light on or off and do not add new light sources.';
+// Topaz 업스케일 프롬프트는 최대 1024자 — 넘으면 fal이 422(string_too_long)로 거절해서 업스케일 자체가 실패함 → 1000자 안으로 문장 단위로 줄임
+function _tzCapPrompt(o){
+  try{
+    if(!o || typeof o.prompt!=='string' || o.prompt.length<=1000) return;
+    var tail='', ti=o.prompt.indexOf(' Keep smooth areas'); // 맨 끝에 붙인 '하늘에 점 금지' 지시는 살림
+    if(ti>0){ tail=o.prompt.slice(ti); o.prompt=o.prompt.slice(0,ti); }
+    var lim=1000-tail.length;
+    if(o.prompt.length>lim){ var t=o.prompt.slice(0,lim), k=Math.max(t.lastIndexOf('. '), t.lastIndexOf('— ')); o.prompt=(k>lim*0.6 ? t.slice(0,k+1) : t).trim(); }
+    o.prompt=(o.prompt+tail).slice(0,1020);
+  }catch(e){}
+}
 function _allowedEngs(wf){
   if(wf==='edit') return ['nano2','nano_pro'];
   if(wf==='space'||wf==='render'||wf==='spaceset'||wf==='budget') return ['nano2','nano_pro','gpt2','seedream5pro'];
@@ -47001,6 +47014,7 @@ function _checkAndResizeForUpscaler(url, ldst, eng, scaleFactor, onDone, onErr){
         _tzParams.prompt = (_tzParams.prompt||'') + ' Keep smooth areas such as the sky, plain walls and water perfectly clean — never add specks, white dots, star-like points, grain or noise to them.';
         _tzParams.sharpen = (G.tabs.upscale && G.tabs.upscale.topazSharpen!=null) ? G.tabs.upscale.topazSharpen : 0.5;
       }
+      _tzCapPrompt(_tzParams); // 2026-10-23 신고("업스케일 안 된다" — Topaz가 프롬프트 1024자 초과로 422 거절)
       falRun('fal-ai/topaz/upscale/image', _tzParams, function(d){
         var url=falExtractImageUrl(d);
         if(url){urlToDataUrl(url,function(r){ _upscaleToneMatch(imgUrl, r||url, function(f){ onDone(f||r||url); }); });return;}
@@ -48956,6 +48970,7 @@ function procImgWithTask(task, onDone, onErr){
           _tzParams2.prompt = (_tzParams2.prompt||'') + ' Keep smooth areas such as the sky, plain walls and water perfectly clean — never add specks, white dots, star-like points, grain or noise to them.';
           _tzParams2.sharpen = (G.tabs.upscale && G.tabs.upscale.topazSharpen!=null) ? G.tabs.upscale.topazSharpen : 0.5;
         }
+        _tzCapPrompt(_tzParams2);
         falRun('fal-ai/topaz/upscale/image', _tzParams2,
           function(d){var u=falExtractImageUrl(d);if(u){ _checkUpscaled(img, u, function(ok,ow,oh,rw,rh){ if(!ok && typeof _agedEnvToast==='function') _agedEnvToast('⚠️ 업스케일 결과가 원본과 같은 크기('+rw+'×'+rh+')로 나왔어요. 확대가 적용되지 않았으니 다시 시도해 주세요.'); }); _upscaleToneMatch(img, u, function(f){ onDone(f||u); }); } else onErr('Topaz URL 없음');},
           function(err){console.warn('[Topaz 실패]',err);onErr(err||'업스케일에 실패했어요. 잠시 후 다시 시도해 주세요.');}
@@ -48988,6 +49003,7 @@ function procImgWithTask(task, onDone, onErr){
       var _isRealismOnlyPreset = (task.selK==='hq_real' || task.selK==='hq_real_pro' || task.selK==='render_quality_boost');
       if(_isRealismOnlyPreset){
         ap=prompt+' ⚠️⚠️⚠️⚠️ 마지막으로 다시 한번, 가장 중요(참고 이미지 사용 금지): 실사 참고 이미지가 몇 장 첨부되어 있더라도, 그 참고 이미지의 재질·색상·스타일·가구·마감재를 이 결과물에 절대 반영하지 마세요 — 참고 이미지는 이 작업에서 완전히 무시하세요. 이 원본 이미지에 실제로 보이는 재질·색상·가구만 그대로 유지한 채 사실감(조명·반사·질감)만 개선하는 것이 유일한 목표입니다. 참고 이미지 때문에 원본에 없던 재질이나 다른 디자인의 가구가 섞여 들어가면 명백한 실패입니다. ⚠️⚠️⚠️⚠️ 마감재 절대 고정: 바닥·벽·천장·상판·가구·타일·목재·금속 등 모든 마감재는 원본과 완전히 같은 재질·색상·패턴·크기·배열(타일 규격과 줄눈, 목재 결 방향과 폭, 무광/유광)을 유지해야 합니다. 다른 마감재로 바꾸거나(예: 도장→석재, 목재→대리석, 밝은 목재→어두운 목재), 색을 바꾸거나, 패턴을 바꾸는 것은 절대 금지이며 치명적 실패입니다. 허용되는 것은 같은 마감재를 사진처럼 더 디테일하고 사실적으로(질감·반사·그림자) 살리는 것뿐입니다. FINISH MATERIALS ARE LOCKED: same material type, color, pattern, scale and layout as the input on every surface — only add photographic realism to the same material, never swap or recolor any finish. ⚠️⚠️⚠️⚠️ CUTAWAY / SECTION MODEL — DO NOT BUILD WHAT IS NOT THERE: if the input is a cut-open 3D model (dollhouse/cutaway/section view with walls, floors or the roof removed, or walls cut at a low height so you can see inside), the result must stay cut open EXACTLY the same way. Do NOT add any wall, partition, floor slab, ceiling, roof, column, railing, stair or opening that is not in the input; do NOT close or complete a cut-away side; do NOT add a wall under a mezzanine or extend a floor into areas that are empty in the input; every wall keeps its exact height, length and cut edge. Keep the BACKGROUND exactly like the input (e.g. a plain gray/white backdrop stays plain) — do NOT add ground, site, pavement, concrete slab, grass, sky or surroundings around the model. COLORS OF THE MODEL ARE THE DESIGN: every object and surface keeps its input color — white chairs stay white, gray floors stay gray (render them as a matching gray material such as polished concrete or gray tile, never wood), white walls stay white, pink stairs stay pink, light-wood tabletops stay light wood. Only add photographic realism (texture, lighting, shadows, reflections) to what is already there. Before finishing, compare the outline of the model with the input: if any wall, floor area or background element was added, or any surface/object color changed, remove/restore it. ⚠️ 컷어웨이(잘린 단면) 모델: 원본에 없는 벽·바닥·천장·기둥·난간을 절대 새로 만들지 말고, 잘려서 열린 면은 그대로 열어두세요. 배경은 원본처럼 단색 그대로(바닥·대지·콘크리트 추가 금지). 모델의 색이 곧 디자인입니다 — 흰 의자는 흰색, 회색 바닥은 회색 재질(목재로 바꾸기 금지)로 유지하세요.';
+        ap+=REALISM_LINES_LIGHTS_FINAL; // 2026-10-23 요청: 스케치업 모델링 검은 외곽선 제거 + 천장 조명 켜짐/꺼짐은 원본 그대로
       } else {
         ap=prompt+' If reference images are provided, blend their color, material and style naturally into this specific request. IMPORTANT — REFERENCE IMAGES MUST NEVER OVERRIDE DOOR/WINDOW PRESERVATION: even when copying a reference image\'s furniture, cabinetry, or shelving layout, you must still keep every original door and window completely unblocked and walkable-through. Do NOT extend a reference image\'s continuous cabinet run, shelving wall, or furniture arrangement across a wall segment that contains a door in the original photo — adapt the reference layout (shorten it, break it, or leave a gap) so the door stays exactly where it was and remains fully open and usable. This rule overrides literal copying of the reference composition. Do not generate, render or display any text, letters, signs, labels or typography in the image.'; // 프리셋 프롬프트 기준 + 레퍼런스 자연스럽게 결합
       }
@@ -49694,7 +49710,7 @@ function procImgWithTask(task, onDone, onErr){
         (_night ? 'Time of day: as the user asked. ' : 'Time of day: BRIGHT, CLEAR DAYTIME — blue sky with a few soft clouds and natural sunlight with soft shadows. The black or dark background is only an empty 3D background, NOT night: replace it with a realistic daytime sky and natural surroundings. Exterior lights off. ')+
         'Re-texture every surface as the real material: real brick with depth and mortar joints, real timber with grain and gaps, real concrete and stone texture, real glass reflecting the sky and showing interiors. '+
         'Replace flat CG plants and mapped ground with real living plants of the same kind and position and real 3D ground cover (wood-chip mulch, gravel, grass) with depth and contact shadows. '+
-        'Natural colours, clean and noise-free, no illustration or CG look.'+
+        'Natural colours, clean and noise-free, no illustration or CG look. Remove every black modelling outline/edge line from the 3D program — a real photo has no drawn outlines. Keep every light fixture in the same on/off state as the input.'+
         (_ut ? ' User request: '+_ut : '')+
         (/사람|인물|행인|손님|직원|고객|가족|커플/.test(_ut) ? ' Any people must be natural ordinary Koreans that look like real photographed people.' : '');
     }
