@@ -20040,6 +20040,7 @@ function _multiRoomBuildExteriorPrompt(userStyle, viewLabel, hasRoomRef){
   // EXTERIOR_CURTAIN_BG_REINFORCE보다도 더 뒤, 즉 진짜 프롬프트 맨 마지막 자리로 옮김.
   if(getTab('spaceset').autoRoomCurtainBg!==false) prompt += EXTERIOR_CURTAIN_FINAL; // 2026-10-05: 컨셉확장과 동일하게 커튼 지시를 맨 끝에
   if(prompt.indexOf('숲과 나무가 우거진 자연 환경')!==-1) prompt += SURROUND_FOREST_FINAL;
+  prompt += _designBoostFinal(userStyle, viewLabel); // 2026-10-24 디자인 강화 방향 다양화
   prompt += _futureDesignFinalSite(userStyle, viewLabel); // 2026-10-21 미래형·2050 문구를 켠 경우만
   prompt += _windowHeightFinal(userStyle, viewLabel); // 2026-10-22 창밖·주변 저층 칩 최종 점검
   if(_mrWeatherExt && SPACE_WEATHER_TEXT[_mrWeatherExt]){
@@ -20227,6 +20228,7 @@ function _multiRoomBuildPrompt(userStyle, roomLabel, hasRoomRef){
     prompt += ' ⚠️⚠️⚠️ 천장 조명은 참고 이미지 그대로 복사(위 "천장 메인 조명 규칙"보다 우선): 참고 이미지 천장에 눈에 띄는 조명 디자인이 있으면(예: 크기가 다른 얇은 사각 평판 LED 등 여러 개를 엇갈리게·겹치듯 배치한 디자인, 라인 조명 패턴, 특정 모양의 방등) 그 조명의 모양·두께·개수·크기 비율·배치 방식·색(흰색 등)을 최대한 똑같이 이 방 천장 같은 위치(보통 천장 중앙)에 재현하세요. 이 경우 위 규칙의 "메인 조명은 한 개만", "조명끼리 겹치거나 붙어 있으면 실패"라는 제한은 적용하지 않습니다 — 참고 이미지처럼 여러 개를 겹쳐 배치한 것 자체가 그 조명의 디자인입니다. 원본 사진의 천장 형태(우물천장 단차·높이)는 그대로 두되, 원본에 있던 다른 메인 조명은 참고 이미지 조명으로 바꾸세요. 참고 이미지 조명을 생략하고 원본 조명만 남기면 명백한 실패입니다. 단, 거실·침실의 줄에 매달린 팬던트·샹들리에 금지 규칙은 그대로입니다.';
   }
   if(prompt.indexOf('숲과 나무가 우거진 자연 환경')!==-1) prompt += SURROUND_FOREST_FINAL;
+  prompt += _designBoostFinal(userStyle, roomLabel); // 2026-10-24 디자인 강화 방향 다양화
   prompt += _futureDesignFinalSite(userStyle, roomLabel); // 2026-10-21 미래형·2050 미래 디자인 문구를 켠 경우만
   prompt += _windowHeightFinal(userStyle, roomLabel); // 2026-10-22 창밖·주변 저층 칩 최종 점검
   if(_mrWeather && SPACE_WEATHER_TEXT_INTERIOR[_mrWeather]){
@@ -22964,6 +22966,45 @@ function _futureDesignFinalCore(basePrompt, typeName){
 // 건축 외관 뷰에는 ① 이 세트의 실내 공간 수만큼 들어갈 수 있는 크기의 건물로 ② (투시뷰 칩을 켰으면) 카메라를 물려서 건물 대부분이 보이게 — 맨 끝에 붙임
 // 2026-10-22 신고("창밖 저층 1~2층, 3~5층 문구가 제대로 안 지켜진다"): 문구 본문은 프롬프트 앞쪽(사용자 문장)에 있어서, 뒤에 붙는
 // '창밖은 외관 참고 사진과 똑같이', '주변 배경 = 서울 도심', 아파트 구조 문구 등에 밀렸음 → 칩을 켜면 맨 끝에 숫자로 된 최종 점검을 다시 붙임
+// 2026-10-24 요청("외관·실내 디자인 강화는 박공지붕 스타일밖에 없냐 — 다양한 예쁜 디자인으로"): 강화 칩을 켜면 세트마다 디자인 방향을 여러 후보 중 하나로 골라
+// 맨 끝에 지정(같은 세트 안에서는 같은 방향 유지, 20분 지나 새로 돌리면 새 방향) — 박공은 10가지 중 하나일 뿐
+var EXT_BOOST_POOL=[
+  'FLAT-ROOF SPLIT MASSES: two or three flat-roofed boxes offset and stacked, one dramatic cantilever, board-formed concrete with warm vertical timber louvers and frameless glass',
+  'SOFT CURVES: a white smooth-stucco volume with generously rounded corners and curved balconies, a curved glass corner, slim bronze window frames',
+  'COURTYARD HOUSE: low horizontal wings wrapped around an inner courtyard, long brick walls in warm grey-brown with a slatted timber gate, flat green roof edges',
+  'STEPPED TERRACES: storeys stepping back like terraces with planted roof gardens and glass balustrades, light limestone panels and dark window frames',
+  'MONO-PITCH: single-slope (shed) roofs in dark standing-seam metal sloping in different directions over two volumes, charred-wood cladding with large picture windows',
+  'STACKED OFFSET BOXES: a long upper box crossing over a smaller lower box at an angle, deep shadow under the overhang, dark metal panels over light concrete',
+  'ARCHES AND VAULTS: modern arches and shallow barrel-vault openings in a warm beige rammed-earth-look or limestone facade, deep window reveals',
+  'MODERN GABLE (only this option uses gables): one clean minimalist gable volume with no eaves, seamless metal roof wrapping into the walls',
+  'HORIZONTAL BANDS: long ribbon windows and deep flat eaves stretching horizontally, layered horizontal stone and wood bands hugging the ground',
+  'SCREEN SKIN: a perforated metal or brick-lattice screen wrapping the upper volume, glowing softly from inside, over a recessed glass ground floor'
+];
+var INT_BOOST_POOL=[
+  'arched openings and soft curved walls, limewash plaster, travertine and warm oak',
+  'warm wood-slat ceilings and wall panels, linen and stone, very calm warm minimal',
+  'dark-stained oak, honed stone and brushed bronze — quiet luxury with layered lighting',
+  'micro-cement floors and walls, pale ash wood, Japandi low furniture, paper lighting',
+  'fluted wood and glass panels, recessed cove lighting lines, marble-topped pieces',
+  'terrazzo floors, colourful accent furniture and playful curved shapes, gallery-white walls'
+];
+function _boostPick(key, pool){
+  window._boostPicks=window._boostPicks||{};
+  var p=window._boostPicks[key];
+  if(!p || Date.now()-p.t>20*60*1000){ p={i:Math.floor(Math.random()*pool.length), t:Date.now()}; window._boostPicks[key]=p; }
+  p.t=Date.now();
+  return pool[p.i];
+}
+function _designBoostFinal(style, typeName){
+  style=String(style||'');
+  if(_isExteriorViewType(typeName)){
+    if(style.indexOf('건축가가 설계한 작품처럼')===-1) return '';
+    if(/🛸|🚀|🤖|미래형|2050|한옥|조선|경성|1930/.test(style)) return ''; // 미래형·한옥 등 다른 디자인 방향을 고른 경우엔 그쪽이 우선
+    return ' 🏛🏛 ARCHITECT DESIGN DIRECTION FOR THIS SET (the design-boost option — pick-of-the-set, use it for every exterior view of this set): '+_boostPick('ext', EXT_BOOST_POOL)+'. Keep the storeys, plot, neighbours and road as given; realistic and buildable.';
+  }
+  if(style.indexOf('디자인 잡지 화보에 실릴 만한 작품처럼')===-1) return '';
+  return ' 🛋🛋 INTERIOR DESIGN SIGNATURE FOR THIS SET (design-boost option, shared by every room so the house feels designed as one): '+_boostPick('int', INT_BOOST_POOL)+'. Apply it within each room\'s own ceiling and window layout — never by copying another room\'s ceiling shape.';
+}
 // 2026-10-24 신고("디자인 강화를 켰더니 1층 방 4개가 다 같은 박공 천장·같은 삼각창·같은 창밖 뷰 — 건물에 박공이 이렇게 많을 수 없다, 천장·뷰를 다양하게"):
 // 세트 일관성용으로 붙는 다른 방 결과(창문 기준 이미지)를 방마다 그대로 따라 그려서 생긴 문제 → 실내 방마다 천장 형태·창이 향하는 방향을 따로 정해서 맨 끝에 못박음
 function _roomVarietyFinal(basePrompt, typeName){
@@ -23316,7 +23357,7 @@ function _autoRoomPromptFor(basePrompt, typeName){
   }
   // 2026-10-22 신고("스마트 기술 강하게 넣었는데 어디 있지?"): 실제 생성 경로는 이 결과(prompt)를 더 긴 지시 중간에 끼워넣고 뒤에 '마지막으로 다시 한번…' 규칙들을
   // 계속 붙여서 디자인 방향 최종 점검이 묻혔음 → 디자인 방향·외관 규모·창밖 높이 최종 점검(_tail)을 따로 기억해두고, 실제 생성 직전 진짜 맨 끝에 한 번 더 붙임
-  var _tail = _futureDesignFinal(basePrompt, typeName) + _exteriorProgramFinal(basePrompt, typeName) + _windowHeightFinal(basePrompt, typeName) + _aptStructFinal(basePrompt, typeName) + _roomVarietyFinal(basePrompt, typeName);
+  var _tail = _futureDesignFinal(basePrompt, typeName) + _exteriorProgramFinal(basePrompt, typeName) + _windowHeightFinal(basePrompt, typeName) + _aptStructFinal(basePrompt, typeName) + _designBoostFinal(basePrompt, typeName) + _roomVarietyFinal(basePrompt, typeName);
   var _full = _prependRules + prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + KOREA_BACKGROUND_RULE + MAIN_LIGHT_CONSISTENCY_RULE + PREMIUM_QUALITY_RULE + _acPositionReinforce + _tail;
   try{ if(_tail){ window._arTailMap=window._arTailMap||{}; window._arTailMap[_full]=_tail; } }catch(e){}
   return _full;
@@ -23879,7 +23920,7 @@ function _padExteriorTo916WithBlur(url, cb){
         // 2026-10-05 버그 수정("건축투시도 3장 뽑았는데 같은 게 2장 나온다"): 후보들이 완전히 똑같은 요청(같은 사진+같은 문구)으로
         // 나가서 AI가 거의 같은 그림을 돌려주는 경우가 있었음 → 2번째 후보부터는 카메라 위치·시점만 다르게 지정해서 보냄(디자인은 동일).
         // 2026-10-05 사용자 정정: "후보 3장이 같은 건물에 카메라만 살짝 다르다 — 전부 다른 건물 디자인이어야 하고, 각도는 정면만 아니면 랜덤"
-        var _candDesigns=['박공지붕 2개가 엇갈려 붙은 매스, 우드+화이트 스타코','평지붕과 박공을 섞은 계단식 매스, 노출콘크리트+우드','하나의 긴 박공 매스에 돌출된 박스형 2층, 짙은 금속 패널+목재','ㄱ자로 꺾인 두 날개 매스, 화이트 벽돌+블랙 프레임','비대칭 경사지붕(외쪽지붕) 매스, 회색 석재+따뜻한 목재 루버'];
+        var _candDesigns=['평지붕 매스 2~3개를 엇갈려 쌓고 캔틸레버 하나, 노출콘크리트+목재 루버','둥근 모서리의 곡선 화이트 스타코 매스와 곡선 발코니, 브론즈 프레임','중정을 감싸는 낮은 ㄷ자 매스, 웜그레이 벽돌+목재 게이트','층마다 물러나는 계단식 테라스와 옥상정원, 라임스톤+유리 난간','방향이 다른 외쪽지붕 두 개, 짙은 금속 지붕+탄화목','긴 위층 박스가 아래 박스 위를 비스듬히 가로지르는 매스, 짙은 금속 패널+콘크리트','현대적인 아치·볼트 개구부, 베이지 석재','처마 없는 미니멀 박공 매스 하나, 지붕과 벽이 이어지는 금속 외피','긴 수평 띠창과 깊은 평지붕 처마, 석재·목재 수평 띠','위층을 감싸는 타공 금속·벽돌 격자 스크린, 유리로 물러난 1층'];
         var _candVar=[];
         if(_isExteriorViewType(typeName)){
           var _dPool=_candDesigns.slice().sort(function(){return Math.random()-0.5;});
