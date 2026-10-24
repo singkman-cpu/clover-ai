@@ -22964,6 +22964,23 @@ function _futureDesignFinalCore(basePrompt, typeName){
 // 건축 외관 뷰에는 ① 이 세트의 실내 공간 수만큼 들어갈 수 있는 크기의 건물로 ② (투시뷰 칩을 켰으면) 카메라를 물려서 건물 대부분이 보이게 — 맨 끝에 붙임
 // 2026-10-22 신고("창밖 저층 1~2층, 3~5층 문구가 제대로 안 지켜진다"): 문구 본문은 프롬프트 앞쪽(사용자 문장)에 있어서, 뒤에 붙는
 // '창밖은 외관 참고 사진과 똑같이', '주변 배경 = 서울 도심', 아파트 구조 문구 등에 밀렸음 → 칩을 켜면 맨 끝에 숫자로 된 최종 점검을 다시 붙임
+// 2026-10-24 신고("디자인 강화를 켰더니 1층 방 4개가 다 같은 박공 천장·같은 삼각창·같은 창밖 뷰 — 건물에 박공이 이렇게 많을 수 없다, 천장·뷰를 다양하게"):
+// 세트 일관성용으로 붙는 다른 방 결과(창문 기준 이미지)를 방마다 그대로 따라 그려서 생긴 문제 → 실내 방마다 천장 형태·창이 향하는 방향을 따로 정해서 맨 끝에 못박음
+function _roomVarietyFinal(basePrompt, typeName){
+  if(_isExteriorViewType(typeName) || String(basePrompt||'').indexOf('한국 아파트 구조로 만들어줘')!==-1) return '';
+  var t=String(typeName||'');
+  var upper=/2층|이층|다락|복층|로프트|메자닌|옥탑/.test(t);
+  var ceil, view;
+  if(/거실|리빙|라운지/.test(t)){ ceil='a high flat ceiling with a deep recessed cove and linear lights (or, only if the house clearly has two storeys, an open double-height void over part of the living room) — not a pitched gable ceiling'; view='the main front garden and the approach to the house, seen through a wide floor-to-ceiling window wall'; }
+  else if(/주방|키친|다이닝|식당/.test(t)){ ceil='a flat ceiling with a warm wood-slat or plaster finish and recessed linear lights over the island'; view='a side yard or small kitchen garden with a fence or hedge, seen through a horizontal window above the counter or a side door'; }
+  else if(/안방|마스터|부부/.test(t)){ ceil=upper?'a gently sloped ceiling under the roof (allowed because this room is upstairs)':'a flat ceiling with a shallow tray and soft cove light'; view='the quiet back garden with trees, seen through a large window with a sill'; }
+  else if(/아이|키즈|자녀|플레이/.test(t)){ ceil='a flat ceiling (optionally with a playful curved soffit)'; view='a side garden with a tree and a lawn, seen through a normal-height window with a low sill or window seat'; }
+  else if(/펫|반려|강아지|고양이/.test(t)){ ceil='a flat ceiling with simple downlights'; view='a small back yard or patio seen through a glass door or a medium window'; }
+  else if(/욕실|화장실|파우더|드레스|세탁|다용도|팬트리/.test(t)){ ceil='a flat ceiling'; view='only a small high window or frosted glass (or no window)'; }
+  else if(/침실|게스트|손님|서재|오피스|홈오피스|작업/.test(t)){ ceil=upper?'a sloped attic-style ceiling (allowed because this room is upstairs)':'a flat ceiling with simple lighting'; view='a different side of the plot — trees, a neighbour\'s wall or the sky — through a standard window with a sill'; }
+  else { ceil='a flat ceiling suited to the room'; view='a different side of the plot from the other rooms'; }
+  return ' 🧭 ROOM VARIETY FINAL CHECK (each room of the set is a different place in the same house — read last): this '+t+' has '+ceil+'. Its window shows '+view+'. Do NOT copy the ceiling shape, the window shape (e.g. a triangular gable window) or the outside view of the other rooms\' images attached for consistency — those only define the shared materials, colours and design language. A pitched gable ceiling appears in at most one or two upstairs rooms of a house, never in every room; ground-floor rooms sit under the floor above and have flat ceilings. Change the camera direction so this room\'s own layout is shown, not the same corner and window as the other rooms.';
+}
 // 2026-10-24 신고("공간컨셉에서 한국 아파트 구조를 체크했는데 단독주택처럼 나온다 — 34평 기준으로"): 칩 문구가 프롬프트 중간에 묻히고, 창밖 저층·미래형 문구가 단독주택처럼 보이게 함
 // → 실내 공간은 맨 끝에 '34평(전용 84㎡) 한국 아파트 쉘' 최종 체크를 붙임(다른 디자인 스타일은 이 쉘 안의 마감·가구로만 적용)
 function _aptStructFinal(basePrompt, typeName){
@@ -23299,7 +23316,7 @@ function _autoRoomPromptFor(basePrompt, typeName){
   }
   // 2026-10-22 신고("스마트 기술 강하게 넣었는데 어디 있지?"): 실제 생성 경로는 이 결과(prompt)를 더 긴 지시 중간에 끼워넣고 뒤에 '마지막으로 다시 한번…' 규칙들을
   // 계속 붙여서 디자인 방향 최종 점검이 묻혔음 → 디자인 방향·외관 규모·창밖 높이 최종 점검(_tail)을 따로 기억해두고, 실제 생성 직전 진짜 맨 끝에 한 번 더 붙임
-  var _tail = _futureDesignFinal(basePrompt, typeName) + _exteriorProgramFinal(basePrompt, typeName) + _windowHeightFinal(basePrompt, typeName) + _aptStructFinal(basePrompt, typeName);
+  var _tail = _futureDesignFinal(basePrompt, typeName) + _exteriorProgramFinal(basePrompt, typeName) + _windowHeightFinal(basePrompt, typeName) + _aptStructFinal(basePrompt, typeName) + _roomVarietyFinal(basePrompt, typeName);
   var _full = _prependRules + prompt + ' ' + KOREA_LAYOUT_GUIDE[_categoryForRoomLabel(typeName, getTab('spaceset').autoRoomCategory)] + _spaceConsistencyRule + _disambig + _fidelitySuffix + _structOverride + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + KOREA_BACKGROUND_RULE + MAIN_LIGHT_CONSISTENCY_RULE + PREMIUM_QUALITY_RULE + _acPositionReinforce + _tail;
   try{ if(_tail){ window._arTailMap=window._arTailMap||{}; window._arTailMap[_full]=_tail; } }catch(e){}
   return _full;
