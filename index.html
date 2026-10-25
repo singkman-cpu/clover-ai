@@ -33211,27 +33211,42 @@ function _consultSchedTextures(st, v, srcUrl, cb, manual){
 }
 // 2026-10-25 요청("상담패키지 마감재 보드가 그냥 사각형 — 렌더링 이미지에서 고급 마감재 무드보드 이미지를 만들어주자"): AI편집 '무드보드' 프리셋 방식으로 시안 렌더링 이미지에서 한 장짜리 마감재 보드 생성
 var CONSULT_MOOD_COST=30;
-function _consultMoodboard(vi){
-  var st=_consultState(), v=st.variants[vi]; if(!v || v.moodBusy) return;
+function _consultMoodboard(vi, opt){
+  opt=opt||{}; var _cbDone=function(ok){ try{ if(opt.done) opt.done(ok); }catch(e){} };
+  var st=_consultState(), v=st.variants[vi]; if(!v || v.moodBusy){ _cbDone(false); return; }
   var srcs=_consultResultSrcs(st, v).slice(0,3);
-  if(!srcs.length){ alert('먼저 공간 이미지를 1장 이상 렌더링하거나 넣어주세요.'); return; }
+  if(!srcs.length){ if(!opt.silent) alert('먼저 공간 이미지를 1장 이상 렌더링하거나 넣어주세요.'); _cbDone(false); return; }
   var isAdmin=(G.supaRole==='admin'||G.plan==='admin');
-  if(!isAdmin && (G.cr||0)<CONSULT_MOOD_COST){ alert('크레딧이 부족해요. ('+CONSULT_MOOD_COST+'cr 필요)'); return; }
-  if(!confirm('이 시안의 렌더링 이미지에서 고급 마감재 무드보드(실물 샘플을 겹쳐 놓은 한 장짜리 보드)를 만들까요? = '+CONSULT_MOOD_COST+'cr')) return;
+  if(!isAdmin && (G.cr||0)<CONSULT_MOOD_COST){ if(!opt.silent) alert('크레딧이 부족해요. ('+CONSULT_MOOD_COST+'cr 필요)'); _cbDone(false); return; }
+  if(!opt.silent && !confirm('이 시안의 렌더링 이미지에서 고급 마감재 무드보드(실물 샘플을 겹쳐 놓은 한 장짜리 보드)를 만들까요? = '+CONSULT_MOOD_COST+'cr')){ _cbDone(false); return; }
   var names=[]; try{ if(v.sched && v.sched.items) Object.keys(v.sched.items).forEach(function(k){ var it=v.sched.items[k]; if(it && it.en && k!=='light') names.push(it.en+(it.hex?' ('+it.hex+')':'')); }); }catch(e){}
   var prompt='Create a high-end interior design MATERIAL MOODBOARD using only the finishing materials that appear in the attached design image'+(srcs.length>1?'s':'')+'. Present them as real physical samples — stone and tile slabs, wood and veneer planks, fabric and leather swatches, metal and hardware pieces, paint/colour chips, a small decor object or plant sprig — arranged in an artistic, layered, slightly overlapping editorial composition like a luxury architectural sample board, photographed from straight above on a refined neutral linen or paper background with soft studio lighting and gentle realistic shadows. Each sample must match the colour, grain, pattern and sheen seen in the design image exactly. '+(names.length?'The materials to include: '+names.slice(0,14).join('; ')+'. ':'')+'Add small, neat, elegant English caption labels next to the main samples (material names only, no brand names, no logos). Photorealistic, premium, balanced layout with breathing space. Output one single board image.';
   v.moodBusy=true; _consultRefresh();
-  function fail(msg){ v.moodBusy=false; _consultRefresh(); alert('마감재 무드보드 만들기 실패: '+(msg||'')+'\n(크레딧은 결과가 나와야 차감돼요)'); }
+  function fail(msg){ v.moodBusy=false; _consultRefresh(); if(!opt.silent) alert('마감재 무드보드 만들기 실패: '+(msg||'')+'\n(크레딧은 결과가 나와야 차감돼요)'); _cbDone(false); }
   var ups=[], left=srcs.length;
   srcs.forEach(function(su,i){ _consultUrl(su, function(u){ ups[i]=u; if(--left===0) go(); }); });
   function go(){
     var us=ups.filter(Boolean); if(!us.length){ fail('이미지 업로드 실패'); return; }
     falRun('google/nano-banana-2.1/edit', {prompt:prompt, image_urls:us, num_images:1, aspect_ratio:'4:3', resolution:'2K', output_format:'jpeg'}, function(d){
       var url=falExtractImageUrl(d); if(!url){ fail('AI가 이미지를 돌려주지 않았어요'); return; }
-      var done2=function(x){ v.moodImg=x||url; v.moodBusy=false; v.dirty=true; _consultSave(); _consultRefresh(); };
+      var done2=function(x){ v.moodImg=x||url; v.moodBusy=false; v.dirty=true; _consultSave(); _consultRefresh(); _cbDone(true); };
       try{ urlToDataUrl(url, function(dx){ done2(dx); }); }catch(e){ done2(url); }
     }, function(e){ fail(e); }, {wf:'edit', resolution:'2K'});
   }
+}
+// 2026-10-25 요청("무드보드는 아는 사람만 알지 — 버튼 눌러보지도 않을 것"): PDF 만들 때 무드보드가 없는 시안이 있으면 같이 만들어 넣을지 물어보고 자동으로
+function _consultPdfWithMood(onDone){
+  var st=_consultState();
+  var need=[]; st.variants.forEach(function(v,vi){ if(!v.moodImg && !v.moodBusy && _consultResultSrcs(st, v).length) need.push(vi); });
+  if(!need.length || st._moodAsked===st.round+'|'+need.join(',')){ _consultBuildPdf(onDone); return; }
+  st._moodAsked=st.round+'|'+need.join(',');
+  var cost=need.length*CONSULT_MOOD_COST, isAdmin=(G.supaRole==='admin'||G.plan==='admin');
+  var ok=confirm('📄 PDF에 "마감재 무드보드" 페이지도 넣을까요?\n\n렌더링 이미지 속 마감재(바닥·벽·타일·도장 등)를 실물 샘플처럼 모아 놓은 한 장짜리 보드예요 — 고객이 자재를 한눈에 이해해서 상담이 쉬워져요.\n\n시안 '+need.length+'개 × '+CONSULT_MOOD_COST+'cr = '+cost+'cr (1~2분)\n\n[확인] 무드보드 만들어서 같이 넣기\n[취소] 무드보드 없이 PDF만 만들기');
+  if(!ok){ _consultBuildPdf(onDone); return; }
+  if(!isAdmin && (G.cr||0)<cost){ alert('크레딧이 부족해서 무드보드 없이 PDF를 만들어요. (무드보드 '+cost+'cr 필요)'); _consultBuildPdf(onDone); return; }
+  var left=need.length, fails=0;
+  try{ _agedEnvToast('🎨 마감재 무드보드 '+need.length+'장 만드는 중… 끝나면 PDF에 자동으로 넣어요 (1~2분)'); }catch(e){}
+  need.forEach(function(vi){ _consultMoodboard(vi, {silent:true, done:function(okk){ if(!okk) fails++; if(--left===0){ if(fails) try{ _agedEnvToast('⚠ 무드보드 '+fails+'장은 만들지 못했어요(크레딧 차감 없음) — 나머지로 PDF를 만들어요'); }catch(e){} _consultBuildPdf(onDone); } }}); });
 }
 function _consultMoodView(src){
   var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:16px;cursor:zoom-out';
@@ -34819,6 +34834,42 @@ function _consultDrawSpacePage(data, st, v, vi, sp, rec, loaded, num, pageIndex,
   _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
   return cv;
 }
+// 2026-10-25 요청("마감재 무드보드 PDF 만들면 당연히 같이 들어가야지"): 시안별 AI 마감재 무드보드 이미지를 시안 페이지 바로 다음에 한 페이지로
+function _consultDrawMoodPage(data, st, v, img, pageIndex, total, logo){
+  var W=PROPOSAL_PAGE_W, H=PROPOSAL_PAGE_H, cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  var ctx=cv.getContext('2d'), t=_proposalEffectiveTheme(data), pad=88, innerW=W-pad*2;
+  ctx.fillStyle=t.bg; ctx.fillRect(0,0,W,H);
+  _proposalEdHeader(ctx, data, t, pad, 'Option '+v.key+'  ·  Materials');
+  var y=130; ctx.textAlign='left'; ctx.textBaseline='top';
+  ctx.fillStyle=t.accent; ctx.font='700 15px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('MATERIAL MOODBOARD · OPTION '+v.key, pad, y); _propEdLS(ctx,0);
+  y+=40; ctx.fillStyle=t.ink; _propEdFitFont(ctx, v.key+'안 마감재 무드보드', '800', 48, 28, innerW); ctx.fillText(v.key+'안 마감재 무드보드', pad, y); y+=74;
+  ctx.fillStyle=t.desc; ctx.font='400 19px '+PROPOSAL_FONT;
+  _wrapCanvasText(ctx, (v.plan&&v.plan.name?v.plan.name+' — ':'')+'렌더링 이미지에 쓰인 마감재를 실물 샘플처럼 모아 본 보드입니다.', innerW).slice(0,2).forEach(function(l){ ctx.fillText(l, pad, y); y+=30; });
+  y+=18;
+  var mats=_consultBoardMats(st, v).filter(function(m){ return m && m.v; }).slice(0,12);
+  var listH=mats.length?(Math.ceil(mats.length/3)*34+60):0, noteH=60, maxH=H-70-40-noteH-listH-y;
+  if(img){
+    var ar=img.naturalWidth/img.naturalHeight, iw=innerW, ih=iw/ar; if(ih>maxH){ ih=maxH; iw=ih*ar; }
+    var ix=pad+(innerW-iw)/2;
+    ctx.save(); ctx.shadowColor='rgba(0,0,0,.16)'; ctx.shadowBlur=22; ctx.shadowOffsetY=8; ctx.fillStyle='#000'; ctx.fillRect(ix+4,y+4,iw-8,ih-8); ctx.restore();
+    _proposalCoverDrawRounded(ctx, img, ix, y, iw, ih, 8);
+    y+=ih+34;
+  }
+  if(mats.length){
+    ctx.fillStyle=t.accent; ctx.font='700 14px '+PROPOSAL_FONT; _propEdLS(ctx,3); ctx.fillText('MATERIALS', pad, y); _propEdLS(ctx,0);
+    ctx.fillStyle=t.divider; ctx.fillRect(pad, y+26, innerW, 1); y+=40;
+    var cw=(innerW-40)/3;
+    mats.forEach(function(m,i){ var x=pad+(i%3)*(cw+20), yy=y+Math.floor(i/3)*34;
+      ctx.fillStyle=m.hex||t.divider; if(ctx.roundRect){ ctx.beginPath(); ctx.roundRect(x,yy+2,22,22,4); ctx.fill(); } else ctx.fillRect(x,yy+2,22,22);
+      ctx.fillStyle=t.muted; ctx.font='700 12px '+PROPOSAL_FONT; var kk=String(m.k||''); ctx.fillText(kk, x+32, yy+6); var kw2=ctx.measureText(kk).width;
+      ctx.fillStyle=t.ink; _propEdFitFont(ctx, String(m.v), '700', 15, 10, cw-46-kw2); ctx.fillText(String(m.v), x+40+kw2, yy+4); });
+    y+=Math.ceil(mats.length/3)*34+10;
+  }
+  ctx.fillStyle=t.muted; ctx.font='400 14px '+PROPOSAL_FONT;
+  ctx.fillText('※ 무드보드는 색·질감 이해를 돕는 연출 이미지이며, 실제 자재는 시공 전 실물 샘플로 확인합니다.', pad, H-70-40-26);
+  _proposalEdFooter(ctx, data, t, pad, pageIndex, total, logo);
+  return cv;
+}
 function _consultBuildPdf(onDone){
   var st=_consultState();
   var data=_consultPdfData(st);
@@ -34837,6 +34888,7 @@ function _consultBuildPdf(onDone){
     if(firstR) toLoad.push(['v'+vi, firstR]);
     if(v.sched && v.sched.items) Object.keys(v.sched.items).forEach(function(k){ var it=v.sched.items[k]; if(it && it.img) toLoad.push(['sv'+vi+'_'+k, it.img]); });
     (v.materials||[]).slice(0,4).forEach(function(m,j){ if(m.img) toLoad.push(['vm'+vi+'_'+j, m.img]); });
+    if(v.moodImg) toLoad.push(['mood'+vi, v.moodImg]); // 2026-10-25 마감재 무드보드
   });
   var left=toLoad.length;
   toLoad.forEach(function(p){ var im=new Image(); im.crossOrigin='anonymous'; im.onload=function(){ loaded[p[0]]=im; if(--left===0) draw(); }; im.onerror=function(){ if(--left===0) draw(); }; im.src=p[1]; });
@@ -34850,6 +34902,7 @@ function _consultBuildPdf(onDone){
     st.variants.forEach(function(v,vi){
       if(!pages.some(function(p){return p.vi===vi;})) return;
       plan.push(function(pi,T){ return _consultDrawVariantPage(data, st, v, vi, loaded, pi, T, loaded.logo); });
+      if(v.moodImg && loaded['mood'+vi]) plan.push(function(pi,T){ return _consultDrawMoodPage(data, st, v, loaded['mood'+vi], pi, T, loaded.logo); }); // 2026-10-25 시안 페이지 다음에 마감재 무드보드
       pages.forEach(function(pg){ if(pg.vi!==vi) return; var n=++num;
         plan.push(function(pi,T){ return _consultDrawSpacePage(data, st, v, vi, pg.sp, pg.rec, loaded, n, pi, T, loaded.logo); });
       });
@@ -35390,7 +35443,7 @@ function _consultRenderCanvas(ub){
     pdfC.innerHTML='<div class="ct">📄 제안서 PDF <span style="font-size:11px;color:var(--m2);font-weight:600">'+st.round+'차 제안'+(busy?' · 시안 생성이 끝나면 만들 수 있어요':'')+'</span></div>';
     var br=document.createElement('div'); br.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
     function bigBtn(html, primary, fn, dis){ var b=document.createElement('button'); b.type='button'; b.innerHTML=html; b.disabled=!!dis; b.style.cssText='padding:10px 16px;border-radius:9px;font-weight:800;font-size:13px;cursor:'+(dis?'not-allowed':'pointer')+';font-family:inherit;opacity:'+(dis?.5:1)+';'+(primary?'border:none;background:linear-gradient(135deg,var(--ac3),var(--ac));color:#000':'border:1px solid var(--bd2);background:var(--c1,#111);color:var(--t2)'); b.onclick=fn; br.appendChild(b); return b; }
-    bigBtn(st.pdfPages?(dirty?'🔄 수정 반영해서 PDF 다시 만들기':'🔄 PDF 다시 만들기'):'📄 제안서 PDF 만들기', true, function(){ this.innerHTML='⏳ 만드는 중…'; var self=this; setTimeout(function(){ _consultBuildPdf(function(){ _consultRefresh(); }); }, 30); }, !anyDone||busy);
+    bigBtn(st.pdfPages?(dirty?'🔄 수정 반영해서 PDF 다시 만들기':'🔄 PDF 다시 만들기'):'📄 제안서 PDF 만들기', true, function(){ this.innerHTML='⏳ 만드는 중…'; var self=this; setTimeout(function(){ _consultPdfWithMood(function(){ _consultRefresh(); }); }, 30); }, !anyDone||busy);
     if(st.pdfPages){
       bigBtn('⬇️ PDF 다운로드', false, function(){ _consultDownloadPdf(); });
       bigBtn('🔍 크게 보기', false, function(){ _proposalLightbox(st.pdfPages, 0); });
@@ -35563,8 +35616,8 @@ function _consultRenderCanvas(ub){
         var hasRes=Object.keys(v.spaces||{}).some(function(k){ return v.spaces[k] && v.spaces[k].result; });
         if(!hasRes && !v.moodImg) return;
         var md=document.createElement('div'); md.style.cssText='margin-top:12px;padding:12px;border-radius:12px;border:1px solid var(--bd2);background:var(--c1,#111)';
-        md.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:'+(v.moodImg||v.moodBusy?'10px':'0')+'"><span style="font-size:13px;font-weight:800;color:var(--t)">🎨 마감재 무드보드</span><span style="font-size:11px;color:var(--m2)">렌더링 이미지의 마감재를 실물 샘플 보드처럼 한 장으로</span>'+
-          (v.moodBusy?'<span style="font-size:11px;color:var(--ac);margin-left:auto">⏳ 만드는 중… (30초~1분)</span>':'<button type="button" class="cbtn cmood" style="margin-left:auto">'+(v.moodImg?'🔁 다시 만들기':'✨ 무드보드 만들기')+' ('+CONSULT_MOOD_COST+'cr)</button>')+'</div>'+
+        md.innerHTML='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:'+(v.moodImg||v.moodBusy?'10px':'0')+'"><span style="font-size:13px;font-weight:800;color:var(--t)">🎨 마감재 무드보드</span><span style="font-size:11px;color:var(--m2)">렌더링 이미지 속 바닥·벽·타일·도장을 <b style="color:var(--t2)">실물 샘플처럼 모은 한 장</b> — 고객이 자재를 한눈에 이해해요'+(v.moodImg?' · <b style="color:var(--ac)">✓ PDF에 자동으로 들어가요</b>':' · PDF 만들 때 같이 만들 수도 있어요')+'</span>'+
+          (v.moodBusy?'<span style="font-size:11px;color:var(--ac);margin-left:auto">⏳ 만드는 중… (30초~1분)</span>':'<button type="button" class="cbtn cmood" style="margin-left:auto;'+(v.moodImg?'':'background:var(--ac);color:#000;border-color:var(--ac);font-weight:900')+'">'+(v.moodImg?'🔁 다시 만들기':'✨ 무드보드 만들기')+' ('+CONSULT_MOOD_COST+'cr)</button>')+'</div>'+
           (v.moodImg?'<img src="'+_cEsc(v.moodImg)+'" class="cmoodimg" style="width:100%;max-width:720px;display:block;border-radius:10px;cursor:zoom-in">':'');
         var b=md.querySelector('.cmood'); if(b) b.onclick=function(){ _consultMoodboard(vi); };
         var im=md.querySelector('.cmoodimg'); if(im) im.onclick=function(){ _consultMoodView(v.moodImg); };
@@ -45029,13 +45082,35 @@ function addHistEl(item, scroll, targetHs, atBottom){
     // 공유 (카카오톡/메일) — 우측 하단 액션 바 맨 끝
     var ssh=mk('button','se-btn');ssh.type='button';ssh.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:-1px;margin-right:3px"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>공유';ssh.title='카카오톡/메일로 공유';
     ssh.style.cssText='background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.18);color:var(--t2);padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
-    ssh.addEventListener('click',function(e){
-      e.stopPropagation();
+    // 2026-10-25 요청("공유·링크 공유 같은 거 아니야?"): 버튼 하나로 합치고, 누르면 '파일로 보내기 / 링크로 보내기' 중에 고르게
+    function _shareFile(){
       var src=item.result||item.orig;
       if(!src)return;
       var isVid=src.includes('.mp4')||src.includes('.webm')||(!item.preview&&(item.wf==='video'||item.wf==='shorts'));
       var fname='clover-ai-'+Date.now()+(isVid?'.mp4':'.jpg');
       cloverShare(src, fname);
+    }
+    function _shareLink(){
+      var titleForShare = (({space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',agent:'AI 에이전트',spaceset:'공간 컨셉 디자인',budget:'AI 견적'})[item.wf]||'Clover AI');
+      cloverShareImage(item.result, item.orig||null, titleForShare);
+    }
+    ssh.addEventListener('click',function(e){
+      e.stopPropagation();
+      if(!item.result){ _shareFile(); return; }
+      var old=document.getElementById('share-pick-pop'); if(old){ old.remove(); if(old._for===ssh) return; }
+      var pop=document.createElement('div'); pop.id='share-pick-pop'; pop._for=ssh;
+      pop.style.cssText='position:fixed;z-index:100000;background:var(--card,#161616);border:1px solid var(--bd2);border-radius:12px;padding:6px;box-shadow:0 12px 32px rgba(0,0,0,.5);width:260px;font-family:inherit';
+      function opt(ic, t1, t2, fn){ var b=document.createElement('button'); b.type='button'; b.style.cssText='display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;padding:9px 10px;border:none;background:transparent;color:var(--t);border-radius:8px;cursor:pointer;font-family:inherit';
+        b.onmouseenter=function(){ b.style.background='var(--c2)'; }; b.onmouseleave=function(){ b.style.background='transparent'; };
+        b.innerHTML='<span style="font-size:18px;line-height:1.2">'+ic+'</span><span><b style="font-size:12.5px">'+t1+'</b><br><span style="font-size:11px;color:var(--m2)">'+t2+'</span></span>';
+        b.onclick=function(ev){ ev.stopPropagation(); pop.remove(); fn(); }; pop.appendChild(b); }
+      opt('📎','파일로 보내기','이미지·영상 파일 자체를 카톡·메일 등으로', _shareFile);
+      opt('🔗','링크로 보내기','로그인 없이 누구나 웹에서 보는 주소 (비포·애프터 포함)', _shareLink);
+      document.body.appendChild(pop);
+      var r=ssh.getBoundingClientRect(), ph=pop.offsetHeight||120;
+      pop.style.left=Math.max(8, Math.min(window.innerWidth-268, r.left))+'px';
+      pop.style.top=((r.top-ph-6>8)?(r.top-ph-6):(r.bottom+6))+'px';
+      setTimeout(function(){ document.addEventListener('click', function cl(ev){ if(!pop.contains(ev.target)){ pop.remove(); document.removeEventListener('click', cl, true); } }, true); }, 0);
     },false);
     ssh.addEventListener('mousedown',function(e){e.stopPropagation();},false);
     sebar.appendChild(ssh);
@@ -45044,15 +45119,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
     // 누구나 웹에서 바로 볼 수 있는 링크"를 만들어줌(VR투어 전용이던 기능을 일반 결과물로 확장).
     // 결과 이미지가 있을 때만 표시.
     if(item.result){
-      var sshl=mk('button','se-btn');sshl.type='button';sshl.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:-1px;margin-right:3px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>링크 공유';sshl.title='로그인 없이 볼 수 있는 웹 링크 만들기 (고객에게 카카오톡으로 보내기 좋아요)';
-      sshl.style.cssText='background:rgba(0,229,204,.1);border-color:rgba(0,229,204,.35);color:var(--ac);padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
-      sshl.addEventListener('click',function(e){
-        e.stopPropagation();
-        var titleForShare = (({space:'현장사진',render:'렌더실사화',edit:'AI편집',video:'영상',upscale:'업스케일',shorts:'쇼츠',world3d:'VR투어',proposal:'제안서',agent:'AI 에이전트',spaceset:'공간 컨셉 디자인',budget:'AI 견적'})[item.wf]||'Clover AI') /* ⚠️ 버그 수정: WF_SOURCE_LABELS는 다른 함수 안의 지역변수라 여기선 ReferenceError가 나서 '링크 공유' 버튼이 작동 안 했음 */+' 디자인 결과';
-        cloverShareImage(item.result, item.orig||null, titleForShare);
-      },false);
-      sshl.addEventListener('mousedown',function(e){e.stopPropagation();},false);
-      sebar.appendChild(sshl);
+      // (2026-10-25: '링크 공유'는 위 '공유' 버튼 안의 '🔗 링크로 보내기'로 합침)
 
       // 📁 프로젝트에 담기 — 자동 태깅(활성 프로젝트 설정 시)이 안 되는 경로(여러 공간 세트,
       // AI 에이전트 등)로 만들어진 결과물도 수동으로 프로젝트에 넣을 수 있게 함.
@@ -53882,14 +53949,67 @@ function admCreateCoupon(){
   });
 }
 
+// 2026-10-25 요청("지급 이력이 뭘 의미하냐, 24일엔 아무도 안 썼냐" → 날짜 선택 + 일별 합계 + 50건 제한 해제)
+var _admLogsSt={range:'7', from:'', to:'', day:'', kind:'all'};
+function _admKstDay(iso){ var d=new Date(new Date(iso).getTime()+9*3600*1000); return d.toISOString().slice(0,10); }
+function _admLogKind(l){ var r=String(l.reason||''), a=+l.amount||0;
+  if(a<0) return /서비스 사용/.test(r)?'use':'minus';
+  if(/자동 환불|환불/.test(r)) return 'refund';
+  try{ if(typeof _admSalesClassify==='function' && _admSalesClassify(l)) return 'charge'; }catch(e){} // 매출 탭과 같은 기준(결제 패키지 크레딧 수)
+  if(/입금|기업|결제|충전|구매|토스|toss/i.test(r)) return 'charge';
+  return 'grant'; }
 function admLogs(c){
   if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
-  _supa.from('credit_logs').select('*,profiles!user_id(email)').order('created_at',{ascending:false}).limit(50).then(function(res){
-    var rows=res.data||[];
-    if(!rows.length){c.innerHTML='<div style="color:var(--m2);text-align:center;padding:20px">이력 없음</div>';return;}
-    c.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px 8px;text-align:left">회원</th><th style="padding:6px 4px;text-align:center">수량</th><th style="padding:6px 8px;text-align:left">사유</th><th style="padding:6px 4px;text-align:center">일시</th></tr></thead><tbody>'+
-      rows.map(function(l){var ip=l.amount>0;var em=l.profiles?l.profiles.email:'unknown';return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t2)">'+em+'</td><td style="padding:6px 4px;text-align:center;font-weight:700;color:'+(ip?'var(--ac)':'#fca5a5)')+'">'+(ip?'+':'')+l.amount+'cr</td><td style="padding:6px 8px;color:var(--m2)">'+(l.reason||'-')+'</td><td style="padding:6px 4px;text-align:center;color:var(--m2)">'+_admKstDT(l.created_at)+'</td></tr>';}).join('')+'</tbody></table></div>';
-  });
+  var S=_admLogsSt, today=_admKstDay(new Date().toISOString());
+  if(S.range!=='custom'){ var n=+S.range||7; S.to=today; var f=new Date(Date.parse(today+'T00:00:00Z')-(n-1)*86400000); S.from=f.toISOString().slice(0,10); }
+  if(!S.from) S.from=today; if(!S.to) S.to=today; if(S.from>S.to){ var t=S.from; S.from=S.to; S.to=t; }
+  var startUtc=new Date(Date.parse(S.from+'T00:00:00+09:00')).toISOString(), endUtc=new Date(Date.parse(S.to+'T00:00:00+09:00')+86400000).toISOString();
+  function btn(on, txt, js){ return '<button onclick="'+js+'" style="padding:6px 11px;border-radius:7px;border:1px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'transparent')+';color:'+(on?'var(--ac)':'var(--m2)')+';font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit">'+txt+'</button>'; }
+  var bar='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+
+    [['1','오늘'],['7','최근 7일'],['30','최근 30일'],['90','최근 90일']].map(function(r){ return btn(S.range===r[0], r[1], "_admLogsSt.range='"+r[0]+"';_admLogsSt.day='';admLogs(gE('adm-content'))"); }).join('')+
+    '<span style="margin-left:6px;font-size:11.5px;color:var(--m2)">직접:</span><input type="date" id="adm-lg-from" value="'+S.from+'" style="padding:5px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:11.5px"> ~ <input type="date" id="adm-lg-to" value="'+S.to+'" style="padding:5px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:11.5px">'+
+    btn(false,'조회',"_admLogsSt.range='custom';_admLogsSt.from=gE('adm-lg-from').value;_admLogsSt.to=gE('adm-lg-to').value;_admLogsSt.day='';admLogs(gE('adm-content'))")+'</div>';
+  c.innerHTML=bar+'<div id="adm-lg-body" style="color:var(--m2);text-align:center;padding:20px">불러오는 중...</div>';
+  var all=[], PAGE=1000;
+  (function page(off){
+    _supa.from('credit_logs').select('*,profiles!user_id(email)').gte('created_at',startUtc).lt('created_at',endUtc).order('created_at',{ascending:false}).range(off, off+PAGE-1).then(function(res){
+      if(res.error){ var b0=gE('adm-lg-body'); if(b0) b0.innerHTML='<div style="color:#fca5a5">불러오기 실패: '+_cEsc(res.error.message||'')+'</div>'; return; }
+      var rows=res.data||[]; all=all.concat(rows);
+      if(rows.length===PAGE && all.length<20000) page(off+PAGE); else draw(all);
+    }).catch(function(e){ var b1=gE('adm-lg-body'); if(b1) b1.innerHTML='<div style="color:#fca5a5">불러오기 실패</div>'; });
+  })(0);
+  function draw(rows){
+    var body=gE('adm-lg-body'); if(!body) return;
+    var days={}, tot={use:0,useN:0,refund:0,grant:0,charge:0,minus:0,users:{}};
+    for(var d=Date.parse(S.to+'T00:00:00Z'); d>=Date.parse(S.from+'T00:00:00Z'); d-=86400000){ var k=new Date(d).toISOString().slice(0,10); days[k]={use:0,useN:0,refund:0,grant:0,charge:0,minus:0,users:{}}; }
+    rows.forEach(function(l){ var k=_admKstDay(l.created_at), D=days[k]; if(!D) return; var kind=_admLogKind(l), a=Math.abs(+l.amount||0);
+      [D,tot].forEach(function(o){ if(kind==='use'){ o.use+=a; o.useN++; o.users[l.user_id]=1; } else o[kind]+=a; }); });
+    function cr(v){ return v?v.toLocaleString()+'cr':'<span style="color:var(--m1,#555)">-</span>'; }
+    var h='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px">'+
+      [['사용(차감)',tot.use,'#fca5a5',tot.useN+'건 · '+Object.keys(tot.users).length+'명'],['실패 자동 환불',tot.refund,'var(--ac)',''],['순사용 (사용−환불)',Math.max(0,tot.use-tot.refund),'#fff',''],['관리자 지급·보상',tot.grant,'#93c5fd',''],['충전(결제)',tot.charge,'#fbbf24','']].map(function(x){
+        return '<div style="border:1px solid var(--bd2);border-radius:10px;padding:10px;background:var(--c2)"><div style="font-size:10.5px;color:var(--m2)">'+x[0]+'</div><div style="font-size:16px;font-weight:900;color:'+x[2]+'">'+(x[1]||0).toLocaleString()+'cr</div>'+(x[3]?'<div style="font-size:10px;color:var(--m2)">'+x[3]+'</div>':'')+'</div>'; }).join('')+'</div>';
+    h+='<div style="font-size:12px;font-weight:800;color:var(--t);margin:4px 0 6px">📅 일별 합계 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(한국 시간 · 날짜를 누르면 그날 내역만)</span></div>';
+    h+='<div style="overflow-x:auto;margin-bottom:14px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px;text-align:left">날짜</th><th style="padding:6px;text-align:right">사용</th><th style="padding:6px;text-align:right">건수</th><th style="padding:6px;text-align:right">사용 회원</th><th style="padding:6px;text-align:right">자동 환불</th><th style="padding:6px;text-align:right">순사용</th><th style="padding:6px;text-align:right">지급·보상</th><th style="padding:6px;text-align:right">충전</th></tr></thead><tbody>'+
+      Object.keys(days).sort().reverse().map(function(k){ var D=days[k], on=S.day===k, wd='일월화수목금토'[new Date(k+'T00:00:00Z').getUTCDay()], empty=!(D.use||D.refund||D.grant||D.charge||D.minus);
+        return '<tr onclick="_admLogsSt.day=(_admLogsSt.day===\''+k+'\'?\'\':\''+k+'\');_admLogsDrawList()" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);background:'+(on?'var(--acg)':'transparent')+';opacity:'+(empty?'.55':'1')+'"><td style="padding:6px;color:var(--t);font-weight:700;white-space:nowrap">'+k.slice(5).replace('-','/')+' ('+wd+')'+(empty?' <span style="font-weight:400;color:var(--m2)">기록 없음</span>':'')+'</td><td style="padding:6px;text-align:right;color:#fca5a5;font-weight:700">'+cr(D.use)+'</td><td style="padding:6px;text-align:right">'+(D.useN||'-')+'</td><td style="padding:6px;text-align:right">'+(Object.keys(D.users).length||'-')+'</td><td style="padding:6px;text-align:right;color:var(--ac)">'+cr(D.refund)+'</td><td style="padding:6px;text-align:right;font-weight:800">'+cr(Math.max(0,D.use-D.refund))+'</td><td style="padding:6px;text-align:right;color:#93c5fd">'+cr(D.grant)+'</td><td style="padding:6px;text-align:right;color:#fbbf24">'+cr(D.charge)+'</td></tr>'; }).join('')+'</tbody></table></div>';
+    h+='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:4px 0 6px"><div style="font-size:12px;font-weight:800;color:var(--t)">📋 상세 내역</div><span id="adm-lg-dayhint" style="font-size:10.5px;color:var(--m2)"></span><span style="flex:1"></span>'+
+      [['all','전체'],['use','사용'],['refund','환불'],['grant','지급·보상'],['charge','충전']].map(function(f){ var on=S.kind===f[0]; return '<button onclick="_admLogsSt.kind=\''+f[0]+'\';_admLogsDrawList()" data-lgk="'+f[0]+'" style="padding:4px 9px;border-radius:6px;border:1px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'transparent')+';color:'+(on?'var(--ac)':'var(--m2)')+';font-size:11px;cursor:pointer;font-family:inherit">'+f[1]+'</button>'; }).join('')+'</div><div id="adm-lg-list"></div>'+
+      '<div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.6">이 목록은 회원 크레딧이 바뀐 모든 기록이에요(사용·실패 자동 환불·관리자 지급·보상·충전). 관리자 본인 사용과 비회원 무료 체험은 크레딧 차감이 없어서 남지 않아요.</div>';
+    body.style.cssText=''; body.innerHTML=h;
+    window._admLogsRows=rows; _admLogsDrawList();
+  }
+}
+function _admLogsDrawList(){
+  var el=gE('adm-lg-list'), rows=window._admLogsRows||[], S=_admLogsSt; if(!el) return;
+  var list=rows.filter(function(l){ if(S.day && _admKstDay(l.created_at)!==S.day) return false; if(S.kind!=='all'){ var k=_admLogKind(l); if(S.kind==='use' ? k!=='use' : (S.kind==='grant' ? (k!=='grant' && k!=='minus') : k!==S.kind)) return false; } return true; });
+  var hint=gE('adm-lg-dayhint'); if(hint) hint.innerHTML=(S.day?('· '+S.day.slice(5).replace('-','/')+'만 보는 중 <a href="javascript:void(0)" onclick="_admLogsSt.day=\'\';_admLogsDrawList()" style="color:var(--ac)">전체 보기</a>'):'')+' · '+list.length+'건';
+  try{ Array.prototype.forEach.call(document.querySelectorAll('[data-lgk]'), function(b){ var on=b.getAttribute('data-lgk')===S.kind; b.style.borderColor=on?'var(--acb)':'var(--bd2)'; b.style.background=on?'var(--acg)':'transparent'; b.style.color=on?'var(--ac)':'var(--m2)'; }); }catch(e){}
+  try{ Array.prototype.forEach.call(document.querySelectorAll('#adm-lg-body tbody tr'), function(tr){ var on=S.day && tr.textContent.indexOf(S.day.slice(5).replace('-','/'))===0; tr.style.background=on?'var(--acg)':'transparent'; }); }catch(e){}
+  var MAX=500, shown=list.slice(0,MAX);
+  el.innerHTML=!list.length?'<div style="color:var(--m2);text-align:center;padding:16px">이 조건의 기록이 없어요</div>':
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--bd);color:var(--m2)"><th style="padding:6px 8px;text-align:left">회원</th><th style="padding:6px 4px;text-align:center">수량</th><th style="padding:6px 8px;text-align:left">사유</th><th style="padding:6px 8px;text-align:right">일시</th></tr></thead><tbody>'+
+    shown.map(function(l){ var ip=l.amount>0, em=l.profiles?l.profiles.email:'unknown', dt=new Date(new Date(l.created_at).getTime()+9*3600*1000).toISOString().slice(0,16).replace('T',' ');
+      return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:6px 8px;color:var(--t2)">'+(l.user_id?'<a href="javascript:void(0)" onclick="_admMemberDetail(\''+_cEsc(l.user_id)+'\')" style="color:var(--t2);text-decoration:underline;text-underline-offset:2px">'+_cEsc(em)+'</a>':_cEsc(em))+'</td><td style="padding:6px 4px;text-align:center;font-weight:700;color:'+(ip?'var(--ac)':'#fca5a5')+'">'+(ip?'+':'')+l.amount+'cr</td><td style="padding:6px 8px;color:var(--t2)">'+_cEsc(l.reason||'')+'</td><td style="padding:6px 8px;text-align:right;color:var(--m2);white-space:nowrap">'+dt+'</td></tr>'; }).join('')+'</tbody></table></div>'+(list.length>MAX?'<div style="font-size:10.5px;color:var(--m2);margin-top:6px">최근 '+MAX+'건만 표시 — 날짜를 눌러 범위를 좁혀보세요 (합계는 전체 '+list.length+'건 기준)</div>':'');
 }
 
 // ⚠️ 요청 반영("버그 제보가 이메일로만 가서, 관리자 모드에서 목록으로 보고 처리 상태를 추적하고
