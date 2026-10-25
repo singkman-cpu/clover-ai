@@ -10204,6 +10204,26 @@ function _realismMaterialMap(src, cb){
 // 2026-10-25 재요청("CG 결과 퀄리티가 안 좋다 — 실사화 결과에서 느낌만 CG로"): 실사화 품질 그대로 + 마지막 마감 느낌만 고급 CG 렌더
 var CG_LOOK_FINAL=' 🎨 FINAL LOOK = SNAP-STYLE ARCHITECTURAL CG (2026-10-25: matched to the user\'s own studio CG portfolio — read last, overrides only the "real photograph / remove the CG look" wording above, all geometry/material/colour locks stay): the image must clearly read as a premium architectural visualisation render, not a camera photo. HIGH-KEY, AIRY EXPOSURE: bright and light overall, shadows lifted and soft, gentle low-to-medium contrast, no deep blacks, no dramatic lighting. SKY (exteriors): a natural, freely varied pleasant sky that suits the scene — any sky colour and cloud pattern is fine. LIGHT: soft, diffuse daylight with long gentle shadows and clean global illumination; interiors bright and evenly lit with soft cove/downlight glow and clean skylight light. COLOUR: fresh, clean, slightly desaturated pastel-neutral palette — crisp whites, warm light woods, soft greys, fresh but not neon greens; slightly warm-neutral white balance. SURFACES: immaculate and idealised — perfectly clean walls and floors, crisp straight edges, smooth flawless materials with clean subtle reflections on glass, water and polished floors; no dirt, wear, stains, noise or grain. PLANTING AND SURROUNDINGS: lush, neatly groomed lawns, shrubs and trees (soft and bright, slightly stylised), clean paving; background buildings and trees softly lighter with a gentle atmospheric haze for depth, but fully rendered (never white boxes). Overall feel: calm, bright, clean and aspirational, like a high-end developer brochure render. COLOUR LOCK STILL WINS: this bright, soft grading must never change any object\'s own colour from the model — black fixtures and spotlights stay black, brown leather doors stay brown leather, dark stays dark; only the light gets brighter and softer. CURVES: curved and rounded transitions (e.g. the rounded hoods above the doors) flow as one smooth seamless surface with soft continuous shading — no visible seam, crease or line where the curve starts or ends.';
 var CG_RENDER_FINAL=' 🎨 CG RENDER FINAL CHECK: the output is a premium archviz CGI render (V-Ray / Corona look) — clean, crisp, perfectly lit and polished, intentionally a high-end 3D render rather than a camera photo; no film grain, no lens dirt, no snapshot look. Keep everything else from the model exactly: camera, geometry, curves (never straighten a curve or round off a corner), every material TYPE and COLOUR (white boards stay white, nothing becomes a different material), existing text, logos and screens at the same size, every tree and shrub in the same place and size (as high-quality 3D plants). Surfaces sharing one material in the model stay one identical material. Remove only the drawn edge lines, never the details they describe. Only the MAIN building/room is locked — background placeholder boxes may become nicely rendered neighbouring buildings at the same position and size. Light fixtures keep the same on/off state as in the model. For exterior views with a road, one or two clean 3D cars may be placed on the road (never blocking the entrance).';
+// 2026-10-25 요청("쇼츠 만들어도 관리자 회원 상세에서 다 볼 수 있게"): 쇼츠는 브라우저 안에서만 만들어져 서버에 안 올라갔음 → 완성되면 서버 갤러리에도 업로드
+function _shortsCloudSave(item, blob, ext, thumb){
+  try{
+    if(!(_supa && _supaUser) || !blob || !item) return;
+    if(blob.size > 48*1024*1024){ console.info('[쇼츠 클라우드 저장] 용량이 커서('+Math.round(blob.size/1048576)+'MB) 건너뜀'); return; }
+    var e2=(ext==='mp4')?'mp4':'webm', ct=(e2==='mp4')?'video/mp4':'video/webm';
+    var gid=String(Date.now())+Math.floor(Math.random()*1000);
+    var path=_supaUser.id+'/shorts/'+gid+'.'+e2;
+    _supa.storage.from('gallery').upload(path, blob, {contentType:ct, upsert:true}).then(function(up){
+      if(up && up.error){ console.warn('[쇼츠 클라우드 저장] 업로드 실패:', up.error.message); return; }
+      var pub=_supa.storage.from('gallery').getPublicUrl(path).data.publicUrl;
+      item.cloud_url=pub;
+      var row={user_id:_supaUser.id, wf:'shorts', storage_path:path, public_url:pub, orig_url:(typeof thumb==='string' && /^https?:/.test(thumb))?thumb:null, engine:'쇼츠 자동생성', resolution:'', style_key:'shorts'};
+      _supa.from('gallery').insert(row).select().single().then(function(ins){
+        if(ins && ins.data && ins.data.id){ item.gallery_id=ins.data.id; try{ saveHistToStorage(); }catch(e){} }
+        else if(ins && ins.error) console.warn('[쇼츠 클라우드 저장] 기록 실패:', ins.error.message);
+      }).catch(function(){});
+    }).catch(function(e){ console.warn('[쇼츠 클라우드 저장] 오류', e); });
+  }catch(e){}
+}
 function _allowedEngs(wf){
   if(wf==='edit') return ['nano2','nano_pro'];
   if(wf==='space'||wf==='render'||wf==='spaceset'||wf==='budget') return ['nano2','nano_pro','gpt2','seedream5pro'];
@@ -36962,6 +36982,7 @@ function _shortsGenerate(){
     G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&slides[0].img, result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
     saveHistToStorage();
     _shortsSaveGalleryMeta();
+    _shortsCloudSave(G.HIST.shorts[0], blob, ext, slides[0]&&slides[0].img);
     G_SHORTS.resultBlob=blob; G_SHORTS.resultMp4Blob=(ext==='mp4')?blob:null;
     G_SHORTS.resultThumb=slides[0]&&slides[0].img;
     G_SHORTS.resultExt=ext;
@@ -37314,6 +37335,7 @@ function _shortsGenerate(){
           G.HIST.shorts.unshift({id:vidId, orig:slides[0]&&slides[0].img, result:url, idbKey:vidId, videoExt:ext, tags:['쇼츠 자동생성'], ai:'', preview:false, cx:50, fav:false, wf:'shorts'});
           saveHistToStorage();
           _shortsSaveGalleryMeta();
+          _shortsCloudSave(G.HIST.shorts[0], blob, ext, slides[0]&&slides[0].img);
         }
         // 카카오톡 공유 버튼이 나중에 영상을 업로드할 때 쓸 수 있게 blob과 썸네일을 같이 보관
         G_SHORTS.resultBlob=blob; G_SHORTS.resultMp4Blob=null;
@@ -52059,6 +52081,12 @@ function _admMemberDetail(uid){
             ((_mt.prompt||_mt.mode)?'<div style="font-size:10.5px;color:var(--t2);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden" title="'+_admEsc(_mt.prompt||'')+'">'+(_mt.mode==='mask'?'<b style="color:#ff6b8a">🖌 칠해서 편집</b> ':(_mt.mode==='full'?'<b style="color:var(--m2)">전체 편집</b> ':''))+(_mt.prompt?'📝 '+_admEsc(_mt.prompt):'<span style="color:var(--m2)">(프롬프트 없음 · 프리셋만)</span>')+'</div>':'')+
             '</div>';
         }).join('')+'</div>';
+    }
+    // 2026-10-25 요청: 영상 제작·쇼츠 결과도 회원 상세에서 보이게(예전엔 이미지 목록에서 영상이 빠져 있었음)
+    var vids=(out.g||[]).filter(function(g){ return g.public_url && /^https?:/i.test(g.public_url) && (/\.(mp4|webm|mov)(\?|$)/i.test(g.public_url) || g.wf==='shorts' || g.wf==='video'); }).slice(0,30);
+    if(vids.length){
+      h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🎬 최근 만든 영상·쇼츠 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(최근 30개 · 눌러서 재생 · 빨간 테두리 = 회원이 지운 것)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:10px">'+
+        vids.map(function(g){ return '<div style="background:var(--c2);border:1px solid '+(g._del?'rgba(248,113,113,.45)':'var(--bd2)')+';border-radius:8px;padding:5px"><video src="'+_admEsc(g.public_url)+'" controls preload="metadata" playsinline style="width:100%;aspect-ratio:9/16;object-fit:contain;background:#000;border-radius:6px;display:block"></video><div style="font-size:10px;color:var(--m2);margin-top:3px">'+_admEsc(_ADM_WF_LABEL[g.wf]||g.wf||'')+' · '+_admEsc(_admKstDT(g.created_at))+'</div></div>'; }).join('')+'</div>';
     }
     // 방문 날짜
     h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🌐 방문한 날 (최근 90일, 한국 시간)</div>';
