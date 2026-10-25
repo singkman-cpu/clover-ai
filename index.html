@@ -8873,6 +8873,7 @@ function canRun(){
   if(G.wf==='shorts') return false; // 쇼츠는 자체 버튼 사용
   if(G.wf==='proposal') return false; // 제안서도 자체 버튼 사용
   if(G.wf==='consult') return false; // 상담 패키지도 자체 버튼 사용
+  if(G.wf==='video' && G.vidMode==='v2v') return false; // 영상→인테리어도 자체 버튼 사용
   if(G._uploadBusy) return false; // 이미지 업로드(파일 읽기+리사이즈) 처리 중 — 경합 방지
   if(G.wf==='video'&&tab.vidMode==='prompt')return (tab.prompt||'').length>2;
   if(!tab.inputImg)return false;
@@ -9051,7 +9052,7 @@ function updBtn(){
   // 숨겨버리는 사고가 있었음(그래서 "렌더 버튼이 없다"는 문제가 생김) — 이제 고유 id를 가진
   // 진짜 고정 하단 버튼(#actbtn) 하나만 정확히 골라서 처리함.
   // ⚠️ 'psedit'(포토샵 편집)도 하단 공용 "실행" 버튼을 안 씀 — 편집기 안에 자체 저장/내보내기 버튼이 있음(크레딧 0)
-  var isShorts=(G.wf==='shorts'||G.wf==='proposal'||G.wf==='consult'||G.wf==='agent'||G.wf==='spaceset'||G.wf==='budget'||G.wf==='psedit');
+  var isShorts=(G.wf==='shorts'||G.wf==='proposal'||G.wf==='consult'||G.wf==='agent'||G.wf==='spaceset'||G.wf==='budget'||G.wf==='psedit'||(G.wf==='video'&&G.vidMode==='v2v')); // 영상→완성영상은 패널 안 자체 버튼 사용
   document.querySelectorAll('#actbtn').forEach(function(b){
     b.style.display=isShorts?'none':'';
   });
@@ -10041,6 +10042,10 @@ function renderMain(callWf, preserveScroll){
           sub:'왼쪽 아래 크레딧을 확인하고 "영상 생성" 버튼을 눌러주세요'
         };
       }
+      if(wf==='video' && G.vidMode==='v2v'){
+        info = { icon:WF_INFO.video.icon, title:'3D 녹화·현장 영상을 <span>클릭해서 업로드</span>',
+          sub:'왼쪽 🔴 화면 녹화로 바로 찍거나, 영상 파일(MP4·MOV)을 여기에 끌어다 놓으세요 — 여러 개 가능' };
+      }
       var icon=document.querySelectorAll('#cub-icon')[hsIdx]||document.getElementById('cub-icon');
       var title=document.querySelectorAll('#cub-title')[hsIdx]||document.getElementById('cub-title');
       var sub=document.querySelectorAll('#cub-sub')[hsIdx]||document.getElementById('cub-sub');
@@ -10205,18 +10210,19 @@ function _realismMaterialMap(src, cb){
 var CG_LOOK_FINAL=' 🎨 FINAL LOOK = SNAP-STYLE ARCHITECTURAL CG (2026-10-25: matched to the user\'s own studio CG portfolio — read last, overrides only the "real photograph / remove the CG look" wording above, all geometry/material/colour locks stay): the image must clearly read as a premium architectural visualisation render, not a camera photo. HIGH-KEY, AIRY EXPOSURE: bright and light overall, shadows lifted and soft, gentle low-to-medium contrast, no deep blacks, no dramatic lighting. SKY (exteriors): a natural, freely varied pleasant sky that suits the scene — any sky colour and cloud pattern is fine. LIGHT: soft, diffuse daylight with long gentle shadows and clean global illumination; interiors bright and evenly lit with soft cove/downlight glow and clean skylight light. COLOUR: fresh, clean, slightly desaturated pastel-neutral palette — crisp whites, warm light woods, soft greys, fresh but not neon greens; slightly warm-neutral white balance. SURFACES: immaculate and idealised — perfectly clean walls and floors, crisp straight edges, smooth flawless materials with clean subtle reflections on glass, water and polished floors; no dirt, wear, stains, noise or grain. PLANTING AND SURROUNDINGS: lush, neatly groomed lawns, shrubs and trees (soft and bright, slightly stylised), clean paving; background buildings and trees softly lighter with a gentle atmospheric haze for depth, but fully rendered (never white boxes). Overall feel: calm, bright, clean and aspirational, like a high-end developer brochure render. COLOUR LOCK STILL WINS: this bright, soft grading must never change any object\'s own colour from the model — black fixtures and spotlights stay black, brown leather doors stay brown leather, dark stays dark; only the light gets brighter and softer. CURVES: curved and rounded transitions (e.g. the rounded hoods above the doors) flow as one smooth seamless surface with soft continuous shading — no visible seam, crease or line where the curve starts or ends.';
 var CG_RENDER_FINAL=' 🎨 CG RENDER FINAL CHECK: the output is a premium archviz CGI render (V-Ray / Corona look) — clean, crisp, perfectly lit and polished, intentionally a high-end 3D render rather than a camera photo; no film grain, no lens dirt, no snapshot look. Keep everything else from the model exactly: camera, geometry, curves (never straighten a curve or round off a corner), every material TYPE and COLOUR (white boards stay white, nothing becomes a different material), existing text, logos and screens at the same size, every tree and shrub in the same place and size (as high-quality 3D plants). Surfaces sharing one material in the model stay one identical material. Remove only the drawn edge lines, never the details they describe. Only the MAIN building/room is locked — background placeholder boxes may become nicely rendered neighbouring buildings at the same position and size. Light fixtures keep the same on/off state as in the model. For exterior views with a road, one or two clean 3D cars may be placed on the road (never blocking the entrance).';
 // 2026-10-25 요청("쇼츠 만들어도 관리자 회원 상세에서 다 볼 수 있게"): 쇼츠는 브라우저 안에서만 만들어져 서버에 안 올라갔음 → 완성되면 서버 갤러리에도 업로드
-function _shortsCloudSave(item, blob, ext, thumb){
+function _shortsCloudSave(item, blob, ext, thumb, wfK, onUrl){
+  wfK=wfK||'shorts';
   try{
     if(!(_supa && _supaUser) || !blob || !item) return;
     if(blob.size > 48*1024*1024){ console.info('[쇼츠 클라우드 저장] 용량이 커서('+Math.round(blob.size/1048576)+'MB) 건너뜀'); return; }
     var e2=(ext==='mp4')?'mp4':'webm', ct=(e2==='mp4')?'video/mp4':'video/webm';
     var gid=String(Date.now())+Math.floor(Math.random()*1000);
-    var path=_supaUser.id+'/shorts/'+gid+'.'+e2;
+    var path=_supaUser.id+'/'+wfK+'/'+gid+'.'+e2;
     _supa.storage.from('gallery').upload(path, blob, {contentType:ct, upsert:true}).then(function(up){
       if(up && up.error){ console.warn('[쇼츠 클라우드 저장] 업로드 실패:', up.error.message); return; }
       var pub=_supa.storage.from('gallery').getPublicUrl(path).data.publicUrl;
-      item.cloud_url=pub;
-      var row={user_id:_supaUser.id, wf:'shorts', storage_path:path, public_url:pub, orig_url:(typeof thumb==='string' && /^https?:/.test(thumb))?thumb:null, engine:'쇼츠 자동생성', resolution:'', style_key:'shorts'};
+      item.cloud_url=pub; try{ if(onUrl) onUrl(pub); }catch(e){}
+      var row={user_id:_supaUser.id, wf:wfK, storage_path:path, public_url:pub, orig_url:(typeof thumb==='string' && /^https?:/.test(thumb))?thumb:null, engine:(wfK==='shorts'?'쇼츠 자동생성':'영상→인테리어'), resolution:'', style_key:(wfK==='shorts'?'shorts':'v2v')};
       _supa.from('gallery').insert(row).select().single().then(function(ins){
         if(ins && ins.data && ins.data.id){ item.gallery_id=ins.data.id; try{ saveHistToStorage(); }catch(e){} }
         else if(ins && ins.error) console.warn('[쇼츠 클라우드 저장] 기록 실패:', ins.error.message);
@@ -18271,7 +18277,9 @@ function _olRenderAdmin(){
     pill.title='실시간 접속 '+list.length+'명 (회원 '+mem.length+' · 비회원 '+guest+') — 관리자에게만 보여요, 눌러서 자세히';
     var pan=document.getElementById('ol-panel');
     if(!_olOpen){ if(pan) pan.remove(); return; }
-    if(!pan){ pan=document.createElement('div'); pan.id='ol-panel'; pan.style.cssText='position:fixed;right:12px;top:56px;z-index:9000;width:min(420px,calc(100vw - 24px));max-height:60vh;overflow:auto;background:rgba(14,16,20,.97);border:1px solid #333;border-radius:12px;padding:12px;font-size:11.5px;color:#ddd;box-shadow:0 10px 30px rgba(0,0,0,.5)'; document.body.appendChild(pan); }
+    if(!pan){ pan=document.createElement('div'); pan.id='ol-panel'; pan.style.cssText='position:fixed;right:12px;top:56px;z-index:9000;width:min(420px,calc(100vw - 24px));max-height:60vh;overflow:auto;background:rgba(14,16,20,.97);border:1px solid #333;border-radius:12px;padding:12px;font-size:11.5px;color:#ddd;box-shadow:0 10px 30px rgba(0,0,0,.5)'; document.body.appendChild(pan);
+      // 2026-10-25 요청: 접속자 회원 메일 클릭 → 바로 회원 상세
+      pan.addEventListener('click', function(ev){ var el=ev.target.closest&&ev.target.closest('[data-olu]'); if(!el) return; ev.stopPropagation(); try{ _admMemberDetail(el.getAttribute('data-olu')); }catch(e){} }); }
     try{ var rc=pill.getBoundingClientRect(); if(rc.width){ pan.style.top=Math.round(rc.bottom+6)+'px'; pan.style.right=Math.max(12,Math.round(window.innerWidth-rc.right))+'px'; pan.style.left='auto'; pan.style.bottom='auto'; } }catch(e){}
     var wl=function(w){ return w==='home'?'메인화면':((typeof _ADM_WF_LABEL!=='undefined'&&_ADM_WF_LABEL[w])||(w==='staging'?'빈집 홈스테이징':w)); };
     var sl=function(s){ return s?((typeof SRC_LABELS!=='undefined'&&SRC_LABELS[s])||s):'-'; };
@@ -18279,7 +18287,7 @@ function _olRenderAdmin(){
     pan.innerHTML='<div style="font-weight:800;color:#fff;margin-bottom:8px">🟢 지금 접속 중 ('+list.length+'명) <span style="font-weight:400;color:#888">· 관리자 본인 제외</span></div>'+
       (list.length? list.map(function(x){ var mins=Math.max(0,Math.round((Date.now()-x.t)/60000));
         return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #262626">'+
-          '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:'+(x.u?'#12E6E6':'#bbb')+';font-weight:700">'+(x.u?(_olEmails[x.u]||'회원'):'👤 비회원')+'</div>'+
+          '<div'+(x.u?' data-olu="'+_cEsc(x.u)+'" title="눌러서 회원 상세 보기"':'')+' style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:'+(x.u?'#12E6E6':'#bbb')+';font-weight:700'+(x.u?';cursor:pointer;text-decoration:underline;text-underline-offset:2px':'')+'">'+(x.u?_cEsc(_olEmails[x.u]||'회원'):'👤 비회원')+'</div>'+
           '<div style="color:#ddd;white-space:nowrap">'+wl(x.w)+'</div>'+
           '<div style="color:#888;white-space:nowrap">'+(x.d==='m'?'📱':'💻')+' '+sl(x.s)+' · '+mins+'분</div></div>'; }).join('') : '<div style="color:#777">지금은 접속자가 없어요</div>')+
       '<div style="color:#666;font-size:10px;margin-top:8px">탭 이동은 20초 안에 반영돼요 · 창을 닫으면 몇 초 뒤 목록에서 빠져요</div>';
@@ -19183,6 +19191,7 @@ function mkMultiRoomSpace(p){
     // 2026-10-19 분리: 메뉴가 나뉘었으므로 지금 보고 있는 쪽(현장사진 세트 / 공간 컨셉)만 지움 — 다른 쪽 사진·문구는 그대로
     var _rsSS=!!G._siteSetMode;
     if(!confirm((_rsSS?'현장사진 세트':'공간 컨셉 디자인')+'에 올려둔 사진과 입력한 문구(전체 공통 스타일 등)가 모두 삭제됩니다. 계속할까요?')) return;
+    try{ _futureVariantNew(true); }catch(_fe){} // 2026-10-25: 전체 리셋하면 미래형 컨셉도 새로
     if(_rsSS){
     spTab.multiRoomImages=[];
     spTab.multiRoomRefDesignImg=null;
@@ -19759,6 +19768,7 @@ function mkMultiRoomSpace(p){
   chipRow1.appendChild(_quickToggleBtn('🛸 미래형 · 곡선 + AI 로봇', FUTURE2050_PHRASE_SITE, '더 먼 미래 — 벽·천장이 이어지는 유기적 곡선, 스스로 빛나는 벽, 거실·현관엔 식물 벽, 일부 장면에 집안일하는 AI 로봇'));
   chipRow1.appendChild(_quickToggleBtn('🤖 미래형 · 스마트 기술 (은은하게)', SMART2050_PHRASE_SITE, '반듯한 미니멀 공간 + 은은한 스마트 기술 — 유리 투명 디스플레이·스마트 글라스·터치 벽 (로봇 없음)'));
   chipRow1.appendChild(_quickToggleBtn('🤖🔥 미래형 · 스마트 기술 + AI 로봇', SMART2050S_PHRASE_SITE, '첨단 기술이 확 보이게 — AR 창문·발광 벽·투명 TV·수직 텃밭 + 일부 장면에 청소·요리·정원 가꾸는 AI 로봇'));
+  chipRow1.appendChild(_futureVariantBtn()); // 2026-10-25 🎲 미래형 다른 컨셉
   chipRow1.appendChild(_quickToggleBtn('🛋 미래형 · 가구·가전까지 미래 제품', FUTOBJ_PHRASE_SITE, '소파·테이블·카펫·붙박이장·가전·에어컨·조명까지 보이는 모든 물건을 2050~2100년 미래 제품으로 (다른 미래형 문구와 같이 켜도 돼요)'));
   chipRow1.appendChild(_quickToggleBtn('🏯 한옥 · 조선시대 전통', PAST_JOSEON_PHRASE_SITE, '이 집이 조선시대 한옥이었다면 — 기와지붕·한지 창호·대청마루 (현대 생활 설비는 한옥식으로 유지)'));
   chipRow1.appendChild(_quickToggleBtn('🪵 한옥 · 모던 (한옥 + 현대)', MODERN_HANOK_PHRASE_SITE, '한옥 구조에 현대 미니멀 — 곡선 처마·서까래 거실·통유리·간접조명'));
@@ -22163,6 +22173,7 @@ function mkAutoRoomCamera(p){
     chipRow1AR.appendChild(_quickToggleBtnAR('🛸 미래형 · 곡선 + AI 로봇', FUTURE2050_PHRASE_CONCEPT, '더 먼 미래 — 벽·천장이 이어지는 유기적 곡선, 스스로 빛나는 벽, 거실·현관엔 식물 벽, 일부 장면에 집안일하는 AI 로봇'));
     chipRow1AR.appendChild(_quickToggleBtnAR('🤖 미래형 · 스마트 기술 (은은하게)', SMART2050_PHRASE_CONCEPT, '반듯한 미니멀 공간 + 은은한 스마트 기술 — 유리 투명 디스플레이·스마트 글라스·터치 벽 (로봇 없음)'));
     chipRow1AR.appendChild(_quickToggleBtnAR('🤖🔥 미래형 · 스마트 기술 + AI 로봇', SMART2050S_PHRASE_CONCEPT, '첨단 기술이 확 보이게 — AR 창문·발광 벽·투명 TV·수직 텃밭 + 일부 장면에 청소·요리·정원 가꾸는 AI 로봇'));
+    chipRow1AR.appendChild(_futureVariantBtn()); // 2026-10-25 🎲 미래형 다른 컨셉
     chipRow1AR.appendChild(_quickToggleBtnAR('🛋 미래형 · 가구·가전까지 미래 제품', FUTOBJ_PHRASE_CONCEPT, '소파·테이블·카펫·붙박이장·가전·에어컨·조명까지 보이는 모든 물건을 2050~2100년 미래 제품으로 (다른 미래형 문구와 같이 켜도 돼요)'));
     chipRow1AR.appendChild(_quickToggleBtnAR('🏯 한옥 · 조선시대 전통', PAST_JOSEON_PHRASE_CONCEPT, '이 집이 조선시대 한옥이었다면 — 기와지붕·한지 창호·대청마루 (현대 생활 설비는 한옥식으로 유지)'));
     chipRow1AR.appendChild(_quickToggleBtnAR('🪵 한옥 · 모던 (한옥 + 현대)', MODERN_HANOK_PHRASE_CONCEPT, '한옥 구조에 현대 미니멀 — 곡선 처마·서까래 거실·통유리·간접조명'));
@@ -22949,7 +22960,7 @@ function _smartTechFinal(style, typeName){
     ? ' 🤖🤖🤖🤖 2050 SMART-TECH FINAL CHECK (the user chose a smart-technology future design — overrides the "similar to the reference" rules above for FACADE and MATERIALS): the building must clearly read as a 2050 smart building at first glance — crisp, minimal, straight-lined glass-and-metal architecture (not blob curves). Make at least three of these elements clearly visible together inside this ONE single photo: a media-glass facade showing a soft light pattern or subtle information; building-integrated solar glass; a small drone-delivery port on a terrace or roof; an EV auto-charging driveway; smart louvers that tilt with the sun; slim metal frames and large glass planes. Everything is real hardware mounted on real surfaces — no floating holograms, no neon or cyberpunk look; it must look buildable.'
     : ' 🤖🤖🤖🤖 2050 SMART-TECH FINAL CHECK (the user chose a smart-technology future design — overrides the "keep the reference finishes / similar to the reference" rules above): this space must clearly read as a 2050 smart home/space at first glance — calm, minimal, straight-lined (not blob curves), with the technology built in. Make at least three of these elements clearly visible together inside this ONE single photo: a frameless transparent glass display (transparent OLED) showing soft semi-transparent AR-style information (weather, schedule, lighting) on the glass itself; smart-glass windows or partitions, some clear and some frosted; a touch-panel wall glowing softly where a hand is near; a table top with a built-in wireless charging zone; robotic furniture folding out of a wall or automatic storage; a small home robot; concealed lighting, speakers and sensors with continuous soft line lighting. Every screen and every piece of information appears ONLY on a real physical surface (glass, wall, table) — no images floating in mid-air, no holograms of people, no neon or cyberpunk look. Photorealistic, livable, believable to install.';
 }
-function _futureDesignFinalSite(userStyle, roomLabel){ var _fc=_futureDesignFinalSiteCore(userStyle, roomLabel)+(_isExteriorViewType(roomLabel)?'':(_smartTechFinal(userStyle, roomLabel)+_futureObjectsFinal(userStyle, roomLabel)+_futureOverrideFinal(userStyle, roomLabel))); if(!_isExteriorViewType(roomLabel) && String(userStyle||'').indexOf('🛸 2050 미래 디자인')!==-1 && String(userStyle||'').indexOf('🤖🔥 2050 스마트 테크 강하게')===-1) _fc+=(_robotThisShot()?_robotClause(false, false):NO_ROBOT_CLAUSE); if(_fc && _fc.indexOf('[PLANT WALL RULE')===-1) _fc+=_futurePlantRule(roomLabel); var _r=_fc ? (_fc+_pastFutureFusion(userStyle, roomLabel)) : _pastDesignFinal(userStyle, roomLabel, true); if(_r && _r.indexOf('ONLY OUR BUILDING HAS THIS STYLE')===-1 && _r.indexOf('VIEW OUTSIDE THE WINDOWS')===-1) _r+=_styleNeigh(userStyle, _isExteriorViewType(roomLabel)); return (_r && _r.indexOf('OUTPUT = EXACTLY ONE SINGLE PHOTOGRAPH')===-1) ? _r+FUTURE_ONE_PHOTO : _r; }
+function _futureDesignFinalSite(userStyle, roomLabel){ var _fc=_futureDesignFinalSiteCore(userStyle, roomLabel)+(_isExteriorViewType(roomLabel)?'':(_smartTechFinal(userStyle, roomLabel)+_futureObjectsFinal(userStyle, roomLabel)+_futureOverrideFinal(userStyle, roomLabel))); if(!_isExteriorViewType(roomLabel) && String(userStyle||'').indexOf('🛸 2050 미래 디자인')!==-1 && String(userStyle||'').indexOf('🤖🔥 2050 스마트 테크 강하게')===-1) _fc+=(_robotThisShot()?_robotClause(false, false):NO_ROBOT_CLAUSE); if(_fc && _fc.indexOf('[PLANT WALL RULE')===-1) _fc+=_futurePlantRule(roomLabel); var _r=_fc ? (_fc+_pastFutureFusion(userStyle, roomLabel)) : _pastDesignFinal(userStyle, roomLabel, true); if(_r && _r.indexOf('ONLY OUR BUILDING HAS THIS STYLE')===-1 && _r.indexOf('VIEW OUTSIDE THE WINDOWS')===-1) _r+=_styleNeigh(userStyle, _isExteriorViewType(roomLabel)); if(_r && _fc && !_isExteriorViewType(roomLabel)) _r+=_futureVariantFinal(); return (_r && _r.indexOf('OUTPUT = EXACTLY ONE SINGLE PHOTOGRAPH')===-1) ? _r+FUTURE_ONE_PHOTO : _r; }
 function _futureDesignFinalSiteCore(userStyle, roomLabel){
   var u=String(userStyle||'');
   if(_isExteriorViewType(roomLabel)){ // 현장사진 세트의 건물 외관 사진: 공간 컨셉 외관과 같은 최종 점검(현장 사진이라 카메라·대지는 그대로)
@@ -22973,7 +22984,47 @@ function _futurePlantRule(typeName){
   if(/거실|현관|입구|로비|라운지|living|entr|lobby/i.test(t)) return ' [PLANT WALL RULE] In this space a living plant wall is allowed as at most ONE feature wall (optional, not mandatory) — all other walls stay clean architectural surfaces without planting.';
   return ' [PLANT WALL RULE — overrides any plant wall / vertical garden / indoor garden wording above] This space is NOT the living room or entrance, so NO plant wall, NO vertical garden, NO moss wall and NO planting built into any wall, ceiling or furniture here. Greenery at most one or two small potted plants — the futuristic look must come from the architecture, light and materials, not from plants.';
 }
-function _futureDesignFinal(basePrompt, typeName){ var _fc=_futureDesignFinalCore(basePrompt, typeName)+_smartTechFinal(basePrompt, typeName)+_futureObjectsFinal(basePrompt, typeName)+_futureOverrideFinal(basePrompt, typeName); if(String(basePrompt||'').indexOf('🛸 2050 미래 디자인')!==-1 && String(basePrompt||'').indexOf('🤖🔥 2050 스마트 테크 강하게')===-1) _fc+=(_robotThisShot()?_robotClause(_isExteriorViewType(typeName), false):NO_ROBOT_CLAUSE); if(_fc && _fc.indexOf('[PLANT WALL RULE')===-1) _fc+=_futurePlantRule(typeName); var _r=_fc ? (_fc+_pastFutureFusion(basePrompt, typeName)) : _pastDesignFinal(basePrompt, typeName, false); if(_r) _r+=_styleNeigh(basePrompt, _isExteriorViewType(typeName)); if(_r && _fc && _isExteriorViewType(typeName)) _r+=FUTURE_EXT_SAME_HOUSE+FUTURE_EXT_ROBOT_LIMIT+FUTURE_EXT_NATURAL_TONE; return _r ? _r+FUTURE_ONE_PHOTO : _r; }
+// 2026-10-25 신고("미래형 스마트 AI 거실 — 좋긴 한데 매번 비슷한 느낌, 미래 디자인이 다 비슷한가?"): 미래형 문구들이 같은 요소 목록(발광 천장 면·곡선·
+// 진주빛 베이지·곡선 소파)을 공유해서 AI가 매번 '큰 둥근 사각 발광 천장 + 베이지 + 곡선 소파'로 수렴 → 미래형 실내는 아래 10가지 시그니처 중 하나를 골라 맨 끝에 지정
+// (🎲 다른 컨셉 버튼이나 전체 리셋을 누르기 전까지는 같은 시그니처 유지 — 시간 제한 없음, 새로고침해도 유지)
+var FUTURE_INT_VARIANTS=[
+  'LUNAR WHITE: matte white and brushed-aluminium surfaces, a terrazzo floor, the ceiling lit by long parallel recessed light slots (no big central panel), a low modular pale-grey sofa, cool daylight mood with a few cobalt-blue accents',
+  'WARM TIMBER CAPSULE: a ceiling of curved light-oak ribs with soft light glowing between them, honey-oak floor, terracotta and rust accents, a bouclé sofa in oatmeal, warm amber mood',
+  'GRAPHITE LUXE: charcoal and graphite walls, smoked glass, bronze metal details, one thin floating light ring suspended in the ceiling, a deep forest-green velvet sofa, a dark polished stone floor, moody evening-luxury feel',
+  'PEARL CERAMIC: seamless off-white ceramic and glazed-tile surfaces, a large oval light dome recessed in the ceiling, sage-green and soft grey accents, sculptural ceramic side tables',
+  'MONOLITH STONE: travertine and limestone monolithic walls, a stepped ceiling with hidden light lines at each step, a sculptural stone coffee table, caramel and cognac leather seating',
+  'GLASS AND MIST: frosted and clear smart-glass partitions, a pale blue-grey palette, a ceiling of fabric-diffused light shaped in a gentle wave, a white modular sofa, very airy and quiet',
+  'PARAMETRIC WALNUT: a parametric wooden-slat ceiling flowing down into one wall, walnut and black metal, cognac leather lounge chairs, warm concealed lighting in the slat gaps',
+  'SPACE-AGE RETRO-FUTURE: cream and burnt-orange palette, round porthole-shaped niches and openings, a sunken conversation lounge, glossy white pod chairs, a circular coffered ceiling',
+  'NORDIC TECH: pale birch and light-grey felt, a flat ceiling with a precise grid of small round downlights, wool textiles, slate-blue accents, very calm and practical',
+  'MIDNIGHT CHROME: deep navy walls, polished chrome and mirror-steel accents, a ceiling of fine linear light strips crossing at angles, a sculptural ivory sofa, gallery-like contrast'
+];
+// 2026-10-25 사용자: "20분 시간 두지 말고 다른 컨셉 버튼 — 누르기 전까지는 같은 타입, 누르면 달라지고, 리셋 눌러도 달라지게"
+var FUTURE_INT_VARIANT_KO=['루나 화이트','우드 캡슐','그라파이트 럭스','펄 세라믹','모놀리스 스톤','글라스 & 미스트','파라메트릭 월넛','스페이스 에이지','노르딕 테크','미드나잇 크롬'];
+function _futureVariantIdx(){
+  if(window._futVarIdx==null){ var v=null; try{ v=localStorage.getItem('clover_fut_sig'); }catch(e){} v=(v==null)?NaN:parseInt(v,10);
+    window._futVarIdx=(v>=0 && v<FUTURE_INT_VARIANTS.length)?v:Math.floor(Math.random()*FUTURE_INT_VARIANTS.length); try{ localStorage.setItem('clover_fut_sig', String(window._futVarIdx)); }catch(e){} }
+  return window._futVarIdx;
+}
+function _futureVariantPick(){ return FUTURE_INT_VARIANTS[_futureVariantIdx()]; }
+function _futureVariantNew(silent){
+  var prev=_futureVariantIdx(), i, tries=0; do{ i=Math.floor(Math.random()*FUTURE_INT_VARIANTS.length); tries++; }while(i===prev && tries<20);
+  window._futVarIdx=i; try{ localStorage.setItem('clover_fut_sig', String(i)); }catch(e){}
+  if(!silent){ try{ _agedEnvToast('🎲 미래형 컨셉이 「'+FUTURE_INT_VARIANT_KO[i]+'」(으)로 바뀌었어요 — 다음 렌더링부터 적용돼요'); }catch(e){} try{ renderSB(); }catch(e){} }
+  return i;
+}
+function _futureVariantBtn(){
+  var b=document.createElement('button'); b.type='button'; b.className='fut-var-btn';
+  b.style.cssText='grid-column:1/-1;flex-basis:100%;width:100%;box-sizing:border-box;margin:4px 0 2px;padding:10px 12px;border-radius:10px;border:1.5px solid var(--ac);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:900;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px;text-align:left';
+  b.innerHTML='<span style="font-size:18px">🎲</span><span style="flex:1">미래형 다른 컨셉으로 바꾸기<br><span style="font-size:10.5px;font-weight:700;color:var(--t2)">지금: <b style="color:var(--t)">'+FUTURE_INT_VARIANT_KO[_futureVariantIdx()]+'</b> · 누르기 전까지 유지</span></span>';
+  b.title='미래형(🚀·🛸·🤖) 실내 디자인의 색·마감재·천장 조명·가구 스타일을 다른 컨셉으로 바꿔요';
+  b.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); _futureVariantNew(false); };
+  return b;
+}
+function _futureVariantFinal(){
+  return ' 🎨🎨 FUTURE INTERIOR SIGNATURE FOR THIS IMAGE (variety rule — keeps the chosen future direction, its technology and robots, but gives it its own distinct look): '+_futureVariantPick()+'. Adapt this palette, materials, ceiling-light idea and furniture to the chosen future direction (curved or straight-lined) and to this room\'s own shape and windows. Do NOT fall back to the usual default of a big rounded-rectangle glowing ceiling panel with beige walls, a beige curved sofa and a glowing floor edge — that look is overused; make this space clearly different in colour, material and ceiling design.';
+}
+function _futureDesignFinal(basePrompt, typeName){ var _fc=_futureDesignFinalCore(basePrompt, typeName)+_smartTechFinal(basePrompt, typeName)+_futureObjectsFinal(basePrompt, typeName)+_futureOverrideFinal(basePrompt, typeName); if(String(basePrompt||'').indexOf('🛸 2050 미래 디자인')!==-1 && String(basePrompt||'').indexOf('🤖🔥 2050 스마트 테크 강하게')===-1) _fc+=(_robotThisShot()?_robotClause(_isExteriorViewType(typeName), false):NO_ROBOT_CLAUSE); if(_fc && _fc.indexOf('[PLANT WALL RULE')===-1) _fc+=_futurePlantRule(typeName); var _r=_fc ? (_fc+_pastFutureFusion(basePrompt, typeName)) : _pastDesignFinal(basePrompt, typeName, false); if(_r) _r+=_styleNeigh(basePrompt, _isExteriorViewType(typeName)); if(_r && _fc && _isExteriorViewType(typeName)) _r+=FUTURE_EXT_SAME_HOUSE+FUTURE_EXT_ROBOT_LIMIT+FUTURE_EXT_NATURAL_TONE; if(_r && _fc && !_isExteriorViewType(typeName)) _r+=_futureVariantFinal(); return _r ? _r+FUTURE_ONE_PHOTO : _r; }
 function _futureDesignFinalCore(basePrompt, typeName){
   if(String(basePrompt||'').indexOf('🛸 2050 미래 디자인')!==-1){
     return _isExteriorViewType(typeName)
@@ -24461,6 +24512,11 @@ function _autoRoomRetryOne(idx){
 function sbRender(p){
   if(window._syncEngForCurrentPreset) window._syncEngForCurrentPreset(); // 2026-10-12: 기본 실사화=나노바나나 2.1 / 고급=Pro 항상 맞춤
   mkNote(p,'<strong style="color:#a78bfa">3D 렌더/도면 &#8594; 실사 이미지</strong><br>3D 렌더링·스케치·도면을 실사 사진 수준으로.');
+  // 2026-10-25 🔁 납품 후 수정 요청 — 납품본과 같은 느낌으로
+  (function(){ var mb=mk('button',''); mb.type='button'; mb.id='mt-open-btn';
+    mb.style.cssText='width:100%;margin:2px 0 10px;padding:11px 12px;border-radius:10px;border:1.5px solid var(--ac);background:var(--acg);color:var(--ac);font-size:12.5px;font-weight:900;cursor:pointer;font-family:inherit;text-align:left;display:flex;gap:8px;align-items:center';
+    mb.innerHTML='<span style="font-size:18px">🔁</span><span>납품 후 수정 요청 왔을 때<br><span style="font-size:10.5px;font-weight:700;color:var(--t2)">고친 모델링만 바뀌고 주변·색감은 납품본 그대로</span></span>';
+    mb.onclick=function(){ _mtOpen(null); }; p.appendChild(mb); })();
   mkEng(p,false);mkUB(p,'렌더/도면 업로드','main');mkRef(p,6,'실사 참고 이미지');
   (function(){ var _pn=dv(''); _pn.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.6;margin:-2px 0 8px;padding:7px 10px;border-radius:8px;background:var(--c2);border:1px solid var(--bd2)'; _pn.innerHTML='📋 <b>카카오톡·윈도우 캡처</b>(Win+Shift+S 등) 후 이 화면에서 <b>Ctrl+V</b> 하면 원본이 있을 땐 <b style="color:var(--ac)">실사 참고 이미지 빈칸</b>에 바로 들어가요.'; p.appendChild(_pn); })();
   // ⚠️ 요청 반영("3D 렌더탭에 브이월드/스마트서울맵 연결해서 투시도·조감도 배경 퀄리티 있게
@@ -25765,6 +25821,758 @@ function sbEdit(p){
   mkAspectRatio(p);
   mkPre(p,PS_EDIT);
 }
+// ══ 2026-10-25 요청("VizMaker보다 쉽게 — 3D 프로그램 화면 녹화나 휴대폰 현장 영상을 버튼 하나로 완성 영상으로") ══
+// v2 (같은 날 재요청): 클립 여러 개(최대 6) 연속 녹화·업로드 → 클립마다 자르기·속도 → 순서 정하기 → 룩 후보 뽑아서 고르기(전체 통일) →
+// 클립별 완성 이미지 → Seedance 2.5 reference-to-video로 클립별 변환 → 한 영상으로 합치기 → 업스케일(FHD·4K 납품)
+var V2V_EXT_STYLES=[['ext_white','모던 화이트 스타코','modern white smooth stucco facade with slim black window frames, clean lines, warm wood soffit accents'],['ext_concrete','노출콘크리트 + 우드','board-formed exposed concrete combined with warm vertical timber cladding and large frameless glazing'],['ext_brick','벽돌 + 블랙 프레임','warm grey or red-brown brick facade with black metal window frames and a black steel canopy'],['ext_metal','미니멀 메탈 패널','minimal dark grey metal panel cladding with crisp joints, recessed glazing and hidden LED lines'],['ext_stone','석재 + 유리','light limestone or sandstone panels with floor-to-ceiling glass and bronze frames'],['ext_wood','따뜻한 우드 클래딩','warm natural wood siding over a white plinth, dark window frames, green planting'],['ext_hanok','한옥 모던','modern hanok-inspired exterior: dark grey roof tiles or metal roof, white plaster walls, warm timber posts and lattice, stone base'],['ext_commercial','상가·근생 리모델링','modern commercial street-front remodel: large shopfront glazing, clean signage band without text, metal panel and stone cladding']];
+var G_V2V={clips:[], mode:'3d', look3d:'real', target:'int', extStyle:'ext_white', style:'staging_whitewood', text:'', res:'720p', busy:false, step:'', recording:false, cps:null, cands:[], master:null, merged:null, mergedUrl:null, edit:null};
+// 요금(크레딧/초)은 서버(fal-proxy V2V_ENGINES, 원가×환율×마진 2.5배)에서 받아오고, 아래 값은 서버 응답 전 표시용 기본값(서버와 동일)
+// 2026-10-25 요청("렌더 걸기 전에 날씨·시간대·계절 우리 만들어놓은 거 선택"): AI편집 환경 프리셋(골든아워·블루아워·야간·벚꽃·단풍·첫눈·안개…)과 같은 항목.
+// 원래 프리셋 문구는 이미지 한 장용으로 매우 길어서(장당 1만자+) 영상·실사화 프롬프트에 그대로 붙이면 핵심 지시가 묻힘 → 같은 효과를 짧게 요약해서 사용
+var V2V_ENV_T=[['','기본 (낮)',''],['golden_hour','골든아워','warm low golden-hour sunlight with long soft shadows and a glowing warm sky'],['blue_hour_dusk','블루아워·황혼','blue-hour dusk — deep blue twilight sky, facade and interior lights switched on and glowing warm, balanced exposure'],['day_to_night','야간 (외관)','night — dark night sky, all architectural, landscape and interior lights on, warm window glow, street lights, crisply lit facade'],['day_to_night_interior','실내 야간 무드 조명','evening interior mood — dark windows, warm indirect cove lighting, lamps and downlights on, cozy ambience'],['moonlit_night','달빛 밤','moonlit night — cool silver moonlight, soft blue night tones, warm lit windows']];
+var V2V_ENV_S=[['','기본',''],['spring','봄','spring — fresh light-green new leaves and a few flowering shrubs'],['cherry_blossom_full','벚꽃 만개','full cherry-blossom season — trees covered in pale pink blossoms, a few petals gently drifting'],['summer','여름','summer — lush deep-green foliage and bright strong sunlight'],['autumn','가을','autumn — trees in warm yellow, orange and red foliage with some fallen leaves'],['autumn_peak','단풍 절정','peak autumn foliage — vivid red and orange maple trees'],['winter','겨울','winter — bare trees, snow on roofs, ground and landscaping, cold crisp light']];
+var V2V_ENV_W=[['','맑음',''],['partly','구름 조금','a blue sky with soft scattered clouds'],['overcast','흐림','a soft overcast sky with diffuse, almost shadowless light'],['rain','비','a rainy day — gentle rain falling, wet reflective ground, overcast sky'],['first_snow_falling','눈 내림','light snow gently falling with a fresh thin layer of snow'],['fog_mist','안개','light fog and mist softly fading the distance']];
+function _v2vEnvPick(list, k){ return list.find(function(x){ return x[0]===(k||''); })||list[0]; }
+function _v2vEnvText(forVideo){
+  var t=_v2vEnvPick(V2V_ENV_T,G_V2V.envT), se=_v2vEnvPick(V2V_ENV_S,G_V2V.envS), w=_v2vEnvPick(V2V_ENV_W,G_V2V.envW), parts=[];
+  if(t[2]) parts.push('time of day: '+t[2]); if(se[2]) parts.push('season: '+se[2]); if(w[2]) parts.push('weather: '+w[2]);
+  var out='';
+  if(parts.length) out+=' ENVIRONMENT — apply exactly and '+(forVideo?'consistently through every frame of the shot':'naturally')+': '+parts.join('; ')+'. For interior spaces show the season and weather only through the windows and in the quality of the light. This environment overrides the lighting of the source image'+(forVideo?' but must match the reference images':'')+'.';
+  if(G_V2V.aerial) out+=forVideo
+    ? ' AERIAL / BIRD\'S-EYE DRONE SHOT over a wide site: the whole city layout, roads, blocks and every small distant building are rigid real 3D geometry — locked in place, keeping their exact shapes, windows and positions from frame to frame. Smooth, slow, steady drone motion.'
+    : ' This is an aerial bird\'s-eye view: render every small distant building, road, car and tree crisply and realistically with clean straight edges and correct scale.';
+  if(forVideo) out+=' TEMPORAL STABILITY: fine details — distant buildings, windows, railings, tiles, leaves, cars, road markings — must stay perfectly stable; no shimmering, crawling, boiling, flickering or morphing textures.';
+  return out;
+}
+function _v2vEnvTail(){
+  var t=_v2vEnvPick(V2V_ENV_T,G_V2V.envT), se=_v2vEnvPick(V2V_ENV_S,G_V2V.envS), w=_v2vEnvPick(V2V_ENV_W,G_V2V.envW), parts=[];
+  if(t[2]) parts.push('time of day: '+t[2]); if(se[2]) parts.push('season: '+se[2]); if(w[2]) parts.push('weather: '+w[2]);
+  if(!parts.length) return '';
+  return ' 🌤 FINAL OVERRIDE — ENVIRONMENT (user choice, takes priority over the light-state and daylight rules above): '+parts.join('; ')+'.'+(t[0]?' For this time of day the light fixtures, cove lights, facade and landscape lights may and should be switched on and glowing as described.':(w[0]?' It is DAYTIME — a black or empty background in a 3D capture is only an unrendered background, never night.':''))+' For interiors show the season and weather through the windows and in the light. Everything else stays exactly as locked above — geometry, materials, colours, furniture, camera.';
+}
+function _v2vEnvKey(){ return [G_V2V.envT||'',G_V2V.envS||'',G_V2V.envW||'',G_V2V.aerial?1:0].join(','); }
+var V2V_MAX_SEC=15, V2V_MAX_CLIPS=6, V2V_STILL_COST=30, V2V_UP_CR_PER_SEC=31, V2V_UP_MIN=60;
+function _v2vClipLen(c){ return Math.max(0.5, ((c.te||c.dur)-(c.ts||0))/(c.speed||1)); }
+function _v2vClipIn(c){ return Math.max(2, Math.min(V2V_MAX_SEC, Math.ceil(_v2vClipLen(c)-0.05))); } // 요금은 올림 초(서버와 동일)
+function _v2vClipOut(c){ return Math.max(4, Math.min(15, _v2vClipIn(c))); }
+function _v2vCost(){
+  var cp=G_V2V.cps||{cps480:51, cps720:109}, cps=G_V2V.res==='720p'?cp.cps720:cp.cps480, v=0, st=0;
+  G_V2V.clips.forEach(function(c){ v+=Math.round(cps*(_v2vClipIn(c)+_v2vClipOut(c))); if(!c.still) st+=V2V_STILL_COST; });
+  return {video:v, stills:st, total:v+st};
+}
+function _v2vTakeRates(d){ if(!d) return; if(d.cps480) G_V2V.cps={cps480:d.cps480, cps720:d.cps720}; if(d.upCps){ V2V_UP_CR_PER_SEC=d.upCps; V2V_UP_MIN=d.upMin||V2V_UP_MIN; } if(d.maskCps){ V2V_MASK_CPS=d.maskCps; V2V_MASK_MIN=d.maskMin||V2V_MASK_MIN; } }
+function _v2vMime(){
+  var c=['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm'];
+  for(var i=0;i<c.length;i++){ try{ if(window.MediaRecorder && MediaRecorder.isTypeSupported(c[i])) return c[i]; }catch(e){} }
+  return '';
+}
+function _v2vAddClip(blob, name, knownDur, opt){
+  opt=opt||{};
+  if(opt.replace==null && G_V2V.clips.length>=V2V_MAX_CLIPS){ alert('클립은 최대 '+V2V_MAX_CLIPS+'개까지예요. 필요 없는 클립을 지우고 추가해 주세요.'); return; }
+  var c={id:Date.now()+Math.random(), blob:blob, url:URL.createObjectURL(blob), name:name||('클립 '+(G_V2V.clips.length+1)), dur:knownDur||0, ts:0, te:0, speed:1, still:null, result:null, status:''};
+  c.idbKey='v2v_'+String(c.id).replace('.','_'); try{ idbSaveVideo(c.idbKey, blob).catch(function(){}); }catch(e){}
+  if(opt.replace!=null && G_V2V.clips[opt.replace]){ var old=G_V2V.clips[opt.replace]; c.name=(old.name||'')+' (교체)'; G_V2V.clips[opt.replace]=c; try{ if(old.url) URL.revokeObjectURL(old.url); if(old.idbKey) idbDeleteVideo(old.idbKey).catch(function(){}); }catch(e){} }
+  else if(opt.after!=null){ G_V2V.clips.splice(opt.after+1, 0, c); }
+  else G_V2V.clips.push(c);
+  G_V2V.edit=c.id; G_V2V.menu=null; _v2vSave();
+  var v=document.createElement('video'); v.preload='metadata'; v.muted=true; v.src=c.url;
+  v.onloadedmetadata=function(){ if(isFinite(v.duration) && v.duration>0) c.dur=v.duration; c.te=Math.min(c.dur, V2V_MAX_SEC); renderSB(); };
+  c.te=Math.min(c.dur||V2V_MAX_SEC, V2V_MAX_SEC);
+  renderSB();
+}
+function _v2vRecord(opt){
+  opt=(opt && typeof opt==='object' && !opt.type)?opt:{};
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){ alert('이 브라우저는 화면 녹화를 지원하지 않아요. PC의 크롬이나 엣지에서 사용해 주세요. (휴대폰은 촬영한 영상을 업로드해 주세요)'); return; }
+  if(opt.replace==null && G_V2V.clips.length>=V2V_MAX_CLIPS){ alert('클립은 최대 '+V2V_MAX_CLIPS+'개까지예요.'); return; }
+  navigator.mediaDevices.getDisplayMedia({video:{frameRate:30, width:{ideal:1920}, height:{ideal:1080}}, audio:false}).then(function(stream){
+    var mime=_v2vMime(), ch=[], t0=Date.now(), stopped=false, LIM=30;
+    var rec=new MediaRecorder(stream, mime?{mimeType:mime, videoBitsPerSecond:10000000}:undefined);
+    rec.ondataavailable=function(e){ if(e.data && e.data.size) ch.push(e.data); };
+    var bar=document.createElement('div'); bar.id='v2v-recbar';
+    bar.style.cssText='position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100001;background:#111;border:2px solid #ef4444;color:#fff;border-radius:999px;padding:8px 10px 8px 16px;display:flex;align-items:center;gap:12px;font-size:13px;font-weight:800;box-shadow:0 8px 30px rgba(0,0,0,.5);font-family:inherit';
+    bar.innerHTML='<span style="width:10px;height:10px;border-radius:50%;background:#ef4444;display:inline-block"></span><span id="v2v-rectime">클립 '+(G_V2V.clips.length+1)+' 녹화 중 0초</span><button type="button" style="border:none;background:#ef4444;color:#fff;font-weight:900;border-radius:999px;padding:7px 14px;cursor:pointer;font-family:inherit">■ 녹화 끝</button>';
+    document.body.appendChild(bar);
+    function stop(){ if(stopped) return; stopped=true; try{ rec.stop(); }catch(e){} stream.getTracks().forEach(function(t){ try{ t.stop(); }catch(e){} }); clearInterval(tm); bar.remove(); G_V2V.recording=false; }
+    rec.onstop=function(){ var sec=(Date.now()-t0)/1000; if(sec<2){ alert('녹화가 너무 짧아요(2초 이상).'); renderSB(); return; } _v2vAddClip(new Blob(ch,{type:(mime||'video/webm').split(';')[0]}), '녹화 '+(G_V2V.clips.length+1), sec, opt); try{ _agedEnvToast('🎥 클립 '+G_V2V.clips.length+'이 등록됐어요 — 길이·속도를 조절하거나 다음 공간을 이어서 녹화하세요'); }catch(e){} };
+    bar.querySelector('button').onclick=stop;
+    stream.getVideoTracks()[0].addEventListener('ended', stop);
+    var tm=setInterval(function(){ var s=Math.floor((Date.now()-t0)/1000); var el=gE('v2v-rectime'); if(el) el.textContent='클립 '+(G_V2V.clips.length+1)+' 녹화 중 '+s+'초 (최대 '+LIM+'초 · 나중에 잘라서 15초로)'; if(s>=LIM) stop(); }, 250);
+    G_V2V.recording=true; rec.start(500); renderSB();
+  }).catch(function(e){ if(e && e.name!=='NotAllowedError') alert('화면 녹화를 시작하지 못했어요: '+(e&&e.message||e)); });
+}
+function _v2vDropFiles(files){
+  var fl=Array.prototype.slice.call(files||[]).filter(function(f){ return /^video\//.test(f.type) || /\.(mp4|mov|webm|m4v)$/i.test(f.name); });
+  if(!fl.length){ alert('영상 파일(MP4·MOV·WEBM)을 올려주세요.'); return; }
+  fl.forEach(function(f){ _v2vAddClip(f, f.name); });
+}
+function _v2vPickFiles(){
+  var fi=document.createElement('input'); fi.type='file'; fi.accept='video/*'; fi.multiple=true; fi.style.display='none'; document.body.appendChild(fi);
+  fi.onchange=function(){ _v2vDropFiles(fi.files); fi.remove(); }; fi.click();
+}
+// 자르기·속도를 실제 영상으로 반영(브라우저에서 재생하며 다시 녹화) — 바뀐 게 없으면 원본 그대로
+function _v2vProcessClip(c, cb){
+  var te=c.te||c.dur, ts=c.ts||0, sp=c.speed||1;
+  if(ts<0.05 && Math.abs(te-c.dur)<0.1 && sp===1 && c.dur<=V2V_MAX_SEC+0.3){ cb(c.blob); return; }
+  var v=document.createElement('video'); v.src=c.url; v.muted=true; v.playsInline=true;
+  var stopAt=Math.min(te, ts+V2V_MAX_SEC*sp), mime=_v2vMime(), ch=[], rec=null, done=false;
+  function fin(b){ if(done) return; done=true; cb(b); }
+  v.onloadeddata=function(){ v.currentTime=ts; };
+  v.onseeked=function(){
+    if(rec) return;
+    var st=(v.captureStream||v.mozCaptureStream); if(!st){ fin(c.blob); return; }
+    st=st.call(v); rec=new MediaRecorder(st, mime?{mimeType:mime, videoBitsPerSecond:10000000}:undefined);
+    rec.ondataavailable=function(e){ if(e.data && e.data.size) ch.push(e.data); };
+    rec.onstop=function(){ fin(new Blob(ch,{type:(mime||'video/webm').split(';')[0]})); };
+    v.playbackRate=sp; rec.start(500); v.play();
+    var iv=setInterval(function(){ if(v.currentTime>=stopAt-0.03 || v.ended){ clearInterval(iv); try{ v.pause(); rec.stop(); }catch(e){} } }, 40);
+  };
+  v.onerror=function(){ fin(c.blob); };
+}
+function _v2vFrameAt(url, time, cb){
+  var v=document.createElement('video'); v.muted=true; v.playsInline=true; v.crossOrigin='anonymous'; v.src=url;
+  var done=false; function fin(x){ if(done) return; done=true; cb(x); }
+  v.onloadeddata=function(){ try{ v.currentTime=Math.min(Math.max(0,time), Math.max(0,(isFinite(v.duration)?v.duration:time+1)-0.2)); }catch(e){ fin(null); } };
+  v.onseeked=function(){ try{ var W=v.videoWidth, H=v.videoHeight, sc=Math.min(1, 2048/Math.max(W,H)); var c=document.createElement('canvas'); c.width=Math.round(W*sc); c.height=Math.round(H*sc); c.getContext('2d').drawImage(v,0,0,c.width,c.height); fin(c.toDataURL('image/jpeg',0.92)); }catch(e){ fin(null); } };
+  v.onerror=function(){ fin(null); }; setTimeout(function(){ fin(null); }, 15000);
+}
+function _v2vClipFrame(c, cb){ _v2vFrameAt(c.url, (c.ts||0)+Math.min(1, _v2vClipLen(c)*(c.speed||1)/3), cb); }
+function _v2vSitePrompt(){
+  if(G_V2V.target==='ext'){ var es=(V2V_EXT_STYLES.find(function(x){return x[0]===G_V2V.extStyle;})||V2V_EXT_STYLES[0]);
+    return 'REMODEL THE BUILDING EXTERIOR in this photo (a frame from a phone video of the real site) into a finished, photorealistic architectural photograph. New design: '+es[2]+'. Replace the facade cladding and all exterior finishes, window and door frames, entrance, balcony railings, roof finish, lighting and landscaping/paving with this new design. KEEP EXACTLY: the building massing, number of storeys, the positions and sizes of window and door openings, the plot, the road, neighbouring buildings and the camera. Real buildable materials, natural daylight, no people, no text.'+_v2vEnvText(false)+(G_V2V.text?(' User request: '+G_V2V.text):''); }
+  var q2=PS_EDIT.find(function(x){return x.k===G_V2V.style;})||PS_EDIT.find(function(x){return /^staging_/.test(x.k);});
+  var st=(typeof _STAGE_STYLES!=='undefined'?_STAGE_STYLES:[]).find(function(x){return x[0]===q2.k;});
+  return 'FULL INTERIOR REMODEL of the space in this photo (a frame from a phone video of the real site — it may be old, unfinished or empty) into a finished, photorealistic interior photograph. Replace ALL finishes with new ones: new flooring, new wall finishes, a new ceiling with designed lighting (cove/downlights), new doors and trim, and new kitchen or bathroom fixtures and cabinetry if visible — then furnish and style it. Design direction: '+(st?st[2]:q2.l)+'. KEEP EXACTLY: the room shape and size, structural walls and columns, window and door openings in the same positions and sizes, the ceiling height and the camera. Keep walkways and doorways clear. Real buildable materials, natural daylight from the existing windows, no people, no text.'+_v2vEnvText(false)+(G_V2V.text?(' User request: '+G_V2V.text):'');
+}
+// 프레임 1장 → 완성 이미지(3D: 실사화 프리셋 전체 파이프라인 / 현장: 리모델링). master(고른 룩)가 있으면 현장 모드는 그 디자인을 따라가게 함께 보냄
+function _v2vMakeStill(frame, withMaster, cb){
+  if(G_V2V.mode==='3d'){
+    var _lk=(G_V2V.look3d==='cg')?'hq_cg':'hq_real'; // 2026-10-25 요청: 3D 영상은 실사화(기본) / 고퀄리티 CG 선택
+    var q=PS_RENDER.find(function(x){return x.k===_lk;})||PS_RENDER.find(function(x){return x.k==='hq_real';});
+    procImgWithTask({img:frame, wf:'render', eng:'nano2', selK:q.k, prompt:q.pt+_v2vEnvText(false)+(G_V2V.text?(' User request: '+G_V2V.text):''), resolution:'2K', _envTail:_v2vEnvTail(), _envNoSky:!!(G_V2V.envT||G_V2V.envW)}, function(u){ cb(u); }, function(e){ console.warn('[영상→완성] 이미지 실패', e); cb(null); });
+    return;
+  }
+  if(!withMaster || !G_V2V.master){
+    procImgWithTask({img:frame, wf:'edit', eng:'nano2', selK:null, prompt:_v2vSitePrompt(), resolution:'2K'}, function(u){ cb(u); }, function(e){ console.warn('[영상→완성] 이미지 실패', e); cb(null); });
+    return;
+  }
+  uploadImgToFal(frame, function(fu){ uploadImgToFal(G_V2V.master, function(mu){
+    falRun('google/nano-banana-2.1/edit', {prompt:_v2vSitePrompt()+' DESIGN REFERENCE: the second attached image is the approved design of this same project — use exactly its materials, colours, finishes, furniture style and lighting mood for this space (adapted to this space\'s own shape and openings; do not copy its layout or camera).', image_urls:[fu, mu], num_images:1, resolution:'2K', output_format:'jpeg'},
+      function(d){ cb(falExtractImageUrl(d)||null); }, function(e){ console.warn(e); cb(null); }, {wf:'edit', resolution:'2K', eng:'nano2'});
+  }, function(){ cb(null); }); }, function(){ cb(null); });
+}
+function _v2vLookCands(){
+  if(G_V2V.busy) return; var c=G_V2V.clips[0]; if(!c){ alert('먼저 클립을 1개 이상 넣어주세요.'); return; }
+  if(!(_supa && _supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  var N=3, isAdmin=(G.supaRole==='admin'||G.plan==='admin');
+  if(!isAdmin && (G.cr||0)<N*V2V_STILL_COST){ alert('크레딧이 부족해요. ('+(N*V2V_STILL_COST)+'cr 필요)'); return; }
+  if(!confirm('첫 번째 클립 장면으로 완성 룩 후보 '+N+'장을 만들까요? = '+(N*V2V_STILL_COST)+'cr\n마음에 드는 1장을 고르면 모든 클립이 그 느낌으로 통일돼요.')) return;
+  G_V2V.busy=true; G_V2V.step='룩 후보 만드는 중… (1~2분)'; G_V2V.cands=[]; renderSB();
+  _v2vClipFrame(c, function(fr){
+    if(!fr){ G_V2V.busy=false; G_V2V.step=''; renderSB(); alert('영상 장면을 읽지 못했어요.'); return; }
+    var left=N; for(var i=0;i<N;i++) _v2vMakeStill(fr, false, function(u){ if(u) G_V2V.cands.push(u); if(--left===0){ G_V2V.busy=false; G_V2V.step=''; if(G_V2V.cands.length && !G_V2V.master){ G_V2V.master=G_V2V.cands[0]; c.still=G_V2V.cands[0]; } renderSB(); } else renderSB(); });
+  });
+}
+// ══ 2026-10-25 요청("영상 렌더 걸기 전에 업체가 궁금해할 수 있으니 165·465·600프레임처럼 3컷을 지정해서 먼저 이미지로 보기") ══
+// 전체 클립(자르기·속도 반영)을 하나의 타임라인으로 보고, 30fps 기준 프레임 번호 3개를 골라(무작위/직접) 지금 룩으로 완성 이미지를 먼저 렌더링
+var V2V_PV_FPS=30, V2V_PV_MAX=3, V2V_PV_KEEP=60; // 2026-10-25 요청: 한 번에 1~3컷씩, 원하는 만큼 반복 테스트(결과는 계속 쌓임)
+function _v2vPvN(){ var n=G_V2V.pvN||3; return Math.max(1, Math.min(V2V_PV_MAX, n|0)); }
+function _v2vTotalLen(){ var t=0; G_V2V.clips.forEach(function(c){ t+=Math.min(_v2vClipLen(c), V2V_MAX_SEC); }); return t; }
+function _v2vTotalFrames(){ return Math.max(1, Math.floor(_v2vTotalLen()*V2V_PV_FPS)); }
+function _v2vRandFrames(){
+  var N=_v2vTotalFrames(), out=[];
+  var K=_v2vPvN(); for(var i=0;i<K;i++){ var a=Math.floor(N*i/K), b=Math.floor(N*(i+1)/K)-1; out.push(Math.max(0, Math.min(N-1, a+Math.floor(Math.random()*Math.max(1,b-a))))); } // 구간을 3등분해서 고르게
+  return out;
+}
+// 전체 프레임 번호 → {clip, idx, srcTime}
+function _v2vLocate(f){
+  var T=f/V2V_PV_FPS, acc=0;
+  for(var i=0;i<G_V2V.clips.length;i++){ var c=G_V2V.clips[i], L=Math.min(_v2vClipLen(c), V2V_MAX_SEC);
+    if(T<acc+L || i===G_V2V.clips.length-1){ var loc=Math.max(0, Math.min(L-0.05, T-acc)); return {clip:c, idx:i, srcTime:(c.ts||0)+loc*(c.speed||1)}; }
+    acc+=L; }
+  return null;
+}
+function _v2vPreviewRun(){
+  if(G_V2V.busy) return;
+  if(!G_V2V.clips.length){ alert('먼저 클립을 넣어주세요.'); return; }
+  if(!(_supa && _supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  if(!G_V2V.pvF || !G_V2V.pvF.length) G_V2V.pvF=_v2vRandFrames();
+  var fr=G_V2V.pvF.slice(), cost=fr.length*V2V_STILL_COST, isAdmin=(G.supaRole==='admin'||G.plan==='admin');
+  var miss=fr.map(_v2vLocate).filter(function(L){ return !L || !L.clip.url; });
+  if(miss.length){ alert('원본 영상이 없는 클립이 있어서 그 장면을 읽을 수 없어요. 🔁 교체로 다시 녹화해 주세요.'); return; }
+  if(!isAdmin && (G.cr||0)<cost){ alert('크레딧이 부족해요. ('+cost+'cr 필요)'); return; }
+  if(!confirm('렌더 테스트 '+fr.length+'컷('+fr.map(function(f){ return f+'f'; }).join(' · ')+')을 지금 룩으로 먼저 이미지로 만들어볼까요? = '+cost+'cr\n'+(G_V2V.master?'고른 기준 룩으로 만들어요.':'⚠ 기준 룩이 없어서 컷마다 느낌이 조금 다를 수 있어요(② 룩 정하기 추천).'))) return;
+  G_V2V.busy=true; var _newPv=fr.map(function(f){ return {f:f, url:null, st:'run', mk:(G_V2V.master||'')+'|'+G_V2V.mode+'|'+G_V2V.look3d+'|'+_v2vEnvKey(), t:Date.now()}; });
+  G_V2V.pv=(G_V2V.pv||[]).filter(function(x){ return x.url; }).concat(_newPv).sort(function(a,b){ return a.f-b.f; }); if(G_V2V.pv.length>V2V_PV_KEEP) G_V2V.pv=G_V2V.pv.slice(-V2V_PV_KEEP); G_V2V.step='미리보기 '+fr.length+'컷 렌더링 중… ('+(fr.length>8?'3~5분':'1~2분')+')'; renderSB();
+  var left=fr.length;
+  function fin(){ if(--left>0){ renderSB(); return; } G_V2V.busy=false; G_V2V.step=''; renderSB(); _v2vSave(); try{ _agedEnvToast('👁 미리보기 컷이 나왔어요 — 크게 보고 업체에 먼저 보여주세요'); }catch(e){} }
+  var queue=_newPv.slice(), active=0, LIM=3; // 동시에 4장씩(서버·브라우저 과부하 방지)
+  var _fin0=fin; fin=function(){ active--; _fin0(); pump(); };
+  function pump(){ while(active<LIM && queue.length){ active++; one(queue.shift()); } }
+  function one(it){
+    var L=_v2vLocate(it.f);
+    _v2vFrameAt(L.clip.url, L.srcTime, function(img){
+      if(!img){ it.st='err'; fin(); return; }
+      it.src=img;
+      _v2vMakeStill(img, true, function(u){
+        if(!u){ it.st='err'; fin(); return; }
+        it.url=u; it.st='done';
+        try{ _uploadDataUrlIfNeeded(u, 'v2v', function(cu){ if(cu && cu.indexOf('data:')!==0) it.url=cu; _v2vSave(); }); }catch(e){}
+        fin();
+      });
+    });
+  }
+  pump();
+}
+function _v2vPreviewView(i){
+  var it=(G_V2V.pv||[])[i]; if(!it || !it.url) return;
+  var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;z-index:100003;background:rgba(0,0,0,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;gap:10px;font-family:inherit';
+  ov.innerHTML='<img src="'+_cEsc(it.url)+'" style="max-width:100%;max-height:82vh;border-radius:10px;object-fit:contain"><div style="display:flex;gap:8px;align-items:center;color:#fff;font-size:13px;font-weight:800">'+it.f+'프레임 ('+(it.f/V2V_PV_FPS).toFixed(1)+'초)'+(it.src?' <button type="button" data-cmp style="border:1px solid #555;background:#222;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-family:inherit">원본 보기</button>':'')+'<a href="'+_cEsc(it.url)+'" download="clover_preview_'+it.f+'.jpg" target="_blank" style="border:1px solid #555;background:#222;color:#fff;border-radius:8px;padding:6px 10px;text-decoration:none">⬇ 저장</a><button type="button" data-x style="border:none;background:var(--ac);color:#000;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:900;font-family:inherit">닫기</button></div>';
+  document.body.appendChild(ov);
+  var im=ov.querySelector('img'), showSrc=false;
+  ov.onclick=function(e){ if(e.target===ov || e.target.hasAttribute('data-x')) ov.remove(); };
+  var cb=ov.querySelector('[data-cmp]'); if(cb) cb.onclick=function(){ showSrc=!showSrc; im.src=showSrc?it.src:it.url; cb.textContent=showSrc?'완성 보기':'원본 보기'; };
+}
+function _v2vPrompt(){
+  var base = G_V2V.mode==='3d'
+    ? (G_V2V.look3d==='cg'
+      ? 'Use the guide video for camera movement, pacing and framing — follow its camera path and speed exactly. Transform the 3D modelling footage (SketchUp / 3ds Max / Revit / Blender / D5 viewport) into a PREMIUM ARCHITECTURAL CGI ANIMATION — the polished look of a top archviz studio film rendered in V-Ray / Corona (interior or building exterior, whatever the footage shows): crisp clean surfaces, perfectly straight edges, flawless materials exactly as in the reference images, balanced bright global illumination, soft clean shadows, gentle bloom on lights, a clean natural sky, rich but controlled colour. It should read as an immaculate high-end CG presentation film, NOT as a handheld real-camera documentary — no film grain, no lens dirt, no motion blur, no depth-of-field blur. Remove all modelling edge lines and viewport UI; placeholder trees, people and background boxes become refined CG ones. '
+      : 'Use the guide video for camera movement, pacing and framing — follow its camera path and speed exactly. Transform the 3D modelling footage (SketchUp / 3ds Max / Revit / Blender / D5 viewport) into a photorealistic, high-end architectural film (interior or building exterior, whatever the footage shows): every surface becomes the real finished material shown in the reference images, with realistic global illumination, soft natural daylight, warm lamp glow and clean reflections. Remove all modelling edge lines and viewport UI; placeholder trees, people and background boxes become real ones. ')
+    : (G_V2V.target==='ext'
+      ? 'Use the guide video for camera movement, pacing and path — follow its handheld camera path, speed and framing exactly. Transform this real phone video of an existing building into a photorealistic film of the same building after a complete exterior remodel, in the design of the reference images: new facade cladding, window frames, entrance, roof finish, lighting and landscaping. '
+      : 'Use the guide video for camera movement, pacing and framing — follow its handheld camera path, speed and framing exactly. Transform this real phone walkthrough of an existing, old, unfinished or empty space into a photorealistic film of the same space after a complete interior remodel, in the design of the reference images: all-new flooring, wall finishes, ceilings with lighting, doors, fixtures, furniture and styling. ');
+  return base+(G_V2V.target==='ext' && G_V2V.mode!=='3d' ? 'Keep the building massing, storeys, window and door openings, plot, road, neighbouring buildings and sky direction exactly as in the guide video.' : 'Keep the layout, walls, ceiling heights, windows, doorways and every architectural opening exactly where they are in the guide video.')+' The FIRST reference image shows how this exact shot must look when finished; any further reference image is either the approved overall look of the project or an approved finished still of a moment later in this same shot (colour grading, lighting mood, materials, furniture) — when the camera reaches that moment it must look like that still; keep everything consistent. Smooth, stable and consistent over time — no flicker, no morphing walls, no objects popping in or out, no people, no text or watermarks, no camera shake beyond the original movement.'+_v2vEnvText(true)+(G_V2V.text?(' Additional request: '+G_V2V.text):'');
+}
+function _v2vRunAll(){
+  if(G_V2V.busy) return;
+  if(!G_V2V.clips.length){ alert('먼저 클립을 녹화하거나 올려주세요.'); return; }
+  if(!(_supa && _supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  var isAdmin=(G.supaRole==='admin'||G.plan==='admin');
+  _falProxyCall('v2v-ready', {}, function(d){
+    _v2vTakeRates(d);
+    var todo=G_V2V.clips.filter(function(c){ return !c.result; });
+    if(!todo.length){ alert('모든 클립이 이미 변환됐어요. 다시 만들 클립은 ↻ 버튼을 눌러주세요.'); return; }
+    var noSrc=todo.filter(function(c){ return !c.blob; }); if(noSrc.length){ alert('원본 영상이 없는 클립이 있어요('+noSrc.map(function(c){return G_V2V.clips.indexOf(c)+1;}).join(', ')+'번). 🔁 교체로 다시 녹화하거나 지워 주세요.'); return; }
+    var cost=_v2vCost(); var cp=G_V2V.cps, cps=G_V2V.res==='720p'?cp.cps720:cp.cps480, vc=0, sc=0;
+    todo.forEach(function(c){ vc+=Math.round(cps*(_v2vClipIn(c)+_v2vClipOut(c))); if(!c.still) sc+=V2V_STILL_COST; });
+    if(!isAdmin && (G.cr||0)<vc+sc){ alert('크레딧이 부족해요. (필요: 약 '+(vc+sc)+'cr)'); return; }
+    if(!confirm('클립 '+todo.length+'개를 완성 영상으로 변환할까요?\n\n'+(sc?('· 클립별 완성 이미지 자동 생성: '+sc+'cr\n'):'')+'· 영상 변환 ('+G_V2V.res+'): '+vc+'cr\n= 총 약 '+(vc+sc)+'cr\n\n'+(G_V2V.master?'고른 룩으로 모든 클립을 통일해요.':'⚠ 룩을 고르지 않아서 클립마다 느낌이 조금 다를 수 있어요(② 룩 정하기 추천).')+'\n클립당 2~6분, 결과가 나와야 차감돼요(실패 시 자동 환불).')) return;
+    G_V2V.busy=true; renderSB();
+    var idx=0;
+    function next(){
+      if(idx>=todo.length){ G_V2V.busy=false; G_V2V.step=''; renderSB(); try{ _agedEnvToast('✅ 클립 변환이 끝났어요 — "한 영상으로 합치기"를 누르세요'); }catch(e){} return; }
+      var c=todo[idx], n=G_V2V.clips.indexOf(c)+1;
+      function err(m){ c.status='err'; c.err=m; idx++; renderSB(); next(); }
+      if(!c.blob){ err('원본 영상이 이 기기에 없어요 — 🔁 교체로 다시 녹화해 주세요'); return; }
+      G_V2V.step='클립 '+n+' — 영상 준비 중…'; c.status='run'; renderSB();
+      _v2vProcessClip(c, function(blob){
+        c.proc=blob;
+        function afterStill(){
+          if(!c.still){ err('완성 이미지를 만들지 못했어요'); return; }
+          G_V2V.step='클립 '+n+' — 업로드 중…'; renderSB();
+          var ext=/mp4/.test(blob.type)?'mp4':(/quicktime/.test(blob.type)?'mov':'webm');
+          _doUploadFile(new File([blob], 'clover_v2v_'+Date.now()+'.'+ext, {type:blob.type||'video/webm'}), function(vu){
+            var refs=[c.still]; if(G_V2V.master && G_V2V.master!==c.still) refs.push(G_V2V.master);
+            // 2026-10-25: 렌더 전 미리보기로 확인한 컷(같은 룩)이 이 클립에 있으면 참고 이미지로 같이 보내서 영상이 미리보기와 최대한 같게
+            var _mk=(G_V2V.master||'')+'|'+G_V2V.mode+'|'+G_V2V.look3d+'|'+_v2vEnvKey();
+            (G_V2V.pv||[]).forEach(function(it){ if(refs.length>=5 || !it.url || it.mk!==_mk) return; var L=_v2vLocate(it.f); if(L && L.clip===c && refs.indexOf(it.url)===-1) refs.push(it.url); });
+            var ru=[], left=refs.length;
+            refs.forEach(function(r,i){ uploadImgToFal(r, function(u){ ru[i]=u; if(--left===0) go(vu, ru.filter(Boolean)); }, function(){ if(--left===0) go(vu, ru.filter(Boolean)); }); });
+          }, function(e){ err('영상 업로드 실패'); });
+        }
+        function go(vu, ru){
+          if(!ru.length){ err('이미지 업로드 실패'); return; }
+          G_V2V.step='클립 '+n+'/'+G_V2V.clips.length+' — AI가 영상 변환 중… (2~6분, 화면을 닫아도 진행돼요)'; renderSB();
+          falRun('bytedance/seedance-2.5/reference-to-video', {prompt:_v2vPrompt(), video_urls:[vu], image_urls:ru, duration:String(_v2vClipOut(c)), resolution:G_V2V.res, generate_audio:false},
+            function(res){
+              var url=falExtractVideoUrl(res); if(!url){ err('결과 영상 주소가 없어요'); return; }
+              c.result=url; c.status='done';
+              if(!G.HIST.video) G.HIST.video=[];
+              var item={id:Date.now()+Math.random(), orig:c.still, result:url, tags:['영상→완성영상','클립 '+n,G_V2V.res], ai:'', preview:false, cx:50, fav:false, wf:'video'};
+              G.HIST.video.unshift(item); try{ saveHistToStorage(); }catch(e){}
+              try{ fetch(url).then(function(r){return r.blob();}).then(function(b){ _shortsCloudSave(item, b, 'mp4', null, 'video', function(pu){ c.resultCloud=pu; _v2vSave(); }); }); }catch(e){}
+              try{ if(G.wf==='video') renderMain('video'); }catch(e){}
+              _v2vSave(); idx++; renderSB(); next();
+            }, function(e){ err(e); }, {wf:'video', vidEng:'seedance25v2v', vdur:_v2vClipOut(c), vin:_v2vClipIn(c), vres:G_V2V.res});
+        }
+        if(c.still){ afterStill(); return; }
+        G_V2V.step='클립 '+n+' — 완성 이미지 만드는 중…'; renderSB();
+        _v2vClipFrame(c, function(fr){ if(!fr){ err('영상 장면을 읽지 못했어요'); return; } _v2vMakeStill(fr, true, function(u){ c.still=u; afterStill(); }); });
+      });
+    }
+    next();
+  }, function(){
+    if(isAdmin) alert('서버(fal-proxy)가 아직 이 기능 버전이 아니에요. 새 fal-proxy 코드를 Supabase에 배포한 뒤 사용해 주세요.');
+    else alert('이 기능은 곧 열려요. 조금만 기다려 주세요!');
+  });
+}
+// 클립 결과들을 순서대로 한 영상으로 합치기(무료, 브라우저에서 재생하며 녹화 — 영상 길이만큼 걸림)
+function _v2vMerge(){
+  var list=G_V2V.clips.filter(function(c){ return c.result; });
+  if(!list.length){ alert('변환된 클립이 아직 없어요.'); return; }
+  G_V2V.busy=true; G_V2V.step='한 영상으로 합치는 중… (영상 길이만큼 걸려요 — 이 탭을 띄워두세요)'; renderSB();
+  var blobs=[], k=0;
+  (function load(){ if(k>=list.length){ build(); return; } var it=list[k]; function viaFal(){ fetch(it.result).then(function(r){ if(!r.ok) throw 0; return r.blob(); }).then(function(b){ blobs.push(b); k++; load(); }).catch(function(){ k++; load(); }); } if(it.resultCloud && it.resultCloud!==it.result){ fetch(it.resultCloud).then(function(r){ if(!r.ok) throw 0; return r.blob(); }).then(function(b){ blobs.push(b); k++; load(); }).catch(viaFal); } else viaFal(); })();
+  function build(){
+    if(!blobs.length){ G_V2V.busy=false; G_V2V.step=''; renderSB(); alert('결과 영상을 불러오지 못했어요.'); return; }
+    var cv=document.createElement('canvas'), ctx=cv.getContext('2d'), mime=_v2vMime(), ch=[], rec=null, i=0, v=document.createElement('video'); v.muted=true; v.playsInline=true;
+    function playNext(){
+      if(i>=blobs.length){ try{ rec.stop(); }catch(e){} return; }
+      v.src=URL.createObjectURL(blobs[i]);
+      v.onloadedmetadata=function(){ if(!rec){ cv.width=v.videoWidth||1280; cv.height=v.videoHeight||720; rec=new MediaRecorder(cv.captureStream(30), mime?{mimeType:mime, videoBitsPerSecond:12000000}:undefined); rec.ondataavailable=function(e){ if(e.data && e.data.size) ch.push(e.data); }; rec.onstop=done; rec.start(500); } v.play(); };
+      v.onended=function(){ i++; playNext(); };
+    }
+    (function draw(){ if(v.readyState>=2){ try{ var vw=v.videoWidth||cv.width, vh=v.videoHeight||cv.height, sc=Math.min(cv.width/vw, cv.height/vh), dw=vw*sc, dh=vh*sc; if(Math.abs(dw-cv.width)>2||Math.abs(dh-cv.height)>2){ ctx.fillStyle='#000'; ctx.fillRect(0,0,cv.width,cv.height); } ctx.drawImage(v,(cv.width-dw)/2,(cv.height-dh)/2,dw,dh); }catch(e){} } if(!rec || rec.state!=='inactive') requestAnimationFrame(draw); })();
+    function done(){
+      var b=new Blob(ch,{type:(mime||'video/webm').split(';')[0]});
+      try{ if(G_V2V.mergedUrl) URL.revokeObjectURL(G_V2V.mergedUrl); }catch(e){}
+      G_V2V.merged=b; G_V2V.mergedUrl=URL.createObjectURL(b); G_V2V.busy=false; G_V2V.step=''; renderSB();
+      if(!G.HIST.video) G.HIST.video=[];
+      var item={id:Date.now()+Math.random(), orig:G_V2V.master||null, result:G_V2V.mergedUrl, tags:['영상→완성영상','합본 '+list.length+'클립'], ai:'', preview:false, cx:50, fav:false, wf:'video'};
+      G.HIST.video.unshift(item); try{ saveHistToStorage(); }catch(e){}
+      G_V2V.mergedCloud=null; var _mu=G_V2V.mergedUrl;
+      _shortsCloudSave(item, b, /mp4/.test(b.type)?'mp4':'webm', null, 'video', function(pu){ if(G_V2V.mergedUrl===_mu){ G_V2V.mergedCloud=pu; _v2vSave(); } });
+      try{ if(G.wf==='video') renderMain('video'); }catch(e){}
+    }
+    playNext();
+  }
+}
+// 납품용 업스케일(Topaz Video): 720p → 약 1440p(2배, FHD 이상) / 4K(3배)
+function _v2vUpscale(factor){
+  if(!G_V2V.merged && !G_V2V.mergedCloud){ alert('먼저 "한 영상으로 합치기"를 해주세요.'); return; }
+  if(!(_supa && _supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  _falProxyCall('v2v-ready', {}, function(d){ _v2vTakeRates(d); _v2vUpscaleGo(factor); }, function(){ alert('서버(fal-proxy)가 아직 이 기능 버전이 아니에요.'); });
+}
+function _v2vUpscaleGo(factor){
+  var secs=0; G_V2V.clips.forEach(function(c){ if(c.result) secs+=_v2vClipOut(c); });
+  var cost=Math.max(V2V_UP_MIN, Math.ceil(secs*V2V_UP_CR_PER_SEC)), isAdmin=(G.supaRole==='admin'||G.plan==='admin');
+  if(!isAdmin && (G.cr||0)<cost){ alert('크레딧이 부족해요. ('+cost+'cr 필요)'); return; }
+  if(!confirm((factor>=3?'4K(약 3840px)':'FHD 이상(약 2560px)')+'로 업스케일할까요? = '+cost+'cr (Topaz Video AI)')) return;
+  G_V2V.busy=true; G_V2V.step='업스케일 중… (몇 분 걸려요)'; renderSB();
+  var b=G_V2V.merged;
+  function _upSrc(ok, bad){ if(!b){ ok(G_V2V.mergedCloud); return; } var ext=/mp4/.test(b.type)?'mp4':'webm'; _doUploadFile(new File([b],'clover_v2v_merged.'+ext,{type:b.type}), ok, bad); }
+  _upSrc(function(u){
+    falRun('fal-ai/topaz/upscale/video', {video_url:u, upscale_factor:factor}, function(res){
+      var url=falExtractVideoUrl(res); G_V2V.busy=false; G_V2V.step=''; 
+      if(!url){ renderSB(); alert('업스케일 결과가 없어요.'); return; }
+      G_V2V.upUrl=url; if(!G.HIST.video) G.HIST.video=[];
+      var item={id:Date.now()+Math.random(), orig:G_V2V.master||null, result:url, tags:['영상→완성영상','업스케일 '+(factor>=3?'4K':'FHD+')], ai:'', preview:false, cx:50, fav:false, wf:'video'};
+      G.HIST.video.unshift(item); try{ saveHistToStorage(); }catch(e){}
+      try{ fetch(url).then(function(r){return r.blob();}).then(function(bb){ _shortsCloudSave(item, bb, 'mp4', null, 'video'); }); }catch(e){}
+      renderSB(); try{ if(G.wf==='video') renderMain('video'); }catch(e){}
+    }, function(e){ G_V2V.busy=false; G_V2V.step=''; renderSB(); alert('업스케일 실패: '+e+'\n(크레딧은 자동 환불돼요)'); }, {wf:'upscale', upscaleEng:'topaz_video', vdur:secs});
+  }, function(e){ G_V2V.busy=false; G_V2V.step=''; renderSB(); alert('업로드 실패: '+e); });
+}
+// ══ 2026-10-25 요청("애프터이펙트처럼 영상 속 오브제를 부분 채널 따서 색·밝기 수정") ══
+// 완성 클립에서 물체를 클릭(또는 이름 입력) → fal-ai/sam-3/video-rle가 전 프레임 마스크 추적 →
+// 마스크 안쪽만 밝기·대비·채도·색상·색온도 보정(브라우저 캔버스, 무료) → 미리보기 → 영상으로 저장.
+// 여러 물체는 한 번 적용한 결과 위에 다시 추적해서 차례로 보정. 원본으로 되돌리기 가능.
+var V2V_MASK_CPS=4, V2V_MASK_MIN=15, V2V_GRADE_FPS=24;
+function _v2vMaskCost(sec){ return Math.max(V2V_MASK_MIN, Math.ceil((sec||10)*V2V_MASK_CPS)); }
+// ── RLE 해독: COCO 압축 문자열 / COCO 숫자 counts / "시작 길이" 쌍 / {size,counts} JSON 모두 처리 ──
+function _v2vCocoStr(s){
+  var cnts=[], p=0, m=0;
+  while(p<s.length){
+    var x=0, k=0, more=1, c=0;
+    while(more){ c=s.charCodeAt(p)-48; x|=(c&0x1f)<<(5*k); more=c&0x20; p++; k++; if(!more && (c&0x10)) x|=(-1<<(5*k)); }
+    if(m>2) x+=cnts[m-2];
+    cnts.push(x); m++;
+  }
+  return cnts;
+}
+// 한 프레임 항목 → {kind:'counts'|'pairs', nums:[], h, w}
+function _v2vRleParse(item, W, H){
+  if(item==null || item==='') return null;
+  var h=H, w=W, cnt=item;
+  if(typeof item==='string' && /^\s*[\[{]/.test(item)){ try{ cnt=JSON.parse(item); }catch(e){} }
+  if(cnt && typeof cnt==='object' && !Array.isArray(cnt)){
+    if(cnt.size && cnt.size.length===2){ h=+cnt.size[0]; w=+cnt.size[1]; }
+    cnt=cnt.counts!=null?cnt.counts:(cnt.rle!=null?cnt.rle:null);
+    if(cnt==null) return null;
+  }
+  if(Array.isArray(cnt)) return {kind:'counts', nums:cnt.map(Number), h:h, w:w, coco:true};
+  cnt=String(cnt).trim(); if(!cnt) return {kind:'counts', nums:[h*w], h:h, w:w, coco:true};
+  if(/^[0-9\s,]+$/.test(cnt)){
+    var nums=cnt.split(/[\s,]+/).filter(Boolean).map(Number), sum=0; for(var i=0;i<nums.length;i++) sum+=nums[i];
+    if(Math.abs(sum-h*w)<=1) return {kind:'counts', nums:nums, h:h, w:w, coco:false};
+    return {kind:'pairs', nums:nums, h:h, w:w};
+  }
+  return {kind:'counts', nums:_v2vCocoStr(cnt), h:h, w:w, coco:true};
+}
+// order: 'col'(위→아래 먼저, COCO 기본) | 'row'(왼→오 먼저)
+function _v2vRleRuns(pr){ // → [[start,len],...] 0-based
+  var runs=[];
+  if(!pr) return runs;
+  if(pr.kind==='counts'){ var pos=0; for(var i=0;i<pr.nums.length;i++){ var n=pr.nums[i]; if(i%2===1 && n>0) runs.push([pos,n]); pos+=n; } }
+  else { for(var j=0;j+1<pr.nums.length;j+=2){ runs.push([pr.nums[j]-1, pr.nums[j+1]]); } }
+  return runs;
+}
+function _v2vPixInMask(pr, order, x, y){ // x,y: 마스크 해상도 기준
+  var runs=_v2vRleRuns(pr), idx=(order==='col')?(x*pr.h+y):(y*pr.w+x);
+  for(var i=0;i<runs.length;i++){ if(idx>=runs[i][0] && idx<runs[i][0]+runs[i][1]) return true; }
+  return false;
+}
+function _v2vMaskToCanvas(pr, order, cv){
+  if(cv.width!==pr.w || cv.height!==pr.h){ cv.width=pr.w; cv.height=pr.h; }
+  var ctx=cv.getContext('2d'), id=ctx.createImageData(pr.w, pr.h), d=id.data, runs=_v2vRleRuns(pr), H=pr.h, W=pr.w, tot=W*H;
+  for(var r=0;r<runs.length;r++){
+    var s=runs[r][0], e=Math.min(tot, s+runs[r][1]);
+    if(order==='col'){ for(var i=s;i<e;i++){ var o=((i%H)*W+((i/H)|0))*4; d[o]=255; d[o+1]=255; d[o+2]=255; d[o+3]=255; } }
+    else { for(var k=s*4, ke=e*4; k<ke; k+=4){ d[k]=255; d[k+1]=255; d[k+2]=255; d[k+3]=255; } }
+  }
+  ctx.putImageData(id,0,0);
+}
+// fal 결과 → 프레임별 항목 배열(파일 URL 모드면 받아서 읽음)
+function _v2vRleList(d, cb){
+  var r=d && (d.rle!=null?d.rle:(d.masks||d.rles));
+  function norm(x){ if(Array.isArray(x)) return x; if(x && Array.isArray(x.rle)) return x.rle; if(x && Array.isArray(x.frames)) return x.frames; if(x && Array.isArray(x.masks)) return x.masks; return null; }
+  if(r && typeof r==='object' && !Array.isArray(r) && r.url){
+    fetch(r.url).then(function(x){ return x.json(); }).then(function(j){ cb(norm(j)); }).catch(function(){ cb(null); });
+    return;
+  }
+  if(typeof r==='string' && /^https?:/.test(r)){ fetch(r).then(function(x){ return x.json(); }).then(function(j){ cb(norm(j)); }).catch(function(){ cb(null); }); return; }
+  cb(norm(r));
+}
+// 보정 필터를 프레임 하나에 적용해서 out 캔버스에 그림
+function _v2vGradeDraw(G2, v, out, showMask){
+  var W=out.width, H=out.height, ctx=out.getContext('2d'), a=G2.adj;
+  ctx.globalCompositeOperation='source-over'; ctx.filter='none'; ctx.drawImage(v,0,0,W,H);
+  if(!G2.masks) return;
+  var N=G2.masks.length, t=v.currentTime||0, dur=G2.dur||v.duration||1;
+  var fi=Math.max(0, Math.min(N-1, Math.floor(t/dur*N)));
+  if(G2._mfi!==fi){ G2._mfi=fi; var pr=G2.masks[fi]; G2._mEmpty=!pr; if(pr){ try{ _v2vMaskToCanvas(pr, G2.order, G2.maskCv); }catch(e){ G2._mEmpty=true; } } }
+  if(G2._mEmpty) return;
+  var L=G2.layer; if(L.width!==W||L.height!==H){ L.width=W; L.height=H; }
+  var lc=L.getContext('2d'); lc.globalCompositeOperation='source-over'; lc.clearRect(0,0,W,H);
+  if(showMask){ lc.filter='none'; lc.fillStyle='rgba(16,220,160,.55)'; lc.fillRect(0,0,W,H); }
+  else {
+    lc.filter='brightness('+(1+a.br/100)+') contrast('+(1+a.ct/100)+') saturate('+(1+a.sat/100)+') hue-rotate('+a.hue+'deg)';
+    lc.drawImage(v,0,0,W,H); lc.filter='none';
+    if(a.temp){ lc.globalCompositeOperation='soft-light'; lc.fillStyle=a.temp>0?'rgba(255,150,40,'+(Math.abs(a.temp)/100*0.9)+')':'rgba(40,140,255,'+(Math.abs(a.temp)/100*0.9)+')'; lc.fillRect(0,0,W,H); }
+  }
+  lc.globalCompositeOperation='destination-in'; lc.filter=a.fe>0?('blur('+a.fe+'px)'):'none';
+  lc.drawImage(G2.maskCv,0,0,W,H);
+  lc.filter='none'; lc.globalCompositeOperation='source-over';
+  ctx.drawImage(L,0,0);
+}
+function _v2vGradeOpen(ci){
+  var c=G_V2V.clips[ci]; if(!c || !c.result){ alert('완성된 클립에서만 색보정할 수 있어요.'); return; }
+  if(G_V2V.busy) return;
+  var G2={ci:ci, clip:c, pts:[], text:'', masks:null, order:'col', adj:{br:0,ct:0,sat:0,hue:0,temp:0,fe:4}, maskCv:document.createElement('canvas'), layer:document.createElement('canvas'), busy:false, showMask:false};
+  window._v2vG2=G2;
+  var ov=document.createElement('div'); ov.id='v2v-grade';
+  ov.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:14px;font-family:inherit';
+  ov.innerHTML='<div style="background:var(--c1,#111);border:1px solid var(--bd2);border-radius:14px;width:min(1100px,100%);max-height:100%;overflow:auto;padding:14px;color:var(--t)">'+
+    '<div style="display:flex;align-items:center;margin-bottom:8px"><div style="font-size:15px;font-weight:900">🎨 부분 색보정 — 클립 '+(ci+1)+'</div><button type="button" id="g2-x" style="margin-left:auto;border:none;background:var(--c2);color:var(--t);border-radius:8px;padding:6px 12px;cursor:pointer;font-family:inherit">닫기 ✕</button></div>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap">'+
+      '<div style="flex:1 1 560px;min-width:0"><div style="position:relative;background:#000;border-radius:10px;overflow:hidden"><canvas id="g2-cv" style="width:100%;display:block;cursor:crosshair"></canvas><div id="g2-load" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px">영상 불러오는 중…</div></div>'+
+        '<div style="display:flex;gap:6px;align-items:center;margin-top:6px"><button type="button" id="g2-play" style="border:1px solid var(--bd2);background:var(--c2);color:var(--t);border-radius:7px;padding:6px 10px;cursor:pointer;font-family:inherit">▶</button><input type="range" id="g2-t" min="0" max="100" step="0.1" value="0" style="flex:1"><span id="g2-tl" style="font-size:11px;color:var(--m2);width:44px;text-align:right">0.0초</span></div>'+
+        '<div style="font-size:10.5px;color:var(--m2);margin-top:4px;line-height:1.5">👆 바꿀 물체를 <b>클릭</b>(여러 번 찍으면 더 정확) · <b>Shift+클릭</b>은 “여기는 빼기” · 물체가 처음 나오는 장면에서 찍어주세요.</div></div>'+
+      '<div style="flex:0 1 300px;min-width:240px;font-size:12px">'+
+        '<div style="font-weight:900;margin-bottom:4px">① 물체 고르기</div>'+
+        '<div id="g2-pts" style="font-size:11px;color:var(--t2);margin-bottom:6px">찍은 점 0개</div>'+
+        '<input id="g2-text" placeholder="또는 이름으로 (영어 추천): sofa, wall, floor" style="width:100%;box-sizing:border-box;padding:7px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:11.5px;margin-bottom:6px">'+
+        '<div style="display:flex;gap:5px;margin-bottom:6px"><button type="button" id="g2-clr" style="flex:1;padding:7px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);cursor:pointer;font-family:inherit;font-size:11px">점 지우기</button><button type="button" id="g2-track" style="flex:2;padding:7px;border-radius:7px;border:none;background:var(--ac);color:#000;font-weight:900;cursor:pointer;font-family:inherit;font-size:11.5px">🎯 전체 영상 추적</button></div>'+
+        '<div id="g2-st" style="font-size:11px;color:var(--ac);min-height:16px;margin-bottom:8px"></div>'+
+        '<div style="font-weight:900;margin:6px 0 4px">② 보정 <label style="font-weight:400;font-size:10.5px;color:var(--m2);margin-left:6px"><input type="checkbox" id="g2-sm"> 마스크 보기</label></div>'+
+        [['br','밝기',-60,60],['ct','대비',-50,50],['sat','채도',-100,100],['hue','색상',-180,180],['temp','색온도 (차갑게↔따뜻하게)',-100,100],['fe','경계 부드럽게',0,20]].map(function(s){ return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--t2)"><span>'+s[1]+'</span><b id="g2-v-'+s[0]+'">'+G2.adj[s[0]]+'</b></div><input type="range" data-g2="'+s[0]+'" min="'+s[2]+'" max="'+s[3]+'" step="1" value="'+G2.adj[s[0]]+'" style="width:100%;margin-bottom:4px">'; }).join('')+
+        '<button type="button" id="g2-reset" style="width:100%;padding:6px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);cursor:pointer;font-family:inherit;font-size:11px;margin-bottom:8px">보정값 초기화</button>'+
+        '<button type="button" id="g2-apply" style="width:100%;padding:11px;border-radius:9px;border:none;background:var(--ac);color:#000;font-weight:900;cursor:pointer;font-family:inherit;font-size:13px">✓ 적용해서 클립 저장 (무료)</button>'+
+        (c.resultOrig?'<button type="button" id="g2-orig" style="width:100%;margin-top:6px;padding:7px;border-radius:8px;border:1px solid #f87171;background:transparent;color:#f87171;cursor:pointer;font-family:inherit;font-size:11px">↩ 색보정 전 원본으로 되돌리기</button>':'')+
+        '<div style="font-size:10.5px;color:var(--m2);margin-top:8px;line-height:1.55">• 추적은 영상 길이에 따라 약 '+V2V_MASK_MIN+'cr~ (초당 '+V2V_MASK_CPS+'cr)<br>• 보정·저장은 무료 — 다른 물체도 저장 후 다시 추적해서 차례로 바꿀 수 있어요<br>• 색·밝기 변경용이에요. 재질 자체(원목→가죽)를 바꾸려면 룩/요청을 바꿔 ↻ 다시 만들기</div>'+
+      '</div></div></div>';
+  document.body.appendChild(ov);
+  function q(s){ return ov.querySelector(s); }
+  var cv=q('#g2-cv'), v=document.createElement('video'); v.muted=true; v.playsInline=true; v.loop=false; G2.v=v; G2.cv=cv;
+  var raf=null, closed=false;
+  function close(){ closed=true; try{ v.pause(); }catch(e){} if(raf) cancelAnimationFrame(raf); try{ if(G2.srcUrl) URL.revokeObjectURL(G2.srcUrl); }catch(e){} ov.remove(); window._v2vG2=null; }
+  q('#g2-x').onclick=function(){ if(G2.busy && !confirm('작업 중이에요. 닫을까요?')) return; close(); };
+  function paint(){
+    if(closed) return;
+    if(G2.recording){ raf=requestAnimationFrame(paint); return; } // 저장(녹화) 중엔 미리보기가 마스크 캐시를 건드리지 않게
+    if(v.readyState>=2){ _v2vGradeDraw(G2, v, cv, G2.showMask); var ctx=cv.getContext('2d');
+      G2.pts.forEach(function(p){ ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(6, cv.width/160), 0, Math.PI*2); ctx.fillStyle=p.l?'rgba(16,220,160,.95)':'rgba(248,113,113,.95)'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#000'; ctx.stroke(); }); }
+    var tr=q('#g2-t'); if(tr && !G2._drag && G2.dur){ tr.value=(v.currentTime/G2.dur*100).toFixed(1); q('#g2-tl').textContent=v.currentTime.toFixed(1)+'초'; }
+    raf=requestAnimationFrame(paint);
+  }
+  var src=c.resultCloud||c.result;
+  fetch(src).then(function(r){ if(!r.ok) throw 0; return r.blob(); }).catch(function(){ return (c.resultCloud && c.result!==c.resultCloud)?fetch(c.result).then(function(r){ return r.blob(); }):null; }).then(function(b){
+    if(!b){ q('#g2-load').textContent='영상을 불러오지 못했어요.'; return; }
+    G2.blob=b; G2.srcUrl=URL.createObjectURL(b); v.src=G2.srcUrl;
+    v.onloadedmetadata=function(){ cv.width=v.videoWidth||1280; cv.height=v.videoHeight||720; G2.dur=isFinite(v.duration)?v.duration:_v2vClipOut(c); q('#g2-load').style.display='none'; try{ v.currentTime=0.01; }catch(e){} paint(); };
+  }).catch(function(){ q('#g2-load').textContent='영상을 불러오지 못했어요.'; });
+  q('#g2-play').onclick=function(){ if(v.paused){ if(v.ended) v.currentTime=0; v.play(); this.textContent='⏸'; } else { v.pause(); this.textContent='▶'; } };
+  v.onended=function(){ var pb=q('#g2-play'); if(pb) pb.textContent='▶'; };
+  var tr=q('#g2-t'); tr.oninput=function(){ G2._drag=true; if(G2.dur){ v.currentTime=Math.min(G2.dur-0.01, +tr.value/100*G2.dur); q('#g2-tl').textContent=v.currentTime.toFixed(1)+'초'; } }; tr.onchange=function(){ G2._drag=false; };
+  function ptsLabel(){ q('#g2-pts').textContent='찍은 점 '+G2.pts.length+'개'+(G2.pts.length?(' (빼기 '+G2.pts.filter(function(p){return !p.l;}).length+')'):''); }
+  cv.onclick=function(e){
+    if(!G2.dur || G2.busy) return;
+    var r=cv.getBoundingClientRect(), x=Math.round((e.clientX-r.left)/r.width*cv.width), y=Math.round((e.clientY-r.top)/r.height*cv.height);
+    if(G2.pts.length && Math.abs(v.currentTime-G2.pts[0].t)>0.3){ G2.pts=[]; } // 다른 장면을 찍으면 새로 시작
+    G2.pts.push({x:x, y:y, l:e.shiftKey?0:1, t:v.currentTime}); ptsLabel();
+  };
+  q('#g2-clr').onclick=function(){ G2.pts=[]; ptsLabel(); };
+  q('#g2-text').oninput=function(){ G2.text=this.value.trim(); };
+  q('#g2-sm').onchange=function(){ G2.showMask=this.checked; G2._mfi=-1; };
+  Array.prototype.forEach.call(ov.querySelectorAll('[data-g2]'), function(s){ s.oninput=function(){ var k=s.getAttribute('data-g2'); G2.adj[k]=+s.value; q('#g2-v-'+k).textContent=s.value; }; });
+  q('#g2-reset').onclick=function(){ G2.adj={br:0,ct:0,sat:0,hue:0,temp:0,fe:4}; Array.prototype.forEach.call(ov.querySelectorAll('[data-g2]'), function(s){ var k=s.getAttribute('data-g2'); s.value=G2.adj[k]; q('#g2-v-'+k).textContent=G2.adj[k]; }); };
+  function st(t){ var el=q('#g2-st'); if(el) el.innerHTML=t; }
+  q('#g2-track').onclick=function(){
+    if(G2.busy || !G2.blob) return;
+    if(!G2.pts.filter(function(p){return p.l;}).length && !G2.text){ alert('바꿀 물체를 영상 위에서 클릭하거나, 이름(예: sofa)을 입력해 주세요.'); return; }
+    if(!(_supa && _supaUser)){ try{ openMd('account'); }catch(e){} return; }
+    var isAdmin=(G.supaRole==='admin'||G.plan==='admin'), cost=_v2vMaskCost(G2.dur);
+    _falProxyCall('v2v-ready', {}, function(d){
+      if(!d || !d.mask){ if(isAdmin) alert('서버(fal-proxy)가 아직 이 기능 버전이 아니에요. 새 fal-proxy 코드를 배포한 뒤 사용해 주세요.'); else alert('이 기능은 곧 열려요!'); return; }
+      _v2vTakeRates(d); cost=_v2vMaskCost(G2.dur);
+      if(!isAdmin && (G.cr||0)<cost){ alert('크레딧이 부족해요. ('+cost+'cr 필요)'); return; }
+      if(!confirm('이 물체를 영상 전체에서 추적할까요? = '+cost+'cr\n(추적 후 색·밝기 보정과 저장은 무료)')) return;
+      G2.busy=true; st('⏳ 영상 올리는 중…');
+      var ext=/mp4/.test(G2.blob.type)?'mp4':'webm';
+      _doUploadFile(new File([G2.blob], 'clover_v2v_mask_'+Date.now()+'.'+ext, {type:G2.blob.type||'video/mp4'}), function(vu){
+        st('⏳ AI가 물체를 전 프레임 추적 중… (1~3분)');
+        var fi=G2.pts.length?Math.max(0, Math.round(G2.pts[0].t*V2V_GRADE_FPS)):0;
+        var inp={video_url:vu, apply_mask:false};
+        if(G2.pts.length) inp.point_prompts=G2.pts.map(function(p){ return {x:p.x, y:p.y, label:p.l, object_id:1, frame_index:fi}; });
+        if(G2.text) inp.prompt=G2.text;
+        falRun('fal-ai/sam-3/video-rle', inp, function(res){
+          _v2vRleList(res, function(list){
+            G2.busy=false;
+            if(!list || !list.length){ st('<span style="color:#f87171">추적 결과를 읽지 못했어요. 다른 점을 찍어 다시 해주세요.</span>'); console.warn('[부분 색보정] 결과', res); return; }
+            var W=cv.width, H=cv.height;
+            var masks=list.map(function(it){ var x=it; if(Array.isArray(it)) x=it[0]; try{ return _v2vRleParse(x, W, H); }catch(e){ return null; } });
+            // 해독 방향 자동 판별: 찍은 점이 마스크 안에 들어오는 쪽으로
+            var N=masks.length, mf=Math.max(0, Math.min(N-1, Math.floor((G2.pts.length?G2.pts[0].t:0)/(G2.dur||1)*N))), pr=masks[mf];
+            var order=(pr && pr.kind==='pairs')?'row':'col';
+            if(pr && G2.pts.length){
+              var pos=G2.pts.filter(function(p){return p.l;});
+              function hits(o){ var n=0; pos.forEach(function(p){ if(_v2vPixInMask(pr, o, Math.round(p.x*pr.w/W), Math.round(p.y*pr.h/H))) n++; }); return n; }
+              var hc=hits('col'), hr=hits('row'); order = hr>hc ? 'row' : (hc>hr ? 'col' : order);
+            }
+            G2.masks=masks; G2.order=order; G2._mfi=-1;
+            var any=masks.some(function(m){ return m && _v2vRleRuns(m).length; });
+            if(!any){ st('<span style="color:#f87171">물체를 찾지 못했어요. 물체 한가운데를 몇 번 더 찍어서 다시 해주세요.</span>'); return; }
+            G2.showMask=true; var sm=q('#g2-sm'); if(sm) sm.checked=true;
+            st('✅ 추적 완료 — 초록색이 잡힌 영역이에요. “마스크 보기”를 끄고 슬라이더로 보정하세요.');
+          });
+        }, function(e){ G2.busy=false; st('<span style="color:#f87171">추적 실패: '+_cEsc(String(e||''))+' (크레딧은 자동 환불)</span>'); }, {wf:'v2v_mask', vdur:Math.ceil(G2.dur||10)});
+      }, function(){ G2.busy=false; st('<span style="color:#f87171">영상 업로드 실패</span>'); });
+    }, function(){ if(isAdmin) alert('서버(fal-proxy)가 아직 이 기능 버전이 아니에요. 새 fal-proxy 코드를 배포한 뒤 사용해 주세요.'); else alert('이 기능은 곧 열려요!'); });
+  };
+  q('#g2-apply').onclick=function(){
+    if(G2.busy) return;
+    if(!G2.masks){ alert('먼저 🎯 전체 영상 추적을 해주세요.'); return; }
+    var a=G2.adj; if(!a.br && !a.ct && !a.sat && !a.hue && !a.temp){ alert('슬라이더로 보정값을 먼저 바꿔주세요.'); return; }
+    G2.busy=true; G2.recording=true; try{ v.pause(); }catch(e){} G2.showMask=false; var sm=q('#g2-sm'); if(sm) sm.checked=false; G2._mfi=-1;
+    st('⏳ 보정한 영상으로 저장 중… (영상 길이만큼 걸려요 — 이 창을 띄워두세요)');
+    var out=document.createElement('canvas'); out.width=cv.width; out.height=cv.height;
+    var mime=_v2vMime(), ch=[], rec=new MediaRecorder(out.captureStream(30), mime?{mimeType:mime, videoBitsPerSecond:12000000}:undefined);
+    rec.ondataavailable=function(e){ if(e.data && e.data.size) ch.push(e.data); };
+    var rv=document.createElement('video'); rv.muted=true; rv.playsInline=true; rv.src=G2.srcUrl; var stopR=false;
+    function drawR(){ if(stopR) return; if(rv.readyState>=2){ _v2vGradeDraw(G2, rv, out, false); } requestAnimationFrame(drawR); }
+    rec.onstop=function(){
+      stopR=true; G2.busy=false; G2.recording=false;
+      var nb=new Blob(ch,{type:(mime||'video/webm').split(';')[0]}), nu=URL.createObjectURL(nb);
+      if(!c.resultOrig) c.resultOrig=c.resultCloud||c.result;
+      c.result=nu; c.resultCloud=null; c.graded=(c.graded||0)+1;
+      G_V2V.merged=null; try{ if(G_V2V.mergedUrl) URL.revokeObjectURL(G_V2V.mergedUrl); }catch(e){} G_V2V.mergedUrl=null; G_V2V.mergedCloud=null; G_V2V.upUrl=null;
+      if(!G.HIST.video) G.HIST.video=[];
+      var item={id:Date.now()+Math.random(), orig:c.still||null, result:nu, tags:['영상→완성영상','클립 '+(ci+1),'부분 색보정'], ai:'', preview:false, cx:50, fav:false, wf:'video'};
+      G.HIST.video.unshift(item); try{ saveHistToStorage(); }catch(e){}
+      try{ _shortsCloudSave(item, nb, /mp4/.test(nb.type)?'mp4':'webm', null, 'video', function(pu){ if(c.result===nu){ c.resultCloud=pu; _v2vSave(); } }); }catch(e){}
+      _v2vSave(); close(); renderSB(); try{ if(G.wf==='video') renderMain('video'); }catch(e){}
+      try{ _agedEnvToast('🎨 클립 '+(ci+1)+' 색보정 저장 완료 — 다른 물체도 바꾸려면 🎨를 다시 누르고, 다 끝나면 ⑤ 합치기를 다시 눌러주세요'); }catch(e){}
+    };
+    rv.onloadeddata=function(){ rv.currentTime=0; rec.start(500); drawR(); rv.play(); };
+    rv.onended=function(){ setTimeout(function(){ try{ rec.stop(); }catch(e){} }, 120); };
+    rv.onerror=function(){ G2.busy=false; G2.recording=false; st('<span style="color:#f87171">저장 실패</span>'); };
+  };
+  if(q('#g2-orig')) q('#g2-orig').onclick=function(){
+    if(G2.busy) return;
+    if(!confirm('색보정 전 원본 클립으로 되돌릴까요?')) return;
+    c.result=c.resultOrig; c.resultCloud=/^https?:/.test(c.resultOrig)?c.resultOrig:null; c.resultOrig=null; c.graded=0;
+    G_V2V.merged=null; G_V2V.mergedUrl=null; G_V2V.mergedCloud=null; _v2vSave(); close(); renderSB();
+  };
+}
+// 프로젝트 자동 저장(며칠 뒤에도 같은 룩으로 클립만 다시 찍어 교체·삽입) — 설정·룩·클립 정보는 이 기기+클라우드, 원본 영상은 이 기기(IndexedDB)
+var _v2vSaveT=null, _v2vLoaded=false;
+function _v2vKey(){ return 'clover_v2v_project_'+(_supaUser?_supaUser.id:'guest'); }
+function _v2vSave(){
+  clearTimeout(_v2vSaveT);
+  _v2vSaveT=setTimeout(function(){
+    try{
+      function up(u, cb){ try{ _uploadDataUrlIfNeeded(u, 'v2v', cb); }catch(e){ cb(u); } }
+      up(G_V2V.master, function(mu){ if(mu && mu!==G_V2V.master && mu.indexOf('data:')!==0){ var ci=G_V2V.cands.indexOf(G_V2V.master); if(ci!==-1) G_V2V.cands[ci]=mu; G_V2V.clips.forEach(function(c){ if(c.still===G_V2V.master) c.still=mu; }); G_V2V.master=mu; }
+        var data={v:1, mode:G_V2V.mode, look3d:G_V2V.look3d, envT:G_V2V.envT||'', envS:G_V2V.envS||'', envW:G_V2V.envW||'', aerial:!!G_V2V.aerial, pvF:G_V2V.pvF||null, pv:(G_V2V.pv||[]).filter(function(x){ return x.url && x.url.indexOf('data:')!==0; }).map(function(x){ return {f:x.f, url:x.url, st:'done', mk:x.mk||''}; }), mergedCloud:G_V2V.mergedCloud||null, upUrl:G_V2V.upUrl||null, target:G_V2V.target, extStyle:G_V2V.extStyle, style:G_V2V.style, text:G_V2V.text, res:G_V2V.res, master:(G_V2V.master&&G_V2V.master.indexOf('data:')===0)?null:G_V2V.master, saved:Date.now(),
+          clips:G_V2V.clips.map(function(c){ return {id:c.id, idbKey:c.idbKey||null, name:c.name, dur:c.dur, ts:c.ts, te:c.te, speed:c.speed, still:(c.still&&c.still.indexOf('data:')!==0)?c.still:null, result:c.resultCloud||((c.result && c.result.indexOf('blob:')!==0)?c.result:(c.resultOrig||null)), resultCloud:c.resultCloud||null, resultOrig:(c.resultOrig && c.resultOrig.indexOf('blob:')!==0)?c.resultOrig:null, graded:c.graded||0}; })};
+        var js=JSON.stringify(Object.assign({},data,{saved:0})); if(js===window._v2vLastJson) return; window._v2vLastJson=js;
+        try{ localStorage.setItem(_v2vKey(), JSON.stringify(data)); }catch(e){}
+        try{ if(typeof _saveWorkspaceState==='function') _saveWorkspaceState('v2v_project', data); }catch(e){}
+      });
+    }catch(e){}
+  }, 800);
+}
+function _v2vApply(d){
+  if(!d || !d.clips || G_V2V.clips.length) return false;
+  ['mode','look3d','envT','envS','envW','aerial','pvF','pv','target','extStyle','style','text','res','master','mergedCloud','upUrl'].forEach(function(k){ if(d[k]!=null) G_V2V[k]=d[k]; }); if(G_V2V.mergedCloud && !G_V2V.mergedUrl) G_V2V.mergedUrl=G_V2V.mergedCloud;
+  G_V2V.clips=d.clips.map(function(x){ return {id:x.id, idbKey:x.idbKey, name:x.name, dur:x.dur||0, ts:x.ts||0, te:x.te||x.dur||0, speed:x.speed||1, still:x.still, result:x.result, resultCloud:x.resultCloud, resultOrig:x.resultOrig||null, graded:x.graded||0, status:x.result?'done':'', blob:null, url:null}; });
+  G_V2V.clips.forEach(function(c){ if(!c.idbKey) return; try{ idbLoadVideo(c.idbKey).then(function(b){ if(b){ c.blob=b; c.url=URL.createObjectURL(b); renderSB(); } }).catch(function(){}); }catch(e){} });
+  return true;
+}
+function _v2vLoad(){
+  if(_v2vLoaded) return; _v2vLoaded=true;
+  var d=null; try{ d=JSON.parse(localStorage.getItem(_v2vKey())||'null'); }catch(e){}
+  if(_v2vApply(d)){ renderSB(); return; }
+  try{ if(typeof _loadWorkspaceState==='function') _loadWorkspaceState('v2v_project', function(cd){ if(_v2vApply(cd)) renderSB(); }); }catch(e){}
+}
+function _v2vNewProject(){
+  if(G_V2V.busy) return;
+  if(G_V2V.clips.length && !confirm('지금 프로젝트(클립·룩)를 비우고 새로 시작할까요?\n(이미 만든 완성 영상은 갤러리에 그대로 남아요)')) return;
+  G_V2V.clips.forEach(function(c){ try{ if(c.url) URL.revokeObjectURL(c.url); if(c.idbKey) idbDeleteVideo(c.idbKey).catch(function(){}); }catch(e){} });
+  G_V2V.clips=[]; G_V2V.cands=[]; G_V2V.pv=[]; G_V2V.pvF=null; G_V2V.master=null; G_V2V.merged=null; G_V2V.mergedUrl=null; G_V2V.mergedCloud=null; G_V2V.upUrl=null; G_V2V.text='';
+  try{ localStorage.removeItem(_v2vKey()); }catch(e){} try{ _saveWorkspaceState('v2v_project', {v:1, clips:[]}); }catch(e){}
+  renderSB();
+}
+function _v2vBtn(on, txt, attr){ return '<button type="button" '+attr+' style="flex:1;padding:8px 6px;border-radius:8px;font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit;border:1.5px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c2)')+';color:'+(on?'var(--ac)':'var(--t2)')+'">'+txt+'</button>'; }
+function _v2vPanel(p){
+  _v2vLoad();
+  var w=dv('ss'); w.style.cssText='border:1.5px solid var(--acb);border-radius:12px;padding:12px;background:var(--acg)';
+  var h='<div style="font-size:11px;color:var(--t2);line-height:1.6;margin-bottom:10px">외관 → 거실 → 주방… 공간마다 클립으로 찍어서 한 편으로 만들어요.</div>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:8px">'+_v2vBtn(G_V2V.mode==='3d','🖥 3D 화면 녹화 → 완성','data-m="3d"')+_v2vBtn(G_V2V.mode==='site','🏗 현장 영상 → 리모델링','data-m="site"')+'</div>';
+  if(G_V2V.mode==='3d'){
+    h+='<div style="font-size:11px;font-weight:800;color:var(--t2);margin:2px 0 4px">완성 느낌</div><div style="display:flex;gap:6px;margin-bottom:4px">'+_v2vBtn(G_V2V.look3d!=='cg','📷 실사화 (기본)','data-lk="real"')+_v2vBtn(G_V2V.look3d==='cg','✨ 고퀄리티 CG','data-lk="cg"')+'</div><div style="font-size:10.5px;color:var(--m2);margin-bottom:8px;line-height:1.5">'+(G_V2V.look3d==='cg'?'V-Ray·코로나 느낌의 깔끔한 고급 CG 영상 (브로슈어·분양 홍보용)':'실제 카메라로 찍은 듯한 사진 같은 영상')+'</div>';
+  }
+  if(G_V2V.mode==='site'){
+    h+='<div style="display:flex;gap:6px;margin-bottom:6px">'+_v2vBtn(G_V2V.target==='int','🛋 실내','data-t="int"')+_v2vBtn(G_V2V.target==='ext','🏢 건축 외관','data-t="ext"')+'</div>';
+    var opts = G_V2V.target==='ext' ? V2V_EXT_STYLES.map(function(x){ return '<option value="'+x[0]+'"'+(x[0]===G_V2V.extStyle?' selected':'')+'>'+_cEsc(x[1])+'</option>'; }).join('')
+      : (typeof PS_STAGE!=='undefined'?PS_STAGE:[]).map(function(q){ return '<option value="'+q.k+'"'+(q.k===G_V2V.style?' selected':'')+'>'+_cEsc(q.l.replace('홈스테이징 · ',''))+'</option>'; }).join('');
+    h+='<select id="v2v-style" style="width:100%;padding:8px;border-radius:8px;background:var(--c2);color:var(--t);border:1px solid var(--bd2);font-family:inherit;margin-bottom:4px">'+opts+'</select><div style="font-size:10.5px;color:var(--m2);margin-bottom:8px;line-height:1.5">마감재까지 전부 새로 바꾼 리모델링 완성 모습 — 구조·창·문 위치와 카메라 동선은 그대로.</div>';
+  }
+  // 시간·계절·날씨 + 항공뷰
+  (function(){
+    function sel(id, list, cur){ return '<select id="'+id+'" style="flex:1;min-width:0;padding:7px 4px;border-radius:7px;background:var(--c2);color:var(--t);border:1px solid '+(cur?'var(--ac)':'var(--bd2)')+';font-family:inherit;font-size:11.5px">'+list.map(function(x){ return '<option value="'+x[0]+'"'+(x[0]===(cur||'')?' selected':'')+'>'+_cEsc(x[1])+'</option>'; }).join('')+'</select>'; }
+    h+='<div style="font-size:11px;font-weight:800;color:var(--t2);margin:2px 0 4px">🌤 시간대 · 계절 · 날씨</div><div style="display:flex;gap:4px;margin-bottom:4px">'+sel('v2v-envT',V2V_ENV_T,G_V2V.envT)+sel('v2v-envS',V2V_ENV_S,G_V2V.envS)+sel('v2v-envW',V2V_ENV_W,G_V2V.envW)+'</div>';
+    h+='<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t2);margin:2px 0 8px;cursor:pointer"><input type="checkbox" id="v2v-aerial"'+(G_V2V.aerial?' checked':'')+'><span>🚁 항공·조감뷰 <span style="color:var(--m2);font-size:10px">— 작은 건물 흔들림 방지</span></span></label>';
+  })();
+  // ① 클립
+  h+='<div style="display:flex;align-items:center;margin:6px 0"><div style="font-size:12px;font-weight:900">① 클립 ('+G_V2V.clips.length+'/'+V2V_MAX_CLIPS+') <span style="font-weight:400;color:var(--m2);font-size:10.5px">클립당 최대 '+V2V_MAX_SEC+'초</span></div>'+(G_V2V.clips.length?'<a href="javascript:void(0)" id="v2v-new" style="margin-left:auto;font-size:10.5px;color:var(--m2)">🗂 새 프로젝트</a>':'')+'</div>'+(G_V2V.clips.length?'<div style="font-size:10px;color:var(--m2);margin:-2px 0 6px">💾 프로젝트·룩 자동 저장 — 며칠 뒤에도 🔁로 클립만 다시 찍어 교체·삽입하면 같은 느낌으로 다시 만들어요.</div>':'');
+  h+='<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" id="v2v-rec" style="flex:1;padding:10px;font-size:12.5px;font-weight:900;border:1.5px solid #ef4444;background:rgba(239,68,68,.12);color:#fca5a5;border-radius:9px;cursor:pointer;font-family:inherit">🔴 '+(G_V2V.clips.length?'다음 공간 녹화':'화면 녹화')+'</button><button type="button" id="v2v-up" style="flex:1;padding:10px;font-size:12.5px;font-weight:900;border:1.5px solid var(--bd2);background:var(--c2);color:var(--t);border-radius:9px;cursor:pointer;font-family:inherit">📱 영상 업로드</button></div>';
+  if(!G_V2V.clips.length) h+='<div style="font-size:10.5px;color:var(--m2);line-height:1.6;margin-bottom:8px">🔴 스케치업·3ds Max·블렌더·D5·레빗 등 아무 프로그램 창을 골라 천천히 둘러보세요(PC 크롬·엣지). 끝나면 바로 다음 공간을 이어서 녹화할 수 있어요.<br>📱 휴대폰 현장 영상(MP4·MOV)도 여러 개 올릴 수 있어요.</div>';
+  G_V2V.clips.forEach(function(c,i){
+    var len=_v2vClipLen(c), over=len>V2V_MAX_SEC+0.05, ed=G_V2V.edit===c.id;
+    h+='<div style="border:1px solid '+(over?'#f59e0b':'var(--bd2)')+';border-radius:9px;padding:7px;margin-bottom:6px;background:var(--c1,#111)">'+
+      '<div style="display:flex;gap:7px;align-items:center"><span style="font-weight:900;color:var(--ac);font-size:12px;width:16px">'+(i+1)+'</span>'+
+      (c.result?'<video src="'+_cEsc(c.resultCloud||c.result)+'" muted playsinline style="width:64px;height:40px;object-fit:cover;border-radius:5px;background:#000"></video>':(c.still?'<img src="'+_cEsc(c.still)+'" style="width:64px;height:40px;object-fit:cover;border-radius:5px">':(c.url?'<video src="'+c.url+'" muted playsinline style="width:64px;height:40px;object-fit:cover;border-radius:5px;background:#000"></video>':'<div style="width:64px;height:40px;border-radius:5px;background:var(--c2);font-size:9px;color:var(--m2);display:flex;align-items:center;justify-content:center;text-align:center">원본 없음</div>')))+
+      '<div style="flex:1;min-width:0;font-size:10.5px;line-height:1.4"><div style="color:var(--t);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_cEsc(c.name)+'</div><div style="color:'+(over?'#f59e0b':'var(--m2)')+'">'+len.toFixed(1)+'초'+(c.speed!==1?' · '+c.speed+'배속':'')+(over?' · 15초로 잘라 써요':'')+(c.status==='done'?' · <b style="color:var(--ac)">✓ 완성'+(c.graded?' · 🎨보정':'')+'</b>':c.status==='run'?' · <b style="color:var(--ac)">진행 중</b>':c.status==='err'?' · <b style="color:#f87171">실패</b>':'')+'</div></div>'+
+      '<div style="display:flex;flex-direction:column;gap:2px"><button type="button" data-up="'+i+'" title="위로" style="border:none;background:var(--c2);color:var(--t2);border-radius:4px;font-size:10px;cursor:pointer;padding:2px 5px">▲</button><button type="button" data-dn="'+i+'" title="아래로" style="border:none;background:var(--c2);color:var(--t2);border-radius:4px;font-size:10px;cursor:pointer;padding:2px 5px">▼</button></div>'+
+      (c.url?'<button type="button" data-ed="'+i+'" style="border:1px solid var(--bd2);background:'+(ed?'var(--acg)':'var(--c2)')+';color:var(--t);border-radius:6px;font-size:10.5px;cursor:pointer;padding:5px 7px;font-family:inherit">✂ 편집</button>':'')+
+      '<button type="button" data-menu="'+i+'" title="다시 녹화해서 교체 · 뒤에 삽입" style="border:1px solid var(--bd2);background:'+(G_V2V.menu===c.id?'var(--acg)':'var(--c2)')+';color:var(--t);border-radius:6px;font-size:10.5px;cursor:pointer;padding:5px 6px;font-family:inherit">🔁</button>'+
+      (c.result?'<button type="button" data-grade="'+i+'" title="부분 색보정 — 물체를 골라 색·밝기 바꾸기" style="border:1px solid var(--acb);background:var(--acg);color:var(--ac);border-radius:6px;font-size:11px;cursor:pointer;padding:5px 6px">🎨</button>':'')+
+      (c.result?'<button type="button" data-redo="'+i+'" title="이 클립 다시 만들기" style="border:none;background:var(--c2);color:var(--t2);border-radius:6px;font-size:11px;cursor:pointer;padding:5px 6px">↻</button>':'')+
+      '<button type="button" data-del="'+i+'" style="border:none;background:transparent;color:#f87171;font-size:13px;cursor:pointer;padding:2px 4px">✕</button></div>';
+    if(G_V2V.menu===c.id) h+='<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap"><button type="button" data-rrec="'+i+'" style="flex:1;padding:6px;border-radius:6px;border:1px solid #ef4444;background:rgba(239,68,68,.1);color:#fca5a5;font-size:10.5px;font-weight:800;cursor:pointer;font-family:inherit">🔴 다시 녹화해서 교체</button><button type="button" data-rup="'+i+'" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:10.5px;font-weight:800;cursor:pointer;font-family:inherit">📱 파일로 교체</button><button type="button" data-ins="'+i+'" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-size:10.5px;font-weight:800;cursor:pointer;font-family:inherit">➕ 뒤에 녹화 삽입</button></div>';
+    if(ed && c.url){
+      var D=c.dur||V2V_MAX_SEC;
+      h+='<div style="margin-top:7px;padding-top:7px;border-top:1px solid var(--bd2)"><video id="v2v-prev-'+i+'" src="'+c.url+'#t='+(c.ts||0).toFixed(1)+'" muted controls playsinline style="width:100%;max-height:160px;background:#000;border-radius:6px"></video>'+
+        '<div style="font-size:10.5px;color:var(--t2);margin-top:5px">시작 <b id="v2v-tsv-'+i+'">'+(c.ts||0).toFixed(1)+'초</b></div><input type="range" data-ts="'+i+'" min="0" max="'+D.toFixed(1)+'" step="0.1" value="'+(c.ts||0)+'" style="width:100%">'+
+        '<div style="font-size:10.5px;color:var(--t2)">끝 <b id="v2v-tev-'+i+'">'+(c.te||D).toFixed(1)+'초</b></div><input type="range" data-te="'+i+'" min="0" max="'+D.toFixed(1)+'" step="0.1" value="'+(c.te||D)+'" style="width:100%">'+
+        '<div style="font-size:10.5px;color:var(--t2);margin:4px 0">속도</div><div style="display:flex;gap:4px">'+[0.5,0.75,1,1.5,2].map(function(sp){ var on=(c.speed||1)===sp; return '<button type="button" data-sp="'+i+':'+sp+'" style="flex:1;padding:5px 2px;border-radius:6px;font-size:10.5px;font-weight:800;cursor:pointer;font-family:inherit;border:1.5px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--c2)')+';color:'+(on?'var(--ac)':'var(--t2)')+'">'+sp+'x</button>'; }).join('')+'</div>'+
+        '<button type="button" data-apply="'+i+'" style="width:100%;margin-top:7px;padding:8px;border-radius:8px;border:none;background:var(--ac);color:#000;font-weight:900;font-size:12px;cursor:pointer;font-family:inherit">✓ 적용 ('+_v2vClipLen(c).toFixed(1)+'초)</button></div>';
+    }
+    h+='</div>';
+  });
+  // ② 룩
+  h+='<div style="font-size:12px;font-weight:900;margin:10px 0 4px">② 룩 정하기 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(추천 — 모든 클립이 같은 느낌으로 통일)</span></div>';
+  h+='<div style="font-size:10.5px;color:var(--m2);line-height:1.6;margin-bottom:6px">1번 클립 장면을 완성 이미지 3장으로 먼저 뽑아보고, 가장 마음에 드는 1장을 누르세요. 그 룩을 기준으로 모든 클립을 변환해요. 내 렌더링 이미지를 기준으로 올려도 돼요.</div>';
+  h+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+G_V2V.cands.map(function(u,i){ var on=G_V2V.master===u; return '<img src="'+_cEsc(u)+'" data-pick="'+i+'" style="width:84px;height:56px;object-fit:cover;border-radius:7px;cursor:pointer;border:3px solid '+(on?'var(--ac)':'transparent')+'">'; }).join('')+
+    (G_V2V.master && G_V2V.cands.indexOf(G_V2V.master)===-1?'<img src="'+_cEsc(G_V2V.master)+'" style="width:84px;height:56px;object-fit:cover;border-radius:7px;border:3px solid var(--ac)">':'')+'</div>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:4px"><button type="button" id="v2v-look" style="flex:1.4;padding:9px;border-radius:8px;border:1.5px solid var(--ac);background:var(--c2);color:var(--ac);font-weight:900;font-size:11.5px;cursor:pointer;font-family:inherit">🎨 룩 후보 3장 ('+(3*V2V_STILL_COST)+'cr)</button><button type="button" id="v2v-master-up" style="flex:1;padding:9px;border-radius:8px;border:1.5px solid var(--bd2);background:var(--c2);color:var(--t2);font-weight:800;font-size:11.5px;cursor:pointer;font-family:inherit">🖼 내 기준 이미지</button></div>';
+  if(G_V2V.master) h+='<div style="font-size:10.5px;color:var(--ac);margin-bottom:6px">✓ 기준 룩 선택됨 <a href="javascript:void(0)" id="v2v-master-clear" style="color:#f87171;margin-left:6px">해제</a></div>';
+  // ②+ 렌더 전 미리보기 컷
+  if(G_V2V.clips.length){
+    var _N=_v2vTotalFrames(); if(!G_V2V.pvF || !G_V2V.pvF.length) G_V2V.pvF=_v2vRandFrames(); if(G_V2V.pvF.length>V2V_PV_MAX) G_V2V.pvF=G_V2V.pvF.slice(0,V2V_PV_MAX); G_V2V.pvN=G_V2V.pvF.length;
+    G_V2V.pvF=G_V2V.pvF.map(function(f){ return Math.max(0, Math.min(_N-1, f|0)); });
+    h+='<div style="font-size:12px;font-weight:900;margin:12px 0 4px">👁 렌더 전 미리보기 컷 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(선택 · 업체 확인용)</span></div>';
+    h+='<div style="font-size:10.5px;color:var(--m2);line-height:1.6;margin-bottom:6px">영상 전체 '+_N+'프레임('+_v2vTotalLen().toFixed(1)+'초, 30fps 기준) 중 원하는 장면을 <b>한 번에 1~3컷씩</b> 골라 영상 렌더링 전에 완성 이미지로 먼저 확인해요. 결과는 아래에 계속 쌓여서 원하는 만큼 반복 테스트할 수 있어요.</div>';
+    var acc=0, TL=_v2vTotalLen()||1, bar='<div style="position:relative;height:22px;border-radius:6px;overflow:hidden;background:var(--c2);margin-bottom:6px;display:flex">';
+    G_V2V.clips.forEach(function(c,i){ var L=Math.min(_v2vClipLen(c), V2V_MAX_SEC); bar+='<div style="width:'+(L/TL*100)+'%;border-right:1px solid var(--bd2);font-size:9.5px;color:var(--m2);display:flex;align-items:center;justify-content:center;background:'+(i%2?'rgba(255,255,255,.03)':'transparent')+'">'+(i+1)+'</div>'; acc+=L; });
+    G_V2V.pvF.forEach(function(f,k){ bar+='<div title="'+f+'프레임" style="position:absolute;top:0;bottom:0;left:'+(f/_N*100)+'%;width:3px;margin-left:-1px;background:var(--ac)">'+(G_V2V.pvF.length<=10?'<span style="position:absolute;top:-1px;left:4px;font-size:9px;font-weight:900;color:var(--ac)">'+(k+1)+'</span>':'')+'</div>'; });
+    bar+='</div>'; h+=bar;
+    h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11.5px;font-weight:800"><span style="white-space:nowrap">한 번에</span><button type="button" data-pvn="-1" style="width:28px;height:28px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer;font-size:15px">−</button><b style="min-width:22px;text-align:center;font-size:14px;color:var(--ac)">'+G_V2V.pvF.length+'</b><button type="button" data-pvn="1" style="width:28px;height:28px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer;font-size:15px">+</button><span style="font-weight:400;color:var(--m2);font-size:10.5px">컷 (최대 '+V2V_PV_MAX+') · 컷당 '+V2V_STILL_COST+'cr</span></div>';
+    h+='<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-bottom:6px">'+G_V2V.pvF.map(function(f,k){ return '<input type="number" data-pvf="'+k+'" min="0" max="'+(_N-1)+'" value="'+f+'" title="'+(k+1)+'번 컷 프레임 번호" style="width:calc(25% - 4px);box-sizing:border-box;padding:6px 4px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:12px;text-align:center">'; }).join('')+'<button type="button" id="v2v-pv-rand" title="무작위로 다시 고르기" style="width:calc(25% - 4px);padding:6px 0;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);cursor:pointer;font-size:13px">🎲</button></div>';
+    h+='<button type="button" id="v2v-pv-go" style="width:100%;padding:9px;border-radius:8px;border:1.5px solid var(--ac);background:var(--c2);color:var(--ac);font-weight:900;font-size:11.5px;cursor:pointer;font-family:inherit;margin-bottom:6px">👁 '+G_V2V.pvF.length+'컷 미리 렌더링 ('+(G_V2V.pvF.length*V2V_STILL_COST)+'cr)</button>';
+    if(G_V2V.pv && G_V2V.pv.length) h+='<div style="display:flex;align-items:center;font-size:11px;font-weight:800;margin:4px 0">🖼 테스트 결과 '+G_V2V.pv.length+'장 <span style="font-weight:400;color:var(--m2);font-size:10px;margin-left:4px">(프레임 순)</span>'+(G_V2V.busy?'':'<a href="javascript:void(0)" id="v2v-pv-clear" style="margin-left:auto;font-size:10px;font-weight:400;color:var(--m2)">전체 지우기</a>')+'</div>';
+    if(G_V2V.pv && G_V2V.pv.length) h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;max-height:340px;overflow-y:auto">'+G_V2V.pv.map(function(it,i){ return '<div style="position:relative;width:calc(33.33% - 4px);min-width:0;text-align:center">'+((it.url||it.st==='err') && !G_V2V.busy?'<button type="button" data-pvd="'+i+'" title="지우기" style="position:absolute;top:2px;right:2px;z-index:1;border:none;background:rgba(0,0,0,.65);color:#fff;border-radius:50%;width:18px;height:18px;font-size:10px;line-height:18px;padding:0;cursor:pointer">✕</button>':'')+(it.url?'<img src="'+_cEsc(it.url)+'" data-pvv="'+i+'" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;cursor:zoom-in;border:1.5px solid var(--bd2)">':'<div style="width:100%;aspect-ratio:16/10;border-radius:7px;background:var(--c2);display:flex;align-items:center;justify-content:center;font-size:10px;color:'+(it.st==='err'?'#f87171':'var(--m2)')+'">'+(it.st==='err'?'실패':'⏳')+'</div>')+'<div style="font-size:9.5px;color:var(--m2);margin-top:2px">'+it.f+'f'+(it.url?' · <a href="javascript:void(0)" data-pvm="'+i+'" style="color:var(--ac)">기준 룩으로</a>':'')+'</div></div>'; }).join('')+'</div>';
+  }
+  // ③ 요청·화질
+  h+='<div style="font-size:12px;font-weight:900;margin:10px 0 4px">③ 추가 요청 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(선택)</span></div><textarea id="v2v-text" rows="2" placeholder="예: 저녁 노을 빛, 바닥은 밝은 오크" style="width:100%;box-sizing:border-box;padding:8px;border-radius:8px;background:var(--c2);color:var(--t);border:1px solid var(--bd2);font-family:inherit;font-size:12px;margin-bottom:8px">'+_cEsc(G_V2V.text)+'</textarea>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:4px">'+_v2vBtn(G_V2V.res==='480p','480p (빠르고 저렴)','data-r="480p"')+_v2vBtn(G_V2V.res==='720p','720p (추천)','data-r="720p"')+'</div><div style="font-size:10.5px;color:var(--m2);line-height:1.5;margin-bottom:10px">AI 영상 엔진은 최대 720p로 만들어요 → 완성 후 아래 ⑤에서 <b>FHD·4K 업스케일</b>로 납품 화질을 맞춰요.<br>💳 요금 = (원본 클립 길이 + 결과 길이) × 초당 '+((G_V2V.cps||{cps480:51,cps720:109})[G_V2V.res==='720p'?'cps720':'cps480'])+'cr — 10초 클립 약 '+(((G_V2V.cps||{cps480:51,cps720:109})[G_V2V.res==='720p'?'cps720':'cps480'])*20).toLocaleString()+'cr. 필요한 부분만 잘라 쓰면 저렴해져요.</div>';
+  // ④ 변환
+  var cost=_v2vCost();
+  if(G_V2V.busy) h+='<div style="padding:12px;border-radius:10px;background:var(--c2);border:1px solid var(--acb);font-size:12px;color:var(--ac);font-weight:800;text-align:center;line-height:1.6">⏳ '+_cEsc(G_V2V.step||'진행 중…')+'</div>';
+  else {
+    var pend=G_V2V.clips.filter(function(c){return !c.result;}).length;
+    h+='<button type="button" id="v2v-go" style="width:100%;padding:13px;border-radius:11px;border:none;background:'+(pend?'var(--ac)':'var(--c2)')+';color:'+(pend?'#000':'var(--m2)')+';font-size:14px;font-weight:900;cursor:'+(pend?'pointer':'default')+';font-family:inherit">④ ✨ 클립 '+(pend||'')+'개 완성 영상으로 변환'+(pend?' <span style="font-size:11px;font-weight:700">(약 '+cost.total+'cr)</span>':'')+'</button>';
+    var doneN=G_V2V.clips.filter(function(c){return c.result;}).length;
+    if(doneN){
+      h+='<div style="font-size:10.5px;color:var(--m2);line-height:1.55;margin:8px 0 0;padding:7px 8px;border-radius:8px;background:var(--c2)">🎨 <b>부분 색보정</b>: 완성 클립의 🎨 버튼 → 소파·벽·바닥 등 물체를 클릭하면 AI가 영상 전체에서 따라가며 그 부분만 밝기·색을 바꿔요(애프터이펙트 로토+색보정처럼).</div>';
+      h+='<div style="font-size:12px;font-weight:900;margin:12px 0 6px">⑤ 한 편으로 · 납품 화질</div>';
+      h+='<button type="button" id="v2v-merge" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--ac);background:var(--c2);color:var(--ac);font-weight:900;font-size:12px;cursor:pointer;font-family:inherit;margin-bottom:6px">🎞 완성 클립 '+doneN+'개를 순서대로 한 영상으로 합치기 (무료)</button>';
+      if(G_V2V.mergedUrl) h+='<video src="'+G_V2V.mergedUrl+'" controls playsinline style="width:100%;max-height:200px;background:#000;border-radius:8px;margin-bottom:6px"></video><div style="display:flex;gap:6px"><button type="button" data-upx="2" style="flex:1;padding:9px;border-radius:8px;border:1.5px solid var(--bd2);background:var(--c2);color:var(--t);font-weight:800;font-size:11.5px;cursor:pointer;font-family:inherit">⬆ FHD+ (2배)</button><button type="button" data-upx="3" style="flex:1;padding:9px;border-radius:8px;border:1.5px solid var(--bd2);background:var(--c2);color:var(--t);font-weight:800;font-size:11.5px;cursor:pointer;font-family:inherit">⬆ 4K (3배)</button><a id="v2v-dl" href="'+G_V2V.mergedUrl+'" download="clover_v2v.'+(G_V2V.merged&&/mp4/.test(G_V2V.merged.type)?'mp4':'webm')+'" style="flex:.7;padding:9px;border-radius:8px;border:1.5px solid var(--bd2);background:var(--c2);color:var(--t);font-weight:800;font-size:11.5px;text-align:center;text-decoration:none">⬇ 받기</a></div>';
+      if(G_V2V.upUrl) h+='<div style="font-size:10.5px;color:var(--ac);margin-top:6px">✅ 업스케일 영상은 메인 화면·갤러리에 있어요 <a href="'+_cEsc(G_V2V.upUrl)+'" target="_blank" style="color:var(--ac)">열기</a></div>';
+    }
+  }
+  w.innerHTML=h; p.appendChild(w); if(G_V2V.clips.length || G_V2V.master) _v2vSave();
+  var fi=document.createElement('input'); fi.type='file'; fi.accept='video/*'; fi.multiple=true; fi.style.display='none'; w.appendChild(fi);
+  var mi=document.createElement('input'); mi.type='file'; mi.accept='image/*'; mi.style.display='none'; w.appendChild(mi);
+  function q(s){ return w.querySelector(s); } function qa(s,f){ Array.prototype.forEach.call(w.querySelectorAll(s), f); }
+  var b;
+  if((b=q('#v2v-rec'))) b.onclick=function(){ _v2vRecord({}); };
+  if((b=q('#v2v-up'))) b.onclick=function(){ fi.click(); };
+  fi.onchange=function(){ var fl=Array.prototype.slice.call(fi.files||[]); if(G_V2V._rep!=null){ var ri2=G_V2V._rep; G_V2V._rep=null; if(fl[0]) _v2vAddClip(fl[0], fl[0].name, 0, {replace:ri2}); return; } fl.forEach(function(f){ _v2vAddClip(f, f.name); }); };
+  if((b=q('#v2v-new'))) b.onclick=_v2vNewProject;
+  qa('[data-menu]', function(x){ x.onclick=function(){ var c=G_V2V.clips[+x.getAttribute('data-menu')]; G_V2V.menu=(G_V2V.menu===c.id)?null:c.id; renderSB(); }; });
+  qa('[data-rrec]', function(x){ x.onclick=function(){ _v2vRecord({replace:+x.getAttribute('data-rrec')}); }; });
+  qa('[data-rup]', function(x){ x.onclick=function(){ G_V2V._rep=+x.getAttribute('data-rup'); fi.multiple=false; fi.click(); }; });
+  qa('[data-ins]', function(x){ x.onclick=function(){ _v2vRecord({after:+x.getAttribute('data-ins')}); }; });
+  qa('[data-m]', function(x){ x.onclick=function(){ G_V2V.mode=x.getAttribute('data-m'); renderSB(); }; });
+  function _envChanged(){ var had=G_V2V.cands.length||G_V2V.clips.some(function(c){return c.still&&!c.result;}); if(had){ if(G_V2V.cands.indexOf(G_V2V.master)!==-1) G_V2V.master=null; G_V2V.cands=[]; G_V2V.clips.forEach(function(c){ if(!c.result) c.still=null; }); try{ _agedEnvToast('시간·계절·날씨가 바뀌어서 룩 후보를 비웠어요 — ② 룩 후보나 미리보기를 다시 뽑아주세요'); }catch(e){} } _v2vSave(); renderSB(); }
+  [['#v2v-envT','envT'],['#v2v-envS','envS'],['#v2v-envW','envW']].forEach(function(a){ var el=q(a[0]); if(el) el.onchange=function(){ G_V2V[a[1]]=this.value; _envChanged(); }; });
+  if((b=q('#v2v-aerial'))) b.onchange=function(){ G_V2V.aerial=this.checked; _envChanged(); };
+  qa('[data-lk]', function(x){ x.onclick=function(){ var nv=x.getAttribute('data-lk'); if(nv===G_V2V.look3d) return; var had=G_V2V.cands.length||G_V2V.clips.some(function(c){return c.still&&!c.result;}); G_V2V.look3d=nv; if(had){ if(G_V2V.cands.indexOf(G_V2V.master)!==-1) G_V2V.master=null; G_V2V.cands=[]; G_V2V.clips.forEach(function(c){ if(!c.result) c.still=null; }); try{ _agedEnvToast('느낌이 바뀌어서 룩 후보를 비웠어요 — ② 룩 후보를 다시 뽑아주세요'); }catch(e){} } renderSB(); }; });
+  qa('[data-t]', function(x){ x.onclick=function(){ G_V2V.target=x.getAttribute('data-t'); renderSB(); }; });
+  qa('[data-r]', function(x){ x.onclick=function(){ G_V2V.res=x.getAttribute('data-r'); renderSB(); }; });
+  if((b=q('#v2v-style'))) b.onchange=function(){ if(G_V2V.target==='ext') G_V2V.extStyle=this.value; else G_V2V.style=this.value; };
+  if((b=q('#v2v-text'))) b.oninput=function(){ G_V2V.text=this.value; };
+  qa('[data-up]', function(x){ x.onclick=function(){ var i=+x.getAttribute('data-up'); if(i>0){ var t=G_V2V.clips[i]; G_V2V.clips[i]=G_V2V.clips[i-1]; G_V2V.clips[i-1]=t; renderSB(); } }; });
+  qa('[data-dn]', function(x){ x.onclick=function(){ var i=+x.getAttribute('data-dn'); if(i<G_V2V.clips.length-1){ var t=G_V2V.clips[i]; G_V2V.clips[i]=G_V2V.clips[i+1]; G_V2V.clips[i+1]=t; renderSB(); } }; });
+  qa('[data-del]', function(x){ x.onclick=function(){ var i=+x.getAttribute('data-del'); if(!confirm((i+1)+'번 클립을 지울까요?')) return; var c=G_V2V.clips.splice(i,1)[0]; try{ if(c.url) URL.revokeObjectURL(c.url); if(c.idbKey) idbDeleteVideo(c.idbKey).catch(function(){}); }catch(e){} _v2vSave(); renderSB(); }; });
+  qa('[data-ed]', function(x){ x.onclick=function(){ var c=G_V2V.clips[+x.getAttribute('data-ed')]; G_V2V.edit=(G_V2V.edit===c.id)?null:c.id; renderSB(); }; });
+  qa('[data-grade]', function(x){ x.onclick=function(){ _v2vGradeOpen(+x.getAttribute('data-grade')); }; });
+  qa('[data-redo]', function(x){ x.onclick=function(){ var c=G_V2V.clips[+x.getAttribute('data-redo')]; if(!confirm('이 클립을 다시 만들까요? (변환 크레딧이 다시 들어요)')) return; c.result=null; c.resultCloud=null; c.resultOrig=null; c.graded=0; c.status=''; renderSB(); }; });
+  qa('[data-ts]', function(x){ var i=+x.getAttribute('data-ts'), c=G_V2V.clips[i]; x.oninput=function(){ c.ts=Math.min(+x.value, (c.te||c.dur)-0.5); var l=gE('v2v-tsv-'+i); if(l) l.textContent=c.ts.toFixed(1)+'초'; var pv=gE('v2v-prev-'+i); if(pv){ try{ pv.currentTime=c.ts; }catch(e){} } }; x.onchange=function(){ c.result=null; c.still=null; renderSB(); }; });
+  qa('[data-te]', function(x){ var i=+x.getAttribute('data-te'), c=G_V2V.clips[i]; x.oninput=function(){ c.te=Math.max(+x.value, (c.ts||0)+0.5); var l=gE('v2v-tev-'+i); if(l) l.textContent=c.te.toFixed(1)+'초'; var pv=gE('v2v-prev-'+i); if(pv){ try{ pv.currentTime=c.te; }catch(e){} } }; x.onchange=function(){ c.result=null; renderSB(); }; });
+  qa('[data-sp]', function(x){ x.onclick=function(){ var a=x.getAttribute('data-sp').split(':'), c=G_V2V.clips[+a[0]]; c.speed=+a[1]; c.result=null; renderSB(); }; });
+  qa('[data-apply]', function(x){ x.onclick=function(){ G_V2V.edit=null; renderSB(); try{ _agedEnvToast('✂ 편집이 적용됐어요 — 변환할 때 이 길이·속도로 만들어요'); }catch(e){} }; });
+  if((b=q('#v2v-look'))) b.onclick=_v2vLookCands;
+  qa('[data-pvf]', function(x){ x.onchange=function(){ var k=+x.getAttribute('data-pvf'), N=_v2vTotalFrames(); G_V2V.pvF[k]=Math.max(0, Math.min(N-1, Math.round(+x.value||0))); renderSB(); }; });
+  if((b=q('#v2v-pv-rand'))) b.onclick=function(){ G_V2V.pvF=_v2vRandFrames(); renderSB(); };
+  qa('[data-pvn]', function(x){ x.onclick=function(){ var d=+x.getAttribute('data-pvn'), n=Math.max(1, Math.min(V2V_PV_MAX, G_V2V.pvF.length+d)), N=_v2vTotalFrames();
+    if(n>G_V2V.pvF.length){ var tries=0, f; do{ f=Math.floor(Math.random()*N); tries++; }while(G_V2V.pvF.indexOf(f)!==-1 && tries<50); G_V2V.pvF.push(f); G_V2V.pvF.sort(function(a,b){return a-b;}); }
+    else if(n<G_V2V.pvF.length) G_V2V.pvF.pop();
+    G_V2V.pvN=G_V2V.pvF.length; renderSB(); }; });
+  if((b=q('#v2v-pv-go'))) b.onclick=_v2vPreviewRun;
+  if((b=q('#v2v-pv-clear'))) b.onclick=function(){ if(!confirm('테스트 결과 '+G_V2V.pv.length+'장을 모두 지울까요?')) return; G_V2V.pv=[]; _v2vSave(); renderSB(); };
+  qa('[data-pvd]', function(x){ x.onclick=function(ev){ ev.stopPropagation(); G_V2V.pv.splice(+x.getAttribute('data-pvd'),1); _v2vSave(); renderSB(); }; });
+  qa('[data-pvv]', function(x){ x.onclick=function(){ _v2vPreviewView(+x.getAttribute('data-pvv')); }; });
+  qa('[data-pvm]', function(x){ x.onclick=function(){ var it=G_V2V.pv[+x.getAttribute('data-pvm')]; if(!it||!it.url) return; G_V2V.master=it.url; G_V2V.clips.forEach(function(c){ if(!c.result) c.still=null; }); renderSB(); try{ _agedEnvToast('✓ 이 컷을 기준 룩으로 정했어요 — 모든 클립이 이 느낌으로 통일돼요'); }catch(e){} }; });
+  qa('[data-pick]', function(x){ x.onclick=function(){ G_V2V.master=G_V2V.cands[+x.getAttribute('data-pick')]; if(G_V2V.clips[0] && !G_V2V.clips[0].result) G_V2V.clips[0].still=G_V2V.master; G_V2V.clips.forEach(function(c,i){ if(i>0 && !c.result) c.still=null; }); renderSB(); }; });
+  if((b=q('#v2v-master-up'))) b.onclick=function(){ mi.click(); };
+  mi.onchange=function(){ var f=mi.files&&mi.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ _downscaleForMemorySafety(rd.result, function(rz){ G_V2V.master=rz; G_V2V.clips.forEach(function(c){ if(!c.result) c.still=null; }); renderSB(); }); }; rd.readAsDataURL(f); };
+  if((b=q('#v2v-master-clear'))) b.onclick=function(){ G_V2V.master=null; renderSB(); };
+  if((b=q('#v2v-go'))) b.onclick=_v2vRunAll;
+  if((b=q('#v2v-merge'))) b.onclick=_v2vMerge;
+  qa('[data-upx]', function(x){ x.onclick=function(){ _v2vUpscale(+x.getAttribute('data-upx')); }; });
+}
 function sbVideo(p){
   // ⚠️ 버그 수정("텍스트→영상 클릭해도 위에 안바뀌는데?"): 이 안내 문구가 G.vidMode와 무관하게
   // "이미지 → 카메라 무빙 영상"으로 하드코딩돼 있어서, 아래 "영상 방식" 탭을 바꿔도 전혀
@@ -25772,16 +26580,30 @@ function sbVideo(p){
   var _vidModeNoteMap={
     image:'이미지 &#8594; 카메라 무빙 영상',
     prompt:'텍스트 &#8594; AI 영상 생성',
-    startend:'시작+끝 이미지 &#8594; 그 사이를 잇는 영상'
+    startend:'시작+끝 이미지 &#8594; 그 사이를 잇는 영상',
+    v2v:'영상(화면 녹화·현장 영상) &#8594; 완성 건축·인테리어 영상'
   };
-  mkNote(p,'<strong style="color:#a5b4fc">'+(_vidModeNoteMap[G.vidMode]||_vidModeNoteMap.image)+'</strong>');
-  var vmw=dv('ss');vmw.innerHTML='<div class="lbl">영상 방식</div>';
+  // 2026-10-25 요청("영상제작 탭 가장 상단에 크게 — 영상제작 대표 프리셋"): 영상→완성영상을 맨 위 큰 카드로
+  (function(){
+    var on=G.vidMode==='v2v', hero=mk('button','');
+    hero.type='button'; hero.id='v2v-hero';
+    hero.style.cssText='display:block;width:100%;text-align:left;cursor:pointer;font-family:inherit;margin:0 0 12px;padding:14px 14px 13px;border-radius:14px;border:2px solid '+(on?'var(--ac)':'var(--acb)')+';background:'+(on?'var(--acg)':'linear-gradient(135deg,rgba(239,68,68,.10),var(--c2))')+';color:var(--t);box-shadow:'+(on?'0 0 0 3px var(--acg)':'0 4px 18px rgba(0,0,0,.25)');
+    hero.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:26px;line-height:1">🎥</span><div style="flex:1"><div style="font-size:15.5px;font-weight:900;color:'+(on?'var(--ac)':'var(--t)')+'">영상 &#8594; 완성 영상</div><div style="font-size:10.5px;color:var(--m2);font-weight:700">대표 기능 · 건축 외관 + 인테리어</div></div><span style="font-size:10px;background:#ef4444;color:#fff;border-radius:5px;padding:2px 6px;font-weight:900">NEW</span></div>'+
+      '<div style="font-size:11.5px;color:var(--t2);line-height:1.6">3D 프로그램 화면 녹화 · 휴대폰 현장 영상을 <b>같은 카메라 동선 그대로</b> 실사 완성 영상으로.<br>공간별 클립 → 룩 통일 → 한 편 합치기 → <b>FHD·4K 납품</b></div>'+
+      (on?'':'<div style="margin-top:9px;padding:8px;border-radius:9px;background:var(--ac);color:#000;font-weight:900;font-size:12.5px;text-align:center">▶ 시작하기</div>');
+    hero.onclick=function(){ if(G.vidMode!=='v2v'){ G.vidMode='v2v'; renderSB(); try{ updBtn(); renderMain('video'); }catch(e){} } };
+    p.appendChild(hero);
+  })();
+  if(G.vidMode!=='v2v') mkNote(p,'<strong style="color:#a5b4fc">'+(_vidModeNoteMap[G.vidMode]||_vidModeNoteMap.image)+'</strong>');
+  if(G.vidMode==='v2v') _v2vPanel(p); // 대표 기능 패널을 큰 카드 바로 아래에, 다른 방식은 맨 아래로
+  var vmw=dv('ss'); if(G.vidMode==='v2v') vmw.style.marginTop='14px'; vmw.innerHTML='<div class="lbl">'+(G.vidMode==='v2v'?'다른 영상 방식':'영상 방식')+'</div>';
   var vmr=dv('chips');
   [['image','이미지&#8594;영상'],['prompt','텍스트&#8594;영상'],['startend','Start/End']].forEach(function(m){
     var b=mk('button','chip'+(G.vidMode===m[0]?' on':''));b.innerHTML=m[1];
-    b.onclick=function(){G.vidMode=m[0];renderSB();};vmr.appendChild(b);
+    b.onclick=function(){G.vidMode=m[0];renderSB();try{ updBtn(); renderMain('video'); }catch(e){}};vmr.appendChild(b);
   });
   vmw.appendChild(vmr);p.appendChild(vmw);
+  if(G.vidMode==='v2v'){ return; } // 2026-10-25 영상→인테리어 영상(자체 버튼 사용)
   mkEng(p,true);
   if(G.vidMode==='image')mkUB(p,'이미지 업로드','main');
   else if(G.vidMode==='startend'){mkUB(p,'Start Frame','main');mkUB(p,'End Frame','end');}
@@ -44143,6 +44965,14 @@ function addHistEl(item, scroll, targetHs, atBottom){
       sebar.appendChild(slead);
     }
 
+    // 2026-10-25 🔁 렌더 실사화 결과: 납품 후 수정 요청 → 이 이미지와 같은 느낌으로 수정 렌더
+    if(item.result && (item.wf==='render' || G.wf==='render') && !/\.(mp4|webm)(\?|$)/i.test(item.result)){
+      var smt=mk('button','se-btn');smt.type='button';smt.textContent='🔁 수정본 같은 느낌';smt.title='납품 후 수정 요청 — 고친 모델링을 올리면 이 이미지와 같은 주변·색감으로 다시 렌더';
+      smt.style.cssText='background:var(--acg);border-color:var(--ac);color:var(--ac);padding:4px 9px;border-radius:5px;font-size:11px;font-weight:800;cursor:pointer;border:1px solid;font-family:inherit';
+      smt.addEventListener('click',function(e){e.stopPropagation();_mtOpen(item);},false);
+      smt.addEventListener('mousedown',function(e){e.stopPropagation();},false);
+      sebar.appendChild(smt);
+    }
     // 업스케일
     var sup=mk('button','se-btn');sup.type='button';sup.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:-1px;margin-right:3px"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>업스케일';sup.title='업스케일 탭으로';
     sup.style.cssText='background:rgba(16,185,129,.1);border-color:rgba(16,185,129,.35);color:var(--ac);padding:4px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid;font-family:inherit';
@@ -47683,7 +48513,10 @@ function _runToolWithPromptActual(translatedPrompt){
     userText:  ((tab.prompt||'')+' '+(tab.extraPrompt||'')).trim(),
     renderSky: (G.wf==='render' ? (G.renderSky||'clear') : null),
     textProtect: (G.wf==='render' ? _tpActiveMask(tab) : null), // 2026-10-12 글자 보호 브러시
-    toneRef:   (G.wf==='render' ? (tab._toneRef||null) : null), // 2026-10-20 여러 장 같은 톤: 기준 이미지(조명·색감만 맞춤)
+    toneRef:   (G.wf==='render' ? (tab._matchRef||tab._toneRef||null) : null), // 2026-10-20 여러 장 같은 톤: 기준 이미지(조명·색감만 맞춤) / 2026-10-25 수정 렌더: 납품본
+    matchRef:  (G.wf==='render' && tab._matchRef) ? 1 : 0, // 2026-10-25 🔁 납품본과 같은 느낌으로 수정 렌더
+    matchOld:  (G.wf==='render' && tab._matchRef) ? (tab._matchOld||null) : null,
+    matchKeep: (G.wf==='render' && tab._matchRef) ? !!tab._matchKeep : false,
     wf:        _realWf(G.wf),
     prompt:    translatedPrompt,
     selK:      tab.selK||null,
@@ -49033,9 +49866,150 @@ function _rqbPost(origSrc, resUrl, onDone){
     onDone(base); // 2026-10-12(사용자 요청): 매입등 빛번짐은 후처리 말고 프롬프트(AI 렌더)로만
   });
 }
+// ══ 2026-10-25 요청("납품한 렌더 실사화에 수정이 나와서 모델링을 고쳐 다시 렌더링할 때, 그 이미지랑 똑같은 느낌·주변 환경 그대로 가능?") ══
+// 🔁 납품본과 같은 느낌으로 수정 렌더:
+//   ① 납품본(완성 이미지)을 마지막 참고 이미지로 보내고 "하늘·주변·나무·차·색감·빛은 납품본 그대로, 바뀐 모델링만 반영" 규칙(맨 끝)
+//   ② 예전 모델링 vs 수정 모델링을 브라우저에서 비교해서 실제로 바뀐 영역만 찾고, 결과에서 그 영역만 쓰고 나머지는 납품본 픽셀 그대로 합성(무료)
+var MATCH_REF_RULE=' 🔁🔁🔁 REVISION OF AN APPROVED DELIVERED IMAGE (most important — user request): the LAST attached image is the APPROVED, ALREADY DELIVERED photoreal render of this SAME view, made earlier from a previous version of this 3D model. The client asked for design changes, the 3D model was revised, and the FIRST image is the revised model. This is the ONLY permitted use of an extra image, and here it OVERRIDES the "do not use reference images" rules above: reproduce the delivered image as exactly as possible — the same sky and clouds, the same background buildings, trees, landscaping, cars, people and street, the same time of day, sunlight direction and shadows, the same colour grading, white balance, exposure and contrast, and the same rendering of every material that did not change. ONLY where the revised 3D model differs from the delivered image (changed geometry, openings, materials or colours) follow the revised model, rendered in exactly the same photographic style so the changes blend in seamlessly. Keep the camera and framing of the revised model.';
+var MATCH_REF_RULE_SHORT=' The LAST attached image is the approved delivered render of this same view (from the previous model). Match it exactly — same sky, surroundings, trees, cars, light, colour grading and material look — and change only what differs in the revised model (first image).';
+var MATCH_REF_LAST=' 🔁 LAST REMINDER: everything that did not change in the model must look exactly like the delivered image (last attachment) — same sky, surroundings, colours and light.';
+function _mtLoad(src, cb){ var im=new Image(); im.crossOrigin='anonymous'; im.onload=function(){ cb(im); }; im.onerror=function(){ cb(null); }; im.src=src; }
+// 예전·수정 모델링 비교 → {mask: 작은 캔버스(알파=바뀐 정도), ratio, w, h, sameAspect}
+function _mtDiff(oldSrc, newSrc, cb){
+  _mtLoad(oldSrc, function(O){ _mtLoad(newSrc, function(N){
+    if(!O || !N){ cb(null); return; }
+    var aO=O.naturalWidth/O.naturalHeight, aN=N.naturalWidth/N.naturalHeight, same=Math.abs(aO-aN)/aN<0.02;
+    var w=Math.min(512, N.naturalWidth), h=Math.max(1, Math.round(w/aN));
+    function px(im){ var c=document.createElement('canvas'); c.width=w; c.height=h; var x=c.getContext('2d',{willReadFrequently:true}); x.filter='blur(1px)'; x.drawImage(im,0,0,w,h); return x.getImageData(0,0,w,h).data; }
+    var a=px(O), b=px(N), n=w*h, raw=new Uint8Array(n), cnt=0;
+    for(var i=0;i<n;i++){ var k=i*4, d=(Math.abs(a[k]-b[k])+Math.abs(a[k+1]-b[k+1])+Math.abs(a[k+2]-b[k+2]))/3; if(d>16){ raw[i]=1; cnt++; } }
+    // 잡티 제거(주변 3×3 중 3개 이상 바뀌어야 인정) → 넉넉하게 넓히기(가로의 약 2.5%) → 부드러운 경계
+    var clean=new Uint8Array(n), c2=0;
+    for(var y=1;y<h-1;y++) for(var x2=1;x2<w-1;x2++){ var s=0; for(var dy=-1;dy<=1;dy++) for(var dx=-1;dx<=1;dx++) s+=raw[(y+dy)*w+x2+dx]; if(s>=3){ clean[y*w+x2]=1; c2++; } }
+    var mc=document.createElement('canvas'); mc.width=w; mc.height=h; var mx=mc.getContext('2d'), id=mx.createImageData(w,h);
+    for(var j=0;j<n;j++){ if(clean[j]){ var q=j*4; id.data[q]=255; id.data[q+1]=255; id.data[q+2]=255; id.data[q+3]=255; } }
+    mx.putImageData(id,0,0);
+    var R=Math.max(3, Math.round(w*0.025));
+    var dc=document.createElement('canvas'); dc.width=w; dc.height=h; var dx2=dc.getContext('2d');
+    dx2.filter='blur('+R+'px)'; dx2.drawImage(mc,0,0); dx2.filter='none';
+    var dd=dx2.getImageData(0,0,w,h); for(var t=3;t<dd.data.length;t+=4){ dd.data[t]=dd.data[t]>8?255:0; dd.data[t-1]=dd.data[t-2]=dd.data[t-3]=255; } dx2.putImageData(dd,0,0); // 넓히기
+    var fc=document.createElement('canvas'); fc.width=w; fc.height=h; var fx=fc.getContext('2d'); fx.filter='blur('+Math.max(2,Math.round(R/2))+'px)'; fx.drawImage(dc,0,0); // 부드러운 경계
+    cb({mask:fc, hard:dc, ratio:c2/n, w:w, h:h, sameAspect:same});
+  }); });
+}
+// 결과 R + 납품본 D → 바뀐 곳만 R, 나머지 D (경계 색 맞춤)
+function _mtComposite(task, resultSrc, cb){
+  _mtDiff(task.matchOld, task.img, function(df){
+    if(!df || !df.sameAspect || df.ratio>0.55){ try{ _agedEnvToast(df&&df.ratio>0.55?'🔁 바뀐 부분이 너무 많아서(카메라·전체 변경) 납품본 합치기는 건너뛰고 느낌만 맞췄어요':'🔁 예전·수정 모델링의 화면 비율이 달라서 납품본 합치기는 건너뛰었어요'); }catch(e){} cb(resultSrc); return; }
+    _mtLoad(task.toneRef, function(D){ _mtLoad(resultSrc, function(R){
+      if(!D || !R){ cb(resultSrc); return; }
+      var aD=D.naturalWidth/D.naturalHeight, aR=R.naturalWidth/R.naturalHeight;
+      if(Math.abs(aD-aR)/aR>0.02){ try{ _agedEnvToast('🔁 납품본과 결과의 화면 비율이 달라서 합치기는 건너뛰었어요'); }catch(e){} cb(resultSrc); return; }
+      var W=Math.max(D.naturalWidth, R.naturalWidth), H=Math.round(W/aD);
+      // 경계 바깥 띠에서 D·R 평균색 차이를 구해 R을 납품본 톤에 맞춤
+      var sw=df.w, sh=df.h, sc=document.createElement('canvas'); sc.width=sw; sc.height=sh; var sx=sc.getContext('2d',{willReadFrequently:true});
+      sx.drawImage(D,0,0,sw,sh); var dP=sx.getImageData(0,0,sw,sh).data; sx.clearRect(0,0,sw,sh); sx.drawImage(R,0,0,sw,sh); var rP=sx.getImageData(0,0,sw,sh).data;
+      var hm=df.hard.getContext('2d').getImageData(0,0,sw,sh).data, fm=df.mask.getContext('2d').getImageData(0,0,sw,sh).data;
+      var sum=[0,0,0], m=0;
+      for(var i=0;i<sw*sh;i++){ var k=i*4; if(hm[k+3]>0 && fm[k+3]<200){ sum[0]+=dP[k]-rP[k]; sum[1]+=dP[k+1]-rP[k+1]; sum[2]+=dP[k+2]-rP[k+2]; m++; } }
+      var _cl=function(v){ return Math.max(-25, Math.min(25, v)); }; var dl=m>50?[_cl(sum[0]/m*0.8), _cl(sum[1]/m*0.8), _cl(sum[2]/m*0.8)]:[0,0,0]; // 경계 색 맞춤은 살짝만(±25)
+      var out=document.createElement('canvas'); out.width=W; out.height=H; var ox=out.getContext('2d');
+      ox.drawImage(D,0,0,W,H);
+      var L=document.createElement('canvas'); L.width=W; L.height=H; var lx=L.getContext('2d');
+      lx.drawImage(R,0,0,W,H);
+      if(Math.abs(dl[0])+Math.abs(dl[1])+Math.abs(dl[2])>1.5){ var ld=lx.getImageData(0,0,W,H), p=ld.data; for(var z=0;z<p.length;z+=4){ p[z]=Math.max(0,Math.min(255,p[z]+dl[0])); p[z+1]=Math.max(0,Math.min(255,p[z+1]+dl[1])); p[z+2]=Math.max(0,Math.min(255,p[z+2]+dl[2])); } lx.putImageData(ld,0,0); }
+      lx.globalCompositeOperation='destination-in'; lx.imageSmoothingQuality='high'; lx.drawImage(df.mask,0,0,W,H); lx.globalCompositeOperation='source-over';
+      ox.drawImage(L,0,0);
+      try{ _agedEnvToast('🔁 바뀐 부분(약 '+Math.max(1,Math.round(df.ratio*100))+'%)만 새로 렌더하고 나머지는 납품본 그대로 합쳤어요'); }catch(e){}
+      try{ cb(out.toDataURL('image/jpeg',0.95)); }catch(e){ cb(resultSrc); }
+    }); });
+  });
+}
+// ── 화면: 3단계 모달 ──
+var G_MT={d:null, o:null, n:null, keep:true};
+function _mtOpen(item){
+  if(item){ G_MT.d=item.result||null; G_MT.o=(typeof item.orig==='string' && item.orig)?item.orig:null; G_MT.n=null; }
+  var old=gE('mt-ov'); if(old) old.remove();
+  var ov=document.createElement('div'); ov.id='mt-ov';
+  ov.style.cssText='position:fixed;inset:0;z-index:100001;background:rgba(0,0,0,.78);display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;overflow-y:auto;font-family:inherit';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  document.body.appendChild(ov);
+  _mtRender();
+}
+function _mtRender(){
+  var ov=gE('mt-ov'); if(!ov) return;
+  function slot(n, key, title, sub, extra){
+    var v=G_MT[key];
+    return '<div style="border:1.5px solid '+(v?'var(--ac)':'var(--bd2)')+';border-radius:12px;padding:10px;background:var(--c2);display:flex;gap:10px;align-items:center;margin-bottom:8px">'+
+      '<div style="width:30px;height:30px;border-radius:50%;background:'+(v?'var(--ac)':'var(--bd2)')+';color:'+(v?'#000':'var(--t2)')+';font-weight:900;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+(v?'✓':n)+'</div>'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:900;color:var(--t)">'+title+'</div><div style="font-size:11px;color:var(--m2);line-height:1.5;margin-top:2px">'+sub+'</div>'+
+      '<div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap"><button type="button" data-mtup="'+key+'" style="padding:6px 10px;border-radius:7px;border:1px solid var(--bd2);background:var(--c1,#111);color:var(--t);font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit">📁 '+(v?'다른 파일':'파일 올리기')+'</button>'+(extra||'')+'</div></div>'+
+      (v?'<img src="'+_cEsc(v)+'" style="width:120px;height:78px;object-fit:cover;border-radius:8px;flex-shrink:0;background:#000">':'<div style="width:120px;height:78px;border-radius:8px;border:1.5px dashed var(--bd2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--m2)">비어 있음</div>')+
+    '</div>';
+  }
+  var hist=((G.HIST&&G.HIST.render)||[]).filter(function(it){ return it && it.result && !it.preview && !/\.(mp4|webm)(\?|$)/i.test(it.result); }).slice(0,24);
+  var tab=getTab('render'), cost=(typeof getBaseCost==='function'?getBaseCost('render','2x',tab.resolution||'1K',(G.eng==='gpt2'?'nano2':G.eng)):20);
+  var h='<div style="background:var(--card,#141414);border:1px solid var(--bd2);border-radius:16px;max-width:640px;width:100%;padding:18px;color:var(--t)">'+
+    '<div style="display:flex;align-items:center;margin-bottom:4px"><div style="font-size:16px;font-weight:900">🔁 납품본과 같은 느낌으로 수정 렌더</div><button type="button" id="mt-x" style="margin-left:auto;border:none;background:var(--c2);color:var(--t);border-radius:8px;padding:6px 12px;cursor:pointer;font-family:inherit">닫기 ✕</button></div>'+
+    '<div style="font-size:11.5px;color:var(--t2);line-height:1.6;margin-bottom:12px">납품 후 수정 요청이 왔을 때 — 고친 모델링만 바뀌고 <b>하늘·주변 건물·나무·차·색감은 납품본 그대로</b> 나오게 해요.</div>';
+  h+=slot(1,'d','납품했던 완성 이미지','고객에게 보냈던 최종 실사 이미지', hist.length?'<button type="button" id="mt-pick" style="padding:6px 10px;border-radius:7px;border:1px solid var(--ac);background:var(--acg);color:var(--ac);font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit">🖼 내 결과에서 고르기</button>':'');
+  if(G_MT._picking){ h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:-2px 0 10px;max-height:240px;overflow:auto">'+hist.map(function(it,i){ return '<img src="'+_cEsc(it.result)+'" data-mtpick="'+i+'" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:7px;cursor:pointer;border:2px solid '+(G_MT.d===it.result?'var(--ac)':'transparent')+'">'; }).join('')+'</div>'; }
+  h+=slot(2,'o','예전 모델링 이미지','납품본을 만들 때 넣었던 3D 캡처 — 내 결과에서 고르면 자동으로 채워져요');
+  h+=slot(3,'n','수정한 모델링 이미지','⚠ 예전과 <b>같은 카메라(장면)·같은 크기</b>로 다시 뽑아주세요 — 스케치업이면 저장한 장면(Scene) 그대로');
+  if(G_MT.o && G_MT.n) h+='<div id="mt-diff" style="border:1px solid var(--bd2);border-radius:12px;padding:10px;margin-bottom:8px;font-size:11.5px;color:var(--t2)">🔍 바뀐 부분 찾는 중…</div>';
+  h+='<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--t);margin:6px 0 12px;cursor:pointer"><input type="checkbox" id="mt-keep"'+(G_MT.keep?' checked':'')+(G_MT.o?'':' disabled')+' style="margin-top:2px"><span><b>안 바뀐 부분은 납품본 그대로 쓰기 (추천)</b><br><span style="font-size:10.5px;color:var(--m2)">'+(G_MT.o?'바뀐 곳만 새로 렌더하고 나머지는 납품본 픽셀 그대로 — 주변이 100% 같아요':'② 예전 모델링 이미지가 있어야 쓸 수 있어요 (없으면 느낌만 맞춰요)')+'</span></span></label>';
+  var ready=G_MT.d && G_MT.n;
+  h+='<button type="button" id="mt-go" style="width:100%;padding:13px;border-radius:11px;border:none;background:'+(ready?'var(--ac)':'var(--c2)')+';color:'+(ready?'#000':'var(--m2)')+';font-size:14px;font-weight:900;cursor:'+(ready?'pointer':'default')+';font-family:inherit">✨ 수정 렌더 시작 <span style="font-size:11.5px;font-weight:700">(약 '+cost+'cr · 지금 고른 실사화 설정)</span></button>'+
+    '<div style="font-size:10.5px;color:var(--m2);margin-top:8px;line-height:1.5">결과는 평소처럼 메인 화면·갤러리에 저장돼요. 비교·합치기는 브라우저에서 해서 추가 크레딧이 없어요.</div></div>';
+  ov.innerHTML=h;
+  var fi=document.createElement('input'); fi.type='file'; fi.accept='image/*'; fi.style.display='none'; ov.appendChild(fi);
+  function q(s){ return ov.querySelector(s); }
+  q('#mt-x').onclick=function(){ ov.remove(); };
+  Array.prototype.forEach.call(ov.querySelectorAll('[data-mtup]'), function(b){ b.onclick=function(){ fi._key=b.getAttribute('data-mtup'); fi.value=''; fi.click(); }; });
+  fi.onchange=function(){ var f=fi.files&&fi.files[0]; if(!f) return; var rd=new FileReader(); rd.onload=function(){ var k=fi._key; try{ _downscaleForMemorySafety(rd.result, function(rz){ G_MT[k]=rz; _mtRender(); }); }catch(e){ G_MT[k]=rd.result; _mtRender(); } }; rd.readAsDataURL(f); };
+  if(q('#mt-pick')) q('#mt-pick').onclick=function(){ G_MT._picking=!G_MT._picking; _mtRender(); };
+  Array.prototype.forEach.call(ov.querySelectorAll('[data-mtpick]'), function(im){ im.onclick=function(){ var it=hist[+im.getAttribute('data-mtpick')]; G_MT.d=it.result; if(typeof it.orig==='string' && it.orig) G_MT.o=it.orig; G_MT._picking=false; _mtRender(); }; });
+  q('#mt-keep').onchange=function(){ G_MT.keep=this.checked; };
+  q('#mt-go').onclick=function(){ if(ready) _mtRun(); else alert('① 납품했던 완성 이미지와 ③ 수정한 모델링 이미지를 넣어주세요.'); };
+  if(G_MT.o && G_MT.n){
+    _mtDiff(G_MT.o, G_MT.n, function(df){
+      var el=q('#mt-diff'); if(!el) return;
+      if(!df){ el.innerHTML='⚠ 이미지를 비교하지 못했어요.'; return; }
+      var pct=Math.round(df.ratio*1000)/10, msg;
+      if(!df.sameAspect) msg='<b style="color:#f59e0b">⚠ 예전·수정 모델링의 화면 비율이 달라요</b> — 같은 카메라·같은 크기로 뽑아야 납품본 합치기가 돼요. (지금은 느낌만 맞춰요)';
+      else if(df.ratio>0.55) msg='<b style="color:#f59e0b">⚠ 화면의 '+pct+'%가 바뀌었어요</b> — 카메라가 움직였거나 전체가 바뀐 것 같아요. 납품본 합치기는 건너뛰고 느낌만 맞춰요.';
+      else if(df.ratio<0.001) msg='<b style="color:#f59e0b">바뀐 부분을 거의 못 찾았어요</b> — 같은 이미지를 넣은 건 아닌지 확인해 주세요.';
+      else msg='<b style="color:var(--ac)">✅ 바뀐 부분 약 '+Math.max(0.1,pct)+'%</b> (빨간색) — 여기만 새로 렌더하고 나머지는 납품본 그대로예요.';
+      _mtLoad(G_MT.n, function(N){
+        var c=document.createElement('canvas'); c.width=df.w; c.height=df.h; var x=c.getContext('2d'); if(N) x.drawImage(N,0,0,df.w,df.h);
+        if(df.sameAspect && df.ratio<=0.55){ var r=document.createElement('canvas'); r.width=df.w; r.height=df.h; var rx=r.getContext('2d'); rx.fillStyle='rgba(239,68,68,.6)'; rx.fillRect(0,0,df.w,df.h); rx.globalCompositeOperation='destination-in'; rx.drawImage(df.hard,0,0); x.drawImage(r,0,0); }
+        el.innerHTML='<div style="margin-bottom:6px;line-height:1.5">'+msg+'</div><img src="'+c.toDataURL('image/jpeg',0.85)+'" style="width:100%;border-radius:8px">';
+      });
+    });
+  }
+}
+function _mtRun(){
+  var tab=getTab('render');
+  if(!(_supa && _supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  if(G.wf!=='render'){ try{ selectWF('render'); }catch(e){} tab=getTab('render'); }
+  var prevImg=tab.inputImg, prevName=tab.inputImgName, prevSel=tab.selK, prevEng=G.eng;
+  if(!tab.selK || !PS_RENDER.find(function(x){ return x.k===tab.selK; })) tab.selK='hq_real'; // 프리셋을 안 골랐으면 기본 실사화
+  if(G.eng==='gpt2') G.eng='nano2'; // GPT 엔진은 참고 이미지 맞추기가 약해서 이 기능은 나노바나나로
+  tab.inputImg=G_MT.n; tab.inputImgName='수정 모델링';
+  tab._matchRef=G_MT.d; tab._matchOld=G_MT.o||null; tab._matchKeep=!!(G_MT.keep && G_MT.o);
+  var gv=gE('mt-ov'); if(gv) gv.remove();
+  try{ window._doActbtn(); }
+  finally{ tab._matchRef=null; tab._matchOld=null; tab._matchKeep=false; if(prevEng==='gpt2') G.eng=prevEng; if(!prevSel) {} }
+  try{ renderSB(); }catch(e){}
+}
 var TONE_REF_RULE=' 🎨🎨 TONE MATCH ACROSS A SET (very important — this image is one of several views of the SAME project that must look like one consistent photo set): the LAST attached image is a TONE REFERENCE already rendered for ANOTHER view of this same project. This is the ONLY permitted use of an extra image: match ONLY its overall photographic look — colour grading, white balance / colour temperature, time of day, sunlight direction and softness, exposure, contrast, and how real and finished the materials look — so the two images look like they were shot by the same photographer on the same day with the same camera settings. NEVER copy anything else from it: not its objects, furniture, layout, room shape, camera angle, framing, nor the colours or materials of its specific surfaces. Every object, the geometry and every material colour must come ONLY from the main (first) image, and all rules above still apply.';
 var TONE_REF_RULE_SHORT=' The second image is a tone reference from another view of the same project: match only its colour grading, white balance, time of day, sunlight and exposure so both look like one photo set. Do not copy its objects, layout, camera or surface colours.';
 function procImgWithTask(task, onDone, onErr){
+  // 2026-10-25 🔁 납품본과 같은 느낌으로 수정 렌더: 결과가 나오면(원본 크기 맞춤 뒤) 바뀐 영역만 결과, 나머지는 납품본 픽셀로 합성
+  if(task && task.matchRef && task.matchKeep && task.matchOld && task.toneRef && !task._mtWrapped && typeof onDone==='function'){
+    task._mtWrapped=true; var _mtOD=onDone;
+    onDone=function(ri){ if(typeof ri!=='string'){ _mtOD.apply(this, arguments); return; } try{ _mtComposite(task, ri, function(out){ _mtOD(out); }); }catch(e){ _mtOD(ri); } };
+  }
   // 2026-10-23 신고("실사화가 메인 건물 마감재를 임의로 다 바꾼다 — 흰 사이딩이 원목·유리로"): 규칙 문구만으로는 AI가 '실제 재료로 바꿔라'를 재료 교체로 해석함 →
   // 실사화 전에 비전 AI가 원본의 요소별 마감재·색을 글로 읽어서(무료, 이미지당 1번) 프롬프트 맨 끝에 '이 재료·색 그대로' 목록으로 못박음
   if(task && (task.wf==='render') && (task.selK==='hq_real' || task.selK==='render_quality_boost' || task.selK==='hq_cg') && task.img && task._matMap===undefined){ // 2026-10-23: 고품질화도 트래버틴 상판이 원목으로 바뀌는 문제 → 같은 마감재 읽기 적용
@@ -49206,6 +50180,7 @@ function procImgWithTask(task, onDone, onErr){
         if(task.selK==='hq_cg'){ try{ var _hqR=PS_RENDER.find(function(x){return x.k==='hq_real';}), _hqC=PS_RENDER.find(function(x){return x.k==='hq_cg';}); if(_hqR && _hqC && prompt.indexOf(_hqC.pt)===0) prompt=_hqR.pt+prompt.slice(_hqC.pt.length); }catch(_e){} } // 2026-10-25: CG 렌더는 실사화와 같은 보존·품질 파이프라인 + 마지막에 CG 느낌만
         ap=prompt+' ⚠️⚠️⚠️⚠️ 마지막으로 다시 한번, 가장 중요(참고 이미지 사용 금지): 실사 참고 이미지가 몇 장 첨부되어 있더라도, 그 참고 이미지의 재질·색상·스타일·가구·마감재를 이 결과물에 절대 반영하지 마세요 — 참고 이미지는 이 작업에서 완전히 무시하세요. 이 원본 이미지에 실제로 보이는 재질·색상·가구만 그대로 유지한 채 사실감(조명·반사·질감)만 개선하는 것이 유일한 목표입니다. 참고 이미지 때문에 원본에 없던 재질이나 다른 디자인의 가구가 섞여 들어가면 명백한 실패입니다. ⚠️⚠️⚠️⚠️ 마감재 절대 고정: 바닥·벽·천장·상판·가구·타일·목재·금속 등 모든 마감재는 원본과 완전히 같은 재질·색상·패턴·크기·배열(타일 규격과 줄눈, 목재 결 방향과 폭, 무광/유광)을 유지해야 합니다. 다른 마감재로 바꾸거나(예: 도장→석재, 목재→대리석, 밝은 목재→어두운 목재), 색을 바꾸거나, 패턴을 바꾸는 것은 절대 금지이며 치명적 실패입니다. 허용되는 것은 같은 마감재를 사진처럼 더 디테일하고 사실적으로(질감·반사·그림자) 살리는 것뿐입니다. FINISH MATERIALS ARE LOCKED: same material type, color, pattern, scale and layout as the input on every surface — only add photographic realism to the same material, never swap or recolor any finish. ⚠️⚠️⚠️⚠️ CUTAWAY / SECTION MODEL — DO NOT BUILD WHAT IS NOT THERE: if the input is a cut-open 3D model (dollhouse/cutaway/section view with walls, floors or the roof removed, or walls cut at a low height so you can see inside), the result must stay cut open EXACTLY the same way. Do NOT add any wall, partition, floor slab, ceiling, roof, column, railing, stair or opening that is not in the input; do NOT close or complete a cut-away side; do NOT add a wall under a mezzanine or extend a floor into areas that are empty in the input; every wall keeps its exact height, length and cut edge. Keep the BACKGROUND exactly like the input (e.g. a plain gray/white backdrop stays plain) — do NOT add ground, site, pavement, concrete slab, grass, sky or surroundings around the model. COLORS OF THE MODEL ARE THE DESIGN: every object and surface keeps its input color — white chairs stay white, gray floors stay gray (render them as a matching gray material such as polished concrete or gray tile, never wood), white walls stay white, pink stairs stay pink, light-wood tabletops stay light wood. Only add photographic realism (texture, lighting, shadows, reflections) to what is already there. Before finishing, compare the outline of the model with the input: if any wall, floor area or background element was added, or any surface/object color changed, remove/restore it. ⚠️ 컷어웨이(잘린 단면) 모델: 원본에 없는 벽·바닥·천장·기둥·난간을 절대 새로 만들지 말고, 잘려서 열린 면은 그대로 열어두세요. 배경은 원본처럼 단색 그대로(바닥·대지·콘크리트 추가 금지). 모델의 색이 곧 디자인입니다 — 흰 의자는 흰색, 회색 바닥은 회색 재질(목재로 바꾸기 금지)로 유지하세요.';
         ap+=(task.selK==='hq_cg' ? (REALISM_LINES_LIGHTS_FINAL.replace(/ 📷 MAKE IT READ AS A REAL CAMERA PHOTO[\s\S]*?only the photographic quality changes\./,'')+CG_LOOK_FINAL) : REALISM_LINES_LIGHTS_FINAL); if(task._matMap) ap+=(task.selK==='hq_cg' ? task._matMap.replace('only make it look like the real version of that same material','only render it as a flawless high-end CG version of that same material') : task._matMap); // 2026-10-23 요청: 스케치업 모델링 검은 외곽선 제거 + 천장 조명 켜짐/꺼짐은 원본 그대로
+        if(task._envTail) ap+=task._envTail; // 2026-10-25 영상→완성영상: 시간·계절·날씨 선택은 맨 끝(가장 강한 위치)에서 위의 '조명 상태 그대로·낮빛' 규칙보다 우선
       } else {
         ap=prompt+' If reference images are provided, blend their color, material and style naturally into this specific request. IMPORTANT — REFERENCE IMAGES MUST NEVER OVERRIDE DOOR/WINDOW PRESERVATION: even when copying a reference image\'s furniture, cabinetry, or shelving layout, you must still keep every original door and window completely unblocked and walkable-through. Do NOT extend a reference image\'s continuous cabinet run, shelving wall, or furniture arrangement across a wall segment that contains a door in the original photo — adapt the reference layout (shorten it, break it, or leave a gap) so the door stays exactly where it was and remains fully open and usable. This rule overrides literal copying of the reference composition. Do not generate, render or display any text, letters, signs, labels or typography in the image.'; // 프리셋 프롬프트 기준 + 레퍼런스 자연스럽게 결합
       }
@@ -49302,7 +50277,7 @@ function procImgWithTask(task, onDone, onErr){
       'PERFORATED / PATTERNED SCREENS MUST KEEP THEIR EXACT PATTERN: if a solid wall has a pattern of openings (triangles, diamonds, hexagons, circles, slots, parametric perforations, vertical slits), keep that solid screen with the SAME opening shapes, sizes, count and spacing — the openings stay openings (dark recess or view through), the solid between them stays solid. Do NOT replace a patterned screen or a solid band with a continuous glass curtain wall, and do NOT add extra glazing, mullions or glass floors that are not drawn. '+
       'Keep the ratio of solid to glass on every facade exactly as in the input — before finishing, compare the podium/base, the bridge and each tower: anything that was solid must still read as solid.';
     // 2026-10-12("3D 캡처 배경이 검은색이라 계속 야간으로 렌더된다 — 따로 요청 안 하면 무조건 맑은 날 주간"): 야간 요청이 없으면 주간 고정
-    if(task.selK!=='render_quality_boost' && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){ // 2026-10-12: 고품질화는 이미 렌더링된 이미지의 시간대·조명 분위기를 그대로 유지
+    if(task.selK!=='render_quality_boost' && !task._envNoSky && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){ // 2026-10-12: 고품질화는 이미 렌더링된 이미지의 시간대·조명 분위기를 그대로 유지
       var _sky = task.renderSky || 'clear';
       // 2026-10-13(요청): 구름 조금 = 맑은 날에 구름이 조금 / 흐림 = 진짜 흐린 날
       var _skyTxt = _sky==='partly' ? 'Render a bright, SUNNY CLEAR-WEATHER daytime scene with just a few clouds: a vivid blue sky with a few scattered fluffy white cumulus clouds (mostly blue — clouds only about 15-25% of the sky), direct bright sunshine with crisp daylight shadows — this is a fine sunny day, NOT a grey or overcast day, exterior lights OFF'
@@ -49322,7 +50297,7 @@ function procImgWithTask(task, onDone, onErr){
     }
   }
   // 2026-10-20 여러 장 같은 톤: 기준 이미지(마지막 첨부)의 조명·색감·분위기만 맞춤(물건·구도·재질은 원본 그대로)
-  if(wf==='render' && task && task.toneRef) ap += TONE_REF_RULE;
+  if(wf==='render' && task && task.toneRef) ap += (task.matchRef ? MATCH_REF_RULE : TONE_REF_RULE);
 
   // ══ EDIT 탭 — 원본 해상도 유지 ═══════════════════════════════════
   if(wf==='edit'){
@@ -49916,7 +50891,7 @@ function procImgWithTask(task, onDone, onErr){
         (_ut ? ' User request: '+_ut : '')+
         (/사람|인물|행인|손님|직원|고객|가족|커플/.test(_ut) ? ' Any people must be natural ordinary Koreans that look like real photographed people.' : '');
     }
-    if(task && task.toneRef) _sdP += TONE_REF_RULE_SHORT;
+    if(task && task.toneRef) _sdP += (task.matchRef ? MATCH_REF_RULE_SHORT : TONE_REF_RULE_SHORT);
     uploadImgToFal(img, function(imgUrl){
       if(task && task.toneRef){ uploadImgToFal(task.toneRef, function(tu){ _sd5Go([imgUrl, tu]); }, function(){ _sd5Go([imgUrl]); }); } else _sd5Go([imgUrl]);
     function _sd5Go(_urls){
@@ -49940,6 +50915,8 @@ function procImgWithTask(task, onDone, onErr){
   // → 실사화(hq_real)도 고품질화와 같은 방식(여백 붙여 지원 비율로 보내고 결과에서 여백만 잘라냄)으로 화면 범위를 그대로 유지
   var _padOn = _rqbOn || !!(task && (task.selK==='hq_real' || task.selK==='hq_cg') && wf==='render');
   if(_padOn && !_rqbOn) ap += ' (The grey bands at the edges of the input are only padding — leave them as plain flat grey; they will be cropped off. Keep the real image area exactly in place.)';
+  if(task && task.matchRef) ap += MATCH_REF_LAST; // 2026-10-25 수정 렌더(맨 끝)
+  if(task && task._envTail) ap += ' 🌤 LAST REMINDER — the chosen time of day / season / weather above must be clearly visible in the result.'; // 2026-10-25 영상→완성영상 환경 선택(맨 끝 위치가 가장 강함)
   (_padOn ? _rqbPadToAspect : function(s,cb){ cb(s,null); })(img, function(_sendImg, _cropFr){
   uploadImgToFal(_sendImg, function(imgUrl){
     if(!_refs3.length){
@@ -58020,6 +58997,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       if(G.wf==='shorts')return; // 쇼츠 탭은 "+" 타일 자체 클릭으로 처리 (중복 오픈 방지)
       if(G.wf==='consult')return; // 상담 패키지: 사이드바에서 공간별로 사진을 넣음
       if(G.wf==='proposal')return; // 제안서 탭도 자체 "+ 장면 추가하기" 흐름을 쓰므로 기본 업로드와 겹치면 안 됨
+      if(G.wf==='video' && G.vidMode==='v2v'){ _v2vPickFiles(); return; } // 2026-10-25 영상→완성영상: 영상 파일을 클립으로
       if(G.wf==='psedit')return; // ⚠️ 포토샵 편집 탭: 편집기 안 클릭(칠하기·선택 등)이 파일 선택창을 열면 안 됨
       // ⚠️ 버그 수정: "공간 컨셉 디자인"에서 메인화면 빈 상태를 클릭하면 일반 단일 이미지 업로드
       // 경로(#fi, tab.inputImg)로 연결되어 있었는데, 이 탭은 그 필드를 아예 안 써서 클릭해도
@@ -58044,6 +59022,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       if(G.wf==='consult')return;
       if(G.wf==='proposal')return;
       if(G.wf==='spaceset'){ if(!G._siteSetMode && !getTab('spaceset').isAptSimpleMode){ if(typeof _qsToast==='function') _qsToast('공간 컨셉 디자인은 <b>왼쪽 메뉴</b>에서 참고 이미지(건물 외관·실내)를 올려주세요.'); return; } _addMultiRoomPhotosFromFiles(e.dataTransfer&&e.dataTransfer.files); return; }
+      if(G.wf==='video' && G.vidMode==='v2v'){ _v2vDropFiles(e.dataTransfer&&e.dataTransfer.files); return; }
       if(G.wf==='psedit'){ e.stopPropagation(); _psDropFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); return; } // ⚠️ 포토샵 편집: 끌어다 놓은 이미지 → 문서가 없으면 새로 열고, 있으면 새 레이어로
       var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
       if(f)loadF(f,'main');
@@ -58055,6 +59034,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
     cnvDrop.ondragover=function(e){e.preventDefault();};
     cnvDrop.ondrop=function(e){
       e.preventDefault();
+      if(G.wf==='video' && G.vidMode==='v2v'){ _v2vDropFiles(e.dataTransfer&&e.dataTransfer.files); return; }
       if(G.wf==='psedit'){ _psDropFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); return; } // ⚠️ 포토샵 편집 탭은 일반 업로드(loadF) 대신 편집기로
       var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
       if(f)loadF(f,'main');
