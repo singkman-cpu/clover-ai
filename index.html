@@ -6156,6 +6156,35 @@ function _imgShift(a, b, W, H){
     return {x:Math.round(bx*W/w), y:Math.round(by*H/h)};
   }catch(e){ return {x:0,y:0}; }
 }
+// ── 2026-10-26 요청("대지 배경 합성 렌더 후 — 주변 간판·로고의 엉터리 한글·영어·한자를 AI 편집 '글씨/간판 교정'으로 정리할지 물어보기") ──
+function _signFixOffer(src){
+  try{ if(localStorage.getItem('clover_signfix_off')) return; }catch(e){}
+  var old=document.getElementById('signfix-offer'); if(old) old.remove();
+  var b=document.createElement('div'); b.id='signfix-offer';
+  b.style.cssText='position:fixed;right:18px;bottom:96px;z-index:100050;width:360px;max-width:calc(100vw - 36px);padding:16px;border-radius:14px;background:rgba(14,16,20,.97);border:2px solid var(--ac,#00e5cc);box-shadow:0 14px 36px rgba(0,0,0,.55);color:#eee;font-family:inherit';
+  b.innerHTML='<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px;color:var(--ac,#00e5cc)">🔤 주변 간판·로고 글씨도 정리할까요?</b><button type="button" data-x style="margin-left:auto;border:none;background:none;color:#888;font-size:16px;cursor:pointer">✕</button></div>'+
+    '<div style="font-size:12.5px;line-height:1.7;color:#ddd">AI가 그린 주변 간판에 <b>알아보기 힘든 한글·이상한 영어·한자</b>가 섞였으면, AI 편집의 <b>🔤 글씨/간판 교정</b>으로 깔끔하고 뜻이 맞는 글씨로 고칠 수 있어요. 제대로 된 글씨는 그대로 둬요.</div>'+
+    '<input data-w type="text" placeholder="꼭 들어갈 간판 글자 (선택) 예: 대구대동신협, 도매상가" style="width:100%;box-sizing:border-box;margin-top:10px;padding:9px 10px;border-radius:9px;border:1.5px solid #444;background:#0b0c10;color:#fff;font-family:inherit;font-size:12.5px">'+
+    '<div style="display:flex;gap:6px;margin-top:10px"><button type="button" data-go style="flex:1;padding:10px;border-radius:9px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;cursor:pointer;font-family:inherit">🔤 간판 정리하러 가기</button><button type="button" data-no style="padding:10px 12px;border-radius:9px;border:1px solid #555;background:none;color:#ccc;cursor:pointer;font-family:inherit">괜찮아요</button></div>'+
+    '<div style="text-align:right;margin-top:6px"><button type="button" data-off style="border:none;background:none;color:#888;font-size:11px;cursor:pointer;font-family:inherit">다시 안 보기</button></div>';
+  document.body.appendChild(b);
+  var inp=b.querySelector('[data-w]'); inp.onkeydown=function(ev){ ev.stopPropagation(); };
+  b.querySelector('[data-x]').onclick=b.querySelector('[data-no]').onclick=function(){ b.remove(); };
+  b.querySelector('[data-off]').onclick=function(){ try{ localStorage.setItem('clover_signfix_off','1'); }catch(e){} b.remove(); };
+  b.querySelector('[data-go]').onclick=function(){
+    var ps=(typeof PS_EDIT!=='undefined' ? PS_EDIT : []).find(function(x){ return x.k==='sign_text_fix'; });
+    if(!ps){ alert('글씨/간판 교정 프리셋을 찾지 못했어요.'); return; }
+    var words=String(inp.value||'').trim();
+    b.remove();
+    if(G.wf!=='edit') selectWF('edit');
+    G.editMode='normal';
+    var t=getTab('edit'); t.inputImg=src; t.inputImgName=''; t.selK='sign_text_fix'; t.prompt=ps.pt; t.refs=[];
+    t.extraPrompt = words ? ('간판에 들어갈 정확한 글자(이 글자를 그대로 쓰세요): '+words) : '';
+    try{ if(!G._chained) G._chained={}; G._chained['edit']=true; }catch(e){}
+    try{ renderSB(); }catch(e){} try{ renderMain('edit'); }catch(e){} try{ _previewImageInMain(src,'edit'); }catch(e){} try{ updBtn(); }catch(e){}
+    try{ _agedEnvToast('🔤 AI 편집에 "글씨/간판 교정"이 준비됐어요 — 아래 실행 버튼을 누르세요'); }catch(e){}
+  };
+}
 function _logoRestore(item){
   if(!item || !item.result){ return; }
   if(!item.orig){ alert('이 결과에는 원본 이미지가 저장돼 있지 않아서 로고를 되살릴 수 없어요.'); return; }
@@ -49978,6 +50007,7 @@ function executeSingleRender(task){
         }
         saveHistToStorage();
         console.log('[Queue] 완료:',task.wf,tags.join(' '));
+        try{ if(task.wf==='render' && /^site_context/.test(task.selK||'') && ri) setTimeout(function(){ _signFixOffer(ri); }, 600); }catch(_sf){} // 2026-10-26: 대지 배경 합성 후 간판 글씨 정리 제안
         // 현재 탭이 다른 탭이면 완료 탭 아이콘에 뱃지 표시
         if(G.wf !== task.wf){
           var doneTab=document.querySelector('.wft[data-w="'+task.wf+'"]');
@@ -58243,7 +58273,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'⬛ 3D만 실사로 / 🏛 주변 배경 넣기 (렌더 실사화)', h:'전시 부스·쇼룸처럼 배경이 검정(또는 흰색) 단색인 3D 이미지로 렌더링을 누르면 "배경을 어떻게 할까요?"를 물어봐요. [3D만 실사로]를 고르면 배경은 원본 그대로 두고 전시장·주변 부스·사람을 지어내지 않아요. [주변 배경도 넣기]는 AI가 어울리는 주변을 채워요. 같은 이미지는 한 번만 묻고, 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요. 실제 대지 배경 합성 프리셋에서는 묻지 않아요.'},
   {c:'edit', t:'🌙 야간 장면 공통 규칙 (달 없음 · 구도 고정 · 블루아워 밝기)', h:'주간→야간, 실내 야간 무드, 블루아워·황혼, 달빛 밤, 별 보이는 밤 등 모든 야간 장면은 ① 달을 넣지 않아요(추가 요청에 "보름달 넣어줘"처럼 적으면 넣어요) ② 화면을 확대하거나 카메라를 내리는 등 구도를 바꾸지 않아요 ③ 메인 건물 실내 불빛 밝기를 블루아워·황혼과 같은 차분한 수준으로 맞춰요(하얗게 날아가지 않게). 달빛 밤도 달빛 분위기만 내고 달 자체는 안 보여요.'},
   {c:'render', t:'🛠 렌더 실사화 — 없던 것 추가 금지 강화', h:'실사화(기본·고급)에서 원본에 없던 아치·벽감·기둥·돌/벽돌 마감·천장 다운라이트·가구를 새로 만들어 넣지 않도록 규칙을 강화했어요. 재질은 같은 재질의 실제 버전으로만 바뀌고(도장 벽은 도장 벽 그대로), 어두운 분위기의 공간은 그 밝기·분위기를 유지해요. 그래도 바뀌면 같은 설정으로 한 번 더 돌리거나 다른 엔진(기본↔고급)으로 시도해 보세요.'},
-  {c:'render', t:'🚗 실제 대지 배경 합성(투시도) — 실사 건물 · 세로선 보정 · 간판 · 차량', h:'실제 대지 배경 합성 - 조감도·광역조감도도 같은 원칙(메인 건물 실사화·왜곡 없는 반듯한 건물·또렷한 한글 간판·도로 크기에 맞는 차량·중앙분리대 등 도로 시설 유지)으로 만들어요. 투시도(눈높이)는 ① 메인 건물을 3D 모델 그대로 붙이지 않고 같은 디자인의 실제 사진 속 건물처럼(벽돌·유리 반사·그림자·색감) 만들고 ② 로드뷰의 광각·어안 왜곡을 펴서 모든 세로선이 수직인 건축 사진으로 바로잡고 ③ 한글 간판을 또렷하게 ④ 차는 보통 1~4대, 4차선 이상 넓은 도로는 4~7대 정도로 자연스럽게 두고 건물 앞을 가리는 가까운 차는 지워요. 중앙분리대·볼라드·방호 울타리·차선·횡단보도·신호등·가로등·전봇대 같은 실제 도로 시설은 로드뷰 그대로 남겨요. 도로 차선·중앙선·횡단보도는 한국 도로 규정에 맞게 로드뷰 그대로 그리고, 없던 횡단보도·유턴 표시·화살표는 만들지 않아요. 로드뷰의 번호판·얼굴 모자이크는 없애고, 번호판은 임의의 번호가 적힌 깔끔한 한국 번호판으로 그려요. 로드뷰는 건물에서 조금 떨어진 곳에서 캡처하면 더 잘 나와요.'},
+  {c:'render', t:'🚗 실제 대지 배경 합성(투시도) — 실사 건물 · 세로선 보정 · 간판 · 차량', h:'대지 배경 합성 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠요 — [간판 정리하러 가기]를 누르면 AI 편집의 🔤 글씨/간판 교정이 결과 이미지와 함께 준비되고, 실행하면 엉터리 한글·영어·한자 간판이 깔끔하게 고쳐져요(꼭 들어갈 간판 글자를 적을 수도 있어요). 실제 대지 배경 합성 - 조감도·광역조감도도 같은 원칙(메인 건물 실사화·왜곡 없는 반듯한 건물·또렷한 한글 간판·도로 크기에 맞는 차량·중앙분리대 등 도로 시설 유지)으로 만들어요. 투시도(눈높이)는 ① 메인 건물을 3D 모델 그대로 붙이지 않고 같은 디자인의 실제 사진 속 건물처럼(벽돌·유리 반사·그림자·색감) 만들고 ② 로드뷰의 광각·어안 왜곡을 펴서 모든 세로선이 수직인 건축 사진으로 바로잡고 ③ 한글 간판을 또렷하게 ④ 차는 보통 1~4대, 4차선 이상 넓은 도로는 4~7대 정도로 자연스럽게 두고 건물 앞을 가리는 가까운 차는 지워요. 중앙분리대·볼라드·방호 울타리·차선·횡단보도·신호등·가로등·전봇대 같은 실제 도로 시설은 로드뷰 그대로 남겨요. 도로 차선·중앙선·횡단보도는 한국 도로 규정에 맞게 로드뷰 그대로 그리고, 없던 횡단보도·유턴 표시·화살표는 만들지 않아요. 로드뷰의 번호판·얼굴 모자이크는 없애고, 번호판은 임의의 번호가 적힌 깔끔한 한국 번호판으로 그려요. 로드뷰는 건물에서 조금 떨어진 곳에서 캡처하면 더 잘 나와요.'},
   {c:'render', t:'☀️ 하늘 선택 — 3D 렌더 실사화 모든 프리셋', h:'3D 렌더 실사화 탭의 모든 프리셋(실사화·고급 실사화·CG·실제 대지 배경 합성·CAD 아이소·고품질화 등)에서 렌더 버튼 위 [☀️ 하늘]로 맑음 / 구름 조금 / 흐림 / 원본 그대로를 고를 수 있어요. 렌더링 완성본 고품질화는 기본이 "원본 그대로"예요. 추가 요청에 야간·노을을 적으면 그게 우선이에요.'},
   {c:'video', t:'🎬 3D 영상 → 실사 영상 (영상 제작 맨 위)', h:'영상 제작 탭 맨 위 카드에서 3D로 뽑은 영상을 올리면 실사 영상으로 바꿔줘요. 실사화(기본)와 고퀄리티 CG 느낌 중 고를 수 있고, 날씨·시간대·계절도 골라 렌더할 수 있어요. 🎞 영상 엔진을 고를 수 있어요: 기본은 Kling 4.0(720p 36cr/초, FHD 1080p 54cr/초 — 가장 저렴하고 FHD 바로 가능, 영상 가로·세로 700px 이상·3초 이상 필요), Seedance 2.5(480p 51cr/초, 720p 109cr/초 — 참고 이미지를 더 충실히 따름). 요금 = (원본 클립 길이 + 결과 길이) × 초당 크레딧이라, 15초 클립을 Kling FHD로 만들면 약 1,620cr이에요. 엔진·화질을 바꾸면 버튼의 크레딧도 바로 바뀌어요.'},
   {c:'video', t:'🖼 영상 렌더 전 미리보기 컷', h:'영상을 렌더하기 전에 원하는 장면을 한 번에 최대 3장씩 먼저 사진으로 뽑아 확인할 수 있어요. 여러 번 눌러 계속 쌓을 수 있어요.'},
