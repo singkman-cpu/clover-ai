@@ -5645,6 +5645,7 @@ var PS_TOOLS=[
   {k:'emarquee',l:'원형 선택',ic:'<ellipse cx="12" cy="12" rx="9" ry="7" stroke-dasharray="3 2.5"/>'},
   {k:'lasso',l:'올가미 (L)',key:'l',ic:'<path d="M7 17c-3-2-4-6-1-9s10-4 13-1 1 8-5 9c-2 .3-4 0-5-1"/><path d="M7 17l-1 4"/>'},
   {k:'poly',l:'다각형 올가미',ic:'<polygon points="4 18 7 5 17 4 20 14 12 20" stroke-dasharray="3 2.5"/>'},
+  {k:'aisel',l:'🎯 AI 물체 선택 — 클릭하면 유리·건물·가구 등 그 물체만 선택',ic:'<path d="M12 2l1.6 4.4L18 8l-4.4 1.6L12 14l-1.6-4.4L6 8l4.4-1.6z"/><path d="M15 15l6 6M15 15v4M15 15h4"/>'}, // 2026-10-25 회원 아이디어(채널 따서 유리 색감·주변 건물 반투명)
   {k:'wand',l:'자동 선택 · 마술봉 (W)',key:'w',ic:'<path d="M4 20L15 9"/><path d="M15 3v2M19.5 4.5L18 6M21 9h-2M13 7l4 4"/>'},
   {k:'brush',l:'브러시 (B)',key:'b',ic:'<path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L11 15.8l-3-3z"/><path d="M8 13c-2 0-4 1.5-4 4 0 1.5-1 2.5-2 3 3 1 7 .5 8.5-2 .8-1.3.5-3-1-4z"/>'},
   {k:'eraser',l:'지우개 (E)',key:'e',ic:'<path d="M20 20H9l-5.5-5.5a2 2 0 0 1 0-2.8L12 3.2a2 2 0 0 1 2.8 0l5.5 5.5a2 2 0 0 1 0 2.8L12 20"/><line x1="7" y1="10" x2="15" y2="18"/>'},
@@ -6546,6 +6547,71 @@ function _psSetMaskEdit(v){
 // 전부 찾아 흰색으로 표시한 마스크를 받은 뒤, 그 흰 부분을 바로 이 레이어 마스크에서 지워서(destination-out)
 // 사람이 있던 자리가 즉시 가려지게(투명해지게) 함. 같은 나노바나나2 세그멘테이션 방식 재사용.
 var PS_AI_PEOPLE_COST=15;
+// ══ 2026-10-25 회원 아이디어("포토샵처럼 채널을 잡아서 직접 터치 — 유리 색감이나 주변 건물 반투명 조절") ══
+// 🎯 AI 물체 선택: 클릭한 물체(또는 이름으로 찾은 물체들)를 fal SAM 3로 정확히 따서 선택 영역으로 → 바로 아래 빠른 작업 막대로
+// 색·밝기 조정 / 색조 바꾸기 / 반투명(흐리게) / 레이어로 분리. AI 비용은 아주 작아서 무료(sam_segment = 0cr)
+function _psAiSelectAt(x, y, e){ _psAiSelectRun({pt:{x:x,y:y}}, _psSelModeFromEvent(e)); }
+function _psAiSelectText(t){ t=String(t||'').trim(); if(!t){ _psToast('찾을 물체 이름을 적어주세요 (예: glass, building)'); return; } _psAiSelectRun({text:t}, PSE.o.selMode); }
+function _psAiSelectRun(q, mode){
+  var d=PSE.doc; if(!d) return;
+  if(PSE._aiBusy){ _psToast('AI가 아직 찾는 중이에요…'); return; }
+  if(!(_supa && _supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  _psCommitPending();
+  var flat=_psFlatten(true), sc=Math.min(1, 1600/Math.max(d.w,d.h)), W=Math.max(1,Math.round(d.w*sc)), H=Math.max(1,Math.round(d.h*sc));
+  var send=_psCanvas(W,H); send.getContext('2d').drawImage(flat,0,0,W,H);
+  var url; try{ url=send.toDataURL('image/jpeg',0.92); }catch(err){ _psToast('이미지 준비 오류'); return; }
+  PSE._aiBusy=true; try{ _psRefreshOpts(); }catch(e){} _psToast('🎯 AI가 '+(q.text?'"'+q.text+'"을(를) ':'물체를 ')+'찾는 중…');
+  function done(){ PSE._aiBusy=false; try{ _psRefreshOpts(); }catch(e){} }
+  uploadImgToFal(url, function(iu){
+    var inp={image_url:iu, output_format:'png'};
+    if(q.pt) inp.point_prompts=[{x:Math.round(q.pt.x*sc), y:Math.round(q.pt.y*sc), label:1, object_id:1}];
+    if(q.text) inp.prompt=q.text;
+    falRun('fal-ai/sam-3/image', inp, function(res){
+      var ms=(res && (res.masks||res.mask||res.images))||[]; if(!Array.isArray(ms)) ms=[ms];
+      var urls=ms.map(function(m){ return typeof m==='string'?m:(m&&(m.url||m.image_url)); }).filter(Boolean);
+      if(!urls.length){ done(); _psToast('물체를 찾지 못했어요 — 물체 한가운데를 다시 눌러보세요'); return; }
+      var M=_psCanvas(d.w,d.h), mx=M.getContext('2d'), left=urls.length, any=false;
+      urls.forEach(function(u){ var im=new Image(); im.crossOrigin='anonymous';
+        im.onload=function(){ try{ var t=_psCanvas(d.w,d.h), tx=t.getContext('2d',{willReadFrequently:true}); tx.drawImage(im,0,0,d.w,d.h); var id=tx.getImageData(0,0,d.w,d.h), p=id.data;
+          for(var i=0;i<p.length;i+=4){ var on=(p[i]>80||p[i+1]>80||p[i+2]>80) && p[i+3]>80; p[i]=255; p[i+1]=255; p[i+2]=255; p[i+3]=on?255:0; if(on) any=true; }
+          tx.putImageData(id,0,0); mx.drawImage(t,0,0); }catch(e2){} fin(); };
+        im.onerror=fin; im.src=u; });
+      function fin(){ if(--left>0) return; done();
+        if(!any){ _psToast('물체를 찾지 못했어요'); return; }
+        _psSelSetFromMask(M, mode||'new', 'AI 물체 선택');
+        _psToast('🎯 선택했어요 — 아래 막대에서 색·밝기·반투명을 바로 바꿀 수 있어요');
+        _psAiSelBar();
+      }
+    }, function(err){ done(); _psToast('AI 선택 실패: '+String(err).slice(0,120)); }, {wf:'sam_segment', included:true});
+  }, function(){ done(); _psToast('이미지 업로드 실패'); });
+}
+// 선택 직후 빠른 작업 막대
+function _psAiSelBar(){
+  var old=document.getElementById('ps-aisel-bar'); if(old) old.remove();
+  if(!PSE.doc || !PSE.doc.sel) return;
+  var bar=document.createElement('div'); bar.id='ps-aisel-bar';
+  bar.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:100003;display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);padding:9px 10px;border-radius:14px;background:rgba(14,16,20,.96);border:1.5px solid var(--ac);box-shadow:0 12px 34px rgba(0,0,0,.55);font-family:inherit';
+  function b(lbl, tip, fn, pri){ var x=document.createElement('button'); x.type='button'; x.innerHTML=lbl; x.title=tip; x.style.cssText='padding:8px 11px;border-radius:9px;border:1px solid '+(pri?'var(--ac)':'#3a3a44')+';background:'+(pri?'var(--acg)':'#1c1d24')+';color:'+(pri?'var(--ac)':'#eee')+';font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap'; x.onclick=function(ev){ ev.stopPropagation(); fn(); }; bar.appendChild(x); }
+  var lab=document.createElement('span'); lab.textContent='선택한 부분을'; lab.style.cssText='color:#aaa;font-size:11.5px;font-weight:700;margin-right:2px'; bar.appendChild(lab);
+  b('🎨 색·밝기','선택한 부분만 밝기·대비·채도·색온도 조정(조정 레이어 — 언제든 다시 수정)', function(){ bar.remove(); _psAddAdjustLayer('color'); try{ _psRefreshPanels(); }catch(e){} }, true);
+  b('🌈 색조','선택한 부분의 색조·채도 바꾸기(유리를 푸른빛·브론즈빛 등)', function(){ bar.remove(); _psAddAdjustLayer('hs'); try{ _psRefreshPanels(); }catch(e){} });
+  b('🌫 반투명','선택한 부분을 흰색으로 반투명하게 덮어 흐리게(주변 건물 고스트 처리) — 레이어 불투명도로 정도 조절', function(){ bar.remove(); _psAiGhost('#ffffff', 0.55); });
+  b('🌌 하늘색으로','선택한 부분을 하늘빛으로 반투명하게 덮기', function(){ bar.remove(); _psAiGhost('#cfe3f5', 0.6); });
+  b('📄 레이어로 분리','선택한 부분(화면에 보이는 그대로)을 새 레이어로 복사 — 따로 지우기·옮기기·불투명도 조절', function(){ bar.remove();
+    var d=PSE.doc; if(!d||!d.sel) return; var fl=_psFlatten(false), c=_psCanvas(d.w,d.h), x=c.getContext('2d'); x.drawImage(fl,0,0); x.globalCompositeOperation='destination-in'; x.drawImage(d.sel,0,0);
+    var L=_psMkRaster('선택 영역 (AI)', c); d.layers.push(L); d.activeId=L.id; _psPush('AI 선택: 레이어로 분리'); _psRequestRender(true); try{ _psRefreshPanels(); }catch(e){} _psToast('선택한 부분을 새 레이어로 만들었어요'); });
+  b('✕','닫기', function(){ bar.remove(); });
+  document.body.appendChild(bar);
+}
+function _psAiGhost(color, alpha){
+  var d=PSE.doc; if(!d || !d.sel) return;
+  var c=_psCanvas(d.w,d.h), x=c.getContext('2d'); x.fillStyle=color; x.fillRect(0,0,d.w,d.h); x.globalCompositeOperation='destination-in'; x.drawImage(d.sel,0,0);
+  var L=_psMkRaster(color==='#ffffff'?'반투명(흐리게)':'반투명(하늘빛)', c); L.opacity=alpha;
+  // 맨 위에 올려서 선택한 부분이 확실히 덮이게
+  d.layers.push(L); d.activeId=L.id;
+  _psPush('AI 선택: '+L.name); _psRequestRender(true); try{ _psRefreshPanels(); }catch(e){}
+  _psToast('반투명 레이어를 추가했어요 — 레이어 불투명도로 흐린 정도를 조절하세요');
+}
 function _psAiHidePeople(btn){
   var d=PSE.doc, L=_psActive(); if(!d || !L || PSE.maskEdit!==L.id) return;
   if(!L.visible){ _psToast('숨겨진 레이어의 마스크는 편집할 수 없어요 — 눈 아이콘을 켜주세요'); return; }
@@ -7179,6 +7245,7 @@ function _psDown(e){
   if(tool==='brush'||tool==='eraser'){ if(_psBrushStart(p.x,p.y,tool==='eraser')){ PSE._needComp=true; _psRaf(); } return; }
   if(tool==='bucket'){ _psBucketAt(p.x,p.y); return; }
   if(tool==='wand'){ _psWandAt(p.x,p.y,e); return; }
+  if(tool==='aisel'){ _psAiSelectAt(p.x,p.y,e); return; }
   if(tool==='marquee'||tool==='emarquee'){ PSE.act={type:'marq', ell:tool==='emarquee', x0:p.x, y0:p.y, x1:p.x, y1:p.y, mode:_psSelModeFromEvent(e)}; return; }
   if(tool==='lasso'){ PSE.act={type:'lasso', pts:[{x:p.x,y:p.y}], mode:_psSelModeFromEvent(e)}; return; }
   if(tool==='poly'){
@@ -8115,6 +8182,14 @@ function _psRefreshOpts(light){
     if(d.sel) hint('선택 영역 안에만 칠해져요');
   } else if(t==='bucket'){ fgCtl(); opacityCtl(); tolCtl(); }
   else if(t==='wand'){ tolCtl(); _psSelModeRow(o); }
+  else if(t==='aisel'){
+    _psSelModeRow(o);
+    var _aiq=_psEl('input'); _aiq.type='text'; _aiq.placeholder='또는 이름으로 찾기: glass, building, sofa…'; _aiq.value=PSE._aiSelText||'';
+    _aiq.style.cssText='width:210px;padding:5px 8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:11.5px';
+    _aiq.oninput=function(){ PSE._aiSelText=this.value; }; _aiq.onkeydown=function(ev){ ev.stopPropagation(); if(ev.key==='Enter') _psAiSelectText(PSE._aiSelText); };
+    o.appendChild(_aiq); o.appendChild(_psB('🔎 찾기',function(){ _psAiSelectText(PSE._aiSelText); },'pri','이름에 해당하는 물체를 사진 전체에서 모두 선택'));
+    hint(PSE._aiBusy?'⏳ AI가 찾는 중…':'물체를 클릭하면 AI가 그 물체만 선택해요 · Shift+클릭 더하기 · Alt+클릭 빼기 · 무료');
+  }
   else if(t==='marquee'||t==='emarquee'||t==='lasso'){ _psSelModeRow(o); hint(t==='lasso'?'드래그해서 자유롭게 둘러싸기':'드래그 (Shift: 정사각형/정원)'); }
   else if(t==='poly'){
     _psSelModeRow(o);
