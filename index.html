@@ -49319,6 +49319,7 @@ function _bgAskThen(tab, go){
 }
 function _runToolWithPromptActual(translatedPrompt){
   var tab=getTab(G.wf);
+  if(G.wf==='render' && /^site_context/.test(tab.selK||'') && !((tab.refs||[]).filter(Boolean).length)){ alert('실제 대지 배경 합성은 대지 사진이 필요해요.\n\n[실제 대지 배경 참고 (브이월드 3D)] 또는 [위치 확인 · 로드뷰 (카카오맵)]로 캡처해서 "실사 참고 이미지"에 넣은 뒤 다시 눌러주세요.'); return; } // 2026-10-26: 참고 이미지 없이 돌면 배경 없이 건물만 나옴
   if(G.wf==='render' && !tab._bgAsked1){ tab._bgAsked1=true; _bgAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } tab._bgAsked1=false; // 2026-10-26 배경 처리 묻기(한 번 거친 뒤 실제 실행)
   try{ if(G.wf==='render' && tab.inputImg) _logoHintCheck(tab.inputImg); }catch(_lh){} // 2026-10-26: 로고 큰 이미지면 안내(렌더와 동시에, 기다리지 않음)
   // 이 사진(=결과)에 예산 정보를 영구히 붙여두기 위한 스냅샷 — 생성 시점에 캡처해야 나중에
@@ -50909,7 +50910,7 @@ function procImgWithTask(task, onDone, onErr){
       try{ var _ld0=gE('ldst'); if(_ld0) _ld0.textContent='1/2 메인 건물 실사화 중…'; }catch(_e){}
       console.log('[대지 합성] 1단계: 메인 건물 먼저 실사화');
       procImgWithTask({id:String(task.id)+'_pre', img:task.img, wf:'render', selK:'hq_real', prompt:_hq.pt, userExtra:'', userText:'', eng:'nano2', resolution:'1K', renderSky:'keep', _bgTail:BG_KEEP_TAIL+' The plain backdrop will be replaced later — keep it a clean, even plain backdrop now; render ONLY the building photorealistically.'},
-        function(u){ if(typeof u==='string' && u){ task.img=u; console.log('[대지 합성] 1단계 완료 → 2단계 합성'); } try{ var _ld1=gE('ldst'); if(_ld1) _ld1.textContent='2/2 실제 대지 사진에 합성 중…'; }catch(_e){} procImgWithTask(task, onDone, onErr); },
+        function(u){ if(typeof u==='string' && u){ task._preImg=u; console.log('[대지 합성] 1단계 완료 → 2단계 합성'); } /* 원본(task.img)은 그대로 두고 합성에만 실사 건물 사용 — 결과 카드의 BEFORE 유지 */ try{ var _ld1=gE('ldst'); if(_ld1) _ld1.textContent='2/2 실제 대지 사진에 합성 중…'; }catch(_e){} procImgWithTask(task, onDone, onErr); },
         function(err){ console.warn('[대지 합성] 1단계 실패 — 원본으로 합성 진행:', err); procImgWithTask(task, onDone, onErr); });
       return;
     }
@@ -50937,7 +50938,7 @@ function procImgWithTask(task, onDone, onErr){
   }
   try{ if(task && task.maskData && (task.wf||G.wf)==='edit'){ var _etR2=getTab('edit'); if(_etR2._resAutoBrush){ _etR2.resolution=_etR2._resBeforeBrush||'2K'; _etR2._resAutoBrush=false; if(G.wf==='edit' && typeof updateResBtnCr==='function') setTimeout(function(){ try{ renderSB(); }catch(e){} }, 0); } } }catch(e){}
   onErr = onErr || function(e){console.error('[procImgWithTask]',e);};
-  var img     = task.img;
+  var img     = task._preImg || task.img; // 2026-10-26: 대지 합성 2단계는 1단계 실사 건물로
   var wf      = task.wf;
   var prompt  = tx(task.prompt) || '';
   // 2026-10-26 요청("모든 야간씬에 달 넣지 마 — 프롬프트에 넣어달라고 쓰기 전까지는", "달 보여주려고 카메라를 밑으로 내렸나?"):
@@ -51706,6 +51707,7 @@ function procImgWithTask(task, onDone, onErr){
 
   // 2026-10-26 신고("실제 대지 배경 합성(투시도)이 예전보다 안 좋아짐 — 차가 너무 많다, 1~4대로 해달라고 했었다"): 프리셋 안 차량 규칙은
   // '주차 몇 대 + 도로 위 3~4대 이상'(결국 5~8대)이었음 → 맨 끝에서 전체 1~4대로 덮어씀 + 로드뷰 광각 왜곡 펴기·건물 합성감 보강
+  if(task && task._preImg) ap += ' (The main image is the same building already rendered as a real photo on a plain empty backdrop — that backdrop is only empty studio space: replace ALL of it with the real site from the reference image, keeping the building, its position, size and the camera exactly.)';
   if(task && task.selK==='site_context_composite_persp') ap += SITE_PERSP_TAIL;
   else if(task && /^site_context_composite_aerial/.test(task.selK||'')) ap += SITE_AERIAL_TAIL; // 2026-10-26: 조감도·광역조감도에도 같은 원칙(항공뷰에 맞게)
   // 2026-10-26: 하늘(맑음·구름 조금·흐림) 선택을 대지 합성·CAD 아이소·고품질화 프리셋에도 적용(나머지 프리셋은 위 주간 규칙에서 이미 적용)
