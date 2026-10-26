@@ -6251,6 +6251,22 @@ function _psSelSetFromMask(mask, mode, label){
   d.sel=_psSelIsEmpty(out)?null:out;
   _psSelChanged(); _psPush(label||'선택'); _psRequestRender();
 }
+// 2026-10-26 요청("레이어 마스크 썸네일을 Ctrl+클릭하면 그 영역이 선택 — 포토샵처럼"):
+// Ctrl(⌘)+클릭 = 새 선택 · Ctrl+Shift = 더하기 · Ctrl+Alt = 빼기 · Ctrl+Shift+Alt = 교차
+// 마스크 썸네일 → 마스크의 흰 부분, 레이어 썸네일 → 그 레이어에 그려진(투명 아닌) 부분
+function _psLoadSelFrom(L, which, e){
+  var d=PSE.doc; if(!d||!L) return; _psCommitPending();
+  var mode=(e&&e.shiftKey&&e.altKey)?'int':(e&&e.shiftKey)?'add':(e&&e.altKey)?'sub':'new';
+  var src=_psCanvas(d.w,d.h), sx=src.getContext('2d',{willReadFrequently:true}), useLum=false;
+  if(which==='mask' || L.type==='adjust'){ if(!L.mask){ _psToast('이 레이어에는 선택할 픽셀이 없어요'); return; } sx.drawImage(L.mask,0,0); useLum=true; }
+  else { try{ _psRenderLayerTo(sx,L); }catch(err){ return; } }
+  var id=sx.getImageData(0,0,d.w,d.h), p=id.data;
+  for(var i=0;i<p.length;i+=4){ var a=useLum ? Math.round((p[i]*0.299+p[i+1]*0.587+p[i+2]*0.114)*p[i+3]/255) : p[i+3]; p[i]=255; p[i+1]=255; p[i+2]=255; p[i+3]=a; }
+  sx.putImageData(id,0,0);
+  if(_psSelIsEmpty(src) && mode==='new'){ _psToast('선택할 영역이 없어요(비어 있음)'); return; }
+  _psSelSetFromMask(src, mode, which==='mask'?'마스크에서 선택':'레이어에서 선택');
+  _psToast((which==='mask'?'🎭 마스크':'🖼 레이어')+' 영역을 '+({'new':'선택했어요','add':'선택에 더했어요','sub':'선택에서 뺐어요','int':'겹치는 부분만 남겼어요'})[mode]);
+}
 function _psSelModeFromEvent(e){
   if(e && e.shiftKey && e.altKey) return 'int';
   if(e && e.shiftKey) return 'add';
@@ -6566,10 +6582,15 @@ function _psAiSelectRun(q, mode){
   uploadImgToFal(url, function(iu){
     var inp={image_url:iu, output_format:'png'};
     if(q.pt) inp.point_prompts=[{x:Math.round(q.pt.x*sc), y:Math.round(q.pt.y*sc), label:1, object_id:1}];
-    if(q.text) inp.prompt=q.text;
+    // 2026-10-26 버그 수정("모두 선택하기 눌러도 유리가 한 개만 선택됨"): SAM-3는 기본으로 가장 확실한 1개만 돌려줌 → 이름 검색은 여러 개(최대 32) 받아서 합침
+    if(q.text){ inp.prompt=q.text; inp.return_multiple_masks=true; inp.max_masks=32; inp.include_scores=true; }
     falRun('fal-ai/sam-3/image', inp, function(res){
       var ms=(res && (res.masks||res.mask||res.images))||[]; if(!Array.isArray(ms)) ms=[ms];
-      var urls=ms.map(function(m){ return typeof m==='string'?m:(m&&(m.url||m.image_url)); }).filter(Boolean);
+      var urls=ms.map(function(m){ return typeof m==='string'?m:(m&&(m.url||m.image_url)); });
+      // 점수가 오면 아주 낮은(엉뚱한) 것만 제외 — 다 빠지면 그대로 사용
+      var sc2=res && Array.isArray(res.scores) ? res.scores : null;
+      if(sc2 && sc2.length===urls.length){ var keep=urls.filter(function(u,i){ return !(+sc2[i]<0.3); }); if(keep.filter(Boolean).length) urls=keep; }
+      urls=urls.filter(Boolean);
       if(!urls.length){ done(); _psToast('물체를 찾지 못했어요 — 물체 한가운데를 다시 눌러보세요'); return; }
       var M=_psCanvas(d.w,d.h), mx=M.getContext('2d'), left=urls.length, any=false;
       urls.forEach(function(u){ var im=new Image(); im.crossOrigin='anonymous';
@@ -7943,6 +7964,11 @@ function _psInjectCss(){
     '.ps-tool:hover{background:var(--c2)}',
     '.ps-tool.on{background:var(--acg);border-color:var(--acb)}',
     '.ps-tool.on svg{stroke:var(--ac)}',
+    '.ps-tool.ps-tool-ai{width:40px;height:52px;flex-direction:column;gap:2px;border:1.5px solid var(--ac);background:var(--acg);box-shadow:0 0 10px rgba(0,229,204,.35);margin:2px 0}',
+    '.ps-tool.ps-tool-ai svg{width:24px;height:24px;stroke:var(--ac);color:var(--ac);stroke-width:1.9}',
+    '.ps-tool.ps-tool-ai span{font-size:9.5px;font-weight:900;color:var(--ac);line-height:1;white-space:nowrap;letter-spacing:-.3px}',
+    '.ps-tool.ps-tool-ai:hover{background:var(--ac)}.ps-tool.ps-tool-ai:hover svg{stroke:#000;color:#000}.ps-tool.ps-tool-ai:hover span{color:#000}',
+    '.ps-tool.ps-tool-ai.on{background:var(--ac)}.ps-tool.ps-tool-ai.on svg{stroke:#000;color:#000}.ps-tool.ps-tool-ai.on span{color:#000}',
     '.ps-tsep{width:26px;height:1px;background:var(--bd2);margin:3px 0;flex-shrink:0}',
     '.ps-sw{position:relative;width:38px;height:40px;margin-top:6px;flex-shrink:0}',
     '.ps-sw input{position:absolute;width:24px;height:24px;border:2px solid #fff;border-radius:4px;padding:0;cursor:pointer;background:none;box-shadow:0 0 0 1px #000}',
@@ -8018,13 +8044,15 @@ function _psBuildUI(){
   PSE.ui=ui;
 
   // 도구 버튼
-  var groups={move:1,transform:1,marquee:2,emarquee:2,lasso:2,poly:2,wand:2,brush:3,eraser:3,bucket:3,picker:3,text:4,srect:4,sellipse:4,sline:4,crop:5};
+  var groups={move:1,transform:1,marquee:2,emarquee:2,lasso:2,poly:2,wand:2,aisel:6,brush:3,eraser:3,bucket:3,picker:3,text:4,srect:4,sellipse:4,sline:4,crop:5};
   var lastG=0;
   PS_TOOLS.forEach(function(T){
     if(lastG && groups[T.k]!==lastG) tools.appendChild(_psEl('div','ps-tsep'));
     lastG=groups[T.k];
     var b=_psEl('button','ps-tool',_psIcon(T.ic)); b.type='button'; b.title=T.l;
     b.onclick=function(e){ e.stopPropagation(); if(!PSE.doc){ _psToast('먼저 이미지를 열거나 새 캔버스를 만들어주세요'); return; } _psSetTool(T.k); };
+    // 2026-10-26 요청("마술봉 위 AI 선택 버튼 잘 안 보임 — 크고 잘 보이게, 물체 선택+검색 모양"): 전용 큰 버튼 + 'AI 선택' 글자
+    if(T.k==='aisel'){ b.className='ps-tool ps-tool-ai'; b.innerHTML='<svg viewBox="0 0 24 24"><rect x="2.5" y="2.5" width="12" height="12" rx="2" stroke-dasharray="3 2.2"/><circle cx="15" cy="15" r="4.6"/><path d="M18.4 18.4L22 22"/><path d="M6 6.5l1 2 2 1-2 1-1 2-1-2-2-1 2-1z" fill="currentColor" stroke="none"/></svg><span>AI 선택</span>'; }
     ui.toolBtns[T.k]=b; tools.appendChild(b);
   });
   // 전경색/배경색
@@ -8310,7 +8338,8 @@ function _psLayersSec(){
       var eye=_psEl('button','ps-eye'+(L.visible?'':' off'),PS_EYE); eye.type='button'; eye.title=L.visible?'숨기기':'보이기';
       eye.onclick=function(e){ e.stopPropagation(); _psCommitPending(); L.visible=!L.visible; _psPush(L.visible?'레이어 보이기':'레이어 숨기기'); _psRequestRender(); };
       var tc=_psCanvas(92,68); ui_thumbReg(L.id,tc);
-      tc.onclick=function(e){ e.stopPropagation(); _psSetActive(L.id); if(PSE.maskEdit) _psSetMaskEdit(null); };
+      tc.onclick=function(e){ e.stopPropagation(); if(e.ctrlKey||e.metaKey){ _psLoadSelFrom(L, 'layer', e); return; } _psSetActive(L.id); if(PSE.maskEdit) _psSetMaskEdit(null); };
+      tc.title='클릭: 레이어 선택 · Ctrl+클릭: 이 레이어 모양대로 영역 선택 (Shift 더하기 · Alt 빼기)';
       var nm=_psEl('div','ps-lname'); nm.textContent=L.name; nm.title='더블클릭해서 이름 바꾸기';
       var tag=_psEl('span','ps-ltag',L.type==='text'?'T':L.type==='shape'?'도형':L.type==='adjust'?('조정'+(L.clip?' ↓':'')):('픽셀'));
       var grip=_psEl('span','ps-grip','⋮⋮'); grip.title='끌어서 순서 바꾸기';
@@ -8323,9 +8352,11 @@ function _psLayersSec(){
         if(L.mask){
           var mtc=_psCanvas(92,68); mtc.className='ps-masktc'+(PSE.maskEdit===L.id ? ' on':'');
           ui_maskThumbReg(L.id,mtc);
-          mtc.title='마스크 편집 — 클릭하면 브러시/지우개로 이 마스크를 바로 그릴 수 있어요';
+          mtc.title='클릭: 마스크 편집 · Ctrl+클릭: 마스크 흰 부분을 영역으로 선택 (Shift 더하기 · Alt 빼기)';
           mtc.onclick=function(e){
-            e.stopPropagation(); _psCommitPending();
+            e.stopPropagation();
+            if(e.ctrlKey||e.metaKey){ _psLoadSelFrom(L, 'mask', e); return; }
+            _psCommitPending();
             _psSetActive(L.id); _psSetMaskEdit(L.id);
             _psToast('마스크 편집 중 — 브러시로 칠하면 가려지고(투명), 지우개로 지우면 다시 보여요');
           };
