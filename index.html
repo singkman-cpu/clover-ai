@@ -9267,18 +9267,21 @@ function canRun(){
 function _renderSkyBar(){
   try{
     var t=getTab('render');
-    var show = G.wf==='render' && t && t.selK && !/^site_context/.test(t.selK) && t.selK!=='cad_isometric' && t.selK!=='render_quality_boost';
+    // 2026-10-26 요청("맑음·구름 조금·흐림을 실사화에만 두지 말고 3D 렌더 실사화 탭 프리셋 전체에서"): 모든 프리셋에 표시 + '원본 하늘 그대로' 추가
+    // (렌더링 완성본 고품질화는 원래 하늘을 안 바꾸는 프리셋이라 기본값이 '원본 그대로' — 따로 저장)
+    var show = G.wf==='render' && t && t.selK;
     if(show && !G.renderSky){ try{ G.renderSky=localStorage.getItem('clover_render_sky')||'clear'; }catch(e){ G.renderSky='clear'; } }
+    var _qb = t && t.selK==='render_quality_boost', _cur=_qb ? (t._skyQB||'keep') : G.renderSky;
     document.querySelectorAll('.sb-btm').forEach(function(btm){
       var bar=btm.querySelector('.sb-sky-bar');
       if(!show){ if(bar) bar.style.display='none'; return; }
       if(!bar){ bar=document.createElement('div'); bar.className='sb-sky-bar'; btm.insertBefore(bar, btm.firstChild); }
       bar.style.cssText='display:flex;align-items:center;gap:5px;margin:0 0 7px';
       bar.innerHTML='<span style="font-size:11px;font-weight:800;color:var(--t);white-space:nowrap;margin-right:2px">☀️ 하늘</span>';
-      [['clear','맑음'],['partly','구름 조금'],['overcast','흐림']].forEach(function(o){
-        var on=G.renderSky===o[0]; var b=document.createElement('button'); b.type='button'; b.textContent=o[1];
+      [['clear','맑음'],['partly','구름 조금'],['overcast','흐림'],['keep','원본 그대로']].forEach(function(o){
+        var on=_cur===o[0]; var b=document.createElement('button'); b.type='button'; b.textContent=o[1];
         b.style.cssText='flex:1;padding:6px 0;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--card)')+';color:'+(on?'var(--ac)':'var(--t2)');
-        b.onclick=function(ev){ ev.stopPropagation(); G.renderSky=o[0]; try{ localStorage.setItem('clover_render_sky',o[0]); }catch(e){} _renderSkyBar(); };
+        b.onclick=function(ev){ ev.stopPropagation(); if(_qb){ t._skyQB=o[0]; } else { G.renderSky=o[0]; try{ localStorage.setItem('clover_render_sky',o[0]); }catch(e){} } _renderSkyBar(); };
         bar.appendChild(b);
       });
       bar.title='노을·야간은 결과를 AI 편집에서 바꿔요';
@@ -49250,7 +49253,7 @@ function _runToolWithPromptActual(translatedPrompt){
     rimg:      G.wf==='edit'?tab.inputImg:null,
     userText:  ((tab.prompt||'')+' '+(tab.extraPrompt||'')).trim(),
     userExtra: (tab.extraPrompt||''), // 2026-10-26: 회원이 직접 쓴 추가 요청만(달 요청 확인용)
-    renderSky: (G.wf==='render' ? (G.renderSky||'clear') : null),
+    renderSky: (G.wf==='render' ? (tab.selK==='render_quality_boost' ? (tab._skyQB||'keep') : (G.renderSky||'clear')) : null),
     textProtect: (G.wf==='render' ? _tpActiveMask(tab) : null), // 2026-10-12 글자 보호 브러시
     toneRef:   (G.wf==='render' ? (tab._matchRef||tab._toneRef||null) : null), // 2026-10-20 여러 장 같은 톤: 기준 이미지(조명·색감만 맞춤) / 2026-10-25 수정 렌더: 납품본
     _bgTail:   (G.wf==='render' && tab._bgMode==='keep' && tab._bgFor===_bgKey(tab.inputImg) && !/^site_context/.test(tab.selK||'')) ? BG_KEEP_TAIL : '', // 2026-10-26 3D만(배경 원본 그대로)
@@ -49895,7 +49898,7 @@ function executeSingleRender(task){
         if(ps)tags.push('preset:'+ps.l);
       }
       // 2026-10-13(요청): 3D 렌더 실사화 — 어떤 하늘로 렌더했는지 결과 우측 상단에 표시(야간 요청·고품질화는 하늘을 안 바꾸므로 제외)
-      if(task.wf==='render' && task.renderSky && task.selK!=='render_quality_boost' && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'')){
+      if(task.wf==='render' && task.renderSky && task.renderSky!=='keep' && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'')){
         tags.push(({clear:'☀️ 맑음', partly:'⛅ 구름 조금', overcast:'☁️ 흐림'})[task.renderSky]||'☀️ 맑음');
       }
       // 크레딧: 영상은 실제 청구(getCost())와 동일한 공식으로 계산
@@ -50787,6 +50790,7 @@ function _isNightTask(task, prompt){
   for(var i=0;i<NIGHT_PROMPT_MARKS.length;i++) if(t.indexOf(NIGHT_PROMPT_MARKS[i])!==-1) return true;
   return false;
 }
+var SITE_PERSP_TAIL=' 🚗 VEHICLES — FINAL OVERRIDE (user rule, replaces every earlier vehicle-count instruction): the whole image shows only 1 to 4 vehicles in total (parked and driving combined) — never more than 4. Remove every other car, van, bus and motorbike from the reference, above all any vehicle in the near foreground that crowds the frame or blocks the view of the main building; fill the freed road and sidewalk with clean, natural asphalt and paving. 📷 PHOTO QUALITY: the reference road view is a wide-angle / fisheye capture — the result must be a natural, straight-lined architectural photograph (about 35mm lens look, vertical lines vertical, no bending at the edges). The main building must sit IN the street, not look pasted on: the same sunlight direction, shadows, sky reflections in its glass, contact shadows at its base and the same colour grading as the surrounding buildings.';
 var NIGHT_COMMON_TAIL=' 🌙 NIGHT-SCENE RULES (user rules for every night / blue-hour / dusk scene, apply on top of everything above): (1) FRAMING LOCKED — never zoom in, crop tighter, tilt, lower, raise or reframe the camera, not even slightly; the result must show exactly the same field of view and edges as the original image (same distance from the building to every frame edge). (2) MAIN BUILDING LIGHT LEVEL = THE SAME AS A SOFT BLUE-HOUR SHOT — the warm interior glow through the windows is a natural 2700-3000K warm-white at a moderate, balanced level: windows read clearly lit, but the glow is never blown out or a flat bright yellow/white fill; furniture, ceilings and interior details stay visible inside the glow, and the facade materials keep their texture. Ceiling cove / linear / soffit line lights are only faint soft washes. Exposure is balanced like a professional architectural dusk photograph — the building must not look brighter or hotter than that.';
 var NO_MOON_TAIL=' 🌑 NO MOON (user rule for every night / blue-hour / dusk scene): do NOT draw a moon — no full moon, half moon or crescent, no moon disc or glow in the sky, unless the user explicitly asked for a moon. Keep the sky a clean deep night/twilight tone. Never tilt, lower, raise, zoom or reframe the camera to show more sky — the framing stays exactly as in the original image.';
 function procImgWithTask(task, onDone, onErr){
@@ -51066,7 +51070,7 @@ function procImgWithTask(task, onDone, onErr){
       'PERFORATED / PATTERNED SCREENS MUST KEEP THEIR EXACT PATTERN: if a solid wall has a pattern of openings (triangles, diamonds, hexagons, circles, slots, parametric perforations, vertical slits), keep that solid screen with the SAME opening shapes, sizes, count and spacing — the openings stay openings (dark recess or view through), the solid between them stays solid. Do NOT replace a patterned screen or a solid band with a continuous glass curtain wall, and do NOT add extra glazing, mullions or glass floors that are not drawn. '+
       'Keep the ratio of solid to glass on every facade exactly as in the input — before finishing, compare the podium/base, the bridge and each tower: anything that was solid must still read as solid.';
     // 2026-10-12("3D 캡처 배경이 검은색이라 계속 야간으로 렌더된다 — 따로 요청 안 하면 무조건 맑은 날 주간"): 야간 요청이 없으면 주간 고정
-    if(task.selK!=='render_quality_boost' && !task._envNoSky && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){ // 2026-10-12: 고품질화는 이미 렌더링된 이미지의 시간대·조명 분위기를 그대로 유지
+    if(task.selK!=='render_quality_boost' && task.renderSky!=='keep' && !task._envNoSky && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){ // 2026-10-12: 고품질화는 이미 렌더링된 이미지의 시간대·조명 분위기를 그대로 유지
       var _sky = task.renderSky || 'clear';
       // 2026-10-13(요청): 구름 조금 = 맑은 날에 구름이 조금 / 흐림 = 진짜 흐린 날
       var _skyTxt = _sky==='partly' ? 'Render a bright, SUNNY CLEAR-WEATHER daytime scene with just a few clouds: a vivid blue sky with a few scattered fluffy white cumulus clouds (mostly blue — clouds only about 15-25% of the sky), direct bright sunshine with crisp daylight shadows — this is a fine sunny day, NOT a grey or overcast day, exterior lights OFF'
@@ -51579,6 +51583,15 @@ function procImgWithTask(task, onDone, onErr){
 
 
 
+  // 2026-10-26 신고("실제 대지 배경 합성(투시도)이 예전보다 안 좋아짐 — 차가 너무 많다, 1~4대로 해달라고 했었다"): 프리셋 안 차량 규칙은
+  // '주차 몇 대 + 도로 위 3~4대 이상'(결국 5~8대)이었음 → 맨 끝에서 전체 1~4대로 덮어씀 + 로드뷰 광각 왜곡 펴기·건물 합성감 보강
+  if(task && task.selK==='site_context_composite_persp') ap += SITE_PERSP_TAIL;
+  // 2026-10-26: 하늘(맑음·구름 조금·흐림) 선택을 대지 합성·CAD 아이소·고품질화 프리셋에도 적용(나머지 프리셋은 위 주간 규칙에서 이미 적용)
+  if(task && wf==='render' && task.renderSky && task.renderSky!=='keep' && (/^site_context/.test(task.selK||'') || task.selK==='cad_isometric' || task.selK==='render_quality_boost') && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(String(task.userExtra||''))) ap += ({
+    clear:' ☀️ SKY / WEATHER — FINAL (user choice, overrides any other sky or weather wording above): a bright, clear sunny day with a clean, cloudless deep-blue sky and crisp natural shadows.',
+    partly:' ⛅ SKY / WEATHER — FINAL (user choice, overrides any other sky or weather wording above): a sunny, clear-weather day with only a few scattered white clouds (mostly blue sky, clouds about 15-25%), direct sunshine and clear shadows — never grey or gloomy.',
+    overcast:' ☁️ SKY / WEATHER — FINAL (user choice, overrides any other sky or weather wording above): a truly overcast day — the whole sky covered by an even grey cloud layer, no blue sky, no visible sun, soft diffuse light with almost no shadows.'
+  })[task.renderSky]||'';
   if(task && task._bgTail) ap += task._bgTail; // 2026-10-26 3D만 실사화(배경 원본 그대로) — 모든 엔진 공통, 맨 끝
   // NB2 / NB Pro (edit 이외 탭)
   if(eng==='gpt2'){
@@ -51680,12 +51693,17 @@ function procImgWithTask(task, onDone, onErr){
         'ADD NOTHING THAT IS NOT IN THE INPUT: no new arches, niches, openings, columns or pillars (never copy one column into several), beams, mouldings, wall cladding (no stone, brick or tile where the wall is plain), no new ceiling lights, spotlights or downlights, no new furniture, art or decor. Plain walls stay plain walls with the same colour. '+
         'IF THIS IS AN INTERIOR: it stays exactly the same interior — dark areas of the room (a dark ceiling, a dark wall, a dimly lit corner) are part of the room, not an empty background; keep them as they are. '+
         'Every surface drawn as an opaque solid (white panels, walls, solid bands, fins) stays an opaque solid material — never turn it into glass; keep perforated/patterned screens (e.g. triangle openings) with exactly the same pattern; only surfaces already drawn as glass become glass. '+
-        (_keepBg ? '' : (_night ? 'Time of day: as the user asked. ' : 'IF THIS IS AN EXTERIOR — time of day: BRIGHT, CLEAR DAYTIME, blue sky with a few soft clouds and natural sunlight with soft shadows; if the background behind the building is plain black, it is only an empty 3D background, NOT night: replace it with a realistic daytime sky and natural surroundings; exterior lights off. '))+
+        ((_keepBg || task.renderSky==='keep') ? '' : (_night ? 'Time of day: as the user asked. ' : 'IF THIS IS AN EXTERIOR — time of day: BRIGHT, CLEAR DAYTIME, blue sky with a few soft clouds and natural sunlight with soft shadows; if the background behind the building is plain black, it is only an empty 3D background, NOT night: replace it with a realistic daytime sky and natural surroundings; exterior lights off. '))+
         'Re-texture every surface as the REAL VERSION OF THE SAME MATERIAL IT ALREADY SHOWS — never change it into a different material: brick stays brick (real depth and mortar joints), timber stays timber (real grain), concrete stays concrete, stone only where stone is already drawn, plaster or paint stays smooth plaster or paint, glass stays glass. '+
         'Replace flat CG plants and mapped ground with real living plants of the same kind and position and real 3D ground cover (wood-chip mulch, gravel, grass) with depth and contact shadows. '+
         'Natural colours, clean and noise-free, no illustration or CG look. Remove every black modelling outline/edge line from the 3D program — a real photo has no drawn outlines. Keep every light fixture in the same on/off state as the input and keep the overall brightness and lighting mood of the input (a dim, moody space stays dim and moody).'+(task._matMap||'')+(task._bgTail||'')+
         (_ut ? ' User request: '+_ut : '')+
         (/사람|인물|행인|손님|직원|고객|가족|커플/.test(_ut) ? ' Any people must be natural ordinary Koreans that look like real photographed people.' : '');
+    }
+    if(task && /^hq_real/.test(task.selK||'') && !task._bgTail && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(String(task.userExtra||''))){ // 2026-10-26: 하늘 선택(구름 조금·흐림)도 고급 실사화에 반영
+      if(task.renderSky==='partly') _sdP += ' Sky: sunny with only a few scattered white clouds (mostly blue sky).';
+      else if(task.renderSky==='overcast') _sdP += ' Sky: a truly overcast day — the whole sky covered by even grey cloud, no blue sky, soft light with almost no shadows.';
+      else if(task.renderSky==='clear') _sdP += ' Sky: clean, cloudless deep blue.';
     }
     if(task && task.toneRef) _sdP += (task.matchRef ? MATCH_REF_RULE_SHORT : TONE_REF_RULE_SHORT);
     uploadImgToFal(img, function(imgUrl){
@@ -58209,6 +58227,8 @@ var CLOVER_NEW_FEATURES=[
   {t:'⬛ 3D만 실사로 / 🏛 주변 배경 넣기 (렌더 실사화)', h:'전시 부스·쇼룸처럼 배경이 검정(또는 흰색) 단색인 3D 이미지로 렌더링을 누르면 "배경을 어떻게 할까요?"를 물어봐요. [3D만 실사로]를 고르면 배경은 원본 그대로 두고 전시장·주변 부스·사람을 지어내지 않아요. [주변 배경도 넣기]는 AI가 어울리는 주변을 채워요. 같은 이미지는 한 번만 묻고, 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요. 실제 대지 배경 합성 프리셋에서는 묻지 않아요.'},
   {t:'🌙 야간 장면 공통 규칙 (달 없음 · 구도 고정 · 블루아워 밝기)', h:'주간→야간, 실내 야간 무드, 블루아워·황혼, 달빛 밤, 별 보이는 밤 등 모든 야간 장면은 ① 달을 넣지 않아요(추가 요청에 "보름달 넣어줘"처럼 적으면 넣어요) ② 화면을 확대하거나 카메라를 내리는 등 구도를 바꾸지 않아요 ③ 메인 건물 실내 불빛 밝기를 블루아워·황혼과 같은 차분한 수준으로 맞춰요(하얗게 날아가지 않게). 달빛 밤도 달빛 분위기만 내고 달 자체는 안 보여요.'},
   {t:'🛠 렌더 실사화 — 없던 것 추가 금지 강화', h:'실사화(기본·고급)에서 원본에 없던 아치·벽감·기둥·돌/벽돌 마감·천장 다운라이트·가구를 새로 만들어 넣지 않도록 규칙을 강화했어요. 재질은 같은 재질의 실제 버전으로만 바뀌고(도장 벽은 도장 벽 그대로), 어두운 분위기의 공간은 그 밝기·분위기를 유지해요. 그래도 바뀌면 같은 설정으로 한 번 더 돌리거나 다른 엔진(기본↔고급)으로 시도해 보세요.'},
+  {t:'🚗 실제 대지 배경 합성(투시도) — 차량 1~4대 · 로드뷰 왜곡 보정', h:'실제 대지 배경 합성 - 투시도(눈높이)는 결과 사진 전체에 차를 1~4대만 남기고(특히 건물 앞을 가리는 가까운 차는 지움), 로드뷰 특유의 광각·어안 왜곡을 펴서 반듯한 건축 사진처럼 만들고, 건물이 붙여넣은 것처럼 보이지 않게 햇빛·그림자·색감을 주변과 맞춰요. 로드뷰는 건물에서 조금 떨어진 곳에서, 앞에 차가 적은 각도로 캡처하면 더 잘 나와요.'},
+  {t:'☀️ 하늘 선택 — 3D 렌더 실사화 모든 프리셋', h:'3D 렌더 실사화 탭의 모든 프리셋(실사화·고급 실사화·CG·실제 대지 배경 합성·CAD 아이소·고품질화 등)에서 렌더 버튼 위 [☀️ 하늘]로 맑음 / 구름 조금 / 흐림 / 원본 그대로를 고를 수 있어요. 렌더링 완성본 고품질화는 기본이 "원본 그대로"예요. 추가 요청에 야간·노을을 적으면 그게 우선이에요.'},
   {t:'🎬 3D 영상 → 실사 영상 (영상 제작 맨 위)', h:'영상 제작 탭 맨 위 카드에서 3D로 뽑은 영상을 올리면 실사 영상으로 바꿔줘요. 실사화(기본)와 고퀄리티 CG 느낌 중 고를 수 있고, 날씨·시간대·계절도 골라 렌더할 수 있어요. 🎞 영상 엔진을 고를 수 있어요: 기본은 Kling 4.0(720p 36cr/초, FHD 1080p 54cr/초 — 가장 저렴하고 FHD 바로 가능, 영상 가로·세로 700px 이상·3초 이상 필요), Seedance 2.5(480p 51cr/초, 720p 109cr/초 — 참고 이미지를 더 충실히 따름). 요금 = (원본 클립 길이 + 결과 길이) × 초당 크레딧이라, 15초 클립을 Kling FHD로 만들면 약 1,620cr이에요. 엔진·화질을 바꾸면 버튼의 크레딧도 바로 바뀌어요.'},
   {t:'🖼 영상 렌더 전 미리보기 컷', h:'영상을 렌더하기 전에 원하는 장면을 한 번에 최대 3장씩 먼저 사진으로 뽑아 확인할 수 있어요. 여러 번 눌러 계속 쌓을 수 있어요.'},
   {t:'🚀 미래형 디자인 "다른 컨셉" 버튼', h:'공간 컨셉 디자인·현장사진에서 미래형 컨셉은 [다른 컨셉] 버튼을 누르기 전까지 같은 느낌으로 유지되고, 누르거나 전체 리셋하면 다른 미래 스타일로 바뀌어요.'},
