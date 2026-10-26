@@ -6180,6 +6180,7 @@ function _signFixOffer(src){
     G.editMode='normal';
     var t=getTab('edit'); t.inputImg=src; t.inputImgName=''; t.selK='sign_text_fix'; t.prompt=ps.pt; t.refs=[];
     t.extraPrompt = words ? ('간판에 들어갈 정확한 글자(이 글자를 그대로 쓰세요): '+words) : '';
+    try{ window._syncEngForCurrentPreset(); }catch(e){} // 간판 교정 → 나노바나나 Pro 자동
     try{ if(!G._chained) G._chained={}; G._chained['edit']=true; }catch(e){}
     try{ renderSB(); }catch(e){} try{ renderMain('edit'); }catch(e){} try{ _previewImageInMain(src,'edit'); }catch(e){} try{ updBtn(); }catch(e){}
     try{ _agedEnvToast('🔤 AI 편집에 "글씨/간판 교정"이 준비됐어요 — 아래 실행 버튼을 누르세요'); }catch(e){}
@@ -12035,7 +12036,8 @@ function _recordRecentPreset(k){
   try{ localStorage.setItem('clover_recent_presets', JSON.stringify(arr.slice(0,10))); }catch(e){}
 }
 // 2026-10-12: 엔진 기본값 동기화 — mkPre 밖(전역)으로 옮겨 언제든 호출 가능하게
-var PRESET_FORCE_PRO = ['apartment_living','kitchen_dining','bathroom','bedroom','isometric','cad_isometric','axonometry','topview','site_context_composite_persp','site_context_composite_aerial','site_context_composite_aerial_wide','elevation_front','elevation_left','elevation_right','elevation_rear','floor_plan_from_photo','ceiling_plan_from_photo','person_add','korean_person','person_blur','people_walk','bg_quality_match'];
+var PRESET_FORCE_PRO = ['sign_text_fix', // 2026-10-26 요청: 간판 교정은 글자를 더 잘 쓰는 나노바나나 Pro 자동
+  'apartment_living','kitchen_dining','bathroom','bedroom','isometric','cad_isometric','axonometry','topview','site_context_composite_persp','site_context_composite_aerial','site_context_composite_aerial_wide','elevation_front','elevation_left','elevation_right','elevation_rear','floor_plan_from_photo','ceiling_plan_from_photo','person_add','korean_person','person_blur','people_walk','bg_quality_match'];
 // ⚠️ 요청 반영("이번엔 Pro로 다시 테스트해보고 싶다"): 지난번 Pro 테스트는 프롬프트 누락
 // 버그가 같이 껴있어서 정확한 테스트가 아니었음 — 그 버그가 고쳐진 지금 Pro를 다시 한번
 // 정확하게 테스트해보기 위해, view_left/view_right/custom_direction을 나노바나나2 강제
@@ -48416,6 +48418,63 @@ function _shouldSkipColorCastFix(selK){
 // 같은 훨씬 큰 작업)가 필요함 — 지금은 보정을 아예 하지 않고 AI 결과를 그대로 쓰는 게 가장
 // 부작용이 적은 선택. (마스크를 실제로 그린 편집은 이 함수를 안 거치고 _compositeMaskedResult
 // 로 여전히 정확하게 보호됨 — 이 함수는 마스크가 없는 경우의 최후 폴백일 뿐임.)
+// ── 2026-10-26 신고("간판 교정 후 카메라가 조금 틀어지고 전체가 붉어졌다"): 글씨/간판 교정은 간판 글씨만 바뀌면 되는 작업 →
+// ① AI 결과를 원본에 맞춰 위치·크기를 자동 정렬 ② 결과에서 간판·글씨 영역만 AI 물체 인식(SAM)으로 찾아 ③ 그 부분만 원본 위에 얹음
+// → 나머지는 원본 픽셀 그대로라 카메라가 절대 안 틀어지고 색(붉은끼)도 안 바뀜. 간판 부분은 원본 색감에 맞춰 색 보정 후 부드럽게 합성.
+function _imgAlign(a, b, W, H){ // b를 a에 맞추는 배율·이동(윤곽선 비교 — 작은 크기로 대략 찾고, 큰 크기로 정밀하게)
+  try{
+    function edges(img,w,h){ var c=document.createElement('canvas'); c.width=w; c.height=h; var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(img,0,0,w,h); var d=x.getImageData(0,0,w,h).data, g=new Float32Array(w*h), e=new Float32Array(w*h);
+      for(var i=0;i<w*h;i++) g[i]=d[i*4]*0.3+d[i*4+1]*0.59+d[i*4+2]*0.11;
+      for(var y=1;y<h-1;y++) for(var x2=1;x2<w-1;x2++){ var k=y*w+x2; e[k]=Math.abs(g[k+1]-g[k-1])+Math.abs(g[k+w]-g[k-w]); } return e; }
+    function search(w, s0, x0, y0, sSteps, sStep, R, step){
+      var h=Math.max(1,Math.round(w*H/W)), ea=edges(a,w,h), eb=edges(b,w,h), cx=w/2, cy=h/2, best={s:s0,x:x0,y:y0}, bestS=Infinity, m=Math.round(w*0.04);
+      for(var si=-sSteps;si<=sSteps;si++){ var sc=s0+si*sStep;
+        for(var dy=-R;dy<=R;dy++) for(var dx=-R;dx<=R;dx++){ var X=x0+dx, Y=y0+dy, sum=0, n=0;
+          for(var y=m;y<h-m;y+=step) for(var x=m;x<w-m;x+=step){ var bx=Math.round((x-cx)*sc+cx+X), by=Math.round((y-cy)*sc+cy+Y); if(bx<0||by<0||bx>=w||by>=h) continue; sum+=Math.abs(ea[y*w+x]-eb[by*w+bx]); n++; }
+          if(n){ sum/=n; if(sum<bestS){ bestS=sum; best={s:sc,x:X,y:Y}; } } } }
+      return best;
+    }
+    var c1=search(200, 1, 0, 0, 4, 0.01, 6, 3); // 대략: ±4% 배율, ±6px(=±3%) 이동
+    var k=3, c2=search(600, c1.s, c1.x*k, c1.y*k, 3, 0.004, 3, 4); // 정밀: 600px에서 ±3px
+    return {s:c2.s, x:c2.x*W/600, y:c2.y*W/600};
+  }catch(e){ return {s:1,x:0,y:0}; }
+}
+function _signFixComposite(origSrc, resUrl, cb){
+  var done=false; function fin(v){ if(done) return; done=true; cb(v); }
+  setTimeout(function(){ fin(null); }, 60000);
+  try{
+    loadImgSafe(origSrc, function(oImg){ loadImgSafe(resUrl, function(rImg){ try{
+      var W=oImg.naturalWidth||oImg.width, H=oImg.naturalHeight||oImg.height;
+      var rc=document.createElement('canvas'); rc.width=W; rc.height=H; rc.getContext('2d').drawImage(rImg,0,0,W,H);
+      var al=_imgAlign(oImg, rc, W, H);
+      // 결과를 원본 좌표로 되돌림: 원본 좌표 p ↔ 결과 좌표 (p-c)*s+c+d
+      var ac=document.createElement('canvas'); ac.width=W; ac.height=H; var ax=ac.getContext('2d');
+      ax.setTransform(1/al.s,0,0,1/al.s, W/2-(W/2+al.x)/al.s, H/2-(H/2+al.y)/al.s); ax.drawImage(rc,0,0); ax.setTransform(1,0,0,1,0,0);
+      console.log('[간판 교정] 원본 정렬:', 'x'+al.s.toFixed(2), Math.round(al.x)+'px', Math.round(al.y)+'px');
+      _samFind(ac, ['sign','signboard','text'], W, H, function(masks){
+        try{
+          var oc=document.createElement('canvas'); oc.width=W; oc.height=H; var ox=oc.getContext('2d',{willReadFrequently:true}); ox.drawImage(oImg,0,0,W,H);
+          if(!masks || !masks.length){ console.warn('[간판 교정] 간판 영역을 못 찾음 — AI 결과 그대로 사용'); fin(null); return; }
+          var M=document.createElement('canvas'); M.width=W; M.height=H; var mx=M.getContext('2d'), r=Math.max(2,Math.round(W*0.004));
+          masks.forEach(function(m){ for(var a2=0;a2<12;a2++){ var ang=a2/12*Math.PI*2; mx.drawImage(m.cv, Math.round(Math.cos(ang)*r), Math.round(Math.sin(ang)*r)); } mx.drawImage(m.cv,0,0); });
+          var F=document.createElement('canvas'); F.width=W; F.height=H; var fx=F.getContext('2d'); try{ fx.filter='blur('+Math.max(1,Math.round(r/2))+'px)'; }catch(e){} fx.drawImage(M,0,0);
+          // 색 맞춤: 간판 밖(원본과 같아야 하는 곳)에서 원본/결과 평균 비율을 재서 결과 간판 부분에 반대로 적용
+          var S=160, sw=Math.max(1,Math.round(W*S/Math.max(W,H))), sh=Math.max(1,Math.round(H*S/Math.max(W,H)));
+          function small(cv){ var c=document.createElement('canvas'); c.width=sw; c.height=sh; var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(cv,0,0,sw,sh); return x.getImageData(0,0,sw,sh).data; }
+          var so=small(oc), sa=small(ac), sm=small(M), sumO=[0,0,0], sumA=[0,0,0];
+          for(var i=0;i<so.length;i+=4){ if(sm[i+3]>10) continue; for(var c=0;c<3;c++){ sumO[c]+=so[i+c]; sumA[c]+=sa[i+c]; } }
+          var gain=[0,1,2].map(function(c){ var g=sumA[c]>0 ? sumO[c]/sumA[c] : 1; return Math.max(0.8, Math.min(1.25, g)); });
+          var L=document.createElement('canvas'); L.width=W; L.height=H; var lx=L.getContext('2d',{willReadFrequently:true}); lx.drawImage(ac,0,0);
+          var id=lx.getImageData(0,0,W,H), p=id.data; for(var j=0;j<p.length;j+=4){ p[j]=Math.min(255,p[j]*gain[0]); p[j+1]=Math.min(255,p[j+1]*gain[1]); p[j+2]=Math.min(255,p[j+2]*gain[2]); }
+          lx.putImageData(id,0,0); lx.globalCompositeOperation='destination-in'; lx.drawImage(F,0,0);
+          ox.drawImage(L,0,0);
+          console.log('[간판 교정] 간판 '+masks.length+'곳만 교체, 나머지는 원본 그대로 · 색 보정', gain.map(function(g){return g.toFixed(2);}).join('/'));
+          fin(oc.toDataURL('image/jpeg',0.93));
+        }catch(e2){ fin(null); }
+      });
+    }catch(e1){ fin(null); } }, function(){ fin(null); }); }, function(){ fin(null); });
+  }catch(e){ fin(null); }
+}
 function _neutralizeEditColorCast(origUrl, resultUrl, cb){
   cb(resultUrl);
 }
@@ -51534,7 +51593,8 @@ function procImgWithTask(task, onDone, onErr){
                 if(_stRoot) console.log('[공사 단계] 이어서 만들기 감지 → 주변 디테일은 맨 처음 원본 기준으로 복원');
                 _editDetailRestore(_stRoot || img, u, function(f){ var fin=f||u; if(STAGE_SURROUND_KEYS.indexOf(task.selK)!==-1) _stageRootRemember(fin, _stRoot || task.img); finishWithResize(fin, onDone); }, {noColor:!_keepColorFix});
               } else {
-                if(task.skipDetailRestore){ _neutralizeEditColorCast(img,u,function(correctedUrl){ finishWithResize(correctedUrl||u, onDone); }); } // 3D 렌더를 실사로 바꾼 홈스테이징: CG 디테일 복원 안 함
+                if(task.selK==='sign_text_fix'){ _signFixComposite(img, u, function(f){ finishWithResize(f||u, onDone); }); } // 2026-10-26: 간판 교정 — 간판만 결과, 나머지는 원본 픽셀(카메라 고정·붉은끼 방지)
+                else if(task.skipDetailRestore){ _neutralizeEditColorCast(img,u,function(correctedUrl){ finishWithResize(correctedUrl||u, onDone); }); } // 3D 렌더를 실사로 바꾼 홈스테이징: CG 디테일 복원 안 함
                 else _neutralizeEditColorCast(img,u,function(correctedUrl){ _editDetailRestore(img, correctedUrl||u, function(f){ finishWithResize(f||correctedUrl, onDone); }); });
               }
             },onErr, _bill);
@@ -58275,6 +58335,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'🛠 렌더 실사화 — 없던 것 추가 금지 강화', h:'실사화(기본·고급)에서 원본에 없던 아치·벽감·기둥·돌/벽돌 마감·천장 다운라이트·가구를 새로 만들어 넣지 않도록 규칙을 강화했어요. 재질은 같은 재질의 실제 버전으로만 바뀌고(도장 벽은 도장 벽 그대로), 어두운 분위기의 공간은 그 밝기·분위기를 유지해요. 그래도 바뀌면 같은 설정으로 한 번 더 돌리거나 다른 엔진(기본↔고급)으로 시도해 보세요.'},
   {c:'render', t:'🚗 실제 대지 배경 합성(투시도) — 실사 건물 · 세로선 보정 · 간판 · 차량', h:'대지 배경 합성 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠요 — [간판 정리하러 가기]를 누르면 AI 편집의 🔤 글씨/간판 교정이 결과 이미지와 함께 준비되고, 실행하면 엉터리 한글·영어·한자 간판이 깔끔하게 고쳐져요(꼭 들어갈 간판 글자를 적을 수도 있어요). 실제 대지 배경 합성 - 조감도·광역조감도도 같은 원칙(메인 건물 실사화·왜곡 없는 반듯한 건물·또렷한 한글 간판·도로 크기에 맞는 차량·중앙분리대 등 도로 시설 유지)으로 만들어요. 투시도(눈높이)는 ① 메인 건물을 3D 모델 그대로 붙이지 않고 같은 디자인의 실제 사진 속 건물처럼(벽돌·유리 반사·그림자·색감) 만들고 ② 로드뷰의 광각·어안 왜곡을 펴서 모든 세로선이 수직인 건축 사진으로 바로잡고 ③ 한글 간판을 또렷하게 ④ 차는 보통 1~4대, 4차선 이상 넓은 도로는 4~7대 정도로 자연스럽게 두고 건물 앞을 가리는 가까운 차는 지워요. 중앙분리대·볼라드·방호 울타리·차선·횡단보도·신호등·가로등·전봇대 같은 실제 도로 시설은 로드뷰 그대로 남겨요. 도로 차선·중앙선·횡단보도는 한국 도로 규정에 맞게 로드뷰 그대로 그리고, 없던 횡단보도·유턴 표시·화살표는 만들지 않아요. 로드뷰의 번호판·얼굴 모자이크는 없애고, 번호판은 임의의 번호가 적힌 깔끔한 한국 번호판으로 그려요. 로드뷰는 건물에서 조금 떨어진 곳에서 캡처하면 더 잘 나와요.'},
   {c:'render', t:'☀️ 하늘 선택 — 3D 렌더 실사화 모든 프리셋', h:'3D 렌더 실사화 탭의 모든 프리셋(실사화·고급 실사화·CG·실제 대지 배경 합성·CAD 아이소·고품질화 등)에서 렌더 버튼 위 [☀️ 하늘]로 맑음 / 구름 조금 / 흐림 / 원본 그대로를 고를 수 있어요. 렌더링 완성본 고품질화는 기본이 "원본 그대로"예요. 추가 요청에 야간·노을을 적으면 그게 우선이에요.'},
+  {c:'edit', t:'🔤 글씨/간판 교정 — 간판만 바뀌고 나머지는 원본 그대로', h:'AI 편집의 🔤 글씨/간판 교정은 결과에서 간판·글씨 부분만 AI 물체 인식으로 찾아 원본 사진 위에 얹어요. 그래서 카메라(구도)가 틀어지지 않고 전체 색감(붉은끼)도 안 바뀌어요. 위치가 조금 밀려 나와도 자동으로 맞춰요. 이 프리셋을 고르면 엔진이 글자를 더 잘 쓰는 나노바나나 Pro로 자동으로 바뀌어요. 글씨가 여전히 어색하면 추가 요청 칸에 정확한 간판 글자를 적고 다시 돌려보세요.'},
   {c:'video', t:'🎬 3D 영상 → 실사 영상 (영상 제작 맨 위)', h:'영상 제작 탭 맨 위 카드에서 3D로 뽑은 영상을 올리면 실사 영상으로 바꿔줘요. 실사화(기본)와 고퀄리티 CG 느낌 중 고를 수 있고, 날씨·시간대·계절도 골라 렌더할 수 있어요. 🎞 영상 엔진을 고를 수 있어요: 기본은 Kling 4.0(720p 36cr/초, FHD 1080p 54cr/초 — 가장 저렴하고 FHD 바로 가능, 영상 가로·세로 700px 이상·3초 이상 필요), Seedance 2.5(480p 51cr/초, 720p 109cr/초 — 참고 이미지를 더 충실히 따름). 요금 = (원본 클립 길이 + 결과 길이) × 초당 크레딧이라, 15초 클립을 Kling FHD로 만들면 약 1,620cr이에요. 엔진·화질을 바꾸면 버튼의 크레딧도 바로 바뀌어요.'},
   {c:'video', t:'🖼 영상 렌더 전 미리보기 컷', h:'영상을 렌더하기 전에 원하는 장면을 한 번에 최대 3장씩 먼저 사진으로 뽑아 확인할 수 있어요. 여러 번 눌러 계속 쌓을 수 있어요.'},
   {c:'spaceset', t:'🚀 미래형 디자인 "다른 컨셉" 버튼', h:'공간 컨셉 디자인·현장사진에서 미래형 컨셉은 [다른 컨셉] 버튼을 누르기 전까지 같은 느낌으로 유지되고, 누르거나 전체 리셋하면 다른 미래 스타일로 바뀌어요.'},
