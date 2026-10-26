@@ -6551,7 +6551,8 @@ var PS_AI_PEOPLE_COST=15;
 // 🎯 AI 물체 선택: 클릭한 물체(또는 이름으로 찾은 물체들)를 fal SAM 3로 정확히 따서 선택 영역으로 → 바로 아래 빠른 작업 막대로
 // 색·밝기 조정 / 색조 바꾸기 / 반투명(흐리게) / 레이어로 분리. AI 비용은 아주 작아서 무료(sam_segment = 0cr)
 function _psAiSelectAt(x, y, e){ _psAiSelectRun({pt:{x:x,y:y}}, _psSelModeFromEvent(e)); }
-function _psAiSelectText(t){ t=String(t||'').trim(); if(!t){ _psToast('찾을 물체 이름을 적어주세요 (예: glass, building)'); return; } _psAiSelectRun({text:t}, PSE.o.selMode); }
+function _psAiSelectText(t){ t=String(t||'').trim(); if(!t){ _psToast('찾을 물체 이름을 적어주세요 (예: 유리, 건물)'); return; } PSE._aiSelText=t;
+  _psAiSelToEn(t, function(en){ _psAiSelectRun({text:en, label:t}, PSE.o.selMode); }); }
 function _psAiSelectRun(q, mode){
   var d=PSE.doc; if(!d) return;
   if(PSE._aiBusy){ _psToast('AI가 아직 찾는 중이에요…'); return; }
@@ -6560,8 +6561,8 @@ function _psAiSelectRun(q, mode){
   var flat=_psFlatten(true), sc=Math.min(1, 1600/Math.max(d.w,d.h)), W=Math.max(1,Math.round(d.w*sc)), H=Math.max(1,Math.round(d.h*sc));
   var send=_psCanvas(W,H); send.getContext('2d').drawImage(flat,0,0,W,H);
   var url; try{ url=send.toDataURL('image/jpeg',0.92); }catch(err){ _psToast('이미지 준비 오류'); return; }
-  PSE._aiBusy=true; try{ _psRefreshOpts(); }catch(e){} _psToast('🎯 AI가 '+(q.text?'"'+q.text+'"을(를) ':'물체를 ')+'찾는 중…');
-  function done(){ PSE._aiBusy=false; try{ _psRefreshOpts(); }catch(e){} }
+  PSE._aiBusy=true; try{ _psRefreshOpts(); _psAiSelCard(); }catch(e){} _psToast('🎯 AI가 '+(q.text?'"'+(q.label||q.text)+'"을(를) ':'물체를 ')+'찾는 중…');
+  function done(){ PSE._aiBusy=false; try{ _psRefreshOpts(); _psAiSelCard(); }catch(e){} }
   uploadImgToFal(url, function(iu){
     var inp={image_url:iu, output_format:'png'};
     if(q.pt) inp.point_prompts=[{x:Math.round(q.pt.x*sc), y:Math.round(q.pt.y*sc), label:1, object_id:1}];
@@ -6577,13 +6578,48 @@ function _psAiSelectRun(q, mode){
           tx.putImageData(id,0,0); mx.drawImage(t,0,0); }catch(e2){} fin(); };
         im.onerror=fin; im.src=u; });
       function fin(){ if(--left>0) return; done();
-        if(!any){ _psToast('물체를 찾지 못했어요'); return; }
+        if(!any){ _psToast(q.text?('"'+(q.label||q.text)+'"을(를) 찾지 못했어요 — 다른 이름으로 적거나 물체를 직접 클릭해 보세요'):'물체를 찾지 못했어요'); return; }
         _psSelSetFromMask(M, mode||'new', 'AI 물체 선택');
         _psToast('🎯 선택했어요 — 아래 막대에서 색·밝기·반투명을 바로 바꿀 수 있어요');
         _psAiSelBar();
       }
     }, function(err){ done(); _psToast('AI 선택 실패: '+String(err).slice(0,120)); }, {wf:'sam_segment', included:true});
   }, function(){ done(); _psToast('이미지 업로드 실패'); });
+}
+// 2026-10-26 요청("어디다 쓰고 찾기를 누르라는 거야? 잘 보이게 크게 · 한글로 써도 되게"): 🎯 도구를 고르면 도구 막대 바로 옆에 큰 안내 상자
+function _psAiSelCard(){
+  if(PSE.tool!=='aisel' || G.wf!=='psedit'){ var o0=document.getElementById('ps-aisel-card'); if(o0) o0.remove(); return; }
+  var card=document.getElementById('ps-aisel-card'), fresh=!card;
+  if(!card){ card=document.createElement('div'); card.id='ps-aisel-card'; document.body.appendChild(card); }
+  var tb=(PSE.ui&&PSE.ui.toolBtns&&PSE.ui.toolBtns.aisel)||null, r=tb?tb.getBoundingClientRect():{right:140, top:200};
+  card.style.cssText='position:fixed;z-index:100002;left:'+Math.round(r.right+12)+'px;top:'+Math.max(70,Math.round(r.top-14))+'px;width:300px;max-width:calc(100vw - '+Math.round(r.right+24)+'px);padding:14px;border-radius:14px;background:rgba(14,16,20,.97);border:2px solid var(--ac);box-shadow:0 14px 36px rgba(0,0,0,.55);font-family:inherit;color:#eee';
+  if(fresh || !card.querySelector('input')){
+    card.innerHTML='<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px;color:var(--ac)">🎯 AI 물체 선택</b><button type="button" data-x style="margin-left:auto;border:none;background:none;color:#888;font-size:16px;cursor:pointer">✕</button></div>'+
+      '<div style="font-size:12.5px;line-height:1.6;margin-bottom:10px">① 사진에서 <b>물체를 클릭</b>하면 그 물체만 선택돼요</div>'+
+      '<div style="font-size:12.5px;font-weight:800;margin-bottom:6px">② 이름으로 한 번에 모두 선택</div>'+
+      '<input type="text" placeholder="예: 유리, 건물, 나무, 하늘" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:2px solid var(--ac);background:#0b0c10;color:#fff;font-family:inherit;font-size:15px;font-weight:700">'+
+      '<button type="button" data-go style="width:100%;margin-top:8px;padding:11px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit">🔎 모두 선택하기</button>'+
+      '<div style="font-size:11px;color:#9aa;line-height:1.6;margin-top:9px">한글·영어 다 돼요 · 예) <b>유리</b> → 사진 속 유리 전부 선택<br>더하기: <b>Shift</b>+클릭 · 빼기: <b>Alt</b>+클릭 · 무료</div>'+
+      '<div data-st style="font-size:12px;color:var(--ac);margin-top:6px;min-height:16px"></div>';
+    var inp=card.querySelector('input'); inp.value=PSE._aiSelText||'';
+    inp.oninput=function(){ PSE._aiSelText=this.value; };
+    inp.onkeydown=function(ev){ ev.stopPropagation(); if(ev.key==='Enter') _psAiSelectText(inp.value); };
+    card.querySelector('[data-go]').onclick=function(){ _psAiSelectText(inp.value); };
+    card.querySelector('[data-x]').onclick=function(){ card.remove(); };
+  }
+  var st=card.querySelector('[data-st]'); if(st) st.textContent=PSE._aiBusy?'⏳ AI가 찾는 중…':'';
+}
+// 한글 물체 이름 → AI(영어)용 이름. 사전에 없으면 AI 번역(무료)
+var PS_AISEL_KO=[['주변 건물','building'],['주변건물','building'],['유리창','window glass'],['통유리','glass'],['유리','glass'],['창문','window'],['창호','window'],['창','window'],['아파트','apartment building'],['건물','building'],['외벽','facade'],['지붕','roof'],['나무','tree'],['수목','tree'],['하늘','sky'],['구름','cloud'],['산','mountain'],['바닥','floor'],['천장','ceiling'],['벽','wall'],['담장','wall'],['소파','sofa'],['의자','chair'],['테이블','table'],['탁자','table'],['식탁','dining table'],['침대','bed'],['사람','person'],['자동차','car'],['차량','car'],['차','car'],['도로','road'],['인도','sidewalk'],['보도','sidewalk'],['잔디','grass'],['풀','grass'],['화분','potted plant'],['식물','plant'],['조명','lamp'],['커튼','curtain'],['블라인드','blind'],['러그','rug'],['카펫','rug'],['문','door'],['계단','stairs'],['난간','railing'],['타일','tile'],['싱크대','sink'],['주방 가구','kitchen cabinet'],['수납장','cabinet'],['티비','television'],['TV','television'],['텔레비전','television'],['거울','mirror'],['액자','picture frame'],['그림','painting'],['수영장','swimming pool'],['물','water'],['간판','signboard'],['전봇대','utility pole'],['가로등','street lamp'],['울타리','fence'],['펜스','fence'],['데크','deck'],['기둥','column'],['발코니','balcony'],['베란다','balcony'],['파라솔','parasol'],['우산','umbrella'],['자전거','bicycle'],['쿠션','cushion'],['이불','blanket'],['책장','bookshelf'],['책','book'],['꽃','flower'],['돌','stone'],['바위','rock']];
+function _psAiSelToEn(t, cb){
+  t=String(t||'').trim();
+  if(!/[가-힣]/.test(t)){ cb(t); return; }
+  var rest=t, out=[];
+  PS_AISEL_KO.forEach(function(p){ if(rest.indexOf(p[0])!==-1){ if(out.indexOf(p[1])===-1) out.push(p[1]); rest=rest.split(p[0]).join(' '); } });
+  if(out.length && !/[가-힣]{2,}/.test(rest.replace(/(전부|모두|다|만|들|과|와|랑|하고|및|그리고|,|\s)/g,''))){ cb(out.join(', ')); return; }
+  _falProxyCall('chat-assistant', {messages:[{role:'user', content:'Translate these Korean object names into short English nouns for an image segmentation model. Output ONLY the English nouns separated by commas, nothing else: '+t}]}, function(res){
+    var e=String((res&&res.reply)||'').replace(/[^a-zA-Z ,\-]/g,'').trim(); cb(e || out.join(', ') || t);
+  }, function(){ cb(out.join(', ') || t); });
 }
 // 선택 직후 빠른 작업 막대
 function _psAiSelBar(){
@@ -8080,6 +8116,7 @@ function _psRefreshStatus(){
   var ui=PSE.ui, d=PSE.doc; if(!ui) return;
   if(!d){ ui.info.textContent='문서 없음'; return; }
   var T=null; PS_TOOLS.forEach(function(t){ if(t.k===PSE.tool) T=t; });
+  if(PSE.tool!=='aisel'){ var _aic=document.getElementById('ps-aisel-card'); if(_aic) _aic.remove(); }
   ui.info.textContent=d.w+' × '+d.h+'px · 레이어 '+d.layers.length+'개'+(d.sel?' · 선택 영역 있음':'')+' · '+(T?T.l.replace(/\s*\(.*\)$/,''):'');
 }
 function _psRenderEmpty(){
@@ -8184,11 +8221,8 @@ function _psRefreshOpts(light){
   else if(t==='wand'){ tolCtl(); _psSelModeRow(o); }
   else if(t==='aisel'){
     _psSelModeRow(o);
-    var _aiq=_psEl('input'); _aiq.type='text'; _aiq.placeholder='또는 이름으로 찾기: glass, building, sofa…'; _aiq.value=PSE._aiSelText||'';
-    _aiq.style.cssText='width:210px;padding:5px 8px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:11.5px';
-    _aiq.oninput=function(){ PSE._aiSelText=this.value; }; _aiq.onkeydown=function(ev){ ev.stopPropagation(); if(ev.key==='Enter') _psAiSelectText(PSE._aiSelText); };
-    o.appendChild(_aiq); o.appendChild(_psB('🔎 찾기',function(){ _psAiSelectText(PSE._aiSelText); },'pri','이름에 해당하는 물체를 사진 전체에서 모두 선택'));
-    hint(PSE._aiBusy?'⏳ AI가 찾는 중…':'물체를 클릭하면 AI가 그 물체만 선택해요 · Shift+클릭 더하기 · Alt+클릭 빼기 · 무료');
+    hint(PSE._aiBusy?'⏳ AI가 찾는 중…':'물체 클릭 = 그 물체만 선택 · Shift+클릭 더하기 · Alt+클릭 빼기 · 이름으로 한 번에 선택은 왼쪽 큰 상자 · 무료');
+    setTimeout(_psAiSelCard, 0);
   }
   else if(t==='marquee'||t==='emarquee'||t==='lasso'){ _psSelModeRow(o); hint(t==='lasso'?'드래그해서 자유롭게 둘러싸기':'드래그 (Shift: 정사각형/정원)'); }
   else if(t==='poly'){
@@ -9407,6 +9441,7 @@ function _loginGateMsg(wf){
   document.body.appendChild(ov);
 }
 function selectWF(wf){
+  if(wf!=='psedit'){ try{ ['ps-aisel-card','ps-aisel-bar'].forEach(function(id){ var x=document.getElementById(id); if(x) x.remove(); }); }catch(_pe){} } // 2026-10-26: 포토샵 편집 밖으로 나가면 AI 선택 상자 닫기
   if(wf==='staging'){ _openStaging(); return; } // 빈집 홈스테이징은 AI편집 엔진을 쓰는 전용 모드
   if(LOGIN_ONLY_WF[wf] && !_supaUser && window._authInitDone){ _loginGateMsg(wf); return; }
   if(!G._stagingEntering && G._staging){ _leaveStaging(); }
@@ -54346,6 +54381,61 @@ function _admLogsDrawList(){
 // 저장되는데(그 테이블이 아직 없으면 이 탭이 SQL 생성문을 안내함), 그걸 목록으로 보여주고
 // 미해결/처리완료 상태를 토글할 수 있게 함. 최신순, 미해결이 눈에 잘 띄도록 상단에 먼저 정렬.
 var _admBugFilter='open';
+// ── 2026-10-26 관리자 → 제보·아이디어 보낸 회원에게 안내(+크레딧 사례) 보내기 ──
+var ADM_NOTICE_TEMPLATES=[
+  {k:'aisel', l:'🎯 AI 물체 선택 사용법', match:/채널|선택|반투명|유리|마스크|영역/, title:'💡 보내주신 아이디어가 반영됐어요!',
+   body:'안녕하세요, CLOVER AI입니다 😊\n보내주신 아이디어("포토샵처럼 영역을 잡아서 유리 색감·주변 건물 반투명 조절")가 반영됐어요. 정말 감사합니다!\n\n[사용 방법] 포토샵 편집 → 왼쪽 도구 막대의 🎯 AI 물체 선택\n① 사진에서 유리·건물 등 바꿀 물체를 클릭하면 그 물체만 선택돼요.\n② 또는 옆에 뜨는 상자에 "유리", "건물"처럼 이름을 적고 [모두 선택하기]를 누르면 사진 속 해당 물체가 한 번에 선택돼요. (한글·영어 다 돼요)\n③ 빼고 싶은 부분은 Alt+클릭, 더하고 싶은 부분은 Shift+클릭\n④ 선택하면 아래 막대에서 🎨 색·밝기 / 🌈 색조 / 🌫 반투명 / 📄 레이어로 분리를 바로 할 수 있어요.\n\n물체 선택은 무료예요. 써보시고 불편한 점이 있으면 언제든 알려주세요!'},
+  {k:'idea', l:'💡 아이디어 반영(기본)', title:'💡 보내주신 아이디어가 반영됐어요!',
+   body:'안녕하세요, CLOVER AI입니다 😊\n보내주신 아이디어가 반영됐어요. 좋은 의견 정말 감사합니다!\n\n[사용 방법]\n(여기에 간단한 사용 방법을 적어주세요)\n\n써보시고 불편한 점이 있으면 언제든 알려주세요!'},
+  {k:'bug', l:'🐛 오류 수정 완료', title:'🛠 알려주신 오류를 고쳤어요',
+   body:'안녕하세요, CLOVER AI입니다.\n알려주신 문제를 확인하고 수정했어요. 불편을 드려 죄송하고, 알려주셔서 정말 감사합니다!\n\n(수정 내용을 간단히 적어주세요)\n\n같은 문제가 또 생기면 언제든 다시 알려주세요.'}
+];
+function _admNoticeCompose(row){
+  var isIdea=/^💡\[아이디어\] /.test(row.description||''), desc=String(row.description||'');
+  var tpl=ADM_NOTICE_TEMPLATES.filter(function(t){ return t.match && t.match.test(desc); })[0] || ADM_NOTICE_TEMPLATES.filter(function(t){ return t.k===(isIdea?'idea':'bug'); })[0];
+  var ov=document.createElement('div'); ov.id='adm-notice-ov';
+  ov.style.cssText='position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.75);display:flex;align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto;font-family:inherit';
+  ov.innerHTML='<div style="background:var(--card,#141518);border:1px solid var(--bd2);border-radius:14px;max-width:620px;width:100%;padding:18px;color:var(--t)">'+
+    '<div style="display:flex;align-items:center;margin-bottom:6px"><b style="font-size:15px">💌 회원에게 안내 보내기</b><button type="button" data-x style="margin-left:auto;border:none;background:var(--c2);color:var(--t);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:inherit">닫기</button></div>'+
+    '<div style="font-size:11.5px;color:var(--m2);margin-bottom:10px">받는 회원: <b style="color:var(--t)">'+_cEsc(row.user_email)+'</b> · 다음에 접속하면 팝업으로 떠요(확인하면 다시 안 떠요)</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+ADM_NOTICE_TEMPLATES.map(function(t){ return '<button type="button" data-tpl="'+t.k+'" style="padding:5px 10px;border-radius:14px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit">'+t.l+'</button>'; }).join('')+'</div>'+
+    '<input data-t style="width:100%;box-sizing:border-box;padding:9px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:13px;font-weight:700;margin-bottom:6px">'+
+    '<textarea data-b rows="13" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit;font-size:12.5px;line-height:1.6"></textarea>'+
+    '<div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap"><button type="button" data-fix style="padding:8px 11px;border-radius:8px;border:1.5px solid var(--ac);background:var(--acg);color:var(--ac);font-weight:800;cursor:pointer;font-family:inherit">✨ 맞춤법 다듬기</button>'+
+    '<label style="font-size:12px;color:var(--t2)">🎁 감사 크레딧 <input data-cr type="number" min="0" step="10" value="'+(isIdea?100:0)+'" style="width:80px;padding:6px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t);font-family:inherit"> cr</label>'+
+    '<label style="font-size:12px;color:var(--t2)"><input data-res type="checkbox" checked> 처리완료로 표시</label>'+
+    '<button type="button" data-send style="margin-left:auto;padding:9px 16px;border-radius:9px;border:none;background:var(--ac);color:#000;font-weight:900;cursor:pointer;font-family:inherit">💌 보내기</button></div>'+
+    '<div data-st style="font-size:12px;margin-top:8px;min-height:16px"></div></div>';
+  document.body.appendChild(ov);
+  function q(x){ return ov.querySelector(x); }
+  function useTpl(t){ q('[data-t]').value=t.title; q('[data-b]').value=t.body; }
+  useTpl(tpl);
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  q('[data-x]').onclick=function(){ ov.remove(); };
+  Array.prototype.forEach.call(ov.querySelectorAll('[data-tpl]'), function(b){ b.onclick=function(){ var t=ADM_NOTICE_TEMPLATES.filter(function(x){ return x.k===b.getAttribute('data-tpl'); })[0]; if(t && (!q('[data-b]').value.trim() || confirm('지금 적은 내용을 이 양식으로 바꿀까요?'))) useTpl(t); }; });
+  q('[data-fix]').onclick=function(){ var ta=q('[data-b]'), btn=this, t=ta.value.trim(); if(!t) return; btn.disabled=true; btn.textContent='다듬는 중…';
+    _supportFixSpelling(t, function(f){ btn.disabled=false; btn.textContent='✨ 맞춤법 다듬기'; if(f){ ta.dataset.before=t; ta.value=f; q('[data-st]').innerHTML='✓ 맞춤법을 다듬었어요 <a href="javascript:void(0)" style="color:var(--m2)">↩ 되돌리기</a>'; q('[data-st] a').onclick=function(){ ta.value=ta.dataset.before||ta.value; q('[data-st]').textContent=''; }; } else alert('맞춤법 다듬기에 실패했어요.'); }); };
+  q('[data-send]').onclick=function(){
+    var title=q('[data-t]').value.trim(), body=q('[data-b]').value.trim(), cr=Math.max(0, parseInt(q('[data-cr]').value,10)||0), st=q('[data-st]'), btn=this;
+    if(!body){ alert('내용을 적어주세요.'); return; }
+    btn.disabled=true; btn.textContent='보내는 중…'; st.style.color='var(--m2)'; st.textContent='회원을 찾는 중…';
+    _supa.from('profiles').select('id').eq('email', row.user_email).maybeSingle().then(function(pr){
+      var uid=pr && pr.data && pr.data.id;
+      if(!uid){ btn.disabled=false; btn.textContent='💌 보내기'; st.style.color='#fca5a5'; st.textContent='이 메일의 회원을 찾지 못했어요(탈퇴했거나 비회원 제보).'; return; }
+      function sendNotice(){
+        _supa.from('member_notices').insert({user_id:uid, title:title||'CLOVER AI 안내', body:body, credits:cr}).then(function(nr){
+          if(nr && nr.error){ btn.disabled=false; btn.textContent='💌 보내기'; st.style.color='#fca5a5'; st.textContent='안내 저장 실패: '+(nr.error.message||'')+(cr?' (크레딧은 이미 지급됨)':''); return; }
+          if(q('[data-res]').checked && row.id!=null) _supa.from('bug_reports').update({status:'resolved'}).eq('id', row.id).then(function(){}).catch(function(){});
+          st.style.color='var(--ac)'; st.textContent='✅ 보냈어요'+(cr?' · '+cr+'cr 지급':'')+' — 회원이 다음에 접속하면 팝업으로 떠요.'; btn.textContent='✓ 보냄';
+          setTimeout(function(){ ov.remove(); try{ admBugReports(gE('adm-content')); }catch(e){} try{ _admNotifyCheck(false); }catch(e){} }, 1500);
+        });
+      }
+      if(cr>0){ st.textContent=cr+'cr 지급 중…';
+        _supa.rpc('admin_adjust_credits', {target_id:uid, amount:cr, log_reason:(/^💡/.test(row.description||'')?'아이디어 반영 사례':'제보 감사')}).then(function(cr2){ if(cr2 && cr2.error){ btn.disabled=false; btn.textContent='💌 보내기'; st.style.color='#fca5a5'; st.textContent='크레딧 지급 실패: '+cr2.error.message; return; } sendNotice(); });
+      } else sendNotice();
+    }).catch(function(){ btn.disabled=false; btn.textContent='💌 보내기'; st.style.color='#fca5a5'; st.textContent='회원 조회 실패'; });
+  };
+}
 function admBugReports(c){
   if(!_supa){c.innerHTML='<div style="color:#fca5a5">Supabase 미연결</div>';return;}
   var filterBar='<div style="display:flex;gap:6px;margin-bottom:12px">'+
@@ -54389,6 +54479,10 @@ function admBugReports(c){
         };
       })(r.id, isOpen?'resolved':'open');
       top.appendChild(toggleBtn);
+      // 2026-10-26 요청("아이디어 제안한 사람에게 사용 방법을 간단히 보내게"): 회원에게 안내(+크레딧 사례) 보내기 — 다음 접속 때 팝업
+      if(r.user_email){ var _ntBtn=document.createElement('button'); _ntBtn.type='button'; _ntBtn.textContent='💌 회원에게 안내 보내기';
+        _ntBtn.style.cssText='flex-shrink:0;padding:5px 10px;border-radius:6px;border:1px solid rgba(167,139,250,.5);background:rgba(167,139,250,.12);color:#c4b5fd;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit';
+        (function(row){ _ntBtn.onclick=function(){ _admNoticeCompose(row); }; })(r); top.appendChild(_ntBtn); }
       card.appendChild(top);
       var desc=document.createElement('div');
       desc.style.cssText='font-size:12.5px;color:var(--t);line-height:1.6;white-space:pre-wrap;margin-bottom:10px';
@@ -57737,7 +57831,29 @@ window.addEventListener('load', function(){
 // ══════════════════════════════════════════════════════════════
 // 2026-10-09 요청: 사용가이드에 유튜브 채널 링크 — 채널 주소만 여기에 넣으면 가이드 맨 위에 "유튜브에서 전체 사용법 보기" 버튼이 나옴
 var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
+// 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
+// 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
+var CLOVER_NEW_FEATURES=[
+  {t:'🎯 AI 물체 선택 (포토샵 편집)', h:'포토샵 편집 왼쪽 도구의 🎯 AI 물체 선택을 누르고 사진에서 물체를 클릭하면 그 물체만 선택돼요. 옆에 뜨는 큰 상자에 "유리", "건물", "나무"처럼 이름(한글·영어 모두)을 적고 [모두 선택하기]를 누르면 해당 물체가 한 번에 다 선택돼요. Shift+클릭은 더하기, Alt+클릭은 빼기. 선택 후 아래 막대에서 색·밝기, 색조, 반투명, 하늘색으로, 레이어로 분리를 바로 할 수 있어요. 선택은 무료.'},
+  {t:'🎬 3D 영상 → 실사 영상 (영상 제작 맨 위)', h:'영상 제작 탭 맨 위 카드에서 3D로 뽑은 영상을 올리면 실사 영상으로 바꿔줘요. 실사화(기본)와 고퀄리티 CG 느낌 중 고를 수 있고, 날씨·시간대·계절도 골라 렌더할 수 있어요. 크레딧은 화질(480p/720p)과 초 단위로 계산돼 버튼에 미리 표시돼요.'},
+  {t:'🖼 영상 렌더 전 미리보기 컷', h:'영상을 렌더하기 전에 원하는 장면을 한 번에 최대 3장씩 먼저 사진으로 뽑아 확인할 수 있어요. 여러 번 눌러 계속 쌓을 수 있어요.'},
+  {t:'🚀 미래형 디자인 "다른 컨셉" 버튼', h:'공간 컨셉 디자인·현장사진에서 미래형 컨셉은 [다른 컨셉] 버튼을 누르기 전까지 같은 느낌으로 유지되고, 누르거나 전체 리셋하면 다른 미래 스타일로 바뀌어요.'},
+  {t:'📌 참고 이미지 따라가기 켜기/끄기', h:'공간 컨셉 디자인에서 미래·한옥·경성 같은 컨셉을 고를 때 "참고 이미지 따라가기"를 켜면 넣은 참고 이미지의 구조·소재를 따르고, 끄면 컨셉대로 자유롭게 디자인해요.'},
+  {t:'🔁 수정본 같은 느낌으로', h:'렌더 실사화 결과를 수정한 뒤, 그 수정본과 같은 주변 환경·색감으로 다른 이미지도 맞추고 싶으면 결과 카드의 [🔁 수정본 같은 느낌] 버튼을 쓰세요.'},
+  {t:'📄 견적·상담 PDF에 마감재 무드보드 포함', h:'상담 PDF를 만들 때 마감재 무드보드 페이지도 같이 넣을 수 있어요(무드보드 1장당 30크레딧, 만들 때 물어봐요).'},
+  {t:'🔗 공유: 파일 또는 링크', h:'결과의 공유 버튼을 누르면 📎 파일로 보내기와 🔗 링크로 보내기 중 고를 수 있어요.'},
+  {t:'⏯ 창을 닫아도 이어서 렌더', h:'공간 컨셉 여러 장, 현장 사진 세트, 톤 일괄, 영상 등 여러 장 렌더 중 창을 닫았다가 24시간 안에 다시 들어오면 멈춘 곳부터 이어서 진행돼요. 이미 진행 중이던 작업은 크레딧을 두 번 쓰지 않아요.'},
+  {t:'🗂 갤러리 중복 정리', h:'같은 결과가 갤러리에 여러 장 보이던 문제를 정리해서 한 장만 보이게 했어요.'},
+  {t:'👤 담당자에게 직접 물어보기', h:'💬 AI 상담 창의 [👤 담당자에게 직접 물어보기]로 사람 담당자에게 질문을 남길 수 있어요. 답변이 오면 💬 버튼에 빨간 점이 뜨고, [📮 내 질문]에서 다시 볼 수 있어요.'}
+];
+function _cloverFeatureKnowledge(){
+  return '[CLOVER AI 최신 기능 안내 — 아래 내용은 최근 새로 추가된 기능이에요. 회원이 물어보면 이 내용을 바탕으로 쉽고 정확하게 한국어로 답해주세요. 여기 없는 기능은 지어내지 마세요.]\n'+
+    CLOVER_NEW_FEATURES.map(function(f){ return '- '+f.t+': '+f.h; }).join('\n')+'\n[안내 끝]\n\n회원 질문: ';
+}
 var GUIDE_SECTIONS = [
+  {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8 5.8 21.3l2.4-7.4L2 9.4h7.6z"/></svg>',title:'🆕 새로 생긴 기능',
+   desc:'최근에 새로 추가되거나 바뀐 기능이에요. 궁금한 건 오른쪽 아래 💬 AI 상담에 물어봐도 알려드려요.',
+   get steps(){ return CLOVER_NEW_FEATURES.map(function(f){ return '<b>'+f.t+'</b> — '+f.h; }); }},
   {icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',title:'현장사진 디자인',
    // ⚠️ 요청 반영("현장사진 디자인 사용설명서 영상, 사용설명서에 넣어줘"): 유튜브 튜토리얼 영상
    // videoId 추가.
@@ -61484,7 +61600,10 @@ function _initChatWidget(){
     sendBtn.disabled=true;
     var loadingBubble=addBubble('assistant','', true);
     loadingBubble.innerHTML='<span class="chat-dot">•</span><span class="chat-dot">•</span><span class="chat-dot">•</span>';
-    _falProxyCall('chat-assistant', {messages:_chatHist}, function(res){
+    // 2026-10-26: 서버 상담 프롬프트는 고정이라 새 기능을 몰랐음 → 첫 질문 앞에 최신 기능 안내를 붙여 보냄(화면·기록엔 안 보임)
+    var _payload=_chatHist.slice(-20).map(function(m){ return {role:m.role, content:m.content}; });
+    try{ for(var _fi=0;_fi<_payload.length;_fi++){ if(_payload[_fi].role==='user' && typeof _payload[_fi].content==='string'){ _payload[_fi].content=_cloverFeatureKnowledge()+_payload[_fi].content; break; } } }catch(_fe){}
+    _falProxyCall('chat-assistant', {messages:_payload}, function(res){
       sendBtn.disabled=false;
       var lb=gE('chat-loading-bubble'); if(lb) lb.remove();
       var reply=(res&&res.reply)||'죄송해요, 답변을 받지 못했어요.';
