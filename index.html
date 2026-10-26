@@ -4250,7 +4250,7 @@ function _wireWheelZoomCore(container, getTargets, opts){
     container.style.cursor = zScale>1 ? (opts.panCursor||'grab') : (opts.defaultCursor||'');
   }
   function setScale(newScale, clientX, clientY){
-    newScale=Math.max(1,Math.min(4,newScale));
+    newScale=Math.max(1,Math.min(opts.maxScale||4,newScale));
     if(newScale===zScale) return;
     var targets=getTargets();
     if(!targets||!targets.length) return;
@@ -4320,7 +4320,7 @@ function _wireWheelZoomCore(container, getTargets, opts){
     }
   },{passive:false});
   container.addEventListener('touchend',function(e){ if(e.touches.length<2) _pinchDist=null; });
-  return { reset:function(){ setScale(1); } };
+  return { reset:function(){ setScale(1); }, zoomBy:function(f,x,y){ setScale(zScale*f, x, y); }, scale:function(){ return zScale; } };
 }
 function _wireMediaBoxWheelZoom(mediaBox){
   try{
@@ -6635,7 +6635,7 @@ function _psAiSelCard(){
       '<div style="font-size:12.5px;font-weight:800;margin-bottom:6px">② 이름으로 한 번에 모두 선택</div>'+
       '<input type="text" placeholder="예: 유리, 건물, 나무, 하늘" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:2px solid var(--ac);background:#0b0c10;color:#fff;font-family:inherit;font-size:15px;font-weight:700">'+
       '<button type="button" data-go style="width:100%;margin-top:8px;padding:11px;border-radius:10px;border:none;background:var(--ac);color:#000;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit">🔎 모두 선택하기</button>'+
-      '<div style="font-size:11px;color:#9aa;line-height:1.6;margin-top:9px">한글·영어 다 돼요 · 예) <b>유리</b> → 사진 속 유리 전부 선택<br>더하기: <b>Shift</b>+클릭 · 빼기: <b>Alt</b>+클릭 · 무료</div>'+
+      '<div style="font-size:11px;color:#9aa;line-height:1.6;margin-top:9px">한글·영어 다 돼요 · 예) <b>유리</b> → 사진 속 유리 전부 선택<br>더하기: <b>Shift</b>+클릭 · 빼기: <b>Alt</b>+클릭 · 하루 200번 무료</div>'+
       '<div style="font-size:12.5px;font-weight:800;margin:12px 0 6px">③ 자주 쓰는 영역 — 누르면 바로 선택</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">'+PS_AISEL_RECIPES.map(function(R){ return '<button type="button" data-rc="'+R.k+'" title="'+R.tip+'" style="padding:8px 6px;border-radius:9px;border:1px solid rgba(0,229,204,.45);background:rgba(0,229,204,.08);color:#e8fffb;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit;text-align:left;line-height:1.25">'+R.l+'</button>'; }).join('')+'</div>'+
       '<div data-st style="font-size:12px;color:var(--ac);margin-top:6px;min-height:16px"></div>';
@@ -8184,7 +8184,13 @@ function _psBuildUI(){
   ov.addEventListener('dblclick',function(e){ if(PSE.tool==='poly'){ e.preventDefault(); _psPolyFinish(); } else if(PSE.tool==='crop' && PSE.crop){ _psApplyCrop(); } });
   ov.addEventListener('contextmenu',function(e){ if(PSE.tool==='poly' && PSE.poly){ e.preventDefault(); _psPolyFinish(); } });
   // ⚠️ 기존 _wireWheelZoomCore(휠 확대 + 휠 버튼 드래그 이동 + 두 손가락 핀치) 그대로 재사용
-  try{ ui.zoom=_wireWheelZoomCore(stage, function(){ return PSE.doc?[wrap]:[]; }, {excludeDblClick:'.ps-ov, .ps-empty'}); }catch(e){}
+  try{ ui.zoom=_wireWheelZoomCore(stage, function(){ return PSE.doc?[wrap]:[]; }, {excludeDblClick:'.ps-ov, .ps-empty', maxScale:8}); }catch(e){}
+  // 2026-10-26 요청("포토샵처럼 Ctrl+Space+클릭 확대, 여기에 Alt까지 누르면 축소"): 도구보다 먼저(캡처 단계) 가로채서 확대/축소만 함
+  stage.addEventListener('pointerdown', function(e){
+    if(!PSE._spaceDown || !(e.ctrlKey||e.metaKey) || !PSE.doc || !ui.zoom || e.button!==0) return;
+    e.preventDefault(); e.stopPropagation();
+    ui.zoom.zoomBy(e.altKey ? 1/1.5 : 1.5, e.clientX, e.clientY);
+  }, true);
   // 화면 크기가 바뀌면 캔버스를 다시 맞춤
   if(window.ResizeObserver){
     var _rt=null;
@@ -8349,7 +8355,7 @@ function _psRefreshOpts(light){
   else if(t==='wand'){ tolCtl(); _psSelModeRow(o); }
   else if(t==='aisel'){
     _psSelModeRow(o);
-    hint(PSE._aiBusy?'⏳ AI가 찾는 중…':'물체 클릭 = 그 물체만 선택 · Shift+클릭 더하기 · Alt+클릭 빼기 · 이름으로 한 번에 선택은 왼쪽 큰 상자 · 무료');
+    hint(PSE._aiBusy?'⏳ AI가 찾는 중…':'물체 클릭 = 그 물체만 선택 · Shift+클릭 더하기 · Alt+클릭 빼기 · 이름으로 한 번에 선택은 왼쪽 큰 상자 · 하루 200번 무료');
     setTimeout(_psAiSelCard, 0);
   }
   else if(t==='marquee'||t==='emarquee'||t==='lasso'){ _psSelModeRow(o); hint(t==='lasso'?'드래그해서 자유롭게 둘러싸기':'드래그 (Shift: 정사각형/정원)'); }
@@ -8909,8 +8915,17 @@ function _psDocSec(){
 // ── 키보드 단축키 ─────────────────────────────────────────────────────
 // ⚠️ _openColorAdjustPanel/_openMaskEditor와 같은 Ctrl+Z / Ctrl+Shift+Z(Ctrl+Y) 규칙. 이 탭이 화면에
 // 보일 때만 반응하고, 글자 입력 중이거나 마스크 편집기 같은 다른 창이 떠 있으면 절대 가로채지 않음.
+// Ctrl+Space(+Alt) 확대/축소용 스페이스 상태 — 누르는 동안 돋보기 커서
+function _psZoomCursor(e){ var ov=PSE.ui&&PSE.ui.ov; if(!ov) return; var on=PSE._spaceDown && e && (e.ctrlKey||e.metaKey);
+  if(on){ if(PSE._zcPrev==null) PSE._zcPrev=ov.style.cursor; ov.style.cursor=e.altKey?'zoom-out':'zoom-in'; }
+  else if(PSE._zcPrev!=null){ ov.style.cursor=PSE._zcPrev; PSE._zcPrev=null; } }
+document.addEventListener('keyup', function(e){ if(PSE._spaceDown && e.key==='Alt') e.preventDefault(); if(e.code==='Space' || e.key===' '){ PSE._spaceDown=false; } _psZoomCursor(e); });
+window.addEventListener('blur', function(){ PSE._spaceDown=false; _psZoomCursor(null); });
 function _psOnKey(e){
   if(G.wf!=='psedit' || !PSE.ui || !PSE.ui.box || !PSE.ui.box.offsetParent) return;
+  if((e.code==='Space' || e.key===' ') && PSE.doc){ var _ae=document.activeElement, _tg=_ae&&_ae.tagName;
+    if(!(_tg==='TEXTAREA' || _tg==='INPUT' || _tg==='SELECT' || (_ae&&_ae.isContentEditable))){ PSE._spaceDown=true; _psZoomCursor(e); e.preventDefault(); return; } }
+  if(PSE._spaceDown) _psZoomCursor(e);
   if(document.getElementById('mask-editor-ov') || document.getElementById('img-lightbox')) return;
   var ae=document.activeElement, tag=ae&&ae.tagName;
   if(tag==='TEXTAREA' || tag==='SELECT' || (ae&&ae.isContentEditable) || (tag==='INPUT' && !/^(range|checkbox|color|button)$/i.test(ae.type||''))) return;
@@ -54551,7 +54566,7 @@ var _admBugFilter='open';
 // ── 2026-10-26 관리자 → 제보·아이디어 보낸 회원에게 안내(+크레딧 사례) 보내기 ──
 var ADM_NOTICE_TEMPLATES=[
   {k:'aisel', l:'🎯 AI 물체 선택 사용법', match:/채널|선택|반투명|유리|마스크|영역/, title:'💡 보내주신 아이디어가 반영됐어요!',
-   body:'안녕하세요, CLOVER AI입니다 😊\n보내주신 아이디어("포토샵처럼 영역을 잡아서 유리 색감·주변 건물 반투명 조절")가 반영됐어요. 정말 감사합니다!\n\n[사용 방법] 포토샵 편집 → 왼쪽 도구 막대의 🎯 AI 물체 선택\n① 사진에서 유리·건물 등 바꿀 물체를 클릭하면 그 물체만 선택돼요.\n② 또는 옆에 뜨는 상자에 "유리", "건물"처럼 이름을 적고 [모두 선택하기]를 누르면 사진 속 해당 물체가 한 번에 선택돼요. (한글·영어 다 돼요)\n③ 빼고 싶은 부분은 Alt+클릭, 더하고 싶은 부분은 Shift+클릭\n④ 선택하면 아래 막대에서 🎨 색·밝기 / 🌈 색조 / 🌫 반투명 / 📄 레이어로 분리를 바로 할 수 있어요.\n\n물체 선택은 무료예요. 써보시고 불편한 점이 있으면 언제든 알려주세요!'},
+   body:'안녕하세요, CLOVER AI입니다 😊\n보내주신 아이디어("포토샵처럼 영역을 잡아서 유리 색감·주변 건물 반투명 조절")가 반영됐어요. 정말 감사합니다!\n\n[사용 방법] 포토샵 편집 → 왼쪽 도구 막대의 🎯 AI 물체 선택\n① 사진에서 유리·건물 등 바꿀 물체를 클릭하면 그 물체만 선택돼요.\n② 또는 옆에 뜨는 상자에 "유리", "건물"처럼 이름을 적고 [모두 선택하기]를 누르면 사진 속 해당 물체가 한 번에 선택돼요. (한글·영어 다 돼요)\n③ 빼고 싶은 부분은 Alt+클릭, 더하고 싶은 부분은 Shift+클릭\n④ 선택하면 아래 막대에서 🎨 색·밝기 / 🌈 색조 / 🌫 반투명 / 📄 레이어로 분리를 바로 할 수 있어요.\n\n물체 선택은 하루 200번까지 무료예요. 써보시고 불편한 점이 있으면 언제든 알려주세요!'},
   {k:'idea', l:'💡 아이디어 반영(기본)', title:'💡 보내주신 아이디어가 반영됐어요!',
    body:'안녕하세요, CLOVER AI입니다 😊\n보내주신 아이디어가 반영됐어요. 좋은 의견 정말 감사합니다!\n\n[사용 방법]\n(여기에 간단한 사용 방법을 적어주세요)\n\n써보시고 불편한 점이 있으면 언제든 알려주세요!'},
   {k:'bug', l:'🐛 오류 수정 완료', title:'🛠 알려주신 오류를 고쳤어요',
@@ -58001,8 +58016,9 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
-  {t:'🎯 AI 물체 선택 (포토샵 편집)', h:'포토샵 편집 왼쪽 도구 막대에서 민트색으로 크게 표시된 [AI 선택] 버튼(마술봉 위)을 누르고 사진에서 물체를 클릭하면 그 물체만 선택돼요. 옆에 뜨는 큰 상자에 "유리", "건물", "나무"처럼 이름(한글·영어 모두)을 적고 [모두 선택하기]를 누르면 해당 물체가 한 번에 다 선택돼요. Shift+클릭은 더하기, Alt+클릭은 빼기. 선택 후 아래 막대에서 색·밝기, 색조, 반투명, 하늘색으로, 레이어로 분리를 바로 할 수 있어요. 상자 아래 ③ 자주 쓰는 영역 버튼(메인 건물, 주변 건물(메인 제외), 유리·창문, 메인 건물 외벽, 바닥 전체, 하늘, 나무·조경, 자동차, 실내 벽, 실내 천장, 가구, 사람)을 누르면 바로 선택돼요. 예) 주변 건물만 반투명: [주변 건물(메인 제외)] → 아래 막대 🌫 반투명. 메인 건물은 사진 가운데의 가장 큰 건물로 판단해요. 선택은 무료.'},
+  {t:'🎯 AI 물체 선택 (포토샵 편집)', h:'포토샵 편집 왼쪽 도구 막대에서 민트색으로 크게 표시된 [AI 선택] 버튼(마술봉 위)을 누르고 사진에서 물체를 클릭하면 그 물체만 선택돼요. 옆에 뜨는 큰 상자에 "유리", "건물", "나무"처럼 이름(한글·영어 모두)을 적고 [모두 선택하기]를 누르면 해당 물체가 한 번에 다 선택돼요. Shift+클릭은 더하기, Alt+클릭은 빼기. 선택 후 아래 막대에서 색·밝기, 색조, 반투명, 하늘색으로, 레이어로 분리를 바로 할 수 있어요. 상자 아래 ③ 자주 쓰는 영역 버튼(메인 건물, 주변 건물(메인 제외), 유리·창문, 메인 건물 외벽, 바닥 전체, 하늘, 나무·조경, 자동차, 실내 벽, 실내 천장, 가구, 사람)을 누르면 바로 선택돼요. 예) 주변 건물만 반투명: [주변 건물(메인 제외)] → 아래 막대 🌫 반투명. 메인 건물은 사진 가운데의 가장 큰 건물로 판단해요. 선택은 하루 약 200번까지 무료이고, 그보다 아주 많이 쓰면 1번에 1cr이에요.'},
   {t:'🎭 레이어·마스크 썸네일 Ctrl+클릭 = 영역 선택 (포토샵 편집)', h:'포토샵과 같아요. 오른쪽 레이어 목록에서 마스크 썸네일을 Ctrl(맥은 ⌘)+클릭하면 마스크의 흰 부분이, 레이어 썸네일을 Ctrl+클릭하면 그 레이어에 그려진 부분이 메인 화면에 선택으로 잡혀요. Ctrl+Shift+클릭은 더하기, Ctrl+Alt+클릭은 빼기, Ctrl+Shift+Alt+클릭은 겹치는 부분만. 그냥 클릭은 예전처럼 마스크 편집/레이어 선택이에요.'},
+  {t:'🔍 Ctrl+Space+클릭 확대 / +Alt 축소 (포토샵 편집)', h:'포토샵과 같아요. 포토샵 편집 화면에서 Ctrl(맥은 ⌘)+Space를 누른 채 클릭하면 클릭한 곳을 중심으로 확대(최대 8배), Ctrl+Alt+Space를 누른 채 클릭하면 축소돼요. 누르고 있는 동안 커서가 돋보기로 바뀌고, 이때는 브러시 등 다른 도구가 칠해지지 않아요. 마우스 휠로도 확대/축소, 휠 버튼 드래그로 화면 이동, 빈 곳 더블클릭으로 원래 크기예요.'},
   {t:'🎬 3D 영상 → 실사 영상 (영상 제작 맨 위)', h:'영상 제작 탭 맨 위 카드에서 3D로 뽑은 영상을 올리면 실사 영상으로 바꿔줘요. 실사화(기본)와 고퀄리티 CG 느낌 중 고를 수 있고, 날씨·시간대·계절도 골라 렌더할 수 있어요. 🎞 영상 엔진을 고를 수 있어요: 기본은 Kling 4.0(720p 36cr/초, FHD 1080p 54cr/초 — 가장 저렴하고 FHD 바로 가능, 영상 가로·세로 700px 이상·3초 이상 필요), Seedance 2.5(480p 51cr/초, 720p 109cr/초 — 참고 이미지를 더 충실히 따름). 요금 = (원본 클립 길이 + 결과 길이) × 초당 크레딧이라, 15초 클립을 Kling FHD로 만들면 약 1,620cr이에요. 엔진·화질을 바꾸면 버튼의 크레딧도 바로 바뀌어요.'},
   {t:'🖼 영상 렌더 전 미리보기 컷', h:'영상을 렌더하기 전에 원하는 장면을 한 번에 최대 3장씩 먼저 사진으로 뽑아 확인할 수 있어요. 여러 번 눌러 계속 쌓을 수 있어요.'},
   {t:'🚀 미래형 디자인 "다른 컨셉" 버튼', h:'공간 컨셉 디자인·현장사진에서 미래형 컨셉은 [다른 컨셉] 버튼을 누르기 전까지 같은 느낌으로 유지되고, 누르거나 전체 리셋하면 다른 미래 스타일로 바뀌어요.'},
