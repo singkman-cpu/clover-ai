@@ -6583,14 +6583,25 @@ function _psAiSelectRun(q, mode){
     var inp={image_url:iu, output_format:'png'};
     if(q.pt) inp.point_prompts=[{x:Math.round(q.pt.x*sc), y:Math.round(q.pt.y*sc), label:1, object_id:1}];
     // 2026-10-26 버그 수정("모두 선택하기 눌러도 유리가 한 개만 선택됨"): SAM-3는 기본으로 가장 확실한 1개만 돌려줌 → 이름 검색은 여러 개(최대 32) 받아서 합침
-    if(q.text){ inp.prompt=q.text; inp.return_multiple_masks=true; inp.max_masks=32; inp.include_scores=true; }
-    falRun('fal-ai/sam-3/image', inp, function(res){
-      var ms=(res && (res.masks||res.mask||res.images))||[]; if(!Array.isArray(ms)) ms=[ms];
-      var urls=ms.map(function(m){ return typeof m==='string'?m:(m&&(m.url||m.image_url)); });
-      // 점수가 오면 아주 낮은(엉뚱한) 것만 제외 — 다 빠지면 그대로 사용
-      var sc2=res && Array.isArray(res.scores) ? res.scores : null;
-      if(sc2 && sc2.length===urls.length){ var keep=urls.filter(function(u,i){ return !(+sc2[i]<0.3); }); if(keep.filter(Boolean).length) urls=keep; }
-      urls=urls.filter(Boolean);
+    // 2026-10-26 2차 수정(실사용 로그: "glass" 한 단어로는 유리창 1개만 잡힘): 이름 검색은 비슷한 단어 여러 개(예: 유리 → window, glass, glass door)로
+    // 각각 따로 찾아서(SAM은 한 번에 한 개념만 잘 찾음) 결과를 모두 합침. 물체 선택은 무료(0cr)
+    var terms=q.text ? _psAiSelTerms(q.text) : [null], allUrls=[], pend=terms.length, okAny=false, lastErr='';
+    terms.forEach(function(term){
+      var inp2={}; for(var k in inp) inp2[k]=inp[k];
+      if(term){ inp2.prompt=term; inp2.return_multiple_masks=true; inp2.max_masks=32; inp2.include_scores=true; }
+      falRun('fal-ai/sam-3/image', inp2, function(res){ okAny=true;
+        var ms=(res && (res.masks||res.mask||res.images))||[]; if(!Array.isArray(ms)) ms=[ms];
+        var u1=ms.map(function(m){ return typeof m==='string'?m:(m&&(m.url||m.image_url)); });
+        // 점수가 오면 아주 낮은(엉뚱한) 것만 제외 — 다 빠지면 그대로 사용
+        var sc2=res && Array.isArray(res.scores) ? res.scores : null;
+        if(sc2 && sc2.length===u1.length){ var keep=u1.filter(function(u,i){ return !(+sc2[i]<0.3); }); if(keep.filter(Boolean).length) u1=keep; }
+        u1.filter(Boolean).forEach(function(u){ if(allUrls.indexOf(u)===-1) allUrls.push(u); });
+        if(--pend===0) gotAll();
+      }, function(err){ lastErr=String(err); if(--pend===0) gotAll(); }, {wf:'sam_segment', included:true});
+    });
+    function gotAll(){
+      if(!okAny){ done(); _psToast('AI 선택 실패: '+lastErr.slice(0,120)); return; }
+      var urls=allUrls;
       if(!urls.length){ done(); _psToast('물체를 찾지 못했어요 — 물체 한가운데를 다시 눌러보세요'); return; }
       var M=_psCanvas(d.w,d.h), mx=M.getContext('2d'), left=urls.length, any=false;
       urls.forEach(function(u){ var im=new Image(); im.crossOrigin='anonymous';
@@ -6604,7 +6615,7 @@ function _psAiSelectRun(q, mode){
         _psToast('🎯 선택했어요 — 아래 막대에서 색·밝기·반투명을 바로 바꿀 수 있어요');
         _psAiSelBar();
       }
-    }, function(err){ done(); _psToast('AI 선택 실패: '+String(err).slice(0,120)); }, {wf:'sam_segment', included:true});
+    }
   }, function(){ done(); _psToast('이미지 업로드 실패'); });
 }
 // 2026-10-26 요청("어디다 쓰고 찾기를 누르라는 거야? 잘 보이게 크게 · 한글로 써도 되게"): 🎯 도구를 고르면 도구 막대 바로 옆에 큰 안내 상자
@@ -6632,6 +6643,13 @@ function _psAiSelCard(){
 }
 // 한글 물체 이름 → AI(영어)용 이름. 사전에 없으면 AI 번역(무료)
 var PS_AISEL_KO=[['주변 건물','building'],['주변건물','building'],['유리창','window glass'],['통유리','glass'],['유리','glass'],['창문','window'],['창호','window'],['창','window'],['아파트','apartment building'],['건물','building'],['외벽','facade'],['지붕','roof'],['나무','tree'],['수목','tree'],['하늘','sky'],['구름','cloud'],['산','mountain'],['바닥','floor'],['천장','ceiling'],['벽','wall'],['담장','wall'],['소파','sofa'],['의자','chair'],['테이블','table'],['탁자','table'],['식탁','dining table'],['침대','bed'],['사람','person'],['자동차','car'],['차량','car'],['차','car'],['도로','road'],['인도','sidewalk'],['보도','sidewalk'],['잔디','grass'],['풀','grass'],['화분','potted plant'],['식물','plant'],['조명','lamp'],['커튼','curtain'],['블라인드','blind'],['러그','rug'],['카펫','rug'],['문','door'],['계단','stairs'],['난간','railing'],['타일','tile'],['싱크대','sink'],['주방 가구','kitchen cabinet'],['수납장','cabinet'],['티비','television'],['TV','television'],['텔레비전','television'],['거울','mirror'],['액자','picture frame'],['그림','painting'],['수영장','swimming pool'],['물','water'],['간판','signboard'],['전봇대','utility pole'],['가로등','street lamp'],['울타리','fence'],['펜스','fence'],['데크','deck'],['기둥','column'],['발코니','balcony'],['베란다','balcony'],['파라솔','parasol'],['우산','umbrella'],['자전거','bicycle'],['쿠션','cushion'],['이불','blanket'],['책장','bookshelf'],['책','book'],['꽃','flower'],['돌','stone'],['바위','rock']];
+// 영어 이름 → SAM에 따로 물어볼 단어 목록(비슷한 말 포함, 최대 4개)
+var PS_AISEL_SYN={'glass':['window','glass','glass door'],'window glass':['window','glass','glass door'],'window':['window','glass'],'building':['building','house'],'tree':['tree','shrub'],'car':['car','vehicle'],'person':['person'],'sky':['sky'],'facade':['facade','wall'],'railing':['railing','glass railing']};
+function _psAiSelTerms(en){
+  var out=[]; String(en||'').split(/[,;\/]+/).forEach(function(w){ w=w.trim().toLowerCase(); if(!w) return;
+    (PS_AISEL_SYN[w]||[w]).forEach(function(x){ if(out.indexOf(x)===-1) out.push(x); }); });
+  return out.slice(0,4).length?out.slice(0,4):[String(en||'')];
+}
 function _psAiSelToEn(t, cb){
   t=String(t||'').trim();
   if(!/[가-힣]/.test(t)){ cb(t); return; }
@@ -57865,7 +57883,8 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
-  {t:'🎯 AI 물체 선택 (포토샵 편집)', h:'포토샵 편집 왼쪽 도구의 🎯 AI 물체 선택을 누르고 사진에서 물체를 클릭하면 그 물체만 선택돼요. 옆에 뜨는 큰 상자에 "유리", "건물", "나무"처럼 이름(한글·영어 모두)을 적고 [모두 선택하기]를 누르면 해당 물체가 한 번에 다 선택돼요. Shift+클릭은 더하기, Alt+클릭은 빼기. 선택 후 아래 막대에서 색·밝기, 색조, 반투명, 하늘색으로, 레이어로 분리를 바로 할 수 있어요. 선택은 무료.'},
+  {t:'🎯 AI 물체 선택 (포토샵 편집)', h:'포토샵 편집 왼쪽 도구 막대에서 민트색으로 크게 표시된 [AI 선택] 버튼(마술봉 위)을 누르고 사진에서 물체를 클릭하면 그 물체만 선택돼요. 옆에 뜨는 큰 상자에 "유리", "건물", "나무"처럼 이름(한글·영어 모두)을 적고 [모두 선택하기]를 누르면 해당 물체가 한 번에 다 선택돼요. Shift+클릭은 더하기, Alt+클릭은 빼기. 선택 후 아래 막대에서 색·밝기, 색조, 반투명, 하늘색으로, 레이어로 분리를 바로 할 수 있어요. 선택은 무료.'},
+  {t:'🎭 레이어·마스크 썸네일 Ctrl+클릭 = 영역 선택 (포토샵 편집)', h:'포토샵과 같아요. 오른쪽 레이어 목록에서 마스크 썸네일을 Ctrl(맥은 ⌘)+클릭하면 마스크의 흰 부분이, 레이어 썸네일을 Ctrl+클릭하면 그 레이어에 그려진 부분이 메인 화면에 선택으로 잡혀요. Ctrl+Shift+클릭은 더하기, Ctrl+Alt+클릭은 빼기, Ctrl+Shift+Alt+클릭은 겹치는 부분만. 그냥 클릭은 예전처럼 마스크 편집/레이어 선택이에요.'},
   {t:'🎬 3D 영상 → 실사 영상 (영상 제작 맨 위)', h:'영상 제작 탭 맨 위 카드에서 3D로 뽑은 영상을 올리면 실사 영상으로 바꿔줘요. 실사화(기본)와 고퀄리티 CG 느낌 중 고를 수 있고, 날씨·시간대·계절도 골라 렌더할 수 있어요. 크레딧은 화질(480p/720p)과 초 단위로 계산돼 버튼에 미리 표시돼요.'},
   {t:'🖼 영상 렌더 전 미리보기 컷', h:'영상을 렌더하기 전에 원하는 장면을 한 번에 최대 3장씩 먼저 사진으로 뽑아 확인할 수 있어요. 여러 번 눌러 계속 쌓을 수 있어요.'},
   {t:'🚀 미래형 디자인 "다른 컨셉" 버튼', h:'공간 컨셉 디자인·현장사진에서 미래형 컨셉은 [다른 컨셉] 버튼을 누르기 전까지 같은 느낌으로 유지되고, 누르거나 전체 리셋하면 다른 미래 스타일로 바뀌어요.'},
