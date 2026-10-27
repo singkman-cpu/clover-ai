@@ -25110,7 +25110,20 @@ function sbRender(p){
       b.onclick=function(){ _t._bgMode=o[0]; renderSB(); }; bx.appendChild(b); });
     p.appendChild(bx); })();
   mkRef(p,6,'실사 참고 이미지');
-  (function(){ var _pn=dv(''); _pn.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.6;margin:-2px 0 8px;padding:7px 10px;border-radius:8px;background:var(--c2);border:1px solid var(--bd2)'; _pn.innerHTML='📋 <b>카카오톡·윈도우 캡처</b>(Win+Shift+S 등) 후 이 화면에서 <b>Ctrl+V</b> 하면 원본이 있을 땐 <b style="color:var(--ac)">실사 참고 이미지 빈칸</b>에 바로 들어가요.'; p.appendChild(_pn); })();
+  // 2026-10-27 요청: 로드뷰·브이월드 캡처 위에 메인건물이 들어갈 대지를 빨간 사각형으로 표시(대지 배경 합성 프리셋만)
+  (function(){ var _t=getTab('render'); if(!_t || !/^site_context/.test(_t.selK||'')) return; var rf=(_t.refs||[]).filter(Boolean); if(!rf.length) return;
+    var n=rf.filter(function(r){ return _t.siteMarks && _t.siteMarks[_siteMarkSig(r)]; }).length;
+    var b=mk('button',''); b.type='button';
+    b.style.cssText='width:100%;margin:0 0 8px;padding:9px;border-radius:8px;border:'+(n?'2px solid #ef4444;background:rgba(239,68,68,.14)':'1px solid rgba(239,68,68,.5);background:rgba(239,68,68,.08)')+';color:#fca5a5;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit';
+    b.textContent = n ? ('🟥 대지 위치 표시됨 ('+n+'장) — 고치기') : '🟥 대지 위치 표시하기 (메인건물 들어갈 자리)';
+    b.onclick=function(){ _siteMarkOpen(); }; p.appendChild(b);
+    var h=dv(''); h.style.cssText='font-size:10px;color:var(--m2);margin:-4px 0 10px;line-height:1.5'; h.innerHTML='참고 이미지 위에 메인건물이 들어갈 <b style="color:#fca5a5">대지(기존 건물 자리)</b>를 드래그로 감싸면, AI가 그 자리·폭에 맞춰 넣고 바깥 건물은 그대로 둬요. 빨간 선은 결과에 안 그려져요.'; p.appendChild(h);
+  })();
+  (function(){ var _pn=dv(''); _pn.style.cssText='font-size:10.5px;color:var(--m2);line-height:1.6;margin:-2px 0 8px;padding:7px 10px;border-radius:8px;background:var(--c2);border:1px solid var(--bd2)'; _pn.innerHTML='📋 <b>로드뷰·카카오톡 캡처</b>(Win+Shift+S 등)를 참고 이미지로 넣으려면 아래 버튼을 누르거나, <b>참고 이미지 빈칸을 한 번 클릭한 뒤 Ctrl+V</b> 하세요. (그냥 Ctrl+V는 위 <b>이미지 업로드</b>로 들어가요)';
+    var _pb=mk('button',''); _pb.type='button'; _pb.textContent='📋 클립보드 → 참고 이미지로 붙여넣기';
+    _pb.style.cssText='display:block;width:100%;margin-top:6px;padding:8px;border-radius:8px;border:1px solid rgba(0,229,204,.45);background:var(--acg);color:var(--ac);font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit';
+    _pb.onclick=function(){ _pasteClipboardToRenderRef(); }; _pn.appendChild(_pb);
+    p.appendChild(_pn); })();
   // ⚠️ 요청 반영("3D 렌더탭에 브이월드/스마트서울맵 연결해서 투시도·조감도 배경 퀄리티 있게
   // 만드는 프로세스 할 수 있어?"): 실제 대지의 진짜 주변 건물·지형을 참고 이미지로 바로 캡처해서
   // 첨부할 수 있게, 브이월드(VWorld) 3D 지도를 여는 버튼을 추가함. 자세한 내용은 _openVworldModal
@@ -49421,6 +49434,104 @@ function _bgIsolated(src, cb){
     cb(Math.max(dark,light)/n>=0.5, dark>=light?'dark':'light');
   }catch(e){ cb(false); } }, function(){ cb(false); });
 }
+// ── 2026-10-27 요청("렌더 실사화 프리셋에 추가 프롬프트로 부분 수정을 하는 회원이 많다 — 그건 AI 편집에서 해야"): 부분 수정 표현이면 안내 팝업 ──
+// 2026-10-27: 클립보드 이미지를 렌더 탭 실사 참고 이미지 빈칸으로(카카오 로드뷰·카톡 캡처용 — Ctrl+V는 원본 업로드로 돌려놓음)
+function _pasteClipboardToRenderRef(){
+  function put(blob){
+    var rT=getTab('render'); if(!rT.refs) rT.refs=Array(6).fill(null);
+    var lim=(typeof getMaxRefs==='function'?getMaxRefs():6), idx=-1; for(var i=0;i<lim;i++){ if(!rT.refs[i]){ idx=i; break; } }
+    if(idx===-1){ try{ _agedEnvToast('실사 참고 이미지 칸이 다 찼어요 — 하나 비우고 다시 해주세요.'); }catch(e){} return; }
+    var rd=new FileReader(); rd.onload=function(){ _downscaleForMemorySafety(rd.result, function(rz){ rT.refs[idx]=rz; try{ _saveMainTabImagesDraft(); }catch(e){} renderSB(); try{ _agedEnvToast('📋 캡처를 실사 참고 이미지 '+(idx+1)+'번 칸에 넣었어요'); }catch(e){} }); }; rd.readAsDataURL(blob);
+  }
+  function fallback(){ alert('클립보드를 바로 읽을 수 없어요(브라우저 권한).\n\n실사 참고 이미지 빈칸을 한 번 클릭한 뒤 Ctrl+V 하면 그 칸에 들어가요.'); }
+  try{
+    if(!(navigator.clipboard && navigator.clipboard.read)){ fallback(); return; }
+    navigator.clipboard.read().then(function(items){
+      for(var i=0;i<items.length;i++){ var tp=(items[i].types||[]).find(function(t){ return t.indexOf('image/')===0; }); if(tp){ items[i].getType(tp).then(put).catch(fallback); return; } }
+      alert('클립보드에 이미지가 없어요. 로드뷰 화면을 캡처(Win+Shift+S)한 뒤 다시 눌러주세요.');
+    }).catch(fallback);
+  }catch(e){ fallback(); }
+}
+// ── 2026-10-27 요청("이미 렌더링된 완성 이미지면 렌더 실사화보다 '렌더링 완성본 고품질화'로 안내"): 단색 면이 거의 없는(조명·질감이 다 들어간) 이미지면 완성 렌더로 보고 안내 ──
+var _qbJudged={};
+function _isFinishedRender(src, cb){
+  loadImgSafe(src, function(img){ try{
+    var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height, W=240, H=Math.max(1,Math.round(240*h/w));
+    var c=document.createElement('canvas'); c.width=W; c.height=H; var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(img,0,0,W,H);
+    var d=x.getImageData(0,0,W,H).data, flat=0, n=0;
+    for(var y=1;y<H-1;y++) for(var xx=1;xx<W-1;xx++){ var i=(y*W+xx)*4; var g=function(k){ return d[k]*0.3+d[k+1]*0.59+d[k+2]*0.11; }; var v=g(i);
+      var gr=Math.abs(v-g(i+4))+Math.abs(v-g(i-4))+Math.abs(v-g(i+W*4))+Math.abs(v-g(i-W*4)); n++; if(gr<2.5) flat++; }
+    var r=flat/n; console.log('[완성 렌더 판단] 단색 면 비율', r.toFixed(3)); cb(r<0.12);
+  }catch(e){ cb(false); } }, function(){ cb(false); });
+}
+function _qbHintThen(tab, go){
+  try{
+    if(!tab || !tab.inputImg) return false;
+    try{ if(localStorage.getItem('clover_qb_hint_off')) return false; }catch(e){}
+    var key=String(tab.inputImg).length+'|'+String(tab.inputImg).slice(-60);
+    if(_qbJudged[key]==='done') return false;
+    _isFinishedRender(tab.inputImg, function(fin){
+      if(!fin){ _qbJudged[key]='done'; go(false); return; }
+      var ov=document.createElement('div'); ov.id='qb-hint';
+      ov.style.cssText='position:fixed;inset:0;z-index:100070;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
+      ov.innerHTML='<div style="width:100%;max-width:460px;background:var(--card,#16181d);border:1.5px solid var(--ac,#00e5cc);border-radius:16px;padding:20px;color:var(--t,#fff)">'+
+        '<div style="font-size:16px;font-weight:900;margin-bottom:8px">✨ 이미 렌더링이 끝난 완성 이미지 같아요</div>'+
+        '<div style="font-size:12.5px;color:var(--t2,#ccc);line-height:1.7;margin-bottom:14px">조명·재질이 다 들어간 <b>완성 렌더</b>는 <b style="color:var(--ac,#00e5cc)">렌더링 완성본 고품질화</b>가 더 잘 맞아요 — 구도·디자인·글씨를 그대로 두고 실제 사진 느낌만 올려줘요.<br>SketchUp·라이노처럼 <b>재질·조명이 없는 3D 화면 캡처</b>라면 지금 프리셋(실사화)이 맞아요.</div>'+
+        '<button type="button" data-qb style="width:100%;padding:12px;border-radius:11px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;font-size:14px;cursor:pointer;font-family:inherit;margin-bottom:8px">✨ 고품질화로 바꿔서 렌더</button>'+
+        '<button type="button" data-keep style="width:100%;padding:11px;border-radius:11px;border:1px solid var(--bd2,#444);background:var(--c2,#1e2026);color:var(--t,#fff);font-weight:800;cursor:pointer;font-family:inherit">그대로 실사화</button>'+
+        '<div style="display:flex;align-items:center;margin-top:12px"><label style="font-size:11px;color:var(--m2,#999)"><input type="checkbox" data-off> 앞으로 묻지 않기</label><button type="button" data-x style="margin-left:auto;border:none;background:none;color:var(--m2,#999);font-size:12px;cursor:pointer;font-family:inherit">취소</button></div></div>';
+      document.body.appendChild(ov);
+      function off(){ if(ov.querySelector('[data-off]').checked){ try{ localStorage.setItem('clover_qb_hint_off','1'); }catch(e){} } }
+      ov.querySelector('[data-qb]').onclick=function(){ off(); _qbJudged[key]='done'; ov.remove(); go(true); };
+      ov.querySelector('[data-keep]').onclick=function(){ off(); _qbJudged[key]='done'; ov.remove(); go(false); };
+      ov.querySelector('[data-x]').onclick=function(){ ov.remove(); };
+    });
+    return true;
+  }catch(e){ return false; }
+}
+function _renderEditText(tab){ return String((tab.selK ? tab.extraPrompt : tab.prompt) || '').trim(); }
+function _looksLocalEdit(t){
+  if(!t || t.length<2) return false;
+  var verb=/(지워|지우|지운|없애|없앤|삭제|제거|빼\s*줘|빼고|빼주|추가해|넣어|바꿔|바꾸|변경|교체|옮겨|이동|고쳐|수정해|늘려|줄여|키워|작게|크게\s*해)/;
+  if(!verb.test(t)) return false;
+  var strong=/(지워|지우|지운|없애|없앤|삭제|제거|빼\s*줘|빼고|빼주|옮겨|이동|교체)/;
+  var globalOnly=/(사람|인물|하늘|분위기|톤|색감|시간|저녁|밤|야간|노을|석양|계절|날씨|아침|조명\s*켜|낮으로|밝게|어둡게)/;
+  if(!strong.test(t) && globalOnly.test(t)) return false; // 전체 분위기·사람 추가 등은 렌더에서 그대로
+  return true;
+}
+function _renderEditHintThen(tab, go){
+  try{
+    if(G.wf!=='render' || !tab || !tab.inputImg) return false;
+    if(/^site_context/.test(tab.selK||'') || tab._matchRef) return false;
+    try{ if(localStorage.getItem('clover_render_edit_hint_off')) return false; }catch(e){}
+    var txt=_renderEditText(tab); if(!_looksLocalEdit(txt)) return false;
+    var ov=document.createElement('div'); ov.id='render-edit-hint';
+    ov.style.cssText='position:fixed;inset:0;z-index:100070;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
+    var safe=txt.replace(/[&<>"]/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; });
+    ov.innerHTML='<div style="width:100%;max-width:460px;background:var(--card,#16181d);border:1.5px solid var(--ac,#00e5cc);border-radius:16px;padding:20px;color:var(--t,#fff)">'+
+      '<div style="font-size:16px;font-weight:900;margin-bottom:8px">✏️ 이 요청은 AI 편집에서 하면 더 정확해요</div>'+
+      '<div style="font-size:12px;color:var(--m2,#aaa);background:var(--c2,#1e2026);border-radius:9px;padding:8px 10px;margin-bottom:10px;max-height:80px;overflow:auto">"'+safe+'"</div>'+
+      '<div style="font-size:12.5px;color:var(--t2,#ccc);line-height:1.7;margin-bottom:14px">렌더 실사화는 <b>원본을 그대로 두고 사실감만 올리는</b> 기능이라, 무언가를 지우거나·바꾸거나·옮기는 요청은 무시되거나 그림 전체가 같이 바뀔 수 있어요.<br><b style="color:var(--ac,#00e5cc)">AI 편집</b>에서는 바꿀 부분만 칠하면 나머지는 원본 그대로 유지돼요.</div>'+
+      '<button type="button" data-go style="width:100%;padding:12px;border-radius:11px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;font-size:14px;cursor:pointer;font-family:inherit;margin-bottom:8px">✏️ AI 편집으로 가기 (이미지·문구 그대로)</button>'+
+      '<button type="button" data-here style="width:100%;padding:11px;border-radius:11px;border:1px solid var(--bd2,#444);background:var(--c2,#1e2026);color:var(--t,#fff);font-weight:800;cursor:pointer;font-family:inherit">그냥 여기서 렌더</button>'+
+      '<div style="display:flex;align-items:center;margin-top:12px"><label style="font-size:11px;color:var(--m2,#999)"><input type="checkbox" data-off> 앞으로 묻지 않기</label><button type="button" data-x style="margin-left:auto;border:none;background:none;color:var(--m2,#999);font-size:12px;cursor:pointer;font-family:inherit">취소</button></div></div>';
+    document.body.appendChild(ov);
+    function off(){ if(ov.querySelector('[data-off]').checked){ try{ localStorage.setItem('clover_render_edit_hint_off','1'); }catch(e){} } }
+    ov.querySelector('[data-here]').onclick=function(){ off(); ov.remove(); go(); };
+    ov.querySelector('[data-x]').onclick=function(){ ov.remove(); };
+    ov.querySelector('[data-go]').onclick=function(){ off(); ov.remove();
+      var src=tab.inputImg, nm=tab.inputImgName||'';
+      if(G.wf!=='edit') selectWF('edit');
+      G.editMode='normal';
+      var t=getTab('edit'); t.inputImg=src; t.inputImgName=nm; t.selK=null; t.prompt=txt; t.extraPrompt=''; t.refs=[]; t.maskData=null;
+      try{ window._syncEngForCurrentPreset(); }catch(e){}
+      try{ if(!G._chained) G._chained={}; G._chained['edit']=true; }catch(e){}
+      try{ renderSB(); }catch(e){} try{ renderMain('edit'); }catch(e){} try{ _previewImageInMain(src,'edit'); }catch(e){} try{ updBtn(); }catch(e){}
+      try{ _agedEnvToast('✏️ AI 편집으로 옮겼어요 — 바꿀 부분을 브러시로 칠한 뒤 실행하세요'); }catch(e){}
+    };
+    return true;
+  }catch(e){ return false; }
+}
 function _bgAskThen(tab, go){
   // 배경을 지어내는 게 목적인 프리셋(실제 대지 배경 합성)·수정 렌더는 묻지 않음
   if(G.wf!=='render' || !tab || !tab.inputImg || /^site_context/.test(tab.selK||'') || tab._matchRef){ go(); return; }
@@ -49447,7 +49558,9 @@ function _bgAskThen(tab, go){
 function _runToolWithPromptActual(translatedPrompt){
   var tab=getTab(G.wf);
   if(G.wf==='render' && /^site_context/.test(tab.selK||'') && !((tab.refs||[]).filter(Boolean).length)){ alert('실제 대지 배경 합성은 대지 사진이 필요해요.\n\n[실제 대지 배경 참고 (브이월드 3D)] 또는 [위치 확인 · 로드뷰 (카카오맵)]로 캡처해서 "실사 참고 이미지"에 넣은 뒤 다시 눌러주세요.'); return; } // 2026-10-26: 참고 이미지 없이 돌면 배경 없이 건물만 나옴
-  if(G.wf==='render' && !tab._bgAsked1){ tab._bgAsked1=true; _bgAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } tab._bgAsked1=false; // 2026-10-26 배경 처리 묻기(한 번 거친 뒤 실제 실행)
+  if(G.wf==='render' && !tab._editHintOk){ if(_renderEditHintThen(tab, function(){ tab._editHintOk=true; _runToolWithPromptActual(translatedPrompt); })) return; } // 2026-10-27 부분 수정 요청이면 AI 편집 안내
+  if(G.wf==='render' && !tab._qbHintOk && tab.selK==='hq_real'){ if(_qbHintThen(tab, function(sw){ tab._qbHintOk=true; var tp=translatedPrompt; if(sw){ var q=PS_RENDER.find(function(x){ return x.k==='render_quality_boost'; }); if(q){ tab.selK=q.k; tab.prompt=q.pt; var ex=(tab.extraPrompt||'').trim(); tp=q.pt+(ex?(' Additionally: '+ex+'.'):''); try{ renderSB(); }catch(e){} } } _runToolWithPromptActual(tp); })) return; } // 2026-10-27 완성 렌더면 고품질화 안내
+  if(G.wf==='render' && !tab._bgAsked1){ tab._bgAsked1=true; _bgAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } tab._bgAsked1=false; tab._editHintOk=false; tab._qbHintOk=false; // 2026-10-26 배경 처리 묻기(한 번 거친 뒤 실제 실행)
   try{ if(G.wf==='render' && tab.inputImg) _logoHintCheck(tab.inputImg); }catch(_lh){} // 2026-10-26: 로고 큰 이미지면 안내(렌더와 동시에, 기다리지 않음)
   // 이 사진(=결과)에 예산 정보를 영구히 붙여두기 위한 스냅샷 — 생성 시점에 캡처해야 나중에
   // 사용자가 예산 설정을 바꿔도 "이 결과는 원래 이 예산으로 만든 거였다"가 안 흔들림
@@ -49472,6 +49585,7 @@ function _runToolWithPromptActual(translatedPrompt){
     userText:  ((tab.prompt||'')+' '+(tab.extraPrompt||'')).trim(),
     userExtra: (tab.extraPrompt||''), // 2026-10-26: 회원이 직접 쓴 추가 요청만(달 요청 확인용)
     renderSky: (G.wf==='render' ? (tab.selK==='render_quality_boost' ? (tab._skyQB||'keep') : (G.renderSky||'clear')) : null),
+    siteMarks: (G.wf==='render' && /^site_context/.test(tab.selK||'') && tab.siteMarks) ? JSON.parse(JSON.stringify(tab.siteMarks)) : null, // 2026-10-27 대지 위치 표시
     textProtect: (G.wf==='render' ? _tpActiveMask(tab) : null), // 2026-10-12 글자 보호 브러시
     toneRef:   (G.wf==='render' ? (tab._matchRef||tab._toneRef||null) : null), // 2026-10-20 여러 장 같은 톤: 기준 이미지(조명·색감만 맞춤) / 2026-10-25 수정 렌더: 납품본
     _bgTail:   (G.wf==='render' && tab._bgMode==='keep' && tab._bgFor===_bgKey(tab.inputImg) && !/^site_context/.test(tab.selK||'')) ? BG_KEEP_TAIL : '', // 2026-10-26 3D만(배경 원본 그대로)
@@ -51052,6 +51166,51 @@ var NO_MOON_TAIL=' 🌑 NO MOON (user rule for every night / blue-hour / dusk sc
 // (프리셋을 골랐으면 추가 요청 칸 글, 프리셋 없이 쓴 경우 쓴 글 전체, 대화형 수정은 보낸 메시지) — 관리자 회원 상세에서만 보여줌
 function _admUserText(task){ try{ var t=task.selK ? (task.userExtra||'') : (task.userExtra || task.userText || ''); return String(t).trim().slice(0,2000); }catch(e){ return ''; } }
 function _admPresetLabel(k){ if(!k) return ''; try{ var all=[].concat(typeof PS_EDIT!=='undefined'?PS_EDIT:[], typeof PS_RENDER!=='undefined'?PS_RENDER:[], typeof PS_SPACE!=='undefined'?PS_SPACE:[]); var q=all.find(function(x){ return x.k===k; }); return q?String(q.l||k):k; }catch(e){ return k; } }
+// ── 2026-10-27 요청: 대지 위치 표시(빨간 사각형) — 참고 이미지마다 1개, AI에 보낼 때만 그 이미지 위에 빨간 테두리를 그려서 보냄 ──
+function _siteMarkSig(r){ r=String(r||''); return r.length+'|'+r.slice(-60); }
+function _siteMarkOpen(){
+  var t=getTab('render'); var refs=(t.refs||[]).filter(Boolean); if(!refs.length){ alert('먼저 실사 참고 이미지(로드뷰·브이월드 캡처)를 넣어주세요.'); return; }
+  if(!t.siteMarks) t.siteMarks={};
+  var old=document.getElementById('site-mark-md'); if(old) old.remove();
+  var md=document.createElement('div'); md.id='site-mark-md';
+  md.style.cssText='position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box';
+  md.innerHTML='<div style="background:#111318;border:1px solid #333;border-radius:14px;padding:14px;max-width:min(1200px,96vw);width:100%;max-height:96vh;overflow:auto;box-sizing:border-box;color:#eee;font-family:inherit">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:15px;color:#fca5a5">🟥 대지 위치 표시</b><button type="button" data-x style="margin-left:auto;border:none;background:none;color:#888;font-size:18px;cursor:pointer">✕</button></div>'+
+    '<div style="font-size:12px;color:#bbb;line-height:1.6;margin-bottom:8px">메인건물이 들어갈 <b>기존 건물 자리(대지)</b>를 마우스·손가락으로 드래그해서 감싸세요. 바닥(1층) 폭에 맞추면 가장 정확해요. 다시 드래그하면 새로 그려져요.</div>'+
+    '<div data-th style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>'+
+    '<div style="position:relative;display:flex;justify-content:center"><canvas data-cv style="max-width:100%;max-height:68vh;touch-action:none;cursor:crosshair;border-radius:8px;background:#000"></canvas></div>'+
+    '<div style="display:flex;gap:6px;margin-top:10px"><button type="button" data-clr style="padding:10px 14px;border-radius:9px;border:1px solid #555;background:#1b1d23;color:#ddd;font-weight:800;cursor:pointer;font-family:inherit">이 이미지 표시 지우기</button><button type="button" data-ok style="flex:1;padding:10px;border-radius:9px;border:none;background:#ef4444;color:#fff;font-weight:900;cursor:pointer;font-family:inherit">저장</button></div></div>';
+  document.body.appendChild(md);
+  var cv=md.querySelector('[data-cv]'), cx=cv.getContext('2d'), th=md.querySelector('[data-th]'), cur=0, img=null, box=null, drag=null;
+  var marks=JSON.parse(JSON.stringify(t.siteMarks||{}));
+  function draw(){ if(!img) return; cx.clearRect(0,0,cv.width,cv.height); cx.drawImage(img,0,0,cv.width,cv.height);
+    if(box){ var W=cv.width,H=cv.height, lw=Math.max(3,Math.round(W*0.004)); cx.fillStyle='rgba(239,68,68,.18)'; cx.fillRect(box.x*W,box.y*H,box.w*W,box.h*H); cx.strokeStyle='#ff1a1a'; cx.lineWidth=lw; cx.strokeRect(box.x*W,box.y*H,box.w*W,box.h*H); } }
+  function load(i){ cur=i; var sig=_siteMarkSig(refs[i]); box=marks[sig]?Object.assign({},marks[sig]):null;
+    Array.prototype.forEach.call(th.children,function(c,k){ c.style.outline = k===i ? '2px solid #ef4444' : 'none'; });
+    loadImgSafe(refs[i], function(im){ img=im; var w=im.naturalWidth||im.width, h=im.naturalHeight||im.height, sc=Math.min(1, 1600/Math.max(w,h)); cv.width=Math.round(w*sc); cv.height=Math.round(h*sc); draw(); }, function(){ alert('이미지를 불러오지 못했어요.'); }); }
+  refs.forEach(function(r,i){ var im=document.createElement('img'); im.src=r; im.style.cssText='height:56px;border-radius:6px;cursor:pointer;object-fit:cover'; im.onclick=function(){ save(); load(i); }; th.appendChild(im); });
+  function pt(e){ var r=cv.getBoundingClientRect(); return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)), y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}; }
+  cv.addEventListener('pointerdown',function(e){ e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){} drag=pt(e); box={x:drag.x,y:drag.y,w:0,h:0}; draw(); });
+  cv.addEventListener('pointermove',function(e){ if(!drag) return; var q=pt(e); box={x:Math.min(drag.x,q.x), y:Math.min(drag.y,q.y), w:Math.abs(q.x-drag.x), h:Math.abs(q.y-drag.y)}; draw(); });
+  cv.addEventListener('pointerup',function(){ drag=null; if(box && (box.w<0.01 || box.h<0.01)) box=null; draw(); });
+  function save(){ var sig=_siteMarkSig(refs[cur]); if(box) marks[sig]=box; else delete marks[sig]; }
+  md.querySelector('[data-clr]').onclick=function(){ box=null; draw(); };
+  md.querySelector('[data-x]').onclick=function(){ md.remove(); };
+  md.querySelector('[data-ok]').onclick=function(){ save();
+    var keep={}; refs.forEach(function(r){ var k=_siteMarkSig(r); if(marks[k]) keep[k]=marks[k]; }); t.siteMarks=keep;
+    md.remove(); try{ renderSB(); }catch(e){}
+    try{ _agedEnvToast(Object.keys(keep).length ? '🟥 대지 위치를 저장했어요 — 렌더할 때 이 자리에 메인건물을 넣어요' : '대지 위치 표시를 지웠어요'); }catch(e){} };
+  load(0);
+}
+// AI에 보낼 참고 이미지에 빨간 사각형을 그려서 돌려줌(표시가 없으면 그대로)
+function _siteMarkApply(rd, box, cb){
+  if(!box){ cb(rd); return; }
+  loadImgSafe(rd, function(im){ try{
+    var w=im.naturalWidth||im.width, h=im.naturalHeight||im.height, c=document.createElement('canvas'); c.width=w; c.height=h; var x=c.getContext('2d'); x.drawImage(im,0,0,w,h);
+    x.strokeStyle='#ff0000'; x.lineWidth=Math.max(4,Math.round(Math.max(w,h)*0.005)); x.strokeRect(box.x*w, box.y*h, box.w*w, box.h*h);
+    cb(c.toDataURL('image/jpeg',0.92));
+  }catch(e){ cb(rd); } }, function(){ cb(rd); });
+}
 function _siteStripInterior(s){ // 2026-10-27: 대지 배경 합성 프롬프트에서 실내 전용 규칙 구간만 빼기(표시 문구가 없으면 그대로 둠)
   function cut(str,a,b){ var i=str.indexOf(a); if(i<0) return str; var j=str.indexOf(b,i); if(j<0) return str; return str.slice(0,i)+str.slice(j); }
   s=cut(s,'IMPORTANT MATERIAL REALISM RULE','AESTHETIC QUALITY RULE');
@@ -51862,6 +52021,9 @@ function procImgWithTask(task, onDone, onErr){
   // 2026-10-27 신고("메인건물 왼쪽 상가 2개가 지워졌다"): 이웃 건물 유지 + 요청("투시도는 하늘이 좀 더 보이게")
   if(task && /^site_context/.test(task.selK||'')) ap += ' 🏘 KEEP NEIGHBORS (user rule): only the main building\'s own lot changes. Every neighboring building and shop of the reference — especially the low shops right next to the main building on its left and right — must stay in the result with their own facades and signs; never delete them, never turn their place into an empty plaza or extra sidewalk. If the main building hides part of a neighbor, show the part that stays visible.';
   if(task && task.selK==='site_context_composite_persp') ap += ' ☁️ SKY HEADROOM (user rule): frame the shot so clearly more sky shows above the main building\'s roof (roughly the top 20-25% of the frame is sky) — the roof and rooftop signs must never touch the top edge. Keep vertical lines straight.';
+  // 2026-10-27 요청: 대지 위치 표시(빨간 사각형)가 있으면 그 자리·폭에 메인건물
+  var _siteMarksNow = (task && /^site_context/.test(task.selK||'') && wf==='render') ? (task.siteMarks || (getTab('render')||{}).siteMarks || null) : null;
+  if(_siteMarksNow && ((task.autoRefs||getTab(wf).refs)||[]).some(function(r){ return r && _siteMarksNow[_siteMarkSig(r)]; })) ap += ' 🟥 SITE MARKER (user drew it, highest priority for location): in the REFERENCE image a RED RECTANGLE outlines the exact lot where the main building stands — the existing building inside that red rectangle is the one being replaced. Place the main building exactly there: its footprint and width match the area inside the red rectangle, never wider and never shifted. Everything outside the red rectangle (neighboring buildings, shops, roads) stays as in the reference. The red rectangle is only a marker — never draw any red line or box in the result.';
   if(task && /^site_context/.test(task.selK||'')) ap += ' 🛣 ROAD LAYOUT LOCK (user rule, read last): copy the ground layout of the reference road view exactly as it is — where the reference shows sidewalk / paving blocks, it stays continuous sidewalk paving; where it shows road, it stays road with the same lanes and markings. Never invent a new road, side street, intersection, driveway or crosswalk that the reference does not show (for example, if the area beside the main building is a continuous paved sidewalk in the reference, it must remain a continuous paved sidewalk — no road and no crosswalk lines there).';
   // 2026-10-27 요청("차량 수·번호판은 꼭 지금"): 짧게 두 가지만 — 카메라·건물 관련 문구는 넣지 않음
   if(task && /^site_context/.test(task.selK||'')) ap += ' 🚗 VEHICLES (user rule, replaces the earlier vehicle-count rule): keep only 1 to 3 vehicles on a normal street and at most 5 on a wide road (4 or more lanes), parked and driving combined, each facing the correct way for its lane (Korean right-hand traffic). Remove the other vehicles of the road view and show the road surface, markings and road furniture that were behind them exactly as they are. 🔢 LICENSE PLATES: the road-view privacy blur must not remain — every visible plate is a clean, sharp standard Korean plate (white plate, black characters, like 12가 3456) with an arbitrary made-up number, never a blurred or mosaic patch.';
@@ -52028,7 +52190,10 @@ function procImgWithTask(task, onDone, onErr){
     }
     var _ru3=new Array(_refs3.length),_d3=0,_f3=0;
     _refs3.forEach(function(rd,ri){
+      var _smBox = (_siteMarksNow && _siteMarksNow[_siteMarkSig(rd)]) || null; // 2026-10-27 대지 위치 표시
+      _siteMarkApply(rd, _smBox, function(rd){
       uploadImgToFal(rd,function(rUrl){_ru3[ri]=rUrl;_d3++;if(_d3+_f3===_refs3.length)_go3();},function(){_f3++;if(_d3+_f3===_refs3.length)_go3();});
+      });
     });
     function _go3(){
       _withExplicitAspect(img, function(_asp){
@@ -58516,7 +58681,10 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'⬛ 3D만 실사로 / 🏛 주변 배경 넣기 (렌더 실사화)', h:'전시 부스·쇼룸처럼 배경이 검정(또는 흰색) 단색인 3D 이미지로 렌더링을 누르면 "배경을 어떻게 할까요?"를 물어봐요. [3D만 실사로]를 고르면 배경은 원본 그대로 두고 전시장·주변 부스·사람을 지어내지 않아요. [주변 배경도 넣기]는 AI가 어울리는 주변을 채워요. 같은 이미지는 한 번만 묻고, 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요. 실제 대지 배경 합성 프리셋에서는 묻지 않아요.'},
   {c:'edit', t:'🌙 야간 장면 공통 규칙 (달 없음 · 구도 고정 · 블루아워 밝기)', h:'주간→야간, 실내 야간 무드, 블루아워·황혼, 달빛 밤, 별 보이는 밤 등 모든 야간 장면은 ① 달을 넣지 않아요(추가 요청에 "보름달 넣어줘"처럼 적으면 넣어요) ② 화면을 확대하거나 카메라를 내리는 등 구도를 바꾸지 않아요 ③ 메인 건물 실내 불빛 밝기를 블루아워·황혼과 같은 차분한 수준으로 맞춰요(하얗게 날아가지 않게). 달빛 밤도 달빛 분위기만 내고 달 자체는 안 보여요.'},
   {c:'render', t:'🛠 렌더 실사화 — 없던 것 추가 금지 강화', h:'실사화(기본·고급)에서 원본에 없던 아치·벽감·기둥·돌/벽돌 마감·천장 다운라이트·가구를 새로 만들어 넣지 않도록 규칙을 강화했어요. 재질은 같은 재질의 실제 버전으로만 바뀌고(도장 벽은 도장 벽 그대로), 어두운 분위기의 공간은 그 밝기·분위기를 유지해요. 그래도 바뀌면 같은 설정으로 한 번 더 돌리거나 다른 엔진(기본↔고급)으로 시도해 보세요.'},
-  {c:'render', t:'🗺 실제 대지 배경 합성 — 사용 팁', h:'실제 대지 배경 합성(투시도·조감도·광역조감도)은 로드뷰·브이월드 캡처를 실사 참고 이미지에 꼭 넣어야 해요(없으면 안내가 떠요). 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠서 AI 편집의 글씨/간판 교정으로 이어갈 수 있어요. 하늘(맑음·구름 조금·흐림)도 고를 수 있어요. 로드뷰의 도로·보도 배치는 그대로 두고(없던 도로·횡단보도 안 만듦), 차는 보통 1~3대(넓은 도로 최대 5대, 차선 방향 맞게), 번호판은 모자이크 없이 임의 번호의 깔끔한 한국 번호판으로 그려요. 메인건물 옆 이웃 상가·건물은 지우지 않고 그대로 두고, 투시도는 지붕 위로 하늘이 넉넉히 보이게 잡아요. 메인건물이 3D·CG처럼 남았으면 결과 카드의 🏢 메인건물 실사화 버튼을 누르세요 — 그 건물만 실제 사진처럼 다시 그리고 카메라·주변은 그대로 둬요(나노바나나 Pro 비용). 메인 건물은 3D 느낌 없이 실제 건물 사진처럼 마감하고, 투시도는 세로선이 반듯하게(왜곡 없이) 나와요. 로드뷰는 3D 뷰와 비슷한 방향·높이·범위로, 앞에 차가 적은 곳에서 캡처하면 더 잘 나와요.'},
+  {c:'render', t:'✏️ 부분 수정은 AI 편집으로 안내', h:'렌더 실사화에서 추가 요청에 "지워줘·바꿔줘·옮겨줘·추가해줘"처럼 특정 부분을 고치는 말을 쓰면, 렌더 전에 "AI 편집에서 하면 더 정확해요" 안내가 떠요. [AI 편집으로 가기]를 누르면 같은 이미지와 문구가 AI 편집으로 옮겨지고, 바꿀 부분만 칠해서 실행하면 나머지는 원본 그대로 유지돼요. 저녁 분위기·톤·사람 추가처럼 전체에 해당하는 요청은 그대로 렌더해요.'},
+  {c:'render', t:'✨ 완성 렌더는 고품질화로 안내', h:'"실사화·고급실사화 통합"으로 이미 조명·재질이 다 들어간 완성 렌더 이미지를 돌리면, "렌더링 완성본 고품질화"로 바꿀지 물어봐요. 완성 렌더는 고품질화가 구도·디자인·글씨를 그대로 두고 사진 느낌만 올려줘서 더 잘 맞아요. SketchUp·라이노처럼 재질·조명 없는 3D 화면 캡처는 실사화가 맞아요.'},
+  {c:'render', t:'📋 렌더 탭 붙여넣기(Ctrl+V)', h:'렌더 실사화에서 Ctrl+V는 다른 탭처럼 위 이미지 업로드(원본)로 들어가요. 로드뷰·카톡 캡처를 실사 참고 이미지로 넣으려면 [📋 클립보드 → 참고 이미지로 붙여넣기] 버튼을 누르거나, 참고 이미지 빈칸을 한 번 클릭한 뒤 Ctrl+V 하세요. 카카오 로드뷰 창이 열려 있을 때의 Ctrl+V는 참고 이미지로 들어가요.'},
+  {c:'render', t:'🗺 실제 대지 배경 합성 — 사용 팁', h:'실제 대지 배경 합성(투시도·조감도·광역조감도)은 로드뷰·브이월드 캡처를 실사 참고 이미지에 꼭 넣어야 해요(없으면 안내가 떠요). 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠서 AI 편집의 글씨/간판 교정으로 이어갈 수 있어요. 하늘(맑음·구름 조금·흐림)도 고를 수 있어요. 로드뷰의 도로·보도 배치는 그대로 두고(없던 도로·횡단보도 안 만듦), 차는 보통 1~3대(넓은 도로 최대 5대, 차선 방향 맞게), 번호판은 모자이크 없이 임의 번호의 깔끔한 한국 번호판으로 그려요. 참고 이미지를 넣은 뒤 [🟥 대지 위치 표시하기]로 메인건물이 들어갈 기존 건물 자리를 드래그해 빨간 사각형으로 감싸면, AI가 그 자리·폭에 맞춰 넣고 바깥 건물은 그대로 둬요(빨간 선은 결과에 안 그려져요). 메인건물 옆 이웃 상가·건물은 지우지 않고 그대로 두고, 투시도는 지붕 위로 하늘이 넉넉히 보이게 잡아요. 메인건물이 3D·CG처럼 남았으면 결과 카드의 🏢 메인건물 실사화 버튼을 누르세요 — 그 건물만 실제 사진처럼 다시 그리고 카메라·주변은 그대로 둬요(나노바나나 Pro 비용). 메인 건물은 3D 느낌 없이 실제 건물 사진처럼 마감하고, 투시도는 세로선이 반듯하게(왜곡 없이) 나와요. 로드뷰는 3D 뷰와 비슷한 방향·높이·범위로, 앞에 차가 적은 곳에서 캡처하면 더 잘 나와요.'},
   {c:'render', t:'☀️ 하늘 선택 — 3D 렌더 실사화 모든 프리셋', h:'3D 렌더 실사화 탭의 모든 프리셋(실사화·고급 실사화·CG·실제 대지 배경 합성·CAD 아이소·고품질화 등)에서 렌더 버튼 위 [☀️ 하늘]로 맑음 / 구름 조금 / 흐림 / 원본 그대로를 고를 수 있어요. 렌더링 완성본 고품질화는 기본이 "원본 그대로"예요. 추가 요청에 야간·노을을 적으면 그게 우선이에요.'},
   {c:'edit', t:'🔤 글씨/간판 교정 — 간판만 바뀌고 나머지는 원본 그대로', h:'AI 편집의 🔤 글씨/간판 교정은 결과에서 간판·글씨 부분만 AI 물체 인식으로 찾아 원본 사진 위에 얹어요. 그래서 카메라(구도)가 틀어지지 않고 전체 색감(붉은끼)도 안 바뀌어요. 위치가 조금 밀려 나와도 자동으로 맞춰요. 이 프리셋을 고르면 엔진이 글자를 더 잘 쓰는 나노바나나 Pro로 자동으로 바뀌어요. 글씨가 여전히 어색하면 추가 요청 칸에 정확한 간판 글자를 적고 다시 돌려보세요.'},
   {c:'render', t:'🛣 3D 렌더 실사화 외관 — 도로 표시·차량', h:'실사화·고퀄리티 CG로 외관을 렌더할 때 도로가 보이면 차선·중앙선·횡단보도를 한국 도로 규정에 맞게 실제 페인트처럼 그리고(모델에 없던 유턴 표시·화살표·글씨는 안 만들어요), 도로에 차가 없으면 평범한 차를 1~3대(넓은 도로는 최대 5대) 중간 거리에 자연스럽게 넣어요. 모델링한 차는 그대로 두고, 카메라 가까운 앞쪽이나 건물을 가리는 자리에는 넣지 않아요. 번호판은 임의 번호의 깔끔한 한국 번호판이에요.'},
@@ -58550,7 +58718,7 @@ var GUIDE_MANUALS={
   {h:'1. 이미지 올리기',p:['왼쪽 메뉴 [3D 렌더 실사화] → [렌더/도면 업로드]에 스케치업·3ds Max·라이노 등에서 뽑은 3D 렌더(또는 스케치·도면)를 올려요. 캡처 후 Ctrl+V로 붙여 넣어도 돼요.','[실사 참고 이미지]에는 원하는 분위기·재질의 사진을 최대 6장까지 넣을 수 있어요(실사화·고품질화 프리셋은 원본을 그대로 살리려고 참고 이미지를 쓰지 않아요).']},
   {h:'2. 프리셋 고르기',p:['실사화·고급실사화 통합 — 모양·색은 그대로, 진짜 사진처럼.','고퀄리티 CG 렌더 — 사진보다 깔끔한 V-Ray·코로나 느낌.','렌더링 완성본 고품질화 — 이미 완성된 렌더의 품질만 올려요.','실제 대지 배경 합성(투시도·조감도·광역 조감도) — 지을 건물을 실제 대지 사진 위에 합성.','스케치→실사, 평면도→실내 투시, 입면도→실사 외관 — 도면·스케치를 사진처럼.']},
   {h:'3. 옵션',p:['엔진: 기본(나노바나나)·고급 등 엔진을 고를 수 있어요(프리셋에 따라 자동으로 정해지기도 해요). 결과가 다르니 마음에 안 들면 엔진을 바꿔 보세요.','해상도(1K·2K·4K)·한 번에 만들 개수·출력 비율을 골라요. 버튼마다 크레딧이 표시돼요.','☀️ 하늘: 맑음 / 구름 조금 / 흐림 / 원본 그대로. 모든 프리셋에서 쓸 수 있어요.','추가 요청 칸에 원하는 것을 적어요. 예) 저녁 노을, 사람 2명.','Creativity·HDR·Resemblance·Fractality 슬라이더로 창의성·대비·원본 충실도·디테일을 미세 조정해요.']},
-  {h:'4. 실제 대지 배경 합성',p:['[실제 대지 배경 참고 (브이월드 3D)]로 주소를 검색해 조감도 각도를 맞추고 [이 화면 캡처해서 참고 이미지로 추가]를 눌러요.','[위치 확인 · 로드뷰 (카카오맵)]로 로드뷰를 연 뒤 📸 캡처 모드 → Win+Shift+S로 캡처 → 창에서 Ctrl+V 하면 참고 이미지에 들어가요.','프리셋은 눈높이면 "실제 대지 배경 합성 - 투시도", 항공뷰면 "조감도"를 골라요. 실사 참고 이미지에 대지 캡처가 없으면 안내가 떠요.']},
+  {h:'4. 실제 대지 배경 합성',p:['🟥 메인건물 위치가 어긋나거나 너무 크게 들어가면: 참고 이미지 아래 [🟥 대지 위치 표시하기]를 눌러, 로드뷰·브이월드 캡처에서 메인건물이 들어갈 기존 건물 자리(1층 폭)를 드래그로 감싸고 저장하세요. 렌더할 때 그 자리·폭에 맞춰 넣고, 사각형 밖 이웃 건물은 그대로 둬요.','[실제 대지 배경 참고 (브이월드 3D)]로 주소를 검색해 조감도 각도를 맞추고 [이 화면 캡처해서 참고 이미지로 추가]를 눌러요.','[위치 확인 · 로드뷰 (카카오맵)]로 로드뷰를 연 뒤 📸 캡처 모드 → Win+Shift+S로 캡처 → 창에서 Ctrl+V 하면 참고 이미지에 들어가요.','프리셋은 눈높이면 "실제 대지 배경 합성 - 투시도", 항공뷰면 "조감도"를 골라요. 실사 참고 이미지에 대지 캡처가 없으면 안내가 떠요.']},
   {h:'5. 배경이 검정인 3D (전시 부스 등)',p:['배경이 검정·흰색 단색이면 렌더 버튼을 누를 때 "⬛ 3D만 실사로 / 🏛 주변 배경도 넣기"를 물어봐요. 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요.']},
   {h:'6. 결과 카드 버튼',p:['🔁 수정본 같은 느낌 — 납품 후 모델링을 고쳤을 때, 고친 부분만 바뀌고 주변·색감은 납품본과 같게 다시 렌더.','🔤 로고 원본으로 — AI가 실제 기업 로고를 가짜 이름으로 바꿨을 때 원본 로고를 다시 덮어줘요(포토샵 편집에서 열림, 무료).','포토샵 편집·AI 편집·업스케일·영상·쇼츠·제안서·견적·공유·프로젝트에 담기로 바로 이어서 작업할 수 있어요.']}
  ],
@@ -60477,7 +60645,9 @@ document.addEventListener('DOMContentLoaded',function(){try{
           break;
         }
         // 2026-10-25 요청("렌더 실사화에서 브이월드 캡처처럼 카카오톡 캡처도 바로 참고 이미지로"): 렌더 탭에 이미 원본이 있으면 붙여넣은 캡처는 실사 참고 이미지 빈칸으로
-        if((G.wf==='render' && getTab('render').inputImg) || document.getElementById('km-capture-mode')){ // 카카오 로드뷰 창이 열려 있으면 원본 유무와 상관없이 참고 이미지로
+        // 2026-10-27 요청("렌더 실사화에서 Ctrl+V가 계속 참고 이미지로 간다 — 다른 탭처럼 이미지 업로드로"): 평소엔 원본 업로드로, 카카오 로드뷰 창이 열려 있을 때만 참고 이미지로
+        //   (참고 이미지는 빈칸을 한 번 클릭한 뒤 Ctrl+V 하거나, [📋 클립보드 → 참고 이미지] 버튼으로)
+        if(document.getElementById('km-capture-mode')){
           var _rT=getTab('render'); if(!_rT.refs) _rT.refs=Array(6).fill(null);
           var _rIdx=_rT.refs.findIndex(function(r){return !r;});
           if(_rIdx===-1){ try{ _agedEnvToast('실사 참고 이미지 6칸이 다 찼어요 — 하나 비우고 다시 붙여넣어 주세요.'); }catch(_e){} e.preventDefault(); break; }
