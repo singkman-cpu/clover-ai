@@ -9729,7 +9729,7 @@ function selectWF(wf){
   if(wf!=='psedit'){ try{ ['ps-aisel-card','ps-aisel-bar'].forEach(function(id){ var x=document.getElementById(id); if(x) x.remove(); }); }catch(_pe){} } // 2026-10-26: 포토샵 편집 밖으로 나가면 AI 선택 상자 닫기
   if(wf==='staging'){ _openStaging(); return; } // 빈집 홈스테이징은 AI편집 엔진을 쓰는 전용 모드
   if(LOGIN_ONLY_WF[wf] && !_supaUser && window._authInitDone){ _loginGateMsg(wf); return; }
-  if(wf==='render' && !window._restoringWf){ try{ setTimeout(_renderIntroShow, 700); }catch(_ri){} } // 2026-10-27 처음 렌더 탭 들어오면 다른 기능 한 번 소개
+  if((wf==='render' || wf==='space' || wf==='spaceset') && !window._restoringWf){ try{ setTimeout(function(){ _tabIntroShow(wf); }, 700); }catch(_ri){} } // 2026-10-27 처음 렌더 탭 들어오면 다른 기능 한 번 소개
   if(!G._stagingEntering && G._staging){ _leaveStaging(); }
   if(!G._stagingEntering) G._staging=false;
   if(wf==='edit' && !G._stagingEntering){ try{ var _et=G.tabs&&G.tabs.edit; if(_et && _et.selK && String(_et.selK).indexOf('staging_')===0){ _et.selK=null; _et.prompt=''; } }catch(e){} }
@@ -49482,33 +49482,54 @@ function _qbHintThen(tab, go){
   }catch(e){ return false; }
 }
 // ── 2026-10-27 요청("처음 온 사람이 렌더 실사화만 해보고 나가지 않게 — 뷰 변환·시간/날씨/계절·포토샵·쇼츠 무료를 한 번 소개") ──
-function _renderIntroShow(){
-  try{ if(localStorage.getItem('clover_render_intro_v1')) return; }catch(e){ return; }
+// 탭별 첫 방문 안내 창(렌더 실사화·현장사진 디자인·공간 컨셉 디자인) — 한 번만, 관리자는 대시보드에서 미리보기
+var TAB_INTROS={
+  render:{lsk:'clover_render_intro_v1', title:'✨ 렌더 실사화 말고도 이런 걸 할 수 있어요', sub:'렌더 결과에서 바로 이어서 쓸 수 있어요 — 결과 카드 아래 버튼이나 왼쪽 메뉴에서 찾을 수 있어요.', start:'3D 렌더 실사화부터 시작하기', items:[
+    ['✏️','AI 편집 — 부분 수정','렌더 결과에서 바꾸고 싶은 부분만 칠하면 그 부분만 고쳐요(가구·마감재·간판 글씨·물체 지우기 등)','AI 편집','edit','렌더 결과를 올리고, 바꿀 부분을 브러시로 칠한 뒤 원하는 내용을 적어 실행하세요'],
+    ['🔄','뷰 변환','투시도 → 조감도·광역조감도, 탑뷰·조감도 → 투시도(눈높이)로 바꿔요','AI 편집 › 뷰·구도 변환','edit','왼쪽 프리셋에서 "뷰·구도 변환"을 찾아보세요 — 렌더 결과를 이미지로 올리면 돼요'],
+    ['🌅','시간·날씨·계절','낮 → 밤·블루아워·노을, 맑음·비·눈, 봄·여름·가을·겨울로 바꿔요','AI 편집 › 시간/날씨/분위기','edit','왼쪽 프리셋에서 "시간/날씨/분위기"를 찾아보세요 — 렌더 결과를 이미지로 올리면 돼요'],
+    ['🎨','포토샵 편집 — 무료','레이어·브러시·텍스트·AI 물체 선택으로 직접 다듬어요','포토샵 편집 탭','psedit',''],
+    ['🎬','쇼츠 만들기 — 무료','완성 이미지로 SNS용 짧은 영상을 바로 만들어요','쇼츠 제작 탭','shorts','']]},
+  space:{lsk:'clover_space_intro_v2', title:'✨ 현장 사진 디자인, 이렇게 쓰면 더 좋아요', sub:'참고 이미지·프리셋으로 원하는 결과를 만들고, 상담·영업까지 바로 이어갈 수 있어요.', start:'현장 사진 디자인 시작하기', items:[
+    ['🖼','참고 이미지를 넣으면 훨씬 잘 나와요','원하는 느낌의 인테리어 사진(핀터레스트·인스타 캡처 등)을 참고 이미지에 넣고 렌더하면 그 색감·마감재·분위기를 따라가요 — 부분만 가져오기(아트월·천장·가구만 등)도 돼요','왼쪽 참고 이미지 칸','space','왼쪽 "참고 이미지" 칸에 원하는 느낌의 사진을 넣고 렌더해 보세요 — 칸을 클릭한 뒤 Ctrl+V도 돼요'],
+    ['🎨','프리셋이 아주 많아요','모던·북유럽·한국 스타일·호텔·카페·신혼집·원룸부터 2026-27 트렌드, 상업공간(F&B·리테일·병원·웨딩 등)까지 클릭 한 번으로 바꿔요','왼쪽 스타일 프리셋','space','왼쪽 스타일 프리셋에서 카테고리를 열어 골라보세요 — 프리셋 전체보기도 있어요'],
+    ['✏️','AI 편집 — 부분 수정','결과에서 벽지·바닥·가구·조명만 골라서 다시 바꿔요(칠한 부분만, 나머지는 그대로)','AI 편집','edit','결과 이미지를 올리고, 바꿀 부분을 브러시로 칠한 뒤 원하는 내용을 적어 실행하세요'],
+    ['🛋','빈집 홈스테이징','텅 빈 방 사진에 가구를 채워서 매물·분양 홍보 사진으로 만들어요','빈집 홈스테이징','staging',''],
+    ['🧾','AI 견적','사진을 보고 공사 항목·예산을 뽑아줘요','AI 견적 탭','budget',''],
+    ['📑','상담 패키지·제안서 — 무료','결과 이미지와 견적을 묶어서 고객용 PDF로 보내요','상담 패키지 탭','consult',''],
+    ['🎬','비포/애프터 쇼츠 — 무료','원본과 결과를 비교하는 SNS용 짧은 영상을 바로 만들어요','쇼츠 제작 탭','shorts','']]},
+  spaceset:{lsk:'clover_spaceset_intro_v1', title:'✨ 공간 컨셉 디자인, 이렇게 이어서 써보세요', sub:'사진 몇 장으로 만든 한 집 전체 디자인을 다듬고, 상담·홍보까지 이어갈 수 있어요.', start:'공간 컨셉 디자인 시작하기', items:[
+    ['✏️','AI 편집 — 부분 수정','방별 결과에서 가구·마감재·조명만 골라서 고쳐요(칠한 부분만, 나머지는 그대로)','AI 편집','edit','결과 이미지를 올리고, 바꿀 부분을 브러시로 칠한 뒤 원하는 내용을 적어 실행하세요'],
+    ['🔄','다른 각도 보기','같은 방을 왼쪽·오른쪽·다른 방향에서 본 모습으로 바꿔요','AI 편집 › 뷰·구도 변환','edit','왼쪽 프리셋에서 "뷰·구도 변환"을 찾아보세요'],
+    ['🌙','시간·분위기','낮 → 밤 조명·노을·블루아워 등 분위기를 바꿔요','AI 편집 › 시간/날씨/분위기','edit','왼쪽 프리셋에서 "시간/날씨/분위기"를 찾아보세요'],
+    ['🧾','AI 견적','디자인 결과를 바탕으로 공사 항목·예산을 뽑아줘요','AI 견적 탭','budget',''],
+    ['📑','상담 패키지·제안서 — 무료','방별 결과를 묶어서 고객용 PDF로 보내요','상담 패키지 탭','consult',''],
+    ['🎬','집 투어 쇼츠 — 무료','여러 방 결과로 SNS용 짧은 영상을 바로 만들어요','쇼츠 제작 탭','shorts','']]}
+};
+function _tabIntroShow(key, force){
+  var cfg=TAB_INTROS[key]; if(!cfg) return;
+  if(!force){ try{ if(localStorage.getItem(cfg.lsk)) return; }catch(e){ return; } }
   if(document.getElementById('render-intro')) return;
-  try{ localStorage.setItem('clover_render_intro_v1','1'); }catch(e){}
-  var items=[
-    ['✏️','AI 편집 — 부분 수정','렌더 결과에서 바꾸고 싶은 부분만 칠하면 그 부분만 고쳐요(가구·마감재·간판 글씨·물체 지우기 등)','AI 편집','edit'],
-    ['🔄','뷰 변환','투시도 → 조감도·광역조감도, 탑뷰·조감도 → 투시도(눈높이)로 바꿔요','AI 편집 › 뷰·구도 변환','edit'],
-    ['🌅','시간·날씨·계절','낮 → 밤·블루아워·노을, 맑음·비·눈, 봄·여름·가을·겨울로 바꿔요','AI 편집 › 시간/날씨/분위기','edit'],
-    ['🎨','포토샵 편집 — 무료','레이어·브러시·텍스트·AI 물체 선택으로 직접 다듬어요','포토샵 편집 탭','psedit'],
-    ['🎬','쇼츠 만들기 — 무료','완성 이미지로 SNS용 짧은 영상을 바로 만들어요','쇼츠 제작 탭','shorts']
-  ];
+  if(!force){ try{ localStorage.setItem(cfg.lsk,'1'); }catch(e){} }
+  var items=cfg.items;
   var ov=document.createElement('div'); ov.id='render-intro';
   ov.style.cssText='position:fixed;inset:0;z-index:100075;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
   ov.innerHTML='<div style="width:100%;max-width:520px;max-height:92vh;overflow:auto;background:var(--card,#16181d);border:1.5px solid var(--ac,#00e5cc);border-radius:18px;padding:20px;color:var(--t,#fff);box-sizing:border-box">'+
-    '<div style="display:flex;align-items:center;margin-bottom:4px"><b style="font-size:17px">✨ 렌더 실사화 말고도 이런 걸 할 수 있어요</b><button type="button" data-x style="margin-left:auto;border:none;background:none;color:var(--m2,#999);font-size:18px;cursor:pointer">✕</button></div>'+
-    '<div style="font-size:12px;color:var(--m2,#aaa);margin-bottom:12px">렌더 결과에서 바로 이어서 쓸 수 있어요 — 결과 카드 아래 버튼이나 왼쪽 메뉴에서 찾을 수 있어요.</div>'+
+    '<div style="display:flex;align-items:center;margin-bottom:4px"><b style="font-size:17px">'+cfg.title+'</b><button type="button" data-x style="margin-left:auto;border:none;background:none;color:var(--m2,#999);font-size:18px;cursor:pointer">✕</button></div>'+
+    '<div style="font-size:12px;color:var(--m2,#aaa);margin-bottom:12px">'+cfg.sub+'</div>'+
     items.map(function(it,i){ return '<button type="button" data-i="'+i+'" style="display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;padding:12px 13px;margin-bottom:8px;border-radius:12px;border:1px solid var(--bd2,#333);background:var(--c2,#1e2026);color:var(--t,#fff);cursor:pointer;font-family:inherit">'+
-      '<span style="font-size:24px;line-height:1">'+it[0]+'</span><span style="flex:1"><b style="font-size:14px">'+it[1]+'</b><br><span style="font-size:12px;color:var(--t2,#ccc);line-height:1.5">'+it[2]+'</span><br><span style="font-size:11px;color:var(--ac,#00e5cc)">'+it[3]+' →</span></span></button>'; }).join('')+
-    '<button type="button" data-start style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;font-size:14px;cursor:pointer;font-family:inherit">3D 렌더 실사화부터 시작하기</button></div>';
+      '<span style="font-size:24px;line-height:1;width:30px;flex:0 0 30px;text-align:center">'+it[0]+'</span><span style="flex:1"><b style="font-size:14px">'+it[1]+'</b><br><span style="font-size:12px;color:var(--t2,#ccc);line-height:1.5">'+it[2]+'</span><br><span style="font-size:11px;color:var(--ac,#00e5cc)">'+it[3]+' →</span></span></button>'; }).join('')+
+    '<button type="button" data-start style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;font-size:14px;cursor:pointer;font-family:inherit">'+cfg.start+'</button></div>';
   document.body.appendChild(ov);
   function close(){ ov.remove(); }
   ov.querySelector('[data-x]').onclick=close; ov.querySelector('[data-start]').onclick=close;
   ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
   Array.prototype.forEach.call(ov.querySelectorAll('[data-i]'),function(b){ b.onclick=function(){ var it=items[+b.getAttribute('data-i')]; close();
+    try{ if(force && typeof closeMd==='function') closeMd('admin'); }catch(e){}
     try{ selectWF(it[4]); }catch(e){}
-    try{ _agedEnvToast(it[0]==='✏️' ? '렌더 결과를 올리고, 바꿀 부분을 브러시로 칠한 뒤 원하는 내용을 적어 실행하세요' : it[4]==='edit' ? ('왼쪽 프리셋에서 "'+(it[1]==='뷰 변환'?'뷰·구도 변환':'시간/날씨/분위기')+'"을 찾아보세요 — 렌더 결과를 이미지로 올리면 돼요') : (it[1]+' 탭이에요')); }catch(e){} }; });
+    try{ _agedEnvToast(it[5] || (it[1].replace(/ — 무료$/,'')+' 탭이에요')); }catch(e){} }; });
 }
+function _renderIntroShow(){ _tabIntroShow('render'); }
 function _renderEditText(tab){ return String((tab.selK ? tab.extraPrompt : tab.prompt) || '').trim(); }
 function _looksLocalEdit(t){
   if(!t || t.length<2) return false;
@@ -52047,6 +52068,8 @@ function procImgWithTask(task, onDone, onErr){
   // 2026-10-27 요청: 대지 위치 표시(빨간 사각형)가 있으면 그 자리·폭에 메인건물
   var _siteMarksNow = (task && /^site_context/.test(task.selK||'') && wf==='render') ? (task.siteMarks || (getTab('render')||{}).siteMarks || null) : null;
   if(_siteMarksNow && ((task.autoRefs||getTab(wf).refs)||[]).some(function(r){ return r && _siteMarksNow[_siteMarkSig(r)]; })) ap += ' 🟥 SITE MARKER (user drew it, highest priority for location): in the REFERENCE image a RED RECTANGLE outlines the exact lot where the main building stands — the existing building inside that red rectangle is the one being replaced. Place the main building exactly there: its footprint and width match the area inside the red rectangle, never wider and never shifted. Everything outside the red rectangle (neighboring buildings, shops, roads) stays as in the reference. The red rectangle is only a marker — never draw any red line or box in the result.';
+  // 2026-10-27 요청("조감도·광역조감도 바닥 자동차가 바닥에 눌러붙은 것처럼 나온다"): 3D 지도 사진에 납작하게 찍힌 차 → 실제 입체 차량으로
+  if(task && /^site_context_composite_aerial/.test(task.selK||'')) ap += ' 🚙 REAL 3D VEHICLES (aerial, user rule): the cars in the 3D-map reference are flat photos printed onto the road texture — never copy them as flat, squashed, smeared or painted-on shapes. Every vehicle in the result is a real solid car seen from this drone angle: visible roof, hood, windshield and side panels with real height and volume, glossy paint reflections, wheels touching the asphalt, and a short dark shadow on the road on the side away from the sun, all at the correct scale for the road and lanes. Any flat car marks left in the road texture are cleaned away to plain asphalt.';
   if(task && /^site_context/.test(task.selK||'')) ap += ' 🛣 ROAD LAYOUT LOCK (user rule, read last): copy the ground layout of the reference road view exactly as it is — where the reference shows sidewalk / paving blocks, it stays continuous sidewalk paving; where it shows road, it stays road with the same lanes and markings. Never invent a new road, side street, intersection, driveway or crosswalk that the reference does not show (for example, if the area beside the main building is a continuous paved sidewalk in the reference, it must remain a continuous paved sidewalk — no road and no crosswalk lines there).';
   // 2026-10-27 요청("차량 수·번호판은 꼭 지금"): 짧게 두 가지만 — 카메라·건물 관련 문구는 넣지 않음
   if(task && /^site_context/.test(task.selK||'')) ap += ' 🚗 VEHICLES (user rule, replaces the earlier vehicle-count rule): keep only 1 to 3 vehicles on a normal street and at most 5 on a wide road (4 or more lanes), parked and driving combined, each facing the correct way for its lane (Korean right-hand traffic). Remove the other vehicles of the road view and show the road surface, markings and road furniture that were behind them exactly as they are. 🔢 LICENSE PLATES: the road-view privacy blur must not remain — every visible plate is a clean, sharp standard Korean plate (white plate, black characters, like 12가 3456) with an arbitrary made-up number, never a blurred or mosaic patch.';
@@ -53797,7 +53820,11 @@ function admSales(c){
 function admRenderTab(){
   var c=gE('adm-content');if(!c)return;
   c.innerHTML='<div style="text-align:center;padding:20px;color:var(--m2)">불러오는 중...</div>';
-  if(_adminTab==='dashboard') admDashboard(c);
+  if(_adminTab==='dashboard'){ // 2026-10-27: 첫 방문 안내 창 미리보기
+    c.innerHTML=''; var _pv=document.createElement('div'); _pv.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 12px;padding:10px 12px;border-radius:10px;border:1px solid var(--bd2);background:var(--c2);font-size:12px;color:var(--t2)';
+    _pv.innerHTML='<b style="margin-right:4px">👀 첫 방문 안내 창 미리보기</b>';
+    [['render','3D 렌더 실사화'],['space','현장사진 디자인'],['spaceset','공간 컨셉 디자인']].forEach(function(o){ var b=document.createElement('button'); b.type='button'; b.textContent=o[1]; b.style.cssText='padding:6px 10px;border-radius:7px;border:1px solid var(--ac);background:var(--acg);color:var(--ac);font-size:11.5px;font-weight:800;cursor:pointer;font-family:inherit'; b.onclick=function(){ _tabIntroShow(o[0], true); }; _pv.appendChild(b); });
+    c.appendChild(_pv); var _in=document.createElement('div'); c.appendChild(_in); admDashboard(_in); }
   else if(_adminTab==='analytics') admAnalytics(c);
   else if(_adminTab==='members') admMembers(c);
   else if(_adminTab==='credit') admCreditGive(c);
@@ -58704,11 +58731,12 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'⬛ 3D만 실사로 / 🏛 주변 배경 넣기 (렌더 실사화)', h:'전시 부스·쇼룸처럼 배경이 검정(또는 흰색) 단색인 3D 이미지로 렌더링을 누르면 "배경을 어떻게 할까요?"를 물어봐요. [3D만 실사로]를 고르면 배경은 원본 그대로 두고 전시장·주변 부스·사람을 지어내지 않아요. [주변 배경도 넣기]는 AI가 어울리는 주변을 채워요. 같은 이미지는 한 번만 묻고, 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요. 실제 대지 배경 합성 프리셋에서는 묻지 않아요.'},
   {c:'edit', t:'🌙 야간 장면 공통 규칙 (달 없음 · 구도 고정 · 블루아워 밝기)', h:'주간→야간, 실내 야간 무드, 블루아워·황혼, 달빛 밤, 별 보이는 밤 등 모든 야간 장면은 ① 달을 넣지 않아요(추가 요청에 "보름달 넣어줘"처럼 적으면 넣어요) ② 화면을 확대하거나 카메라를 내리는 등 구도를 바꾸지 않아요 ③ 메인 건물 실내 불빛 밝기를 블루아워·황혼과 같은 차분한 수준으로 맞춰요(하얗게 날아가지 않게). 달빛 밤도 달빛 분위기만 내고 달 자체는 안 보여요.'},
   {c:'render', t:'🛠 렌더 실사화 — 없던 것 추가 금지 강화', h:'실사화(기본·고급)에서 원본에 없던 아치·벽감·기둥·돌/벽돌 마감·천장 다운라이트·가구를 새로 만들어 넣지 않도록 규칙을 강화했어요. 재질은 같은 재질의 실제 버전으로만 바뀌고(도장 벽은 도장 벽 그대로), 어두운 분위기의 공간은 그 밝기·분위기를 유지해요. 그래도 바뀌면 같은 설정으로 한 번 더 돌리거나 다른 엔진(기본↔고급)으로 시도해 보세요.'},
+  {c:'common', t:'✨ 처음 들어가는 탭 소개 창', h:'3D 렌더 실사화·현장사진 디자인·공간 컨셉 디자인 탭에 처음 들어가면 한 번만, 그 탭을 잘 쓰는 법(현장사진은 참고 이미지·다양한 프리셋)과 결과로 이어서 쓸 수 있는 기능(AI 편집 부분 수정, 뷰·시간 변환, 홈스테이징, AI 견적, 상담 패키지, 쇼츠 등)을 소개하는 창이 떠요. 항목을 누르면 그 기능으로 바로 가요.'},
   {c:'render', t:'✨ 처음 렌더 탭 소개 창', h:'처음 3D 렌더 실사화 탭에 들어오면 한 번만, AI 편집 부분 수정(칠한 부분만 고치기), 뷰 변환(투시도↔조감도·광역조감도·탑뷰), 시간·날씨·계절 변환, 포토샵 편집(무료), 쇼츠 만들기(무료)를 소개하는 창이 떠요. 항목을 누르면 그 탭으로 바로 가요.'},
   {c:'render', t:'✏️ 부분 수정은 AI 편집으로 안내', h:'렌더 실사화에서 추가 요청에 "지워줘·바꿔줘·옮겨줘·추가해줘"처럼 특정 부분을 고치는 말을 쓰면, 렌더 전에 "AI 편집에서 하면 더 정확해요" 안내가 떠요. [AI 편집으로 가기]를 누르면 같은 이미지와 문구가 AI 편집으로 옮겨지고, 바꿀 부분만 칠해서 실행하면 나머지는 원본 그대로 유지돼요. 저녁 분위기·톤·사람 추가처럼 전체에 해당하는 요청은 그대로 렌더해요.'},
   {c:'render', t:'✨ 완성 렌더는 고품질화로 안내', h:'"실사화·고급실사화 통합"으로 이미 조명·재질이 다 들어간 완성 렌더 이미지를 돌리면, "렌더링 완성본 고품질화"로 바꿀지 물어봐요. 완성 렌더는 고품질화가 구도·디자인·글씨를 그대로 두고 사진 느낌만 올려줘서 더 잘 맞아요. SketchUp·라이노처럼 재질·조명 없는 3D 화면 캡처는 실사화가 맞아요.'},
   {c:'render', t:'📋 렌더 탭 붙여넣기(Ctrl+V)', h:'렌더 실사화에서 Ctrl+V는 다른 탭처럼 위 이미지 업로드(원본)로 들어가요. 로드뷰·카톡 캡처를 실사 참고 이미지로 넣으려면 [📋 클립보드 → 참고 이미지로 붙여넣기] 버튼을 누르거나, 참고 이미지 빈칸을 한 번 클릭한 뒤 Ctrl+V 하세요. 카카오 로드뷰 창이 열려 있을 때의 Ctrl+V는 참고 이미지로 들어가요.'},
-  {c:'render', t:'🗺 실제 대지 배경 합성 — 사용 팁', h:'실제 대지 배경 합성(투시도·조감도·광역조감도)은 로드뷰·브이월드 캡처를 실사 참고 이미지에 꼭 넣어야 해요(없으면 안내가 떠요). 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠서 AI 편집의 글씨/간판 교정으로 이어갈 수 있어요. 하늘(맑음·구름 조금·흐림)도 고를 수 있어요. 로드뷰의 도로·보도 배치는 그대로 두고(없던 도로·횡단보도 안 만듦), 차는 보통 1~3대(넓은 도로 최대 5대, 차선 방향 맞게), 번호판은 모자이크 없이 임의 번호의 깔끔한 한국 번호판으로 그려요. 렌더 버튼을 누르면 대지 위치 표시 창이 떠요 — 메인건물이 들어갈 기존 건물 자리를 드래그해 빨간 사각형으로 감싸고 [🟥 표시한 자리로 렌더]를 누르면, AI가 그 자리·폭에 맞춰 넣고 바깥 건물은 그대로 둬요(빨간 선은 결과에 안 그려져요). 메인건물 옆 이웃 상가·건물은 지우지 않고 그대로 두고, 투시도는 지붕 위로 하늘이 넉넉히 보이게 잡아요. 메인건물이 3D·CG처럼 남았으면 결과 카드의 🏢 메인건물 실사화 버튼을 누르세요 — 그 건물만 실제 사진처럼 다시 그리고 카메라·주변은 그대로 둬요(나노바나나 Pro 비용). 메인 건물은 3D 느낌 없이 실제 건물 사진처럼 마감하고, 투시도는 세로선이 반듯하게(왜곡 없이) 나와요. 로드뷰는 3D 뷰와 비슷한 방향·높이·범위로, 앞에 차가 적은 곳에서 캡처하면 더 잘 나와요.'},
+  {c:'render', t:'🗺 실제 대지 배경 합성 — 사용 팁', h:'실제 대지 배경 합성(투시도·조감도·광역조감도)은 로드뷰·브이월드 캡처를 실사 참고 이미지에 꼭 넣어야 해요(없으면 안내가 떠요). 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠서 AI 편집의 글씨/간판 교정으로 이어갈 수 있어요. 하늘(맑음·구름 조금·흐림)도 고를 수 있어요. 로드뷰의 도로·보도 배치는 그대로 두고(없던 도로·횡단보도 안 만듦), 차는 보통 1~3대(넓은 도로 최대 5대, 차선 방향 맞게), 번호판은 모자이크 없이 임의 번호의 깔끔한 한국 번호판으로 그려요. 조감도·광역조감도에서는 3D 지도에 납작하게 찍힌 차를 그대로 쓰지 않고, 높이·그림자가 있는 실제 입체 차량으로 그려요. 렌더 버튼을 누르면 대지 위치 표시 창이 떠요 — 메인건물이 들어갈 기존 건물 자리를 드래그해 빨간 사각형으로 감싸고 [🟥 표시한 자리로 렌더]를 누르면, AI가 그 자리·폭에 맞춰 넣고 바깥 건물은 그대로 둬요(빨간 선은 결과에 안 그려져요). 메인건물 옆 이웃 상가·건물은 지우지 않고 그대로 두고, 투시도는 지붕 위로 하늘이 넉넉히 보이게 잡아요. 메인건물이 3D·CG처럼 남았으면 결과 카드의 🏢 메인건물 실사화 버튼을 누르세요 — 그 건물만 실제 사진처럼 다시 그리고 카메라·주변은 그대로 둬요(나노바나나 Pro 비용). 메인 건물은 3D 느낌 없이 실제 건물 사진처럼 마감하고, 투시도는 세로선이 반듯하게(왜곡 없이) 나와요. 로드뷰는 3D 뷰와 비슷한 방향·높이·범위로, 앞에 차가 적은 곳에서 캡처하면 더 잘 나와요.'},
   {c:'render', t:'☀️ 하늘 선택 — 3D 렌더 실사화 모든 프리셋', h:'3D 렌더 실사화 탭의 모든 프리셋(실사화·고급 실사화·CG·실제 대지 배경 합성·CAD 아이소·고품질화 등)에서 렌더 버튼 위 [☀️ 하늘]로 맑음 / 구름 조금 / 흐림 / 원본 그대로를 고를 수 있어요. 렌더링 완성본 고품질화는 기본이 "원본 그대로"예요. 추가 요청에 야간·노을을 적으면 그게 우선이에요.'},
   {c:'edit', t:'🔤 글씨/간판 교정 — 간판만 바뀌고 나머지는 원본 그대로', h:'AI 편집의 🔤 글씨/간판 교정은 결과에서 간판·글씨 부분만 AI 물체 인식으로 찾아 원본 사진 위에 얹어요. 그래서 카메라(구도)가 틀어지지 않고 전체 색감(붉은끼)도 안 바뀌어요. 위치가 조금 밀려 나와도 자동으로 맞춰요. 이 프리셋을 고르면 엔진이 글자를 더 잘 쓰는 나노바나나 Pro로 자동으로 바뀌어요. 글씨가 여전히 어색하면 추가 요청 칸에 정확한 간판 글자를 적고 다시 돌려보세요.'},
   {c:'render', t:'🛣 3D 렌더 실사화 외관 — 도로 표시·차량', h:'실사화·고퀄리티 CG로 외관을 렌더할 때 도로가 보이면 차선·중앙선·횡단보도를 한국 도로 규정에 맞게 실제 페인트처럼 그리고(모델에 없던 유턴 표시·화살표·글씨는 안 만들어요), 도로에 차가 없으면 평범한 차를 1~3대(넓은 도로는 최대 5대) 중간 거리에 자연스럽게 넣어요. 모델링한 차는 그대로 두고, 카메라 가까운 앞쪽이나 건물을 가리는 자리에는 넣지 않아요. 번호판은 임의 번호의 깔끔한 한국 번호판이에요.'},
