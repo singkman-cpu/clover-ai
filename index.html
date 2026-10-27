@@ -9729,6 +9729,7 @@ function selectWF(wf){
   if(wf!=='psedit'){ try{ ['ps-aisel-card','ps-aisel-bar'].forEach(function(id){ var x=document.getElementById(id); if(x) x.remove(); }); }catch(_pe){} } // 2026-10-26: 포토샵 편집 밖으로 나가면 AI 선택 상자 닫기
   if(wf==='staging'){ _openStaging(); return; } // 빈집 홈스테이징은 AI편집 엔진을 쓰는 전용 모드
   if(LOGIN_ONLY_WF[wf] && !_supaUser && window._authInitDone){ _loginGateMsg(wf); return; }
+  if(wf==='render' && !window._restoringWf){ try{ setTimeout(_renderIntroShow, 700); }catch(_ri){} } // 2026-10-27 처음 렌더 탭 들어오면 다른 기능 한 번 소개
   if(!G._stagingEntering && G._staging){ _leaveStaging(); }
   if(!G._stagingEntering) G._staging=false;
   if(wf==='edit' && !G._stagingEntering){ try{ var _et=G.tabs&&G.tabs.edit; if(_et && _et.selK && String(_et.selK).indexOf('staging_')===0){ _et.selK=null; _et.prompt=''; } }catch(e){} }
@@ -49480,6 +49481,34 @@ function _qbHintThen(tab, go){
     return true;
   }catch(e){ return false; }
 }
+// ── 2026-10-27 요청("처음 온 사람이 렌더 실사화만 해보고 나가지 않게 — 뷰 변환·시간/날씨/계절·포토샵·쇼츠 무료를 한 번 소개") ──
+function _renderIntroShow(){
+  try{ if(localStorage.getItem('clover_render_intro_v1')) return; }catch(e){ return; }
+  if(document.getElementById('render-intro')) return;
+  try{ localStorage.setItem('clover_render_intro_v1','1'); }catch(e){}
+  var items=[
+    ['✏️','AI 편집 — 부분 수정','렌더 결과에서 바꾸고 싶은 부분만 칠하면 그 부분만 고쳐요(가구·마감재·간판 글씨·물체 지우기 등)','AI 편집','edit'],
+    ['🔄','뷰 변환','투시도 → 조감도·광역조감도, 탑뷰·조감도 → 투시도(눈높이)로 바꿔요','AI 편집 › 뷰·구도 변환','edit'],
+    ['🌅','시간·날씨·계절','낮 → 밤·블루아워·노을, 맑음·비·눈, 봄·여름·가을·겨울로 바꿔요','AI 편집 › 시간/날씨/분위기','edit'],
+    ['🎨','포토샵 편집 — 무료','레이어·브러시·텍스트·AI 물체 선택으로 직접 다듬어요','포토샵 편집 탭','psedit'],
+    ['🎬','쇼츠 만들기 — 무료','완성 이미지로 SNS용 짧은 영상을 바로 만들어요','쇼츠 제작 탭','shorts']
+  ];
+  var ov=document.createElement('div'); ov.id='render-intro';
+  ov.style.cssText='position:fixed;inset:0;z-index:100075;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
+  ov.innerHTML='<div style="width:100%;max-width:520px;max-height:92vh;overflow:auto;background:var(--card,#16181d);border:1.5px solid var(--ac,#00e5cc);border-radius:18px;padding:20px;color:var(--t,#fff);box-sizing:border-box">'+
+    '<div style="display:flex;align-items:center;margin-bottom:4px"><b style="font-size:17px">✨ 렌더 실사화 말고도 이런 걸 할 수 있어요</b><button type="button" data-x style="margin-left:auto;border:none;background:none;color:var(--m2,#999);font-size:18px;cursor:pointer">✕</button></div>'+
+    '<div style="font-size:12px;color:var(--m2,#aaa);margin-bottom:12px">렌더 결과에서 바로 이어서 쓸 수 있어요 — 결과 카드 아래 버튼이나 왼쪽 메뉴에서 찾을 수 있어요.</div>'+
+    items.map(function(it,i){ return '<button type="button" data-i="'+i+'" style="display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;padding:12px 13px;margin-bottom:8px;border-radius:12px;border:1px solid var(--bd2,#333);background:var(--c2,#1e2026);color:var(--t,#fff);cursor:pointer;font-family:inherit">'+
+      '<span style="font-size:24px;line-height:1">'+it[0]+'</span><span style="flex:1"><b style="font-size:14px">'+it[1]+'</b><br><span style="font-size:12px;color:var(--t2,#ccc);line-height:1.5">'+it[2]+'</span><br><span style="font-size:11px;color:var(--ac,#00e5cc)">'+it[3]+' →</span></span></button>'; }).join('')+
+    '<button type="button" data-start style="width:100%;margin-top:4px;padding:12px;border-radius:11px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;font-size:14px;cursor:pointer;font-family:inherit">3D 렌더 실사화부터 시작하기</button></div>';
+  document.body.appendChild(ov);
+  function close(){ ov.remove(); }
+  ov.querySelector('[data-x]').onclick=close; ov.querySelector('[data-start]').onclick=close;
+  ov.addEventListener('click',function(e){ if(e.target===ov) close(); });
+  Array.prototype.forEach.call(ov.querySelectorAll('[data-i]'),function(b){ b.onclick=function(){ var it=items[+b.getAttribute('data-i')]; close();
+    try{ selectWF(it[4]); }catch(e){}
+    try{ _agedEnvToast(it[0]==='✏️' ? '렌더 결과를 올리고, 바꿀 부분을 브러시로 칠한 뒤 원하는 내용을 적어 실행하세요' : it[4]==='edit' ? ('왼쪽 프리셋에서 "'+(it[1]==='뷰 변환'?'뷰·구도 변환':'시간/날씨/분위기')+'"을 찾아보세요 — 렌더 결과를 이미지로 올리면 돼요') : (it[1]+' 탭이에요')); }catch(e){} }; });
+}
 function _renderEditText(tab){ return String((tab.selK ? tab.extraPrompt : tab.prompt) || '').trim(); }
 function _looksLocalEdit(t){
   if(!t || t.length<2) return false;
@@ -57146,7 +57175,7 @@ function _admIssueScan(){
     });
     Object.keys(_galCand).forEach(function(uid){
       var miss=_admMatchMiss(_galCand[uid], (gal[uid]||[]).map(function(g){ return g.t; }));
-      _galCand[uid].forEach(function(c){ if(miss[c.id]) list.push({j:c.j, t:c.t, why:'nosave'}); });
+      _galCand[uid].forEach(function(c){ if(miss[c.id]) list.push({j:c.j, t:c.t, why:'nosave', recv:(recSince && c.t>recSince) ? (rec[c.id]?'yes':'no') : ''}); }); // 2026-10-27: 회원 화면이 결과를 받았는지도 같이 표시
     });
     return _admIssueStorageFilter(list, (jr.data||[]).filter(function(j){ return j.status==='completed' && !done[j.req_id] && galWf[j.wf] && !_ISSUE_NO_GAL_WF[j.wf]; }));
   }).catch(function(e){ return {list:[], err:String((e&&e.message)||e)}; });
@@ -57221,7 +57250,7 @@ function _admIssueRender(r){
       box.style.cssText='border:1px solid rgba(239,68,68,.4);background:rgba(239,68,68,.06);border-radius:10px;padding:10px 12px;margin-bottom:10px';
       var rows=items.map(function(x){
         var d=new Date(x.t), ts=(d.getMonth()+1)+'/'+d.getDate()+' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
-        return '<div style="display:flex;gap:8px;padding:3px 0;color:var(--t2);font-size:11.5px"><span style="width:78px;color:var(--m2)">'+ts+'</span><span style="flex:1">'+(x.why==='stuck'?'⏸ 멈춤':x.why==='norecv'?'📡 결과 수신 실패':'📭 결과 파일 없음'+(x.unverified?'(파일 확인 불가)':''))+' · '+_admEsc(WFL[x.j.wf]||x.j.wf||'기타')+'</span><span style="font-weight:700;color:#f87171">-'+x.j.cost+'cr</span></div>';
+        return '<div style="display:flex;gap:8px;padding:3px 0;color:var(--t2);font-size:11.5px"><span style="width:78px;color:var(--m2)">'+ts+'</span><span style="flex:1">'+(x.why==='stuck'?'⏸ 멈춤':x.why==='norecv'?'📡 결과 수신 실패':'📭 결과 파일 없음'+(x.unverified?'(파일 확인 불가)':''))+' · '+_admEsc(WFL[x.j.wf]||x.j.wf||'기타')+(x.recv==='yes'?' <span style="color:#fbbf24">· 화면은 결과 받음 → 저장 실패(우리 쪽 오류)</span>':x.recv==='no'?' <span style="color:var(--m2)">· 화면이 결과 못 받음(창 닫음·연결 끊김 또는 오류)</span>':'')+'</span><span style="font-weight:700;color:#f87171">-'+x.j.cost+'cr</span></div>';
       }).join('');
       box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="flex:1;font-weight:800;color:var(--t);font-size:13px;word-break:break-all">'+_admEsc(p.email||u)+'</div>'+(paid[u]?'<span style="font-size:10.5px;font-weight:800;color:#000;background:#f5b544;border-radius:6px;padding:2px 7px">💳 유료'+(p.plan&&!/^free$/i.test(p.plan)?' '+_admEsc(String(p.plan).toUpperCase()):'')+'</span>':'<span style="font-size:10.5px;color:var(--m2);border:1px solid var(--bd2);border-radius:6px;padding:1px 6px">무료</span>')+'<div style="font-size:11px;color:var(--m2)">보유 '+((p.credits||0).toLocaleString())+'cr</div></div>'+rows+
         '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><button type="button" data-a="refund" style="flex:1;min-width:150px;padding:9px;border-radius:8px;border:none;background:var(--ac);color:#000;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit">💳 '+sum+'cr 환불 + 사과 안내</button>'+
@@ -58675,6 +58704,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'⬛ 3D만 실사로 / 🏛 주변 배경 넣기 (렌더 실사화)', h:'전시 부스·쇼룸처럼 배경이 검정(또는 흰색) 단색인 3D 이미지로 렌더링을 누르면 "배경을 어떻게 할까요?"를 물어봐요. [3D만 실사로]를 고르면 배경은 원본 그대로 두고 전시장·주변 부스·사람을 지어내지 않아요. [주변 배경도 넣기]는 AI가 어울리는 주변을 채워요. 같은 이미지는 한 번만 묻고, 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요. 실제 대지 배경 합성 프리셋에서는 묻지 않아요.'},
   {c:'edit', t:'🌙 야간 장면 공통 규칙 (달 없음 · 구도 고정 · 블루아워 밝기)', h:'주간→야간, 실내 야간 무드, 블루아워·황혼, 달빛 밤, 별 보이는 밤 등 모든 야간 장면은 ① 달을 넣지 않아요(추가 요청에 "보름달 넣어줘"처럼 적으면 넣어요) ② 화면을 확대하거나 카메라를 내리는 등 구도를 바꾸지 않아요 ③ 메인 건물 실내 불빛 밝기를 블루아워·황혼과 같은 차분한 수준으로 맞춰요(하얗게 날아가지 않게). 달빛 밤도 달빛 분위기만 내고 달 자체는 안 보여요.'},
   {c:'render', t:'🛠 렌더 실사화 — 없던 것 추가 금지 강화', h:'실사화(기본·고급)에서 원본에 없던 아치·벽감·기둥·돌/벽돌 마감·천장 다운라이트·가구를 새로 만들어 넣지 않도록 규칙을 강화했어요. 재질은 같은 재질의 실제 버전으로만 바뀌고(도장 벽은 도장 벽 그대로), 어두운 분위기의 공간은 그 밝기·분위기를 유지해요. 그래도 바뀌면 같은 설정으로 한 번 더 돌리거나 다른 엔진(기본↔고급)으로 시도해 보세요.'},
+  {c:'render', t:'✨ 처음 렌더 탭 소개 창', h:'처음 3D 렌더 실사화 탭에 들어오면 한 번만, AI 편집 부분 수정(칠한 부분만 고치기), 뷰 변환(투시도↔조감도·광역조감도·탑뷰), 시간·날씨·계절 변환, 포토샵 편집(무료), 쇼츠 만들기(무료)를 소개하는 창이 떠요. 항목을 누르면 그 탭으로 바로 가요.'},
   {c:'render', t:'✏️ 부분 수정은 AI 편집으로 안내', h:'렌더 실사화에서 추가 요청에 "지워줘·바꿔줘·옮겨줘·추가해줘"처럼 특정 부분을 고치는 말을 쓰면, 렌더 전에 "AI 편집에서 하면 더 정확해요" 안내가 떠요. [AI 편집으로 가기]를 누르면 같은 이미지와 문구가 AI 편집으로 옮겨지고, 바꿀 부분만 칠해서 실행하면 나머지는 원본 그대로 유지돼요. 저녁 분위기·톤·사람 추가처럼 전체에 해당하는 요청은 그대로 렌더해요.'},
   {c:'render', t:'✨ 완성 렌더는 고품질화로 안내', h:'"실사화·고급실사화 통합"으로 이미 조명·재질이 다 들어간 완성 렌더 이미지를 돌리면, "렌더링 완성본 고품질화"로 바꿀지 물어봐요. 완성 렌더는 고품질화가 구도·디자인·글씨를 그대로 두고 사진 느낌만 올려줘서 더 잘 맞아요. SketchUp·라이노처럼 재질·조명 없는 3D 화면 캡처는 실사화가 맞아요.'},
   {c:'render', t:'📋 렌더 탭 붙여넣기(Ctrl+V)', h:'렌더 실사화에서 Ctrl+V는 다른 탭처럼 위 이미지 업로드(원본)로 들어가요. 로드뷰·카톡 캡처를 실사 참고 이미지로 넣으려면 [📋 클립보드 → 참고 이미지로 붙여넣기] 버튼을 누르거나, 참고 이미지 빈칸을 한 번 클릭한 뒤 Ctrl+V 하세요. 카카오 로드뷰 창이 열려 있을 때의 Ctrl+V는 참고 이미지로 들어가요.'},
