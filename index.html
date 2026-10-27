@@ -50506,7 +50506,6 @@ function executeSingleRender(task){
         // 기록을 초기화"하는 로직이 있어서, 이 자동 체이닝이 매번 그 조건을 건드려 방금 쌓인
         // 대화 기록을 스스로 지워버리고 있었음(그 사이 잠깐 보였다 사라지는 게 "깜빡임"으로 보임).
         // 대화형 모드는 이 일반 모드 전용 자동 체이닝을 건너뛰게 함.
-        try{ if(task.wf==='edit' && ri && task.img) _editRootMap[_editSig(ri)] = _editRootOf(task.img) || task.img; }catch(_er){} // 2026-10-27 이어서 편집해도 맨 처음 원본 기준으로 화질 복원
         if(task.wf==='edit' && ri && !task.chatEdit){
           var _editTab=getTab('edit');
           _editTab.inputImg=ri;
@@ -51427,6 +51426,21 @@ function _siteMarkApply(rd, box, cb){
     cb(c.toDataURL('image/jpeg',0.92));
   }catch(e){ cb(rd); } }, function(){ cb(rd); });
 }
+// ── 2026-10-27 사용자 결정("조감도·광역조감도는 브이월드 화면 기준"): 카메라·배경 = 브이월드 캡처(참고 이미지), 메인건물만 그 자리에 그 각도로 넣기 ──
+// 대지 위치 표시(빨간 사각형)가 있는 참고 이미지를 우선, 없으면 첫 번째 참고 이미지를 카메라로 씀
+function _siteAerialCamRef(task, wf){
+  try{
+    if(wf!=='render' || !task || !/^site_context_composite_aerial/.test(task.selK||'')) return null;
+    var refs=((task.autoRefs||getTab(wf).refs)||[]).filter(Boolean); if(!refs.length) return null;
+    var mk=task.siteMarks||(getTab('render')||{}).siteMarks||null;
+    if(mk){ for(var i=0;i<refs.length;i++){ if(mk[_siteMarkSig(refs[i])]) return refs[i]; } }
+    return refs[0];
+  }catch(e){ return null; }
+}
+var SITE_AERIAL_REFCAM_PROMPT='⚠⚠⚠⚠⚠ ABSOLUTE RULE #1 — THE CAMERA IS IMAGE 1: image 1 is a capture of the REAL SITE from a 3D city map (VWorld). Its camera position, altitude, downward angle, lens and framing are the camera of the final photo, pixel-for-pixel — the result must line up with image 1 exactly: every road, intersection, crosswalk, city block and neighboring building stays exactly where it is in image 1, with the same form, size, floor count, roof shape and roof color. Never invent a different street layout, never move or remove neighboring buildings, never change the viewpoint. '+
+  'Image 2 is the architect\'s 3D design of the NEW main building (its camera angle in image 2 does not matter). TASK: produce ONE photorealistic drone photograph of exactly image 1\'s view in which the existing building on the target lot is replaced by the new building from image 2 — re-drawn in correct perspective as seen from image 1\'s camera, standing on that lot, its footprint fitting that lot (never spreading onto neighboring lots), its front facing the street the same way as in image 2. TARGET LOT: inside the red rectangle in image 1 if one is drawn; otherwise the map pin / the building at the center of image 1. '+
+  'Keep the new building\'s design exactly as in image 2: shape, floor count, proportions, facade layout, window grid, colors, materials and every sign\'s text and logo (copy the text exactly). Its height follows its floor count with the same floor-to-floor height as the neighboring buildings. '+
+  'Remove all map interface elements of image 1 (place-name labels, icons, pins, compass, logos, watermarks, text overlays, the red rectangle). Clear bright daytime unless the user asks otherwise. Output exactly one single photograph with the same aspect ratio and framing as image 1 — no borders, no collage, no text.';
 function _siteStripInterior(s){ // 2026-10-27: 대지 배경 합성 프롬프트에서 실내 전용 규칙 구간만 빼기(표시 문구가 없으면 그대로 둠)
   function cut(str,a,b){ var i=str.indexOf(a); if(i<0) return str; var j=str.indexOf(b,i); if(j<0) return str; return str.slice(0,i)+str.slice(j); }
   s=cut(s,'IMPORTANT MATERIAL REALISM RULE','AESTHETIC QUALITY RULE');
@@ -51496,7 +51510,7 @@ function procImgWithTask(task, onDone, onErr){
   if((wf==='space'||wf==='render'||wf==='edit') && !_hasForcedAspect){
     var _rawOnDone = onDone;
     var _selKForPost = task.selK;
-    var _postOrigImg = img; // ⚠️ 아래에서 "칠한 부분만 잘라서 편집"할 때 img가 잘린 조각으로 바뀌므로, 원본을 따로 잡아둠
+    var _postOrigImg = _siteAerialCamRef(task, wf) || img; // 2026-10-27 조감도류는 브이월드 캡처 비율에 맞춤 // ⚠️ 아래에서 "칠한 부분만 잘라서 편집"할 때 img가 잘린 조각으로 바뀌므로, 원본을 따로 잡아둠
     var _hadMaskForPost = !!task.maskData;
     onDone = function(ri){
       if(_selKForPost==='texture_from_photo' || _selKForPost==='texture_seamless' || _selKForPost==='texture_normal_map'){
@@ -52136,7 +52150,7 @@ function procImgWithTask(task, onDone, onErr){
                 else if(task.selK==='main_bld_real'){ _mainBldComposite(img, u, function(f){ finishWithResize(f||u, onDone); }); }
                 else if(task.selK==='surround_real'){ _surroundComposite(img, u, function(f){ finishWithResize(f||u, onDone); }); } // 2026-10-27: 위치 맞춤·색 원본·메인 간판 원본 // 2026-10-27: 메인건물만 결과, 나머지는 원본 픽셀(카메라 고정) // 2026-10-26: 간판 교정 — 간판만 결과, 나머지는 원본 픽셀(카메라 고정·붉은끼 방지)
                 else if(task.skipDetailRestore){ _neutralizeEditColorCast(img,u,function(correctedUrl){ finishWithResize(correctedUrl||u, onDone); }); } // 3D 렌더를 실사로 바꾼 홈스테이징: CG 디테일 복원 안 함
-                else _neutralizeEditColorCast(img,u,function(correctedUrl){ _editDetailRestore(_editRootOf(img)||img, correctedUrl||u, function(f){ finishWithResize(f||correctedUrl, onDone); }, {wbSkip:_editWbSkipKey(task.selK)}); });
+                else _neutralizeEditColorCast(img,u,function(correctedUrl){ _editDetailRestore(img, correctedUrl||u, function(f){ finishWithResize(f||correctedUrl, onDone); }, {wbSkip:_editWbSkipKey(task.selK)}); });
               }
             },onErr, _bill);
         });
@@ -52235,6 +52249,8 @@ function procImgWithTask(task, onDone, onErr){
   // 2026-10-27 요청("로드뷰의 도로 부분은 손대지 마 — 메인 건물 왼쪽은 보도블럭이 이어진 곳인데 도로·횡단보도를 만들어 넣었다"): 도로 배치 고정 한 가지만 추가
   // 2026-10-27 신고("프롬프트가 길어서 줄인다고 나온다"): 대지 합성엔 쓸모없는 실내 규칙(욕실·에어컨·조명)만 빼서 5만 자 초과 → 중간 잘림을 없앰(다른 문구는 그대로)
   if(task && /^site_context/.test(task.selK||'')){ try{ ap=_siteStripInterior(ap); }catch(_eSI){} }
+  var _aerialCamRef=_siteAerialCamRef(task, wf); // 2026-10-27 조감도류 = 브이월드 화면 기준
+  if(_aerialCamRef){ ap = SITE_AERIAL_REFCAM_PROMPT + ((task.userExtra||'').trim() ? (' ⚠️ The user additionally requested (highest priority for content, never for camera/layout): '+String(task.userExtra).trim()+'.') : ''); }
   // 2026-10-27 신고("메인건물 왼쪽 상가 2개가 지워졌다"): 이웃 건물 유지 + 요청("투시도는 하늘이 좀 더 보이게")
   if(task && /^site_context/.test(task.selK||'')) ap += ' 🏘 KEEP NEIGHBORS (user rule): only the main building\'s own lot changes. Every neighboring building and shop of the reference — especially the low shops right next to the main building on its left and right — must stay in the result with their own facades and signs; never delete them, never turn their place into an empty plaza or extra sidewalk. If the main building hides part of a neighbor, show the part that stays visible.';
   if(task && task.selK==='site_context_composite_persp') ap += ' ☁️ SKY HEADROOM (user rule): frame the shot so clearly more sky shows above the main building\'s roof (roughly the top 20-25% of the frame is sky) — the roof and rooftop signs must never touch the top edge. Keep vertical lines straight.';
@@ -52415,8 +52431,10 @@ function procImgWithTask(task, onDone, onErr){
       });
     });
     function _go3(){
-      _withExplicitAspect(img, function(_asp){
-        falRun(_nbSlug3,{prompt:ap,image_urls:[imgUrl].concat(_ru3.filter(Boolean)),num_images:1,resolution:apiRes,aspect_ratio:_asp,output_format:'jpeg'},
+      var _camI = _aerialCamRef ? _refs3.indexOf(_aerialCamRef) : -1; // 2026-10-27 조감도류: 1번 이미지 = 브이월드 캡처(카메라), 2번 = 3D 디자인
+      var _urls3 = (_camI>=0 && _ru3[_camI]) ? [_ru3[_camI], imgUrl].concat(_ru3.filter(function(u,ii){ return u && ii!==_camI; })) : [imgUrl].concat(_ru3.filter(Boolean));
+      _withExplicitAspect((_camI>=0 && _ru3[_camI]) ? _aerialCamRef : img, function(_asp){
+        falRun(_nbSlug3,{prompt:ap,image_urls:_urls3,num_images:1,resolution:apiRes,aspect_ratio:_asp,output_format:'jpeg'},
           function(d){var url=falExtractImageUrl(d);if(url)onDone(url);else onErr('NB2 URL 없음');},onErr, _bill);
       });
     }
@@ -58908,12 +58926,11 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'✨ 처음 렌더 탭 소개 창', h:'처음 3D 렌더 실사화 탭에 들어오면 한 번만, AI 편집 부분 수정(칠한 부분만 고치기), 뷰 변환(투시도↔조감도·광역조감도·탑뷰), 시간·날씨·계절 변환, 포토샵 편집(무료), 쇼츠 만들기(무료)를 소개하는 창이 떠요. 항목을 누르면 그 탭으로 바로 가요.'},
   {c:'render', t:'⬆ 렌더 직후 업스케일 안내', h:'3D 렌더 실사화 결과가 나오면 "업스케일하면 더 사실적으로 나와요" 안내가 떠요. [이 결과 업스케일하기]를 누르면 업스케일 탭에 결과가 바로 들어가요 — 렌더 직후 업스케일하면 재질·유리·나무 디테일이 더 또렷하고 실제 사진에 더 가까워져요.'},
   {c:'render', t:'🖱 렌더 결과 누르면 업로드 이미지로', h:'3D 렌더 실사화에서 결과 카드를 누르면 그 렌더 결과가 왼쪽 업로드 이미지로 들어가요. 그대로 이어서 다시 렌더하거나(예: 고품질화·대지 합성) 다른 탭으로 보낼 수 있어요. 원본으로 다시 하려면 원본을 다시 올리거나 재실행(↻)을 누르세요.'},
-  {c:'edit', t:'🌳 이어서 편집해도 화질 유지', h:'AI 편집 결과로 계속 이어서 편집해도, 안 바뀐 곳(나무·하늘·이웃 건물 등)은 매번 맨 처음 올린 원본의 선명한 디테일과 해상도로 복원해요. 편집할수록 나무가 뭉개지던 문제를 줄였어요. 편집으로 바꾼 부분은 그대로 유지돼요.'},
-  {c:'common', t:'🎨 AI 편집 색 유지(붉은끼 방지)', h:'AI 편집 결과가 원본보다 붉게(따뜻하게) 틀어지면 자동으로 원본 색 균형에 맞춰요. 사진 전체를 다시 그리는 화질 개선 같은 편집도 적용돼요. 낮밤·계절·조명·뷰 변환처럼 색이 바뀌는 게 목적인 프리셋은 그대로 둬요.'},
+    {c:'common', t:'🎨 AI 편집 색 유지(붉은끼 방지)', h:'AI 편집 결과가 원본보다 붉게(따뜻하게) 틀어지면 자동으로 원본 색 균형에 맞춰요. 사진 전체를 다시 그리는 화질 개선 같은 편집도 적용돼요. 낮밤·계절·조명·뷰 변환처럼 색이 바뀌는 게 목적인 프리셋은 그대로 둬요.'},
   {c:'render', t:'✏️ 부분 수정은 AI 편집으로 안내', h:'렌더 실사화에서 추가 요청에 "지워줘·바꿔줘·옮겨줘·추가해줘"처럼 특정 부분을 고치는 말을 쓰면, 렌더 전에 "AI 편집에서 하면 더 정확해요" 안내가 떠요. [AI 편집으로 가기]를 누르면 같은 이미지와 문구가 AI 편집으로 옮겨지고, 바꿀 부분만 칠해서 실행하면 나머지는 원본 그대로 유지돼요. 저녁 분위기·톤·사람 추가처럼 전체에 해당하는 요청은 그대로 렌더해요.'},
   {c:'render', t:'✨ 완성 렌더는 고품질화로 안내', h:'"실사화·고급실사화 통합"으로 이미 조명·재질이 다 들어간 완성 렌더 이미지를 돌리면, "렌더링 완성본 고품질화"로 바꿀지 물어봐요. 완성 렌더는 고품질화가 구도·디자인·글씨를 그대로 두고 사진 느낌만 올려줘서 더 잘 맞아요. SketchUp·라이노처럼 재질·조명 없는 3D 화면 캡처는 실사화가 맞아요.'},
   {c:'render', t:'📋 렌더 탭 붙여넣기(Ctrl+V)', h:'렌더 실사화에서 Ctrl+V는 다른 탭처럼 위 이미지 업로드(원본)로 들어가요. 로드뷰·카톡 캡처를 실사 참고 이미지로 넣으려면 [📋 클립보드 → 참고 이미지로 붙여넣기] 버튼을 누르거나, 참고 이미지 빈칸을 한 번 클릭한 뒤 Ctrl+V 하세요. 카카오 로드뷰 창이 열려 있을 때의 Ctrl+V는 참고 이미지로 들어가요.'},
-  {c:'render', t:'🗺 실제 대지 배경 합성 — 사용 팁', h:'실제 대지 배경 합성(투시도·조감도·광역조감도)은 로드뷰·브이월드 캡처를 실사 참고 이미지에 꼭 넣어야 해요(없으면 안내가 떠요). 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠서 AI 편집의 글씨/간판 교정으로 이어갈 수 있어요. 하늘(맑음·구름 조금·흐림)도 고를 수 있어요. 로드뷰의 도로·보도 배치는 그대로 두고(없던 도로·횡단보도 안 만듦), 차는 보통 1~3대(넓은 도로 최대 5대, 차선 방향 맞게), 번호판은 모자이크 없이 임의 번호의 깔끔한 한국 번호판으로 그려요. 조감도·광역조감도 렌더가 끝나면 "🏙 주변 건물도 실제 사진처럼 바꿀까요?" 안내가 떠요(결과 카드의 🏙 주변 실사화(4K) 버튼, 나중에 AI 편집의 🏙️ 주변 건물 화질 개선 버튼도 같아요) — 브이월드 3D 모델 느낌의 주변 건물은 형태(크기·층수·지붕)는 그대로 두고 마감재만 실제 사진처럼, 도로·차·나무도 4K 실제 드론 사진 퀄리티로 다시 그리고, 배치·카메라와 메인건물 간판은 그대로 둬요(나노바나나 Pro 4K 비용). 조감도·광역조감도에서는 3D 지도에 납작하게 찍힌 차·나무를 그대로 쓰지 않고, 높이·그림자가 있는 실제 입체 차량·나무와 선명한 주변 건물로 그려요. 렌더 버튼을 누르면 대지 위치 표시 창이 떠요 — 메인건물이 들어갈 기존 건물 자리를 드래그해 빨간 사각형으로 감싸고 [🟥 표시한 자리로 렌더]를 누르면, AI가 그 자리·폭에 맞춰 넣고 바깥 건물은 그대로 둬요(빨간 선은 결과에 안 그려져요). 메인건물 옆 이웃 상가·건물은 지우지 않고 그대로 두고, 투시도는 지붕 위로 하늘이 넉넉히 보이게 잡아요. 메인건물이 3D·CG처럼 남았으면 결과 카드의 🏢 메인건물 실사화 버튼을 누르세요 — 그 건물만 실제 사진처럼 다시 그리고 카메라·주변은 그대로 둬요(나노바나나 Pro 비용). 메인 건물은 3D 느낌 없이 실제 건물 사진처럼 마감하고, 투시도는 세로선이 반듯하게(왜곡 없이) 나와요. 로드뷰는 3D 뷰와 비슷한 방향·높이·범위로, 앞에 차가 적은 곳에서 캡처하면 더 잘 나와요.'},
+  {c:'render', t:'🗺 실제 대지 배경 합성 — 사용 팁', h:'실제 대지 배경 합성(투시도·조감도·광역조감도)은 로드뷰·브이월드 캡처를 실사 참고 이미지에 꼭 넣어야 해요(없으면 안내가 떠요). 렌더가 끝나면 "🔤 주변 간판·로고 글씨도 정리할까요?" 안내가 떠서 AI 편집의 글씨/간판 교정으로 이어갈 수 있어요. 하늘(맑음·구름 조금·흐림)도 고를 수 있어요. 로드뷰의 도로·보도 배치는 그대로 두고(없던 도로·횡단보도 안 만듦), 차는 보통 1~3대(넓은 도로 최대 5대, 차선 방향 맞게), 번호판은 모자이크 없이 임의 번호의 깔끔한 한국 번호판으로 그려요. 조감도·광역조감도는 브이월드 캡처 화면이 카메라예요 — 배경·도로·주변 건물 배치와 각도는 캡처 그대로, 메인건물만 대지 자리(빨간 사각형 또는 핀/가운데)에 그 각도로 들어가요. 3D 뷰 이미지는 건물 디자인 참고용이라 각도를 맞추지 않아도 돼요. 조감도·광역조감도 렌더가 끝나면 "🏙 주변 건물도 실제 사진처럼 바꿀까요?" 안내가 떠요(결과 카드의 🏙 주변 실사화(4K) 버튼, 나중에 AI 편집의 🏙️ 주변 건물 화질 개선 버튼도 같아요) — 브이월드 3D 모델 느낌의 주변 건물은 형태(크기·층수·지붕)는 그대로 두고 마감재만 실제 사진처럼, 도로·차·나무도 4K 실제 드론 사진 퀄리티로 다시 그리고, 배치·카메라와 메인건물 간판은 그대로 둬요(나노바나나 Pro 4K 비용). 조감도·광역조감도에서는 3D 지도에 납작하게 찍힌 차·나무를 그대로 쓰지 않고, 높이·그림자가 있는 실제 입체 차량·나무와 선명한 주변 건물로 그려요. 렌더 버튼을 누르면 대지 위치 표시 창이 떠요 — 메인건물이 들어갈 기존 건물 자리를 드래그해 빨간 사각형으로 감싸고 [🟥 표시한 자리로 렌더]를 누르면, AI가 그 자리·폭에 맞춰 넣고 바깥 건물은 그대로 둬요(빨간 선은 결과에 안 그려져요). 메인건물 옆 이웃 상가·건물은 지우지 않고 그대로 두고, 투시도는 지붕 위로 하늘이 넉넉히 보이게 잡아요. 메인건물이 3D·CG처럼 남았으면 결과 카드의 🏢 메인건물 실사화 버튼을 누르세요 — 그 건물만 실제 사진처럼 다시 그리고 카메라·주변은 그대로 둬요(나노바나나 Pro 비용). 메인 건물은 3D 느낌 없이 실제 건물 사진처럼 마감하고, 투시도는 세로선이 반듯하게(왜곡 없이) 나와요. 로드뷰는 3D 뷰와 비슷한 방향·높이·범위로, 앞에 차가 적은 곳에서 캡처하면 더 잘 나와요.'},
   {c:'render', t:'☀️ 하늘 선택 — 3D 렌더 실사화 모든 프리셋', h:'3D 렌더 실사화 탭의 모든 프리셋(실사화·고급 실사화·CG·실제 대지 배경 합성·CAD 아이소·고품질화 등)에서 렌더 버튼 위 [☀️ 하늘]로 맑음 / 구름 조금 / 흐림 / 원본 그대로를 고를 수 있어요. 렌더링 완성본 고품질화는 기본이 "원본 그대로"예요. 추가 요청에 야간·노을을 적으면 그게 우선이에요.'},
   {c:'edit', t:'🔤 글씨/간판 교정 — 간판만 바뀌고 나머지는 원본 그대로', h:'AI 편집의 🔤 글씨/간판 교정은 결과에서 간판·글씨 부분만 AI 물체 인식으로 찾아 원본 사진 위에 얹어요. 그래서 카메라(구도)가 틀어지지 않고 전체 색감(붉은끼)도 안 바뀌어요. 위치가 조금 밀려 나와도 자동으로 맞춰요. 이 프리셋을 고르면 엔진이 글자를 더 잘 쓰는 나노바나나 Pro로 자동으로 바뀌어요. 글씨가 여전히 어색하면 추가 요청 칸에 정확한 간판 글자를 적고 다시 돌려보세요.'},
   {c:'render', t:'🛣 3D 렌더 실사화 외관 — 도로 표시·차량', h:'실사화·고퀄리티 CG로 외관을 렌더할 때 도로가 보이면 차선·중앙선·횡단보도를 한국 도로 규정에 맞게 실제 페인트처럼 그리고(모델에 없던 유턴 표시·화살표·글씨는 안 만들어요), 도로에 차가 없으면 평범한 차를 1~3대(넓은 도로는 최대 5대) 중간 거리에 자연스럽게 넣어요. 모델링한 차는 그대로 두고, 카메라 가까운 앞쪽이나 건물을 가리는 자리에는 넣지 않아요. 번호판은 임의 번호의 깔끔한 한국 번호판이에요.'},
