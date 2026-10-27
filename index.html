@@ -19310,7 +19310,7 @@ function _dedupeHist(){
   if(removed) console.log('[갤러리 중복 정리] 같은 그림 '+removed+'개 정리');
   return removed;
 }
-function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel, siteSetFlag){
+function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resolution, budgetSnapshot, roomLabel, siteSetFlag, metaExtra){
   if(!(_supa && _supaUser && resultUrl)) return;
   try{
     // ⚠️ executeSingleRender 쪽과 같은 이유로 여기도 영상 URL이면 .jpg/image-jpeg로 잘못
@@ -19335,7 +19335,7 @@ function _saveResultToCloudGallery(wf, id, resultUrl, origUrl, engineName, resol
           var _row2={
             user_id:_supaUser.id, wf:wf, storage_path:filePath, public_url:publicUrl,
             orig_url:origUrlFinal||null, engine:engineName||'', resolution:resolution||'', style_key:roomLabel||'', budget_snapshot:budgetSnapshot||null,
-            meta:{prompt:String((_sp&&(siteSetFlag?_sp.multiRoomPrompt:_sp.autoRoomPrompt))||'').slice(0,1000), preset:roomLabel||'', eng:engineName||'', mode:(siteSetFlag?'siteset':'')}
+            meta:Object.assign({prompt:String((_sp&&(siteSetFlag?_sp.multiRoomPrompt:_sp.autoRoomPrompt))||'').slice(0,1000), user_text:(wf==='spaceset'?String((_sp&&(siteSetFlag?_sp.multiRoomPrompt:_sp.autoRoomPrompt))||'').slice(0,2000):undefined), preset:roomLabel||'', preset_label:roomLabel||'', eng:engineName||'', mode:(siteSetFlag?'siteset':'')}, metaExtra||{})
           };
           _supa.from('gallery').insert(_row2).select().single().then(function(ins){
             if(ins && ins.error && /meta/i.test(ins.error.message||'')){ delete _row2.meta; return _supa.from('gallery').insert(_row2).select().single(); }
@@ -41011,7 +41011,7 @@ function _chatEditSend(promptText){
   var loadingId=Date.now()+Math.random();
   G.HIST.edit.unshift({ id:loadingId, orig:baseImg, result:null, origThumb:null, tags:['대화형 수정 처리 중...'], ai:'', cx:50, fav:false, wf:'edit', preview:false, loading:true });
   if(G.wf==='edit') renderMain('edit');
-  var task={id:Date.now(), img:baseImg, wf:'edit', prompt:promptText, selK:null, resolution:tab.resolution||'1K', chatEdit:true};
+  var task={id:Date.now(), img:baseImg, wf:'edit', prompt:promptText, selK:null, resolution:tab.resolution||'1K', chatEdit:true, userText:promptText, userExtra:promptText};
   procImgWithTask(task, function(resultUrl){
     tab.chatHistory.push({prompt:promptText, resultUrl:resultUrl});
     tab.chatCurrentImg=resultUrl;
@@ -41019,7 +41019,7 @@ function _chatEditSend(promptText){
     G.HIST.edit=G.HIST.edit.filter(function(x){return x.id!==loadingId;});
     G.HIST.edit.unshift({ id:Date.now()+Math.random(), orig:baseImg, result:resultUrl, origThumb:null, tags:['대화형 수정 턴 '+tab.chatHistory.length, turnCost+'cr'], ai:'', cx:50, fav:false, wf:'edit', preview:false });
     tab.resultImg=resultUrl;
-    _saveResultToCloudGallery('edit', task.id, resultUrl, baseImg, 'nano2', task.resolution);
+    _saveResultToCloudGallery('edit', task.id, resultUrl, baseImg, 'nano2', task.resolution, null, null, false, {mode:'chat', user_text:String(promptText||'').slice(0,2000), prompt:String(promptText||'').slice(0,1000)}); // 2026-10-26: 관리자용 — 대화형 수정에서 회원이 보낸 말
     if(G.wf==='edit') renderMain('edit');
     renderSB();
   }, function(err){
@@ -50122,7 +50122,7 @@ function executeSingleRender(task){
                     resolution:task.resolution||'',
                     style_key:task.selK||'',
                     budget_snapshot:task.budgetSnapshot||null,
-                    meta:{prompt:String(task.userText||'').slice(0,1000), preset:task.selK||'', eng:task.eng||'', mode:(task.wf==='edit'?(task.maskData?'mask':'full'):''), mask_url:maskUrl||null, up:task.upParams||null}
+                    meta:{prompt:String(task.userText||'').slice(0,1000), user_text:_admUserText(task), preset:task.selK||'', preset_label:_admPresetLabel(task.selK), eng:task.eng||'', mode:(task.wf==='edit'?(task.chatEdit?'chat':(task.maskData?'mask':'full')):''), mask_url:maskUrl||null, up:task.upParams||null}
                   };
                   _supa.from('gallery').insert(_row).select().single().then(function(ins){
                     if(ins && ins.error && /meta/i.test(ins.error.message||'')){ delete _row.meta; return _supa.from('gallery').insert(_row).select().single(); }
@@ -50905,6 +50905,10 @@ var REALISM_ROAD_RULE=' 🛣 ROAD RULE — ONLY IF THIS IS AN EXTERIOR WITH A VI
 var REALISM_ROAD_RULE_SHORT=' If this is an exterior with a visible road: keep correct Korean road markings (yellow centre line, white lane lines, crosswalks only where modeled — never invent U-turn marks, arrows or text), and if the road has no cars add 1 to 3 ordinary Korean cars (up to 5 on a wide road) in the middle distance in the correct lanes (right-hand traffic), none in the near foreground or blocking the building, with clean Korean license plates.';
 var NIGHT_COMMON_TAIL=' 🌙 NIGHT-SCENE RULES (user rules for every night / blue-hour / dusk scene, apply on top of everything above): (1) FRAMING LOCKED — never zoom in, crop tighter, tilt, lower, raise or reframe the camera, not even slightly; the result must show exactly the same field of view and edges as the original image (same distance from the building to every frame edge). (2) MAIN BUILDING LIGHT LEVEL = THE SAME AS A SOFT BLUE-HOUR SHOT — the warm interior glow through the windows is a natural 2700-3000K warm-white at a moderate, balanced level: windows read clearly lit, but the glow is never blown out or a flat bright yellow/white fill; furniture, ceilings and interior details stay visible inside the glow, and the facade materials keep their texture. Ceiling cove / linear / soffit line lights are only faint soft washes. Exposure is balanced like a professional architectural dusk photograph — the building must not look brighter or hotter than that.';
 var NO_MOON_TAIL=' 🌑 NO MOON (user rule for every night / blue-hour / dusk scene): do NOT draw a moon — no full moon, half moon or crescent, no moon disc or glow in the sky, unless the user explicitly asked for a moon. Keep the sky a clean deep night/twilight tone. Never tilt, lower, raise, zoom or reframe the camera to show more sky — the framing stays exactly as in the original image.';
+// 2026-10-26 요청("회원이 직접 쓴 프롬프트와 AI 편집에서 무엇을 썼는지 관리자만 보게"): 갤러리 기록(meta)에 회원이 직접 쓴 글만 따로 저장
+// (프리셋을 골랐으면 추가 요청 칸 글, 프리셋 없이 쓴 경우 쓴 글 전체, 대화형 수정은 보낸 메시지) — 관리자 회원 상세에서만 보여줌
+function _admUserText(task){ try{ var t=task.selK ? (task.userExtra||'') : (task.userExtra || task.userText || ''); return String(t).trim().slice(0,2000); }catch(e){ return ''; } }
+function _admPresetLabel(k){ if(!k) return ''; try{ var all=[].concat(typeof PS_EDIT!=='undefined'?PS_EDIT:[], typeof PS_RENDER!=='undefined'?PS_RENDER:[], typeof PS_SPACE!=='undefined'?PS_SPACE:[]); var q=all.find(function(x){ return x.k===k; }); return q?String(q.l||k):k; }catch(e){ return k; } }
 function procImgWithTask(task, onDone, onErr){
   // 2026-10-26 신고("대지 배경 합성에서 메인 건물이 또 3D 모델 그대로 — 매번 실수"): 지시문만으로는 AI가 3D 모델을 그대로 붙이는 경우를 못 막음 →
   // 2단계로 확실하게: ① 메인 건물만 먼저 실사화(배경은 단색 그대로, 1K 기본 엔진) ② 그 실사 건물을 실제 대지 사진에 합성
@@ -53994,7 +53998,7 @@ function _admMemberDetail(uid){
         skKeys.map(function(k){ return '<span style="background:var(--c2);border:1px solid var(--bd2);border-radius:6px;padding:4px 8px">'+_admEsc(k)+' <b style="color:var(--ac)">'+skCnt[k]+'</b></span>'; }).join('')+'</div>';
     }
     var thumbs=(out.g||[]).filter(function(g){return g.public_url && !/\.(mp4|webm|mov)(\?|$)/i.test(g.public_url);}).slice(0,60);
-    window._admLbItems=thumbs.map(function(g){ var o=(g.orig_url && /^https?:/i.test(g.orig_url) && !/\.(mp4|webm|mov)(\?|$)/i.test(g.orig_url))?g.orig_url:''; var mt=g.meta||{}; return {orig:o, res:g.public_url, mask:mt.mask_url||'', prompt:mt.prompt||'', mode:mt.mode||'', label:(_ADM_WF_LABEL[g.wf]||g.wf||'')+(g.style_key?' · '+g.style_key:'')+' · '+_admKstDT(g.created_at).slice(5,16)}; });
+    window._admLbItems=thumbs.map(function(g){ var o=(g.orig_url && /^https?:/i.test(g.orig_url) && !/\.(mp4|webm|mov)(\?|$)/i.test(g.orig_url))?g.orig_url:''; var mt=g.meta||{}; return {orig:o, res:g.public_url, mask:mt.mask_url||'', prompt:mt.prompt||'', utext:(mt.user_text!=null?mt.user_text:null), plabel:mt.preset_label||'', mode:mt.mode||'', label:(_ADM_WF_LABEL[g.wf]||g.wf||'')+(g.style_key?' · '+g.style_key:'')+' · '+_admKstDT(g.created_at).slice(5,16)}; });
     if(thumbs.length){
       function _okImg(u){ return u && /^https?:/i.test(u) && !/\.(mp4|webm|mov)(\?|$)/i.test(u); }
       h+='<div style="font-weight:800;color:var(--t);margin:8px 0 6px">🖼 최근 만든 이미지 <span style="font-weight:400;color:var(--m2);font-size:10.5px">(왼쪽 원본 → 오른쪽 결과 · 누르면 크게 · 최근 60개 · 빨간 테두리 = 회원이 지운 것)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-bottom:12px">'+
@@ -54004,7 +54008,7 @@ function _admMemberDetail(uid){
           var _mt=g.meta||{};
           var cell=function(u,lab){ return u ? '<a href="javascript:void(0)" onclick="_admLightbox('+_ix+','+(lab==='원본'?1:0)+')" style="position:relative;display:block;cursor:zoom-in"><img src="'+_admEsc(u)+'" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;border:1px solid var(--bd2)">'+((lab==='원본' && _mt.mask_url)?'<img src="'+_admEsc(_mt.mask_url)+'" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;pointer-events:none">':'')+'<span style="position:absolute;left:4px;top:4px;background:rgba(0,0,0,.65);color:#fff;font-size:9.5px;padding:1px 5px;border-radius:4px">'+lab+'</span></a>' : '<div style="aspect-ratio:1;border-radius:6px;border:1px dashed var(--bd2);display:flex;align-items:center;justify-content:center;color:var(--m2);font-size:10px;text-align:center">원본 없음</div>'; };
           return '<div style="background:var(--c2);border:1px solid '+(g._del?'rgba(248,113,113,.45)':'var(--bd2)')+';border-radius:8px;padding:5px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">'+cell(o,'원본')+cell(g.public_url,'결과')+'</div><div style="font-size:10px;color:var(--m2);margin-top:4px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+_admEsc((g.style_key||'')+' '+(g.engine||''))+'">'+(g._del?'<b style="color:#f87171">'+(g._del==='storage_recovered'?'♻ 복구됨':'🗑 회원 삭제')+'</b> · ':'')+_admEsc(_ADM_WF_LABEL[g.wf]||g.wf||'')+(g.style_key?' · '+_admEsc(g.style_key):'')+' · '+_admKstDT(g.created_at).slice(5,16)+'</div>'+
-            ((_mt.prompt||_mt.mode)?'<div style="font-size:10.5px;color:var(--t2);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden" title="'+_admEsc(_mt.prompt||'')+'">'+(_mt.mode==='mask'?'<b style="color:#ff6b8a">🖌 칠해서 편집</b> ':(_mt.mode==='full'?'<b style="color:var(--m2)">전체 편집</b> ':''))+(_mt.prompt?'📝 '+_admEsc(_mt.prompt):'<span style="color:var(--m2)">(프롬프트 없음 · 프리셋만)</span>')+'</div>':'')+
+            ((_mt.prompt||_mt.mode||_mt.user_text)?'<div style="font-size:10.5px;color:var(--t2);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden" title="'+_admEsc(_mt.user_text!=null?_mt.user_text:(_mt.prompt||''))+'">'+(_mt.mode==='mask'?'<b style="color:#ff6b8a">🖌 칠해서 편집</b> ':(_mt.mode==='chat'?'<b style="color:#93c5fd">💬 대화형</b> ':(_mt.mode==='full'?'<b style="color:var(--m2)">전체 편집</b> ':'')))+(_mt.user_text!=null ? (_mt.user_text?'✍️ <b style="color:#fde68a">'+_admEsc(_mt.user_text)+'</b>':'<span style="color:var(--m2)">✍️ 직접 쓴 글 없음</span>') : (_mt.prompt?'📝 '+_admEsc(_mt.prompt):'<span style="color:var(--m2)">(프롬프트 없음 · 프리셋만)</span>'))+'</div>':'')+
             '</div>';
         }).join('')+'</div>';
     }
@@ -54048,8 +54052,12 @@ function _admLightbox(idx, showOrig){
     var it=items[cur];
     gE('adm-lb-cap').textContent=(cur+1)+' / '+items.length+'  ·  '+it.label;
     var pb=gE('adm-lb-prompt'); if(!pb){ pb=document.createElement('div'); pb.id='adm-lb-prompt'; pb.style.cssText='max-width:92%;margin-top:8px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,.08);color:#fff;font-size:12.5px;line-height:1.5;white-space:pre-wrap;max-height:18vh;overflow:auto'; ov.appendChild(pb); }
-    pb.style.display=(it.prompt||it.mode)?'block':'none';
-    pb.innerHTML=(it.mode==='mask'?'<b style="color:#ff6b8a">🖌 칠해서 편집</b>  ':(it.mode==='full'?'<b>전체 편집</b>  ':''))+(it.prompt?'📝 '+_admEsc(it.prompt):'(프롬프트 없음 · 프리셋만)');
+    pb.style.display=(it.prompt||it.mode||it.utext||it.plabel)?'block':'none';
+    // 2026-10-26: 편집 방식 · 고른 프리셋 · 회원이 직접 쓴 글을 나눠서 보여줌(예전 기록은 저장된 프롬프트로 대신 표시)
+    var _modeTxt=it.mode==='mask'?'<b style="color:#ff6b8a">🖌 칠해서 편집</b>':(it.mode==='chat'?'<b style="color:#93c5fd">💬 대화형 수정</b>':(it.mode==='full'?'<b>전체 편집</b>':''));
+    var _parts=[]; if(_modeTxt) _parts.push(_modeTxt); if(it.plabel) _parts.push('🎯 프리셋: <b>'+_admEsc(it.plabel)+'</b>');
+    var _ut = it.utext!=null ? (it.utext ? '✍️ 회원이 쓴 글: <b style="color:#fde68a">'+_admEsc(it.utext)+'</b>' : '✍️ 회원이 쓴 글: <span style="color:#aaa">없음 (프리셋만 사용)</span>') : (it.prompt?'📝 '+_admEsc(it.prompt):'(프롬프트 없음 · 프리셋만)');
+    pb.innerHTML=_parts.join('  ·  ')+(_parts.length?'<br>':'')+_ut;
     var st=gE('adm-lb-stage');
     var _oLab=it.mask?'원본 (빨강 = 칠한 영역)':'원본';
     if(mode==='both') st.innerHTML=imgEl(it.orig,_oLab,it.mask)+imgEl(it.res,'결과');
