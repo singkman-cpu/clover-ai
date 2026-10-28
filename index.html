@@ -25904,7 +25904,7 @@ function _openVworldModal(){
                   var rT2=getTab('render'); if(!rT2.refs) rT2.refs=Array(6).fill(null);
                   var ei=rT2.refs.findIndex(function(r){return !r;});
                   if(ei===-1) showErr('실사 참고 이미지 슬롯이 이미 6개 다 찼어요 — 하나 비우고 다시 시도해주세요.');
-                  else { rT2.refs[ei]=du; try{ _saveMainTabImagesDraft(); }catch(_e){} renderSB(); showOk('✅ 실사 참고 이미지로 추가됐어요 ('+rT2.refs.filter(function(r){return !!r;}).length+'/6)'); }
+                  else { rT2.refs[ei]=du; _vwMarkRef(du); try{ _saveMainTabImagesDraft(); }catch(_e){} renderSB(); showOk('✅ 실사 참고 이미지로 추가됐어요 ('+rT2.refs.filter(function(r){return !!r;}).length+'/6)'); }
                 } else showErr('화면 캡처를 못 했어요'+(err?' ('+err+')':'')+'. 브라우저 스크린샷(Windows: Win+Shift+S, Mac: Cmd+Shift+4)으로 찍은 뒤, 렌더 탭의 [📋 클립보드 → 참고 이미지로 붙여넣기]를 눌러주세요.');
               }finally{ if(_afterOnce) _afterOnce(); }
             });
@@ -25914,7 +25914,7 @@ function _openVworldModal(){
           if(!rTab.refs) rTab.refs=Array(6).fill(null);
           var emptyIdx=rTab.refs.findIndex(function(r){return !r;});
           if(emptyIdx===-1){ showErr('실사 참고 이미지 슬롯이 이미 6개 다 찼어요 — 하나 비우고 다시 시도해주세요.'); return; }
-          rTab.refs[emptyIdx]=dataUrl;
+          rTab.refs[emptyIdx]=dataUrl; _vwMarkRef(dataUrl);
           _saveMainTabImagesDraft(); // ⚠️ 버그 수정("레퍼런스 이미지가 없어진다"): 이 캡처 경로가 자동저장 함수를 안 부르고 있어서, 화면엔 보여도 실제로는 저장이 안 되고 있었음
           renderSB();
           // ⚠️ 요청 반영("캡처하면 자동으로 닫히던데 안 닫히게 해줘, 옆에도 캡처하고 싶은데"): 캡처 후
@@ -49810,9 +49810,10 @@ function _runToolWithPromptActual(translatedPrompt){
   if(G.wf==='edit' && tab.selK==='bg_quality_match'){ var _sq=(typeof PS_EDIT!=='undefined'?PS_EDIT:[]).find(function(x){ return x.k==='surround_real'; }); if(_sq){ var _ex=(tab.extraPrompt||'').trim(); tab.selK='surround_real'; tab.prompt=_sq.pt; translatedPrompt=_sq.pt+(_ex?(' Additionally: '+_ex+'.'):''); G.eng='nano_pro'; tab.resolution='4K'; } }
   if(G.wf==='render' && /^site_context/.test(tab.selK||'') && !((tab.refs||[]).filter(Boolean).length)){ alert('실제 대지 배경 합성은 대지 사진이 필요해요.\n\n[실제 대지 배경 참고 (브이월드 3D)] 또는 [위치 확인 · 로드뷰 (카카오맵)]로 캡처해서 "실사 참고 이미지"에 넣은 뒤 다시 눌러주세요.'); return; } // 2026-10-26: 참고 이미지 없이 돌면 배경 없이 건물만 나옴
   if(G.wf==='render' && !tab._editHintOk){ if(_renderEditHintThen(tab, function(){ tab._editHintOk=true; _runToolWithPromptActual(translatedPrompt); })) return; } // 2026-10-27 부분 수정 요청이면 AI 편집 안내
+  if(G.wf==='render' && !tab._vwPresetOk && tab.selK==='site_context_composite_persp' && (tab.refs||[]).some(function(r){ return r && _vwIsRef(r); })){ _vwPresetAsk(tab, function(){ tab._vwPresetOk=true; _runToolWithPromptActual(tab.selK==='site_context_composite_persp' ? translatedPrompt : (function(){ var q=PS_RENDER.find(function(x){ return x.k===tab.selK; }); var ex=(tab.extraPrompt||'').trim(); return q ? q.pt+(ex?(' Additionally: '+ex+'.'):'') : translatedPrompt; })()); }); return; } // 2026-10-28 투시도인데 브이월드 항공 캡처면 확인
   if(G.wf==='render' && !tab._siteMarkOk && /^site_context/.test(tab.selK||'') && (tab.refs||[]).filter(Boolean).length){ _siteMarkOpen(function(){ tab._siteMarkOk=true; _runToolWithPromptActual(translatedPrompt); }); return; } // 2026-10-27 요청: 렌더 버튼 누르면 대지 위치 표시 창
   if(G.wf==='render' && !tab._qbHintOk && tab.selK==='hq_real'){ if(_qbHintThen(tab, function(sw){ tab._qbHintOk=true; var tp=translatedPrompt; if(sw){ var q=PS_RENDER.find(function(x){ return x.k==='render_quality_boost'; }); if(q){ tab.selK=q.k; tab.prompt=q.pt; var ex=(tab.extraPrompt||'').trim(); tp=q.pt+(ex?(' Additionally: '+ex+'.'):''); try{ renderSB(); }catch(e){} } } _runToolWithPromptActual(tp); })) return; } // 2026-10-27 완성 렌더면 고품질화 안내
-  if(G.wf==='render' && !tab._bgAsked1){ tab._bgAsked1=true; _bgAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } tab._bgAsked1=false; tab._editHintOk=false; tab._qbHintOk=false; tab._siteMarkOk=false; // 2026-10-26 배경 처리 묻기(한 번 거친 뒤 실제 실행)
+  if(G.wf==='render' && !tab._bgAsked1){ tab._bgAsked1=true; _bgAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } tab._bgAsked1=false; tab._editHintOk=false; tab._qbHintOk=false; tab._siteMarkOk=false; tab._vwPresetOk=false; // 2026-10-26 배경 처리 묻기(한 번 거친 뒤 실제 실행)
   try{ if(G.wf==='render' && tab.inputImg) _logoHintCheck(tab.inputImg); }catch(_lh){} // 2026-10-26: 로고 큰 이미지면 안내(렌더와 동시에, 기다리지 않음)
   // 이 사진(=결과)에 예산 정보를 영구히 붙여두기 위한 스냅샷 — 생성 시점에 캡처해야 나중에
   // 사용자가 예산 설정을 바꿔도 "이 결과는 원래 이 예산으로 만든 거였다"가 안 흔들림
@@ -51467,6 +51468,26 @@ function _siteMarkApply(rd, box, cb){
 }
 // ── 2026-10-27 사용자 결정("조감도·광역조감도는 브이월드 화면 기준"): 카메라·배경 = 브이월드 캡처(참고 이미지), 메인건물만 그 자리에 그 각도로 넣기 ──
 // 대지 위치 표시(빨간 사각형)가 있는 참고 이미지를 우선, 없으면 첫 번째 참고 이미지를 카메라로 씀
+// ── 2026-10-28 신고("조감도 렌더링인데 눈높이 사진이 나왔다 — 참고 이미지는 브이월드"): 프리셋은 '투시도(눈높이)'인데 참고 이미지가 브이월드 항공 캡처면 렌더 전에 물어봄 ──
+var _vwRefSigs={}; try{ (JSON.parse(localStorage.getItem('clover_vw_ref_sigs')||'[]')||[]).forEach(function(k){ _vwRefSigs[k]=1; }); }catch(e){}
+function _vwMarkRef(d){ try{ var k=_siteMarkSig(d); _vwRefSigs[k]=1; var a=Object.keys(_vwRefSigs).slice(-60); localStorage.setItem('clover_vw_ref_sigs', JSON.stringify(a)); }catch(e){} }
+function _vwIsRef(d){ try{ return !!_vwRefSigs[_siteMarkSig(d)]; }catch(e){ return false; } }
+function _vwPresetAsk(tab, go){
+  var ov=document.createElement('div'); ov.id='vw-preset-ask';
+  ov.style.cssText='position:fixed;inset:0;z-index:100070;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
+  ov.innerHTML='<div style="width:100%;max-width:440px;background:var(--card,#16181d);border:1.5px solid var(--ac,#00e5cc);border-radius:16px;padding:20px;color:var(--t,#fff)">'+
+    '<div style="font-size:16px;font-weight:900;margin-bottom:8px">🗺 브이월드 항공 캡처를 넣으셨네요</div>'+
+    '<div style="font-size:12.5px;color:var(--t2,#ccc);line-height:1.7;margin-bottom:14px">지금 프리셋은 <b>투시도(눈높이)</b>라 사람 눈높이 사진으로 나와요. 브이월드 화면처럼 <b>위에서 내려다본 사진</b>을 원하시면 조감도로 바꿔서 렌더하세요.</div>'+
+    '<button type="button" data-k="site_context_composite_aerial" style="width:100%;padding:12px;border-radius:11px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;font-size:14px;cursor:pointer;font-family:inherit;margin-bottom:8px">조감도(항공뷰)로 바꿔서 렌더</button>'+
+    '<button type="button" data-k="site_context_composite_aerial_wide" style="width:100%;padding:11px;border-radius:11px;border:1px solid var(--ac,#00e5cc);background:var(--acg,rgba(0,229,204,.1));color:var(--ac,#00e5cc);font-weight:800;cursor:pointer;font-family:inherit;margin-bottom:8px">광역조감도로 바꿔서 렌더</button>'+
+    '<button type="button" data-k="" style="width:100%;padding:11px;border-radius:11px;border:1px solid var(--bd2,#444);background:var(--c2,#1e2026);color:var(--t,#fff);font-weight:800;cursor:pointer;font-family:inherit">투시도(눈높이) 그대로</button>'+
+    '<div style="text-align:right;margin-top:10px"><button type="button" data-x style="border:none;background:none;color:var(--m2,#999);font-size:12px;cursor:pointer;font-family:inherit">취소</button></div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector('[data-x]').onclick=function(){ ov.remove(); };
+  Array.prototype.forEach.call(ov.querySelectorAll('[data-k]'),function(b){ b.onclick=function(){ var k=b.getAttribute('data-k'); ov.remove();
+    if(k){ var q=(typeof PS_RENDER!=='undefined'?PS_RENDER:[]).find(function(x){ return x.k===k; }); if(q){ tab.selK=q.k; tab.prompt=q.pt; try{ window._syncEngForCurrentPreset(); }catch(e){} try{ renderSB(); }catch(e){} } }
+    go(); }; });
+}
 function _siteAerialCamRef(task, wf){
   try{
     if(wf!=='render' || !task || !/^site_context_composite_aerial/.test(task.selK||'')) return null;
