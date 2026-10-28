@@ -18145,6 +18145,22 @@ var ROOM_TYPE_DISAMBIGUATION = {
 // ⚠️ 신규: 건축 외관 뷰 종류별 카메라 앵글 지시문 — 실내 공간과 달리 "이 사진 그대로 스타일만
 // 바꾸는" 게 아니라 "이 건물을 이런 앵글로 찍은 사진처럼 만들어달라"는 요청이라, 뷰 종류마다
 // 카메라 높이·거리·각도가 완전히 다름. _multiRoomBuildExteriorPrompt에서 사용.
+// ── 2026-10-28 요청("회원 결과에 3D 사람이 들어갔다 — 절대 3D 사람 안 됨. 가장 자연스럽고 연령이 다양하고, 그 공간에 꼭 있어야 할 스타일의 한국 사람. 외국인 지정 시만 예외") ──
+var PEOPLE_REAL_RULE=' 👥 PEOPLE — FINAL RULE (overrides any other people wording): every person in the result must look like a REAL person photographed with a real camera — never a 3D / CG character, render-library cut-out figure, mannequin, game-like avatar or plastic-skinned doll. Unless the user explicitly asked for foreigners, they are real Korean people. Use a natural mix of ages that fits THIS place (children, teenagers, young adults, middle-aged, elderly) and the everyday Korean styling that truly belongs in this exact space and its purpose — e.g. language academy / school: students with backpacks and books, a parent, a staff member at the desk; cafe: customers and a barista; hospital or clinic: patients, a guardian and a nurse in uniform; office: workers in business-casual; shop: shoppers and a clerk; apartment / home: a family at ease. Candid natural poses and actions that make sense for the place (talking, walking, working, waiting), a natural number of people for the space (never crowded, never identical duplicated people), correct scale and perspective, feet firmly on the floor with soft contact shadows, lit by exactly the same light as the room, with real skin texture, real hair, real fabric folds and natural facial expressions.';
+function _peopleRuleFor(tab){
+  try{
+    if(!tab) return '';
+    var k=tab.selK||'';
+    var txt=String((k ? tab.extraPrompt : tab.prompt) || '')+' '+String(tab.extraPrompt||'');
+    var presetPeople=/^(person_add|korean_person|people_focus|people_walk)$/.test(k);
+    var wants=/사람|인물|한국인|외국인|손님|고객|학생|직원|가족|아이들?|노인|커플|people|person|crowd|visitor/i.test(txt) && !/(사람|인물|손님|people|person)[^.]{0,12}(지워|지우|제거|없애|빼|remove|erase|delete)|(지워|제거|없애|빼)[^.]{0,6}(사람|인물)/i.test(txt);
+    if(/person_remove|furniture_remove|person_blur/.test(k)) return '';
+    return (presetPeople || wants) ? PEOPLE_REAL_RULE : '';
+  }catch(e){ return ''; }
+}
+// 2026-10-28 요청("3D에서 직접 만든 로고·간판·사무실 명패를 왜 지워? 회원이 필요해서 만든 건데 — 그대로 둬"): 렌더 실사화는 회원 본인의 3D 디자인이라
+// '실존 상호·로고 빼기'(상표 규칙) 대신, 원본 3D에 있는 로고·간판·명패·글씨를 그대로 지키는 규칙을 씀
+var USER_SIGNAGE_KEEP_RULE=' 🔤 KEEP THE USER\'S OWN SIGNAGE (the input is the user\'s own 3D design — this overrides any rule about removing or replacing logos): every logo, signboard, wall lettering, reception-desk lettering, door / room nameplate, wayfinding sign, number plate and any other text or graphic that exists in the MAIN image was made on purpose by the user. Keep each one exactly where it is, at the same size, shape, color and material, with exactly the same letters and logo shape (copy the text character by character — never blur, garble, translate, rename, simplify or remove it). Only make it look physically real (real metal, acrylic, printed or backlit material with natural reflections). Do not add any new brand names or logos that are not in the main image.';
 var KOREA_PEOPLE_VEHICLE_RULE=' ⚠️ PEOPLE AND VEHICLES MUST LOOK KOREAN (only applies if the image contains or newly adds any people or vehicles; do not add people or vehicles just because of this rule): any person must be a Korean (East Asian) person with natural Korean appearance and everyday Korean clothing (construction workers in typical Korean site gear — hard hat, safety vest, work clothes). Any vehicle must look like a car commonly driven in Korea today — Korean-market sedans, SUVs, vans and, for construction sites, the small 1-ton cargo trucks, dump trucks, excavators and concrete mixer trucks typical of Korean sites — with Korean-style license plates (white plate with Korean characters and numbers). No American pickup trucks, no American school buses, no foreign-style license plates. Do not show readable brand logos.';
 var EXT_DEPTH_KEYS=['eye_to_aerial','eye_to_aerial_r45','eye_to_aerial_l45','eye_to_wide_aerial','eye_to_wide_aerial_r45','eye_to_wide_aerial_l45','exterior_site_plan_top','view_left','view_right','wide_angle_diagonal_corner','best_view'];
 var EXT_DEPTH_RULE=' ⚠️⚠️⚠️ SAME BUILDING, ONLY THE CAMERA MOVES (most important): this must be exactly the same building as in the input photo — identical front facade, identical window layout and frame color, identical roof shape and pitch, identical cladding materials and colors, identical number of storeys and floor heights, identical deck/entrance. Do not redesign, simplify, shorten or re-proportion anything that is visible in the photo. ⚠️ Hidden parts: the photo only shows the front and part of one side, so continue the building backwards in the SAME way the visible side wall and roof already continue (same length rhythm, same cladding, same roof ridge running straight back). The building must not be a thin flat facade — give it a believable depth that matches what the visible side wall suggests — but do NOT invent new wings, extra volumes or a different rear design. ⚠️ Surroundings: continue the surroundings that are visible in the photo (if the photo shows forest and trees around the house, the wider aerial view must also be forest and trees); do not invent a dense neighborhood of other houses, roads or parked cars that are not suggested by the photo.';
@@ -49806,7 +49822,7 @@ function _runToolWithPromptActual(translatedPrompt){
     matchOld:  (G.wf==='render' && tab._matchRef) ? (tab._matchOld||null) : null,
     matchKeep: (G.wf==='render' && tab._matchRef) ? !!tab._matchKeep : false,
     wf:        _realWf(G.wf),
-    prompt:    translatedPrompt,
+    prompt:    translatedPrompt + _peopleRuleFor(tab), // 2026-10-27 사람을 넣을 땐 실제 한국 사람(3D 인물 금지)
     selK:      tab.selK||null,
     // ⚠️ 요청 반영(긴급 되돌림): Nanobanana Pro 강제 전환이 실제 렌더링 실패 + 화면 표시·크레딧
     // 계산과 실제 사용 엔진이 다른 문제를 일으켜서, 검증된 나노바나나2로 되돌림.
@@ -58926,7 +58942,9 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'✨ 처음 렌더 탭 소개 창', h:'처음 3D 렌더 실사화 탭에 들어오면 한 번만, AI 편집 부분 수정(칠한 부분만 고치기), 뷰 변환(투시도↔조감도·광역조감도·탑뷰), 시간·날씨·계절 변환, 포토샵 편집(무료), 쇼츠 만들기(무료)를 소개하는 창이 떠요. 항목을 누르면 그 탭으로 바로 가요.'},
   {c:'render', t:'⬆ 렌더 직후 업스케일 안내', h:'3D 렌더 실사화 결과가 나오면 "업스케일하면 더 사실적으로 나와요" 안내가 떠요. [이 결과 업스케일하기]를 누르면 업스케일 탭에 결과가 바로 들어가요 — 렌더 직후 업스케일하면 재질·유리·나무 디테일이 더 또렷하고 실제 사진에 더 가까워져요.'},
   {c:'render', t:'🖱 렌더 결과 누르면 업로드 이미지로', h:'3D 렌더 실사화에서 결과 카드를 누르면 그 렌더 결과가 왼쪽 업로드 이미지로 들어가요. 그대로 이어서 다시 렌더하거나(예: 고품질화·대지 합성) 다른 탭으로 보낼 수 있어요. 원본으로 다시 하려면 원본을 다시 올리거나 재실행(↻)을 누르세요.'},
-    {c:'common', t:'🎨 AI 편집 색 유지(붉은끼 방지)', h:'AI 편집 결과가 원본보다 붉게(따뜻하게) 틀어지면 자동으로 원본 색 균형에 맞춰요. 사진 전체를 다시 그리는 화질 개선 같은 편집도 적용돼요. 낮밤·계절·조명·뷰 변환처럼 색이 바뀌는 게 목적인 프리셋은 그대로 둬요.'},
+    {c:'render', t:'🔤 3D에서 만든 로고·간판·명패는 그대로', h:'3D 렌더 실사화의 모든 프리셋은 회원이 3D에서 직접 만든 로고·간판·벽 글씨·데스크 글씨·사무실 명패·안내 사인을 지우거나 바꾸지 않고 같은 위치·크기·글자 그대로 실제 재질로만 바꿔요. 그래도 글자가 바뀌었으면 결과 카드의 🔤 로고 원본으로 버튼으로 원본 로고를 다시 덮을 수 있어요.'},
+  {c:'common', t:'👥 사람은 실제 한국 사람으로', h:'사람 추가 버튼·사람 추가 프리셋·추가 요청에 사람을 넣어달라고 하면, 3D(CG) 인물이 아니라 실제 사진 같은 한국 사람으로 그려요. 연령대를 자연스럽게 섞고, 공간에 맞는 사람(학원: 학생·학부모·직원, 카페: 손님·바리스타, 병원: 환자·간호사 등)으로 넣어요. 외국인을 원하면 추가 요청에 직접 적어주세요.'},
+  {c:'common', t:'🎨 AI 편집 색 유지(붉은끼 방지)', h:'AI 편집 결과가 원본보다 붉게(따뜻하게) 틀어지면 자동으로 원본 색 균형에 맞춰요. 사진 전체를 다시 그리는 화질 개선 같은 편집도 적용돼요. 낮밤·계절·조명·뷰 변환처럼 색이 바뀌는 게 목적인 프리셋은 그대로 둬요.'},
   {c:'render', t:'✏️ 부분 수정은 AI 편집으로 안내', h:'렌더 실사화에서 추가 요청에 "지워줘·바꿔줘·옮겨줘·추가해줘"처럼 특정 부분을 고치는 말을 쓰면, 렌더 전에 "AI 편집에서 하면 더 정확해요" 안내가 떠요. [AI 편집으로 가기]를 누르면 같은 이미지와 문구가 AI 편집으로 옮겨지고, 바꿀 부분만 칠해서 실행하면 나머지는 원본 그대로 유지돼요. 저녁 분위기·톤·사람 추가처럼 전체에 해당하는 요청은 그대로 렌더해요.'},
   {c:'render', t:'✨ 완성 렌더는 고품질화로 안내', h:'"실사화·고급실사화 통합"으로 이미 조명·재질이 다 들어간 완성 렌더 이미지를 돌리면, "렌더링 완성본 고품질화"로 바꿀지 물어봐요. 완성 렌더는 고품질화가 구도·디자인·글씨를 그대로 두고 사진 느낌만 올려줘서 더 잘 맞아요. SketchUp·라이노처럼 재질·조명 없는 3D 화면 캡처는 실사화가 맞아요.'},
   {c:'render', t:'📋 렌더 탭 붙여넣기(Ctrl+V)', h:'렌더 실사화에서 Ctrl+V는 다른 탭처럼 위 이미지 업로드(원본)로 들어가요. 로드뷰·카톡 캡처를 실사 참고 이미지로 넣으려면 [📋 클립보드 → 참고 이미지로 붙여넣기] 버튼을 누르거나, 참고 이미지 빈칸을 한 번 클릭한 뒤 Ctrl+V 하세요. 카카오 로드뷰 창이 열려 있을 때의 Ctrl+V는 참고 이미지로 들어가요.'},
@@ -60558,7 +60576,7 @@ document.addEventListener('DOMContentLoaded',function(){try{
       // 2026-10-26: 실제 대지 배경 합성은 실제 거리의 간판을 그대로 옮겨야 해서 '실존 상호·로고 빼기(상표 규칙)'가 간판 글씨를 뭉개고 로고를 바꾸는 원인이었음
       // → 이 프리셋들은 상표 규칙과 실내 전용(에어컨·천장 조명) 규칙을 빼고 공통 규칙(블러 금지·사진 1장·한국 배경·색 틀어짐 방지)만 붙임
       var _isSiteComp = (G.wf==='render' && /^site_context/.test(tab.selK||''));
-      _finalPrompt = (_finalPrompt||'') + (_isCubeHandComposite ? '' : NO_BRAND_TRADEMARK_RULE) + NO_BLUR_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE + AC_CONSISTENCY_RULE + MAIN_LIGHT_CONSISTENCY_RULE + NO_COLOR_CAST_RULE + (_finalPrompt.indexOf('사람')===-1 && _finalPrompt.indexOf('한국인')===-1?NO_PEOPLE_ANIMALS_RULE:'');
+      _finalPrompt = (_finalPrompt||'') + (_isCubeHandComposite ? '' : (G.wf==='render' ? USER_SIGNAGE_KEEP_RULE : NO_BRAND_TRADEMARK_RULE)) + NO_BLUR_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE + AC_CONSISTENCY_RULE + MAIN_LIGHT_CONSISTENCY_RULE + NO_COLOR_CAST_RULE + (_finalPrompt.indexOf('사람')===-1 && _finalPrompt.indexOf('한국인')===-1?NO_PEOPLE_ANIMALS_RULE:'');
       if(G.wf==='space' && !_isExtForBudget) _finalPrompt += MAIN_FIXTURE_REQUIRED_RULE; // 주거 거실·침실 메인 등 필수(규칙 안에서 주방·욕실 등은 제외)
       // ⚠️ 버그 수정("투시도→조감도에서 '주변에 건물 넣지마'라고 추가 요청사항에 적어도 계속
       // 나온다"): _extra(사용자가 직접 적은 추가 요청사항)를 위(1행 위쪽, _finalPrompt 만들던
