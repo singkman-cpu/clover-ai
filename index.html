@@ -14895,6 +14895,7 @@ var RES_OPTS = [
 function getResObj(){ return RES_OPTS.find(function(r){return r.k===(getTab(G.wf).resolution||'1K');})||RES_OPTS[0]; }
 function getCost(){
   var base;
+  try{ if(G.wf==='edit' && /^context_mass_gray_/.test(getTab('edit').selK||'')) return 0; }catch(_eG){} // 2026-10-29: 주변 건물 그레이 매싱은 사이트에서 직접 처리(무료)
   if(G.wf==='shorts') return 0; // 브라우저 내 처리, 크레딧 없음
   if(G.wf==='video'){
     var dur=G.vdur||5;
@@ -46152,10 +46153,15 @@ function addHistEl(item, scroll, targetHs, atBottom){
   w.addEventListener('click', function(e){
     if(e.target.closest('button')||e.target.closest('.cmp-hnd')||e.target.closest('.ib')) return;
     var tab=getTab(item.wf);
+    // 2026-10-29 요청("렌더 실사화처럼 다른 탭도 모두 — 왼쪽 클릭=원본, 오른쪽 클릭=결과가 업로드 이미지로"): 비교선 왼쪽을 눌렀는지(드래그 제외)
+    var _leftSide=false;
+    try{ var _clA=document.getElementById('cl-'+item.id), _mbA=_clA&&_clA.parentElement;
+      if(_clA && item.orig && _mbA && _mbA.contains(e.target) && !(typeof G._cmpDownX==='number' && Math.abs(e.clientX-G._cmpDownX)>6)) _leftSide = e.clientX < _clA.getBoundingClientRect().left;
+    }catch(_eL){}
     if(item.wf==='edit'){
       // AI편집 탭은 의미가 다름: 이 카드를 클릭하면 "그 시점의 결과(After)"부터 이어서 편집하는 것
-      // (다른 탭처럼 원본으로 되돌리면 체이닝이 끊겨서 의도와 반대로 동작함)
-      var src=item.result||item.orig;
+      // (다른 탭처럼 원본으로 되돌리면 체이닝이 끊겨서 의도와 반대로 동작함) — 2026-10-29: 비교선 왼쪽(BEFORE)을 누르면 원본
+      var src=(_leftSide && item.orig) ? item.orig : (item.result||item.orig);
       if(!src) return;
       // ⚠️ 버그 수정("다른 편집할 이미지에 전에 작업했던 선택영역이 그대로 남아있네"): 이 클릭
       // 핸들러는 tab.inputImg만 새 이미지로 바꾸고 브러시색·다각형·사각형·화살표(G.arrows/
@@ -46190,23 +46196,15 @@ function addHistEl(item, scroll, targetHs, atBottom){
       return;
     }
     // 2026-10-27 요청("렌더 실사화 결과를 누르면 왼쪽 업로드 이미지에 그 렌더 결과가 떠야 한다 — 처음 원본만 고정돼 있다"): 렌더 탭은 결과(After)를 이어서 쓰게
-    if(item.wf==='render' && item.result && !/\.(mp4|webm)(\?|$)/i.test(item.result)){
-      // 2026-10-28 요청: 비교 화면에서 왼쪽(BEFORE, 원본)을 누르면 원본, 오른쪽(AFTER, 렌더 결과)을 누르면 렌더 결과가 업로드 이미지로
-      try{ var _clR=document.getElementById('cl-'+item.id), _mbR=_clR&&_clR.parentElement;
-        if(_clR && item.orig && _mbR && _mbR.contains(e.target) && !(typeof G._cmpDownX==='number' && Math.abs(e.clientX-G._cmpDownX)>6)){ var _lx=_clR.getBoundingClientRect().left; if(e.clientX < _lx){
-          tab.inputImg=item.orig; tab.inputImgName=item.origName||''; tab.status='idle';
-          document.querySelectorAll('#ub-main').forEach(function(ub){ rUB(ub,'main'); });
-          if(G.wf==='render'){ try{ renderSB(); }catch(_e){} }
-          updBtn(); try{ _saveMainTabImagesDraft(); }catch(_e){}
-          var _stlO=gE('stl'); if(_stlO) _stlO.textContent='✓ 원본(BEFORE)을 업로드 이미지로 설정했어요 — 원본으로 다시 렌더할 수 있어요';
-          return; } }
-      }catch(_e){}
-      tab.inputImg=item.result; tab.inputImgName=''; tab.status='idle';
+    // 2026-10-28(렌더 실사화) → 2026-10-29 모든 이미지 탭: 비교 화면 왼쪽(BEFORE)=원본, 오른쪽(AFTER)=결과가 업로드 이미지로 (영상·쇼츠 탭은 예전처럼 원본)
+    if(item.wf!=='video' && item.wf!=='shorts' && item.result && !/\.(mp4|webm)(\?|$)/i.test(item.result) && (item.wf==='render' || item.orig)){
+      var _useOrig = _leftSide && item.orig;
+      tab.inputImg=_useOrig ? item.orig : item.result; tab.inputImgName=_useOrig ? (item.origName||'') : ''; tab.status='idle';
       document.querySelectorAll('#ub-main').forEach(function(ub){ rUB(ub,'main'); });
-      if(G.wf==='render'){ try{ renderSB(); }catch(_e){} }
+      if(G.wf===item.wf){ try{ renderSB(); }catch(_e){} }
       updBtn();
       try{ _saveMainTabImagesDraft(); }catch(_e){}
-      var _stlR=gE('stl'); if(_stlR) _stlR.textContent='✓ 이 렌더 결과를 업로드 이미지로 설정했어요 — 이어서 렌더하거나 편집하세요';
+      var _stlR=gE('stl'); if(_stlR) _stlR.textContent=_useOrig ? '✓ 원본(BEFORE)을 업로드 이미지로 설정했어요 — 원본으로 다시 만들 수 있어요' : '✓ 이 결과(AFTER)를 업로드 이미지로 설정했어요 — 이어서 작업하세요';
       return;
     }
     if(!item.orig) return;
@@ -50540,7 +50538,8 @@ function executeSingleRender(task){
         // 추가하면서 여기서도 그 값을 넘겨줌.
         cost=Math.round(getBaseCost(task.wf,task.scale,task.resolution,task.eng));
       }
-      try{ if(task.wf==='render' && /^site_context_composite_(aerial|plan)/.test(task.selK||'')) cost=(+cost||0)+40; }catch(_eC){} // 2026-10-28 조감도류 2단계 40cr 포함 표시
+      try{ if(task.wf==='render' && /^site_context_composite_(aerial|plan)/.test(task.selK||'')) cost=(+cost||0)+40; }catch(_eC){}
+      try{ if(task.wf==='edit' && /^context_mass_gray_/.test(task.selK||'')) cost=0; }catch(_eG2){} // 2026-10-28 조감도류 2단계 40cr 포함 표시
       tags.push(cost+'cr');
       if(!G.HIST[task.wf])G.HIST[task.wf]=[];
       var item={id:Date.now()+Math.random(),orig:task.img,result:ri,origThumb:null,tags:tags,ai:'',preview:false,cx:50,fav:false,wf:task.wf,upscaleEng:task.upscaleEng||null,vidEng:task.vidEng||null,vidRes:task.vidRes||null,savedPrompt:task.prompt||'',savedSelK:task.selK||null,savedEng:task.eng||'nano2',savedRes:task.resolution||'1K',budgetSnapshot:task.budgetSnapshot||null,isApt:(task.wf==='spaceset')?!!getTab('spaceset').isAptSimpleMode:undefined,siteSet:(task.wf==='spaceset')?(task._siteSet!=null?!!task._siteSet:!!G._siteSetMode):undefined};
@@ -51656,7 +51655,44 @@ function _siteStripInterior(s){ // 2026-10-27: 대지 배경 합성 프롬프트
   s=cut(s,'⚠️ 에어컨(냉방기구) 규칙','⚠️ 화이트밸런스 유지');
   return s;
 }
+// ══ 2026-10-29 요청("반투명 그레이인데 실사 마감재 반투명처럼 나온다 — 가로수는 덮지 말고 나무 뒤 건물만 그레이"): 주변 건물 그레이 매싱을 AI 생성 대신 사이트에서 직접 처리(무료) ══
+// ① 건물 자동 선택(SAM, 무료) → 가장 크고 가운데 건물 = 메인건물 제외 ② 나무·차·사람 자동 선택해서 빼기 ③ 남은 주변 건물만 질감 없는 연회색(반투명/불투명)
+function _grayMassLocal(src, opaque, cb){
+  var done=false; function fin(u,e){ if(done) return; done=true; cb(u,e); }
+  setTimeout(function(){ fin(null,'시간 초과'); }, 180000);
+  loadImgSafe(src, function(im){ try{
+    var W=im.naturalWidth||im.width, H=im.naturalHeight||im.height;
+    var base=document.createElement('canvas'); base.width=W; base.height=H; base.getContext('2d').drawImage(im,0,0,W,H);
+    console.log('[그레이 매싱] 주변 건물·나무 자동 선택 중…');
+    try{ _agedEnvToast('🏢 주변 건물을 찾아서 그레이로 바꾸는 중이에요…'); }catch(e){}
+    _samFind(base, ['building','house','apartment building'], W, H, function(bm, e1){
+      if(!bm || !bm.length){ fin(null, '건물을 찾지 못했어요'+(e1?' ('+e1+')':'')); return; }
+      var main=_psAiPickMain(bm), rest=bm.filter(function(m){ return m!==main; });
+      if(!rest.length){ fin(null,'메인 건물 말고 다른 건물을 찾지 못했어요'); return; }
+      _samFind(base, ['tree','car','person'], W, H, function(fg){
+        try{
+          var M=document.createElement('canvas'); M.width=W; M.height=H; var mx=M.getContext('2d');
+          rest.forEach(function(m){ mx.drawImage(m.cv,0,0); });
+          mx.globalCompositeOperation='destination-out'; if(main) mx.drawImage(main.cv,0,0); (fg||[]).forEach(function(m){ mx.drawImage(m.cv,0,0); }); mx.globalCompositeOperation='source-over';
+          var MF=document.createElement('canvas'); MF.width=W; MF.height=H; var mfx=MF.getContext('2d'); mfx.filter='blur('+Math.max(1,Math.round(Math.max(W,H)/1600))+'px)'; mfx.drawImage(M,0,0); mfx.filter='none';
+          // 질감 없앤 형태 음영(크게 흐린 밝기) → 연회색
+          var BL=document.createElement('canvas'); BL.width=W; BL.height=H; var bx=BL.getContext('2d',{willReadFrequently:true}); bx.filter='blur('+Math.max(4,Math.round(Math.max(W,H)/300))+'px)'; bx.drawImage(im,0,0,W,H); bx.filter='none';
+          var x=base.getContext('2d',{willReadFrequently:true}), od=x.getImageData(0,0,W,H), d=od.data, bd=bx.getImageData(0,0,W,H).data, md=mfx.getImageData(0,0,W,H).data;
+          var sum=0, n=0; for(var i=0;i<d.length;i+=16){ if(md[i+3]>128){ sum+=bd[i]*0.3+bd[i+1]*0.59+bd[i+2]*0.11; n++; } } var mean=n?sum/n:150;
+          var A=opaque?0.97:0.8, cnt=0;
+          for(var j=0;j<d.length;j+=4){ var a=md[j+3]/255; if(a<=0) continue; cnt++;
+            var L=bd[j]*0.3+bd[j+1]*0.59+bd[j+2]*0.11, g=212+(L-mean)*0.3; g=g<175?175:g>238?238:g; var k=a*A;
+            d[j]=d[j]*(1-k)+g*k; d[j+1]=d[j+1]*(1-k)+g*k; d[j+2]=d[j+2]*(1-k)+(g+3)*k; }
+          x.putImageData(od,0,0);
+          console.log('[그레이 매싱] 주변 건물 '+rest.length+'개 그레이 처리(나무·차·사람 '+((fg||[]).length)+'개는 그대로), 덮은 면적 '+Math.round(cnt/(W*H)*100)+'%');
+          fin(base.toDataURL('image/jpeg',0.94));
+        }catch(e2){ fin(null, e2.message); }
+      });
+    });
+  }catch(e){ fin(null, e.message); } }, function(){ fin(null,'이미지를 불러오지 못했어요'); });
+}
 function procImgWithTask(task, onDone, onErr){
+  if(task && task.wf==='edit' && /^context_mass_gray_/.test(task.selK||'')){ _grayMassLocal(task.img, task.selK==='context_mass_gray_o', function(u, er){ if(u) onDone(u); else onErr('주변 건물 그레이 처리 실패: '+(er||'')); }); return; }
   // 2026-10-27: 대지 배경 합성 2단계 방식(먼저 실사화 후 합성)은 결과가 더 나빠져서 사용자 요청으로 되돌림(예전 1단계 방식)
   // 2026-10-25 🔁 납품본과 같은 느낌으로 수정 렌더: 결과가 나오면(원본 크기 맞춤 뒤) 바뀐 영역만 결과, 나머지는 납품본 픽셀로 합성
   if(task && task.matchRef && task.matchKeep && task.matchOld && task.toneRef && !task._mtWrapped && typeof onDone==='function'){
@@ -59140,6 +59176,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'psedit', t:'🎯 AI 물체 선택 (포토샵 편집)', h:'포토샵 편집 왼쪽 도구 막대에서 민트색으로 크게 표시된 [AI 선택] 버튼(마술봉 위)을 누르고 사진에서 물체를 클릭하면 그 물체만 선택돼요. 옆에 뜨는 큰 상자에 "유리", "건물", "나무"처럼 이름(한글·영어 모두)을 적고 [모두 선택하기]를 누르면 해당 물체가 한 번에 다 선택돼요. Shift+클릭은 더하기, Alt+클릭은 빼기. 선택 후 아래 막대에서 색·밝기, 색조, 반투명, 하늘색으로, 레이어로 분리를 바로 할 수 있어요. 상자 아래 ③ 자주 쓰는 영역 버튼(메인 건물, 주변 건물(메인 제외), 유리·창문, 메인 건물 외벽, 바닥 전체, 하늘, 나무·조경, 자동차, 실내 벽, 실내 천장, 가구, 사람)을 누르면 바로 선택돼요. 예) 주변 건물만 반투명: [주변 건물(메인 제외)] → 아래 막대 🌫 반투명. 메인 건물은 사진 가운데의 가장 큰 건물로 판단해요. 선택은 하루 약 200번까지 무료이고, 그보다 아주 많이 쓰면 1번에 1cr이에요.'},
   {c:'psedit', t:'🎭 레이어·마스크 썸네일 Ctrl+클릭 = 영역 선택 (포토샵 편집)', h:'포토샵과 같아요. 오른쪽 레이어 목록에서 마스크 썸네일을 Ctrl(맥은 ⌘)+클릭하면 마스크의 흰 부분이, 레이어 썸네일을 Ctrl+클릭하면 그 레이어에 그려진 부분이 메인 화면에 선택으로 잡혀요. Ctrl+Shift+클릭은 더하기, Ctrl+Alt+클릭은 빼기, Ctrl+Shift+Alt+클릭은 겹치는 부분만. 그냥 클릭은 예전처럼 마스크 편집/레이어 선택이에요.'},
   {c:'psedit', t:'🔍 Ctrl+Space+클릭 확대 / +Alt 축소 (포토샵 편집)', h:'포토샵과 같아요. 포토샵 편집 화면에서 Ctrl(맥은 ⌘)+Space를 누른 채 클릭하면 클릭한 곳을 중심으로 확대(최대 8배), Ctrl+Alt+Space를 누른 채 클릭하면 축소돼요. 누르고 있는 동안 커서가 돋보기로 바뀌고, 이때는 브러시 등 다른 도구가 칠해지지 않아요. 마우스 휠로도 확대/축소, 휠 버튼 드래그로 화면 이동, 빈 곳 더블클릭으로 원래 크기예요.'},
+  {c:'edit', t:'🏢 주변 건물 매싱 강조(그레이) — 무료·나무는 그대로', h:'AI 편집의 주변 건물 매싱 강조(반투명 그레이·불투명 그레이)는 AI가 그림을 새로 그리지 않고 사이트에서 직접 처리해요(0cr). 건물을 자동으로 찾아 가장 크고 가운데에 있는 건물을 메인건물로 보고 빼고, 가로수·자동차·사람도 자동으로 빼서 그 뒤의 주변 건물만 질감 없는 연회색으로 덮어요. 메인건물이 화면 가운데에 크게 있을수록 정확해요. 반투명 실사마감재는 예전처럼 AI로 만들어요.'},
   {c:'edit', t:'🌆 블루아워·황혼 조명 개선', h:'AI 편집·영상 환경의 블루아워·황혼을 고르면 천장 간접조명·라인 조명은 은은하게(하얗게 날아가지 않게) 나오고, 주변 아파트·건물 창문도 불규칙하게 일부 불이 켜지고 가로등도 켜져 자연스러운 저녁 풍경이 돼요. 메인 건물이 가장 눈에 띄게 주변 불빛은 더 은은하게 나와요.'},
   {c:'render,edit', t:'🔤 로고 원본으로 (렌더 실사화·AI 편집)', h:'AI가 실제 기업 로고(예: LG, 삼성)를 상표 문제를 피하려고 비슷한 가짜 이름으로 바꿔 그릴 때가 있어요. 결과 카드의 [🔤 로고 원본으로] 버튼을 누르면 원본 이미지에서 로고·글자를 찾아 결과 위에 레이어로 그대로 다시 덮고 포토샵 편집에서 열어줘요(무료). 어긋나면 이동 도구·방향키로 맞추고 [갤러리에 저장]. 로고가 크게 들어간 이미지로 렌더하면 이 방법을 알려주는 안내가 떠요. 고급 실사화로 다시 돌리면 로고가 유지되기도 해요.'},
   {c:'render', t:'⬛ 3D만 실사로 / 🏛 주변 배경 넣기 (렌더 실사화)', h:'전시 부스·쇼룸처럼 배경이 검정(또는 흰색) 단색인 3D 이미지로 렌더링을 누르면 "배경을 어떻게 할까요?"를 물어봐요. [3D만 실사로]를 고르면 배경은 원본 그대로 두고 전시장·주변 부스·사람을 지어내지 않아요. [주변 배경도 넣기]는 AI가 어울리는 주변을 채워요. 같은 이미지는 한 번만 묻고, 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요. 실제 대지 배경 합성 프리셋에서는 묻지 않아요.'},
@@ -59149,7 +59186,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'render', t:'✨ 처음 렌더 탭 소개 창', h:'처음 3D 렌더 실사화 탭에 들어오면 한 번만, AI 편집 부분 수정(칠한 부분만 고치기), 뷰 변환(투시도↔조감도·광역조감도·탑뷰), 시간·날씨·계절 변환, 포토샵 편집(무료), 쇼츠 만들기(무료)를 소개하는 창이 떠요. 항목을 누르면 그 탭으로 바로 가요.'},
   {c:'common', t:'⬆ 업스케일 선명도 개선·기본값', h:'업스케일 기본값이 재질 사실감 3 · 샤픈 0.7로 바뀌었어요(슬라이더로 조절 가능). 업스케일 후 보정 단계가 AI가 새로 만든 미세 디테일을 절반 넘게 지우고 흐린 원본 디테일로 바꿔 넣던 문제를 고쳐서, 이제 픽셀만 커지고 흐려지는 일 없이 업스케일 결과의 선명함이 그대로 남아요.'},
   {c:'render', t:'⬆ 렌더 직후 업스케일 안내', h:'3D 렌더 실사화 결과가 나오면 "업스케일하면 더 사실적으로 나와요" 안내가 떠요. [이 결과 업스케일하기]를 누르면 업스케일 탭에 결과가 바로 들어가요 — 렌더 직후 업스케일하면 재질·유리·나무 디테일이 더 또렷하고 실제 사진에 더 가까워져요.'},
-  {c:'render', t:'🖱 결과 화면 왼쪽=원본 / 오른쪽=렌더 결과를 업로드 이미지로', h:'3D 렌더 실사화 결과 비교 화면에서 오른쪽(AFTER, 렌더 결과)을 누르면 렌더 결과가, 왼쪽(BEFORE, 원본)을 누르면 원본이 왼쪽 업로드 이미지로 들어가요 — 원본으로 다시 렌더할 때 갤러리에서 다시 불러올 필요 없어요. 그대로 이어서 다시 렌더하거나(예: 고품질화·대지 합성) 다른 탭으로 보낼 수 있어요. 원본으로 다시 하려면 원본을 다시 올리거나 재실행(↻)을 누르세요.'},
+  {c:'render', t:'🖱 결과 화면 왼쪽=원본 / 오른쪽=결과를 업로드 이미지로 (모든 이미지 탭)', h:'3D 렌더 실사화·현장사진 디자인·AI 편집 등 모든 이미지 탭의 결과 비교 화면에서 오른쪽(AFTER, 결과)을 누르면 결과가, 왼쪽(BEFORE, 원본)을 누르면 원본이 왼쪽 업로드 이미지로 들어가요(영상·쇼츠 탭 제외) — 원본으로 다시 렌더할 때 갤러리에서 다시 불러올 필요 없어요. 그대로 이어서 다시 렌더하거나(예: 고품질화·대지 합성) 다른 탭으로 보낼 수 있어요. 원본으로 다시 하려면 원본을 다시 올리거나 재실행(↻)을 누르세요.'},
     {c:'edit', t:'🗺 조감도→배치도는 지붕만', h:'AI 편집의 조감도→배치도(지붕과 주변이 잘 보이는 조감도를 넣으면 가장 잘 나와요)는 나노바나나 Pro로 자동 실행되고, 위성사진처럼 바로 위에서 본 정사영으로 바꿔요 — 건물은 지붕만 보이고 벽·외관·1층 부분은 보이지 않으며, 높은 건물도 바깥쪽으로 기울어 보이지 않아요. 건물 사이엔 도로·차선·주차장·나무(위에서 본 모양)만 보여요. 지붕과 주변은 녹물·얼룩·때 없이 깔끔하게 정돈된 모습으로 그려요(색·재질은 그대로).'},
   {c:'edit', t:'🔤 AI 편집도 간판 글씨 그대로·선명하게', h:'AI 편집(투시도→조감도 같은 뷰 변환 포함)에서도 원본 사진·렌더에 있는 간판·로고·명패 글씨는 지우거나 흐리게(블러) 하지 않고 같은 글자 그대로 선명하게 다시 그려요. 참고 이미지에만 있는 남의 로고는 결과에 옮기지 않아요.'},
   {c:'render', t:'🔤 3D에서 만든 로고·간판·명패는 그대로', h:'3D 렌더 실사화의 모든 프리셋은 회원이 3D에서 직접 만든 로고·간판·벽 글씨·데스크 글씨·사무실 명패·안내 사인을 지우거나 바꾸지 않고 같은 위치·크기·글자 그대로 실제 재질로만 바꿔요. 그래도 글자가 바뀌었으면 결과 카드의 🔤 로고 원본으로 버튼으로 원본 로고를 다시 덮을 수 있어요.'},
