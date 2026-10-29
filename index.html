@@ -45831,7 +45831,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
     }
     // 2026-10-29 요청("광역조감도는 메인건물을 몇 배로 키운다 — 숫자로 10배, 20배"): 광역조감도 결과에 🏢 메인건물 키우기
     if(item.result && (item.tags||[]).some(function(t){ return /^preset:.*광역조감도/.test(String(t)); }) && !/\.(mp4|webm)(\?|$)/i.test(item.result)){
-      var sbs=mk('button','se-btn');sbs.type='button';sbs.textContent='🏢 메인건물 키우기';sbs.title='광역조감도에서 메인건물을 탭해서 고르고 배수(예: 10)만큼 키워요 — 미리보기 무료, 선명하게 렌더 40cr';
+      var sbs=mk('button','se-btn');sbs.type='button';sbs.textContent='🏢 메인건물 키우기';sbs.title='광역조감도에서 메인건물을 사각형으로 드래그해서 고르고 배수(예: 10)만큼 키워요 — 미리보기 무료, 선명하게 렌더 40cr';
       sbs.style.cssText='background:rgba(250,204,21,.12);border-color:rgba(250,204,21,.6);color:#fde047;padding:4px 9px;border-radius:5px;font-size:11px;font-weight:800;cursor:pointer;border:1px solid;font-family:inherit';
       sbs.addEventListener('click',function(e){e.stopPropagation();_bldScaleOpen(item);},false);
       sbs.addEventListener('mousedown',function(e){e.stopPropagation();},false);
@@ -51735,8 +51735,8 @@ function _bldScaleOpen(item, opt){
   ov.style.cssText='position:fixed;inset:0;z-index:100080;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:12px;font-family:inherit';
   ov.innerHTML='<div style="width:100%;max-width:1200px;max-height:96vh;background:var(--c1,#151519);border:1.5px solid rgba(250,204,21,.6);border-radius:14px;padding:14px;color:var(--t,#fff);display:flex;flex-direction:column;gap:10px">'+
     '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><div style="font-size:15px;font-weight:900">'+(opt.auto?'✅ 광역조감도 완성! 메인건물을 키울까요?':'🏢 메인건물 키우기')+'</div><div style="display:flex;gap:8px;align-items:center">'+(opt.auto?'<button data-later type="button" style="padding:6px 12px;border-radius:8px;border:1px solid var(--bd2,#333);background:transparent;color:var(--m2,#aaa);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">그대로 둘게요</button>':'')+'<button data-x type="button" style="border:none;background:transparent;color:var(--m2,#aaa);font-size:20px;cursor:pointer">✕</button></div></div>'+
-    '<div data-st style="font-size:12px;color:#fde047;line-height:1.5">① 사진에서 <b>메인건물을 탭</b>하세요 (잘못 잡히면 다시 탭)</div>'+
-    '<div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#0d0d10;border-radius:10px;overflow:hidden"><canvas data-cv style="max-width:100%;max-height:62vh;cursor:crosshair;touch-action:manipulation"></canvas></div>'+
+    '<div data-st style="font-size:12px;color:#fde047;line-height:1.5">① 메인건물을 <b>사각형으로 드래그</b>해서 감싸 주세요 (건물 꼭대기~바닥까지)</div>'+
+    '<div style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#0d0d10;border-radius:10px;overflow:hidden"><canvas data-cv style="max-width:100%;max-height:62vh;cursor:crosshair;touch-action:none"></canvas></div>'+
     '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">'+
       '<label style="font-size:12.5px;font-weight:800">② 배수 <input data-n type="number" min="1.1" max="30" step="0.5" value="5" style="width:72px;padding:7px 8px;border-radius:8px;border:1px solid var(--bd2,#333);background:var(--c2,#1e1e24);color:var(--t,#fff);font-size:14px;font-weight:800;margin:0 4px">배</label>'+
       '<button data-pv type="button" style="padding:8px 12px;border-radius:8px;border:1px solid var(--bd2,#333);background:var(--c2,#1e1e24);color:var(--t,#fff);font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">👁 미리보기 (무료)</button>'+
@@ -51768,30 +51768,39 @@ function _bldScaleOpen(item, opt){
     return out;
   }
   function getN(){ var n=parseFloat(nIn.value); if(!isFinite(n)) n=5; n=Math.max(1.1, Math.min(30, n)); nIn.value=n; return n; }
-  cv.addEventListener('click', function(e){
-    if(!base || busy) return;
-    var r=cv.getBoundingClientRect(), px=(e.clientX-r.left)/r.width*W, py=(e.clientY-r.top)/r.height*H;
-    busy=true; msg('🎯 메인건물을 찾는 중…');
+  // 2026-10-29 요청("탭 말고 사각형 드래그로 위치 잡기"): 메인건물을 사각형으로 감싸면 → AI가 그 안의 건물 모양을 정확히 따고(무료), 못 찾으면 사각형 그대로 사용
+  var drag=null;
+  function pos(e){ var r=cv.getBoundingClientRect(); return {x:Math.max(0,Math.min(W,(e.clientX-r.left)/r.width*W)), y:Math.max(0,Math.min(H,(e.clientY-r.top)/r.height*H))}; }
+  cv.addEventListener('pointerdown', function(e){ if(!base||busy) return; e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_e){} var p=pos(e); drag={x0:p.x,y0:p.y,x1:p.x,y1:p.y}; });
+  cv.addEventListener('pointermove', function(e){ if(!drag) return; var p=pos(e); drag.x1=p.x; drag.y1=p.y; draw(base,null); var x=cv.getContext('2d'); x.strokeStyle='#facc15'; x.lineWidth=Math.max(3,Math.round(Math.max(W,H)/400)); x.setLineDash([12,8]); x.strokeRect(Math.min(drag.x0,drag.x1),Math.min(drag.y0,drag.y1),Math.abs(drag.x1-drag.x0),Math.abs(drag.y1-drag.y0)); x.setLineDash([]); });
+  cv.addEventListener('pointerup', function(e){
+    if(!drag) return; var d=drag; drag=null;
+    var rx0=Math.min(d.x0,d.x1), ry0=Math.min(d.y0,d.y1), rx1=Math.max(d.x0,d.x1), ry1=Math.max(d.y0,d.y1);
+    if(rx1-rx0<6 || ry1-ry0<6){ draw(base,M); msg('📐 메인건물을 <b>사각형으로 드래그</b>해서 감싸 주세요 (건물 꼭대기~바닥까지)'); return; }
+    function useRect(note){ var m=document.createElement('canvas'); m.width=W; m.height=H; var mx=m.getContext('2d'); mx.fillStyle='#fff'; mx.fillRect(rx0,ry0,rx1-rx0,ry1-ry0); M=m; bb={x0:rx0,y0:ry0,x1:rx1,y1:ry1}; draw(base,M); busy=false; msg(note||'✅ 표시한 사각형을 메인건물로 써요 → ② 배수를 넣고 [👁 미리보기]'); }
+    busy=true; msg('🎯 사각형 안의 메인건물 모양을 찾는 중…');
     var sc=Math.min(1, 1600/Math.max(W,H)), sw=Math.round(W*sc), sh=Math.round(H*sc), s2=document.createElement('canvas'); s2.width=sw; s2.height=sh; s2.getContext('2d').drawImage(base,0,0,sw,sh);
     uploadImgToFal(s2.toDataURL('image/jpeg',0.92), function(iu){
-      falRun('fal-ai/sam-3/image', {image_url:iu, output_format:'png', point_prompts:[{x:Math.round(px*sc), y:Math.round(py*sc), label:1, object_id:1}]}, function(res){
+      falRun('fal-ai/sam-3/image', {image_url:iu, output_format:'png', box_prompts:[{x_min:Math.round(rx0*sc), y_min:Math.round(ry0*sc), x_max:Math.round(rx1*sc), y_max:Math.round(ry1*sc), object_id:1}]}, function(res){
         var ms=(res && (res.masks||res.mask||res.images))||[]; if(!Array.isArray(ms)) ms=[ms];
         var u=ms.map(function(m){ return typeof m==='string'?m:(m&&(m.url||m.image_url)); }).filter(Boolean)[0];
-        if(!u){ busy=false; msg('건물을 찾지 못했어요 — 메인건물 한가운데를 다시 탭해 보세요'); return; }
-        _psAiDecodeMask(u, W, H, function(m){ busy=false;
-          if(!m){ msg('건물을 찾지 못했어요 — 다시 탭해 보세요'); return; }
-          M=m.cv; bb=bbox(M); if(!bb){ msg('건물을 찾지 못했어요 — 다시 탭해 보세요'); return; }
-          draw(base, M); lastN=1; msg('✅ 노란색이 메인건물이에요 (틀리면 다시 탭) → ② 배수를 넣고 [👁 미리보기]');
+        if(!u){ useRect(); return; }
+        _psAiDecodeMask(u, W, H, function(m){
+          if(!m){ useRect(); return; }
+          // 사각형 밖으로 나간 부분은 잘라냄
+          var mc=m.cv, cx=mc.getContext('2d'); cx.globalCompositeOperation='destination-in'; cx.fillStyle='#fff'; cx.fillRect(rx0,ry0,rx1-rx0,ry1-ry0); cx.globalCompositeOperation='source-over';
+          var b2=bbox(mc); if(!b2 || (b2.x1-b2.x0)*(b2.y1-b2.y0) < (rx1-rx0)*(ry1-ry0)*0.12){ useRect(); return; }
+          M=mc; bb=b2; busy=false; draw(base,M); msg('✅ 노란색이 메인건물이에요 (틀리면 다시 드래그) → ② 배수를 넣고 [👁 미리보기]');
         });
-      }, function(err){ busy=false; msg('건물 찾기 실패: '+String(err).slice(0,80)); }, {wf:'sam_segment', included:true});
-    }, function(){ busy=false; msg('이미지 업로드 실패'); });
+      }, function(){ useRect(); }, {wf:'sam_segment', included:true});
+    }, function(){ useRect(); });
   });
   ov.querySelector('[data-pv]').onclick=function(){
-    if(!M){ msg('먼저 ① 메인건물을 탭해서 골라 주세요'); return; }
-    var N=getN(); lastN=N; draw(compose(N), null); msg('👁 '+N+'배 미리보기예요 — 숫자를 바꿔 다시 보거나 ③ [선명하게 렌더]를 누르세요 (다시 탭하면 건물을 새로 골라요)');
+    if(!M){ msg('먼저 ① 메인건물을 사각형으로 드래그해 주세요'); return; }
+    var N=getN(); lastN=N; draw(compose(N), null); msg('👁 '+N+'배 미리보기예요 — 숫자를 바꿔 다시 보거나 ③ [선명하게 렌더]를 누르세요 (다시 드래그하면 건물을 새로 골라요)');
   };
   ov.querySelector('[data-go]').onclick=function(){
-    if(!M){ msg('먼저 ① 메인건물을 탭해서 골라 주세요'); return; }
+    if(!M){ msg('먼저 ① 메인건물을 사각형으로 드래그해 주세요'); return; }
     if(busy) return; var N=getN(); busy=true;
     var comp=compose(N), ax=(bb.x0+bb.x1)/2, ay=bb.y1;
     var sx0=ax+(bb.x0-ax)*N, sx1=ax+(bb.x1-ax)*N, sy0=ay+(bb.y0-ay)*N, sy1=bb.y1;
@@ -59351,7 +59360,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'psedit', t:'🎭 레이어·마스크 썸네일 Ctrl+클릭 = 영역 선택 (포토샵 편집)', h:'포토샵과 같아요. 오른쪽 레이어 목록에서 마스크 썸네일을 Ctrl(맥은 ⌘)+클릭하면 마스크의 흰 부분이, 레이어 썸네일을 Ctrl+클릭하면 그 레이어에 그려진 부분이 메인 화면에 선택으로 잡혀요. Ctrl+Shift+클릭은 더하기, Ctrl+Alt+클릭은 빼기, Ctrl+Shift+Alt+클릭은 겹치는 부분만. 그냥 클릭은 예전처럼 마스크 편집/레이어 선택이에요.'},
   {c:'psedit', t:'🔍 Ctrl+Space+클릭 확대 / +Alt 축소 (포토샵 편집)', h:'포토샵과 같아요. 포토샵 편집 화면에서 Ctrl(맥은 ⌘)+Space를 누른 채 클릭하면 클릭한 곳을 중심으로 확대(최대 8배), Ctrl+Alt+Space를 누른 채 클릭하면 축소돼요. 누르고 있는 동안 커서가 돋보기로 바뀌고, 이때는 브러시 등 다른 도구가 칠해지지 않아요. 마우스 휠로도 확대/축소, 휠 버튼 드래그로 화면 이동, 빈 곳 더블클릭으로 원래 크기예요.'},
   {c:'edit', t:'🏢 주변 건물 매싱 강조 — ① 그레이로 바꾸기 → ② 그레이 반투명', h:'주변 건물을 회색 매스로 보여 주려면 AI 편집에서 먼저 [① 그레이로 바꾸기(불투명)]를 하고, 그 결과를 클릭해 업로드 이미지로 넣은 뒤 [② 그레이 반투명]을 누르세요 — 회색 매스가 50% 정도 반투명해지면서 그 아래 도로·바닥이 비쳐 보여요. ②를 회색으로 안 바꾼 사진에 누르면 먼저 ①을 하라는 안내가 떠요. 메인건물·가로수·하늘은 그대로예요.'},
-  {c:'edit', t:'🏢 광역조감도 — 도시 전경 범위 + 메인건물 N배 키우기', h:'투시도→광역조감도(좌·우 45도 포함)·조감도→광역조감도는 이제 수 km 도시 전경(먼 산·지평선·하늘까지)으로 넓게 잡아요. 광역조감도 결과(AI 편집·브이월드 광역조감도 모두)에 [🏢 메인건물 키우기] 버튼이 생기고, 렌더가 끝나면 메인 화면에 바로 키우기 창이 떠요 — 사진에서 메인건물을 탭해서 고르고(무료), 배수(예: 10)를 넣고 [👁 미리보기](무료)로 확인한 뒤 [이대로 선명하게 렌더](40cr)를 누르면 키운 건물을 원래 디자인대로 선명하게 다시 그려서 새 결과로 저장해요.'},
+  {c:'edit', t:'🏢 광역조감도 — 도시 전경 범위 + 메인건물 N배 키우기', h:'투시도→광역조감도(좌·우 45도 포함)·조감도→광역조감도는 이제 수 km 도시 전경(먼 산·지평선·하늘까지)으로 넓게 잡아요. 광역조감도 결과(AI 편집·브이월드 광역조감도 모두)에 [🏢 메인건물 키우기] 버튼이 생기고, 렌더가 끝나면 메인 화면에 바로 키우기 창이 떠요 — 사진에서 메인건물을 사각형으로 드래그해서 고르고(무료), 배수(예: 10)를 넣고 [👁 미리보기](무료)로 확인한 뒤 [이대로 선명하게 렌더](40cr)를 누르면 키운 건물을 원래 디자인대로 선명하게 다시 그려서 새 결과로 저장해요.'},
   {c:'edit', t:'🌆 블루아워·황혼 조명 개선', h:'AI 편집·영상 환경의 블루아워·황혼을 고르면 천장 간접조명·라인 조명은 은은하게(하얗게 날아가지 않게) 나오고, 주변 아파트·건물 창문도 불규칙하게 일부 불이 켜지고 가로등도 켜져 자연스러운 저녁 풍경이 돼요. 메인 건물이 가장 눈에 띄게 주변 불빛은 더 은은하게 나와요.'},
   {c:'render,edit', t:'🔤 로고 원본으로 (렌더 실사화·AI 편집)', h:'AI가 실제 기업 로고(예: LG, 삼성)를 상표 문제를 피하려고 비슷한 가짜 이름으로 바꿔 그릴 때가 있어요. 결과 카드의 [🔤 로고 원본으로] 버튼을 누르면 원본 이미지에서 로고·글자를 찾아 결과 위에 레이어로 그대로 다시 덮고 포토샵 편집에서 열어줘요(무료). 어긋나면 이동 도구·방향키로 맞추고 [갤러리에 저장]. 로고가 크게 들어간 이미지로 렌더하면 이 방법을 알려주는 안내가 떠요. 고급 실사화로 다시 돌리면 로고가 유지되기도 해요.'},
   {c:'render', t:'⬛ 3D만 실사로 / 🏛 주변 배경 넣기 (렌더 실사화)', h:'전시 부스·쇼룸처럼 배경이 검정(또는 흰색) 단색인 3D 이미지로 렌더링을 누르면 "배경을 어떻게 할까요?"를 물어봐요. [3D만 실사로]를 고르면 배경은 원본 그대로 두고 전시장·주변 부스·사람을 지어내지 않아요. [주변 배경도 넣기]는 AI가 어울리는 주변을 채워요. 같은 이미지는 한 번만 묻고, 업로드 칸 아래 버튼으로 언제든 바꿀 수 있어요. 실제 대지 배경 합성 프리셋에서는 묻지 않아요.'},
