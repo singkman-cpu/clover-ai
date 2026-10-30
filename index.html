@@ -57810,9 +57810,12 @@ function _admIssueScan(){
   return Promise.all([
     _supa.from('fal_jobs').select('req_id,user_id,cost,status,wf,created_at').gt('cost',0).in('status',['pending','completed']).gte('created_at',since).order('created_at',{ascending:true}).limit(3000),
     _supa.from('gallery').select('user_id,wf,created_at').gte('created_at',new Date(Date.now()-(_ISSUE_DAYS+1)*864e5).toISOString()).limit(20000),
-    _supa.from('job_receipts').select('req_id,created_at').gte('created_at',since).order('created_at',{ascending:true}).limit(20000)
+    _supa.from('job_receipts').select('req_id,created_at').gte('created_at',since).order('created_at',{ascending:true}).limit(20000),
+    // 2026-10-30 신고("모바일에서 환불했는데 PC에선 아직 오류 의심"): 처리 기록이 그 기기에만 남았음 → 서버의 환불 기록으로도 처리된 건을 빼기
+    _supa.from('credit_logs').select('user_id,reason,created_at').like('reason','오류 환불%').gte('created_at',since).limit(5000).then(function(r){ return r; }).catch(function(){ return {data:[]}; })
   ]).then(function(rs){
-    var jr=rs[0], gr=rs[1], rr=rs[2]||{};
+    var jr=rs[0], gr=rs[1], rr=rs[2]||{}, fr=rs[3]||{}, refAt={};
+    (fr.data||[]).forEach(function(x){ var t=new Date(x.created_at).getTime(); if(!refAt[x.user_id] || t>refAt[x.user_id]) refAt[x.user_id]=t; });
     var rec={}, recSince=0; if(!rr.error && rr.data && rr.data.length){ recSince=new Date(rr.data[0].created_at).getTime(); rr.data.forEach(function(x){ rec[x.req_id]=1; }); }
     if(jr.error) return {list:[], err:jr.error.message};
     var done=_admIssueDoneLS(), gal={}, galWf={};
@@ -57822,6 +57825,7 @@ function _admIssueScan(){
     (jr.data||[]).forEach(function(j){
       if(done[j.req_id]) return;
       var t=new Date(j.created_at).getTime();
+      if(refAt[j.user_id] && t<refAt[j.user_id]) return; // 다른 기기에서 이미 오류 환불한 회원의 그 이전 작업
       if(j.status==='pending'){ if(now-t>20*60000) list.push({j:j, t:t, why:'stuck'}); return; }
       if(now-t<40*60000) return; // 저장 중일 수 있는 최근 40분 제외
       // 2026-10-25 신고("쇼츠에서 무슨 크레딧이?"): 쇼츠의 AI 비용은 '🖼️ 9:16 확장'(사진 위아래를 AI로 채움, 20cr)뿐이고 그 결과는 쇼츠 안 사진만 바꿀 뿐 갤러리에 따로 저장하지 않음
@@ -57926,7 +57930,7 @@ function _admIssueResolve(uid, items, sum, refund, box){
   box.querySelectorAll('button').forEach(function(b){ b.disabled=true; b.style.opacity='.5'; });
   function mark(){
     _admIssueMarkLS(ids);
-    _supa.from('fal_jobs').update({status: refund?'admin_refunded':'admin_ok'}).in('req_id', ids).then(function(){}).catch(function(){});
+    _supa.from('fal_jobs').update({status: refund?'admin_refunded':'admin_ok'}).in('req_id', ids).then(function(r){ if(r && r.error) console.warn('[오류 의심] 처리 상태 서버 저장 실패(다른 기기엔 계속 보일 수 있음):', r.error.message); }).catch(function(e){ console.warn('[오류 의심] 처리 상태 서버 저장 실패', e); });
     setTimeout(function(){ box.remove(); try{ _admNotifyCheck(false); }catch(e){} }, refund?1600:300);
   }
   if(!refund){ mark(); return; }
