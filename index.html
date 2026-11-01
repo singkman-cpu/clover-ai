@@ -47219,7 +47219,7 @@ function cancelRun(){
   });
 }
 // ── 진행 중인 작업 추적 (새로고침해도 추적 가능) ───────────────────
-function _saveActiveJob(reqId, baseUrl, label){
+function _saveActiveJob(reqId, baseUrl, label, stuKey){
   try{
     var jobs=JSON.parse(localStorage.getItem('clover_active_jobs')||'[]');
     jobs=jobs.filter(function(j){return Date.now()-j.ts<24*60*60*1000;}); // 2026-10-25: 20분 → 24시간(늦게 다시 열어도 AI 쪽에 남아있는 결과를 받아옴)
@@ -47234,7 +47234,7 @@ function _saveActiveJob(reqId, baseUrl, label){
     var _mr=null; try{ var _mc=window._mrJobCtx; if(_mc){ var _ms=getTab('spaceset').multiRoomState; if(_ms && _ms.running && _ms.step===_mc.pos) _mr={pos:_mc.pos}; } }catch(e3){}
     var _tb=null; try{ if(window._tbJobCtx && window._tbJobCtx.active) _tb={first:1}; }catch(e4){}
     var _vv=null; try{ var _vc=window._v2vJobCtx; if(_vc && typeof G_V2V!=='undefined' && G_V2V.busy && Date.now()-_vc.t<60*1000) _vv={clipId:_vc.clipId}; }catch(e2){}
-    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',wf:G.wf||'edit',ts:Date.now(),origImg:curOrig,ar:_ar,v2v:_vv,mr:_mr,tb:_tb});
+    jobs.push({reqId:reqId,baseUrl:baseUrl,label:label||'렌더링',wf:stuKey?'video':(G.wf||'edit'),ts:Date.now(),origImg:curOrig,ar:_ar,v2v:_vv,mr:_mr,tb:_tb,stu:stuKey||null});
     localStorage.setItem('clover_active_jobs',JSON.stringify(jobs));
   }catch(e){}
 }
@@ -48251,6 +48251,7 @@ function _resumeActiveJobs(){
     _showJobRecoveryBanner('🔄 새로고침 전에 진행 중이던 '+j.label+' 작업을 다시 확인하고 있어요...', false);
     falPoll(j.baseUrl, j.reqId, function(d){
       _clearActiveJob(j.reqId); _jobReceipt(j.reqId, d);
+      if(j.stu){ try{ var _su=''; try{ _su=falExtractVideoUrl(d)||''; }catch(_a){} if(!_su){ try{ _su=falExtractImageUrl(d)||''; }catch(_b){} } if(!_su){ var _m=JSON.stringify(d||{}).match(/https?:[^"]+\.(mp3|wav|m4a|aac|ogg)/i); if(_m) _su=_m[0]; } if(_su && window._stuAdopt){ window._stuAdopt(j.stu, _su); _showJobRecoveryBanner('✅ 새로고침 전에 만들던 영상 스튜디오 장면을 받아왔어요 — 스튜디오가 이어서 써요(추가 차감 없음)', false); return; } }catch(eS){ console.warn('[스튜디오 복구]', eS); } }
       var url=falExtractImageUrl(d);
       // 2026-10-25: 영상 결과도 받아옴(예전엔 이미지 주소만 찾아서, 영상은 크레딧만 나가고 결과를 잃었음)
       if(!url){ var _vu=''; try{ _vu=falExtractVideoUrl(d)||''; }catch(eV){}
@@ -48335,6 +48336,7 @@ function _resumeActiveJobs(){
 }
 
 function falRun(modelId, input, onDone, onErr, billingCtx) {
+  var _stuK=null; if(billingCtx && billingCtx.stuKey){ _stuK=billingCtx.stuKey; billingCtx=Object.assign({}, billingCtx); delete billingCtx.stuKey; } // 2026-11-02: 영상 스튜디오 장면 표시(새로고침 뒤 다시 받아오면 스튜디오가 '이미 만든 장면'으로 알아봄)
   _stageTvFill(input);
   // ⚠️ 버그 수정("다시 생성 눌러도 똑같은 이미지가 나온다"): 지금까지 어떤 호출도 seed를 지정한
   // 적이 없었음 — 같은 프롬프트+같은 참고 이미지 조합으로 다시 요청하면 API가 내부적으로 어느
@@ -48371,7 +48373,7 @@ function falRun(modelId, input, onDone, onErr, billingCtx) {
     console.log('[FAL] baseUrl candidates for polling:', candidates);
     var baseUrl = candidates[0];
     var _modelLabel=(modelId.split('/')[1]||modelId);
-    _saveActiveJob(reqId, baseUrl, _modelLabel);
+    _saveActiveJob(reqId, baseUrl, _modelLabel, _stuK);
     falPoll(candidates, reqId, function(d){ _clearActiveJob(reqId); _jobReceipt(reqId, d); onDone(d); }, function(e){ _clearActiveJob(reqId); onErr(e); }, 0);
   }, onErr, billingCtx);
 }
@@ -64844,7 +64846,18 @@ function shotPrompt0(s, hasCastRefs){
 }
 
 // ── 렌더 ──
-function falP(model, input, bill){ if(bill && STU.tpl && STU.tpl.id && /^studio_/.test(bill.wf||'')) bill=Object.assign({}, bill, {tplId:STU.tpl.id}); /* 템플릿 사용 → 서버가 완성 시 올린 사람에게 5% 보상 */ return new Promise(function(res, rej){ falRun(model, input, function(d){ res(d); }, function(e){ rej(e); }, bill); }); }
+// 2026-11-02 요청("새로고침해도 만들던 게 멈추면 안 된다"): 새로고침 전 fal에 맡긴 장면은 다시 맡기지 않고 그 결과를 기다려 받아 씀(이중 차감 방지)
+function stuAdoptMap(){ try{ return JSON.parse(localStorage.getItem('clover_stu_adopt')||'{}'); }catch(e){ return {}; } }
+window._stuAdopt=function(key, url){ try{ var m=stuAdoptMap(); m[key]=url; localStorage.setItem('clover_stu_adopt', JSON.stringify(m)); }catch(e){} try{ STU.cache=STU.cache||{}; STU.cache[key]=url; stuSaveSoon(); }catch(e){} };
+function stuMergeAdopt(){ var m=stuAdoptMap(), n=0; Object.keys(m).forEach(function(k){ STU.cache[k]=m[k]; n++; }); return n; }
+function stuPendingJob(key){ try{ return JSON.parse(localStorage.getItem('clover_active_jobs')||'[]').some(function(j){ return j.stu===key && Date.now()-j.ts<24*60*60*1000; }); }catch(e){ return false; } }
+function stuWrap(key, url){ return /^dv:|^dir:/.test(key)?{video:{url:url}}:(/^dmus:|^dtts:/.test(key)?{audio:{url:url}}:{images:[{url:url}]}); }
+function falP(model, input, bill, key){
+  if(key){ var m0=stuAdoptMap(); if(m0[key]){ STU.cache[key]=m0[key]; return Promise.resolve(stuWrap(key, m0[key])); }
+    if(stuPendingJob(key)) return new Promise(function(res, rej){ var t0=Date.now(); (function chk(){ var m=stuAdoptMap(); if(m[key]){ STU.cache[key]=m[key]; res(stuWrap(key, m[key])); return; } if(!stuPendingJob(key)){ /* 기다리던 작업이 실패·만료 → 새로 맡김 */ falP(model, input, bill, null).then(res, rej); return; } if(Date.now()-t0>40*60*1000){ rej(new Error('새로고침 전 작업을 기다리다 시간이 초과됐어요')); return; } setTimeout(chk, 3000); })(); });
+    bill=Object.assign({}, bill||{}, {stuKey:key}); }
+  return falPRaw(model, input, bill); }
+function falPRaw(model, input, bill){ if(bill && STU.tpl && STU.tpl.id && /^studio_/.test(bill.wf||'')) bill=Object.assign({}, bill, {tplId:STU.tpl.id}); /* 템플릿 사용 → 서버가 완성 시 올린 사람에게 5% 보상 */ return new Promise(function(res, rej){ falRun(model, input, function(d){ res(d); }, function(e){ rej(e); }, bill); }); }
 function vidUrl(d){ try{ return falExtractVideoUrl(d); }catch(e){ return d&&d.video&&d.video.url; } }
 function imgUrl(d){ try{ return falExtractImageUrl(d); }catch(e){ return d&&d.images&&d.images[0]&&d.images[0].url; } }
 function audUrl(d){ var u=d && ((d.audio && (d.audio.url||d.audio)) || (d.audio_file && d.audio_file.url) || d.url); if(typeof u==='string' && u) return u; return deepUrl(d, 0); }
@@ -64959,6 +64972,7 @@ function runRender(){
 
 // ── 이어 붙이기(브라우저, 실시간 녹화) ──
 function blobUrl(u){ return fetch(u).then(function(r){ if(!r.ok) throw new Error('파일 받기 실패'); return r.blob(); }).then(function(b){ return URL.createObjectURL(b); }); }
+function metaDur(src){ return new Promise(function(res){ var el=document.createElement('video'), ok=false; el.preload='metadata'; el.muted=true; function fin(d){ if(ok) return; ok=true; try{ el.removeAttribute('src'); el.load(); }catch(e){} res(d); } el.onloadedmetadata=function(){ fin(isFinite(el.duration)?el.duration:0); }; el.onerror=function(){ fin(0); }; setTimeout(function(){ fin(0); }, 15000); el.src=src; }); }
 function loadMedia(tag, src){ return new Promise(function(res){ var el=document.createElement(tag); el.preload='auto'; el.playsInline=true; el.crossOrigin='anonymous'; var ok=false; el.onloadeddata=el.oncanplaythrough=function(){ if(ok) return; ok=true; res(el); }; el.onerror=function(){ if(ok) return; ok=true; res(null); }; setTimeout(function(){ if(!ok){ ok=true; res(el); } }, 20000); el.src=src; el.load(); }); }
 // ══ 2026-11-01 요청: 영상 문구 글씨체 고르기(미리보기 카드) — 모두 상업적 무료(OFL) 구글 폰트 · 고른 글씨체는 문구·자막·콘티에 그대로 ══
 var STU_FONTS=[
@@ -64993,21 +65007,30 @@ function composeRaw(shots, vids, music, ttsList, opt){
   opt=opt||{}; var FL=(opt.filter!=null)?opt.filter:FL; // 2026-11-01: 필름(색감)은 완성 후에 골라 입힐 수 있게(opt.filter)
   var R=opt.hd?1.5:((STU.res==='1080p')?1.5:(STU.res==='480p'?0.667:1)), vert=(opt.vert!=null)?opt.vert:(STU.aspect==='9:16');
   var W=Math.round((vert?720:1280)*R/2)*2, H=Math.round((vert?1280:720)*R/2)*2, XF=0.5;
-  return Promise.all(vids.map(function(u){ return blobUrl(u).catch(function(){ return u; }); })).then(function(vu){
-    return Promise.all([Promise.all(vu.map(function(u){ return loadMedia('video', u); })), music?blobUrl(music).then(function(u){ return loadMedia('audio',u); }).catch(function(){ return null; }):null, Promise.all((ttsList||[]).map(function(u){ return u?blobUrl(u).then(function(b){ return loadMedia('audio',b); }).catch(function(){ return null; }):null; }))]);
+  // 2026-11-02(긴 영상): 장면이 많으면(25개 초과) 영상 플레이어를 한꺼번에 만들지 않고, 장면 시작 몇 초 전에 만들고 끝나면 정리(크롬 동시 플레이어 수 제한·메모리 대비)
+  var LAZY=vids.length>24, VU=null, VDUR=null;
+  return Promise.all(vids.map(function(u){ return blobUrl(u).catch(function(){ return u; }); })).then(function(vu){ VU=vu;
+    if(LAZY) return pool(vu.map(function(u,i){ return i; }), 4, function(i){ return metaDur(vu[i]); }).then(function(ds){ VDUR=ds; return vu; });
+    return vu;
+  }).then(function(vu){
+    return Promise.all([LAZY?vu.map(function(){ return null; }):Promise.all(vu.map(function(u){ return loadMedia('video', u); })), music?blobUrl(music).then(function(u){ return loadMedia('audio',u); }).catch(function(){ return null; }):null, Promise.all((ttsList||[]).map(function(u){ return u?blobUrl(u).then(function(b){ return loadMedia('audio',b); }).catch(function(){ return null; }):null; }))]);
   }).then(function(L){
     var V=L[0], M=L[1], T=L[2];
-    var starts=[], t=0; shots.forEach(function(s,i){ var vd=(V[i]&&isFinite(V[i].duration)&&V[i].duration>0)?V[i].duration:s.dur; var d=Math.min(s.dur, vd/fitRate(s, vd)); s._d=d; starts.push(t); t+=d-XF; }); var total=opt.total?Math.min(t+XF, opt.total):Math.min(t+XF, totalDur()||(t+XF));
+    var starts=[], t=0; shots.forEach(function(s,i){ var vd=LAZY?((VDUR&&VDUR[i]>0)?VDUR[i]:s.dur):((V[i]&&isFinite(V[i].duration)&&V[i].duration>0)?V[i].duration:s.dur); var d=Math.min(s.dur, vd/fitRate(s, vd)); s._d=d; starts.push(t); t+=d-XF; }); var total=opt.total?Math.min(t+XF, opt.total):Math.min(t+XF, totalDur()||(t+XF));
     var cv=document.createElement('canvas'); cv.width=W; cv.height=H; var x=cv.getContext('2d');
     var AC=window.AudioContext||window.webkitAudioContext, ac=new AC(), dest=ac.createMediaStreamDestination();
     var musicGain=ac.createGain(), base=(opt.musicBase!=null?opt.musicBase:(STU.mode==='walk'?0.9:(STU.mode==='movie'?0.45:0.55)))*vv('music'); musicGain.gain.value=base; musicGain.connect(dest);
     if(M){ try{ ac.createMediaElementSource(M).connect(musicGain); M.currentTime=0; }catch(e){} }
     var useClipAudio=true, clipG=[]; // 비·바람·새소리 같은 현장 소리는 모든 컨셉에 깔림(음악 아래)
-    V.forEach(function(v,i){ if(!v) return; v.muted=false; try{ var g=ac.createGain(); g.gain.value=(opt.clipGain!=null?opt.clipGain:((STU.mode==='movie'||STU.mode==='free')?1:(STU.mode==='season'?0.8:0.55)))*vv('amb'); ac.createMediaElementSource(v).connect(g); g.connect(dest); clipG[i]=g; }catch(e){ v.muted=true; } });
+    function attachClip(v,i){ if(!v) return; v.muted=false; try{ var g=ac.createGain(); g.gain.value=(opt.clipGain!=null?opt.clipGain:((STU.mode==='movie'||STU.mode==='free')?1:(STU.mode==='season'?0.8:0.55)))*vv('amb'); ac.createMediaElementSource(v).connect(g); g.connect(dest); clipG[i]=g; }catch(e){ v.muted=true; } }
+    V.forEach(attachClip);
+    var prep=[], gone=[]; function lazyTick(now){ if(!LAZY) return; for(var i=0;i<shots.length;i++){ var st=starts[i], en=st+shots[i]._d;
+      if(!prep[i] && now>=st-6 && now<en){ prep[i]=1; (function(k){ loadMedia('video', VU[k]).then(function(el){ if(gone[k]){ try{ el.removeAttribute('src'); el.load(); }catch(e){} return; } V[k]=el; attachClip(el,k); }); })(i); }
+      if(!gone[i] && now>en+0.6){ gone[i]=1; var ov=V[i]; if(ov){ try{ ov.pause(); if(clipG[i]) clipG[i].disconnect(); ov.removeAttribute('src'); ov.load(); }catch(e){} V[i]=null; } } } }
     var VO=(opt.vo||[]).filter(function(o){ return o && o.el; }); VO.forEach(function(o){ try{ var g=ac.createGain(); g.gain.value=vv('voice'); ac.createMediaElementSource(o.el).connect(g); g.connect(dest); }catch(e){} }); // AI 감독: 내레이션을 정한 시간에
     (T||[]).forEach(function(a){ if(!a) return; try{ var g=ac.createGain(); g.gain.value=vv('voice'); ac.createMediaElementSource(a).connect(g); g.connect(dest); }catch(e){} });
     var stream=cv.captureStream(30); dest.stream.getAudioTracks().forEach(function(tr){ stream.addTrack(tr); });
-    var mime=(typeof _v2vMime==='function')?_v2vMime():'', ch=[], rec=new MediaRecorder(stream, mime?{mimeType:mime, videoBitsPerSecond:(R>1?14000000:9000000)}:undefined);
+    var mime=(typeof _v2vMime==='function')?_v2vMime():'', ch=[], longF=(total>90), rec=new MediaRecorder(stream, mime?{mimeType:mime, videoBitsPerSecond:(R>1?(longF?10000000:14000000):(longF?7000000:9000000))}:undefined); // 긴 영상은 메모리 대비 비트레이트를 조금 낮춤
     rec.ondataavailable=function(e){ if(e.data&&e.data.size) ch.push(e.data); };
     var grain=null; if(FL==='film'||FL==='vintage'||FL==='noir'){ grain=document.createElement('canvas'); grain.width=256; grain.height=256; var gx=grain.getContext('2d'), gd=gx.createImageData(256,256); for(var k=0;k<gd.data.length;k+=4){ var n=Math.random()*255; gd.data[k]=gd.data[k+1]=gd.data[k+2]=n; gd.data[k+3]=18; } gx.putImageData(gd,0,0); }
     var started=[], ttsStarted=[], ducking=false;
@@ -65020,7 +65043,7 @@ function composeRaw(shots, vids, music, ttsList, opt){
     return new Promise(function(resolve, reject){
       var t0=0, raf=null, stopped=false;
       function frame(){
-        if(stopped) return; var now=(performance.now()-t0)/1000;
+        if(stopped) return; var now=(performance.now()-t0)/1000; lazyTick(now);
         x.fillStyle='#000'; x.fillRect(0,0,W,H);
         x.filter=FILTER_CSS[FL]||'none';
         for(var i=0;i<shots.length;i++){ var st=starts[i], en=st+shots[i]._d; if(now<st||now>en) continue; var v=V[i]; if(!v) continue;
@@ -65185,7 +65208,7 @@ var STU_DB=null, _stuSaveT=null, _stuImgSig='', _stuOutRef=null, _stuShRef=null,
 function stuDb(){ if(STU_DB) return STU_DB; STU_DB=new Promise(function(res, rej){ try{ var r=indexedDB.open('clover_studio', 1); r.onupgradeneeded=function(){ try{ r.result.createObjectStore('kv'); }catch(e){} }; r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ rej(r.error); }; }catch(e){ rej(e); } }); STU_DB.catch(function(){ STU_DB=null; }); return STU_DB; }
 function stuPut(k, v){ return stuDb().then(function(db){ return new Promise(function(res){ try{ var t=db.transaction('kv','readwrite'); if(v==null) t.objectStore('kv').delete(k); else t.objectStore('kv').put(v, k); t.oncomplete=function(){ res(true); }; t.onerror=t.onabort=function(){ res(false); }; }catch(e){ res(false); } }); }).catch(function(){ return false; }); }
 function stuGet(k){ return stuDb().then(function(db){ return new Promise(function(res){ try{ var r=db.transaction('kv','readonly').objectStore('kv').get(k); r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ res(null); }; }catch(e){ res(null); } }); }).catch(function(){ return null; }); }
-var STU_KEEP=['paid','font','fontOpen','aspect','res','eng','mode','target','cstyle','fit','vol','on','plan','cache','advOpen','fold','foldUser','tpl','filter','subs','voice','voices','music','dlg','userPrompt','genre','cast','shortsHd','outUrl','outShortsUrl','up','fxApplied'];
+var STU_KEEP=['runPending','paid','font','fontOpen','aspect','res','eng','mode','target','cstyle','fit','vol','on','plan','cache','advOpen','fold','foldUser','tpl','filter','subs','voice','voices','music','dlg','userPrompt','genre','cast','shortsHd','outUrl','outShortsUrl','up','fxApplied'];
 function stuSaveSoon(){ if(_stuRestoring) return; clearTimeout(_stuSaveT); _stuSaveT=setTimeout(stuSaveNow, 700); }
 function stuSaveNow(){
   try{
@@ -65205,11 +65228,14 @@ function stuRestore(){
     var st=R[0]; if(!st && !(R[1]&&R[1].length)) return;
     if(st){ STU_KEEP.forEach(function(k){ if(st[k]!==undefined) STU[k]=st[k]; }); if(st.D) STU.D=Object.assign(STU.D||{}, st.D, {loading:false, tasteBusy:false}); }
     if(R[1] && R[1].length) STU.imgs=R[1];
+    stuMergeAdopt();
     if(R[2] instanceof Blob){ STU.out={blob:R[2], url:URL.createObjectURL(R[2])}; _stuOutRef=R[2]; }
     if(R[3] && R[3].blob instanceof Blob){ STU.outShorts={blob:R[3].blob, shHd:!!R[3].shHd, url:URL.createObjectURL(R[3].blob)}; _stuShRef=R[3].blob; }
     _stuImgSig=STU.imgs.length+':'+STU.imgs.map(function(x){ return String(x).length+String(x).slice(-16); }).join('|');
     STU.statusHtml=''; STU.fxPreview=null;
-  }).catch(function(e){ console.warn('[스튜디오] 불러오기 실패', e); }).then(function(){ _stuRestoring=false; refresh(); });
+  }).catch(function(e){ console.warn('[스튜디오] 불러오기 실패', e); }).then(function(){ _stuRestoring=false; refresh();
+    // 새로고침 전에 영상을 만들던 중이었으면 자동으로 이어서(이미 만든 장면 재사용 · 진행 중이던 장면은 그 결과를 기다려 받음 · 추가 차감 없음)
+    var rp=STU.runPending, r0=dRec(); if(rp && r0 && !STU.busy && (Date.now()-(rp.t||0))<6*60*60*1000){ toast('🔄 새로고침 전에 만들던 영상을 이어서 만들어요 — 이미 만든 장면은 다시 차감되지 않아요'); setTimeout(function(){ if(STU.busy) return; if(r0.brand) runBrand(r0, true); else runDirector(true); }, 800); } });
 }
 function stuReset(){
   if(STU.busy||STU.shortsBusy||STU.upBusy){ alert('영상을 만드는 중에는 리셋할 수 없어요. 끝난 뒤에 눌러 주세요.'); return; }
@@ -65217,7 +65243,7 @@ function stuReset(){
   clearTimeout(_stuSaveT);
   ['state','imgs','out','outShorts'].forEach(function(k){ stuPut(k, null); });
   try{ if(STU.out&&STU.out.url) URL.revokeObjectURL(STU.out.url); if(STU.outShorts&&STU.outShorts.url) URL.revokeObjectURL(STU.outShorts.url); }catch(e){}
-  STU.imgs=[]; STU.mode=null; STU.plan=null; STU.cache={}; STU.paid={}; STU.tpl=null; STU.out=null; STU.outShorts=null; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; STU._assets=null; STU.statusHtml=''; STU.aspect='16:9'; STU.res='1080p'; STU.eng='kling4'; STU.target=30; STU.cast=[]; STU.userPrompt=''; STU.vol={music:100, voice:100, amb:100}; STU.on={};
+  STU.imgs=[]; STU.mode=null; STU.plan=null; STU.cache={}; STU.paid={}; STU.runPending=null; try{ localStorage.removeItem('clover_stu_adopt'); }catch(e){} STU.tpl=null; STU.out=null; STU.outShorts=null; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; STU._assets=null; STU.statusHtml=''; STU.aspect='16:9'; STU.res='1080p'; STU.eng='kling4'; STU.target=30; STU.cast=[]; STU.userPrompt=''; STU.vol={music:100, voice:100, amb:100}; STU.on={};
   STU.font='pretendard'; STU.D={T:20, res:'1080p', props:null, pick:0, read:'', loading:false};
   _stuImgSig=''; _stuOutRef=null; _stuShRef=null; refresh(); toast('🗑 스튜디오를 처음 상태로 리셋했어요');
 }
@@ -65597,7 +65623,7 @@ if(!STU.view) STU.view='dir';
 STU.D=STU.D||{T:20, res:'1080p', props:null, pick:0, read:'', loading:false};
 function maxImgs(){ return 20; } // AI 감독: 20장까지 올리면 감독이 베스트 컷을 고름(고급 모드는 10장)
 function dMaxOrder(){ return maxImgs(); } // 2026-11-01 요청: 올린 사진은 '잘 나온 사진'이니 빼지 않고 전부 씀 — 10장을 넘으면 원테이크를 여러 개로 나눠 이어 붙임(이음새 1장 공유) // 원테이크 1개 = 최대 10장, 60초(원테이크 2개 이어 붙이기, 이음새 1장 공유) = 최대 19장
-var D_GUIDE=[[10,'2~3장'],[15,'3~4장'],[20,'4~6장'],[30,'6~8장'],[60,'12~16장']]; // 2026-11-01 요청: 길이별 추천 사진 수(사진 1장당 약 3~5초가 가장 자연스러움)
+var D_GUIDE=[[10,'2~3장'],[15,'3~4장'],[20,'4~6장'],[30,'6~8장'],[60,'12~16장'],[120,'10~20장'],[180,'10~20장'],[300,'10~20장']]; // 2026-11-02: 2·3·5분 — 사진이 적어도 감독이 디테일·빛·날씨 장면을 새로 만들어 채움 // 2026-11-01 요청: 길이별 추천 사진 수(사진 1장당 약 3~5초가 가장 자연스러움)
 function dGuideRange(T){ var g=D_GUIDE.filter(function(x){ return x[0]===T; })[0]; if(!g) return [Math.max(2,Math.round(T/5)), Math.max(2,Math.round(T/3.75))]; var m=g[1].match(/(\d+)~(\d+)/); return [+m[1], +m[2]]; }
 function dcps(){ var r=STU.D.res; if(STU.D.eng==='seedance25') return r==='1080p'?231:(r==='480p'?44:94); return r==='720p'?39:58; }
 function dRec(){ var D=STU.D; return D.props&&D.props[D.pick]; }
@@ -65620,7 +65646,7 @@ function dNorm(dir, n){
     return {title:String(p.title||'AI 감독의 제안').slice(0,30), why:String(p.why||''), score:Math.max(0,Math.min(100,(p.score==null?80:+p.score))), order:order,
       beats:order.map(function(i){ var b=bm[i]||{}; return {img:i, ko:String(b.ko||''), en:String(b.en||'')}; }), flow_en:String(p.flow_en||''),
       hook:String(p.hook||''), mid:String(p.mid||''), ending:String(p.ending||''), narration_on:!!p.narration_on, _narRec:!!p.narration_on,
-      narration:(p.narration||[]).slice(0,3).map(function(x){ return {at:Math.max(0,Math.min(0.9,+x.at||0)), text:String(x.text||'')}; }).filter(function(x){ return x.text; }),
+      narration:(p.narration||[]).slice(0,12).map(function(x){ return {at:Math.max(0,Math.min(0.9,+x.at||0)), text:String(x.text||'')}; }).filter(function(x){ return x.text; }),
       voice:koV(p.voice||'Korean_CalmLady'), music:String(p.music||''), music_en:String(p.music_en||''), relight_end:!!p.relight_end};
   });
   return {read:String(dir&&dir.read||''), recommended:Math.max(0,Math.min(P.length-1,+(dir&&dir.recommended)||0)), proposals:P};
@@ -65717,28 +65743,28 @@ function dVid(start, end, prompt, dur){
   var e=dEng(), res=STU.D.res, d=Math.max(dMinDur(), Math.min(30, Math.ceil(dur)));
   var key='dv:'+[e,res,d,start,end||'',prompt].join('¦'); if(STU.cache[key]) return Promise.resolve({url:STU.cache[key], dur:d});
   var p = e==='seedance25'
-    ? falP(res==='1080p'?'bytedance/seedance-2.5/us/image-to-video':'bytedance/seedance-2.5/image-to-video', Object.assign({prompt:prompt, image_url:start, duration:String(d), resolution:res, generate_audio:true}, end?{end_image_url:end}:{}), {wf:'studio_video', vidEng:'seedance25', vdur:d, vres:res})
-    : falP('kling/v4/image-to-video', Object.assign({prompt:String(prompt).slice(0,2400), start_image_url:start, duration:d, resolution:res}, end?{end_image_url:end}:{}), {wf:'studio_video', vidEng:'kling4', vdur:d, vres:res});
+    ? falP(res==='1080p'?'bytedance/seedance-2.5/us/image-to-video':'bytedance/seedance-2.5/image-to-video', Object.assign({prompt:prompt, image_url:start, duration:String(d), resolution:res, generate_audio:true}, end?{end_image_url:end}:{}), {wf:'studio_video', vidEng:'seedance25', vdur:d, vres:res}, key)
+    : falP('kling/v4/image-to-video', Object.assign({prompt:String(prompt).slice(0,2400), start_image_url:start, duration:d, resolution:res}, end?{end_image_url:end}:{}), {wf:'studio_video', vidEng:'kling4', vdur:d, vres:res}, key);
   return p.then(function(x){ var u=vidUrl(x); if(!u) throw new Error('영상 주소 없음'); STU.cache[key]=u; return {url:u, dur:d}; });
 }
 function dKf(ii){ var k='kf:'+imgId(ii)+'|'+STU.aspect; if(STU.cache[k]) return Promise.resolve(STU.cache[k]); return cropP(STU.imgs[ii]).then(upP).then(function(u){ STU.cache[k]=u; return u; }); }
 function dRelit(ii, base, target){ var rk='rl:'+imgId(ii)+'|'+STU.aspect+(target?'|'+target:''); if(STU.cache[rk]) return Promise.resolve(STU.cache[rk]);
   // target(감독이 정한 빛·날씨: 비 갠 뒤, 첫눈, 새벽 안개 등)이 있으면 그 상태로, 없으면 저녁 불빛으로 — 어느 경우든 빛·날씨만 바꾸고 공간은 그대로
-  if(target) return falP('google/nano-banana-2.1/edit', {prompt:'Change ONLY the light, time of day and weather of this exact same photo to: '+target+'.'+(wxBoost(target)?' Make the weather strongly and clearly visible in the still image (falling rain streaks / snowflakes in the air, wet or snow-covered surfaces, wind-blown leaves, drifting fog) — it must be obvious at first glance.':'')+' Keep the camera position, composition, building, walls, materials, furniture and colours exactly the same. Photorealistic architectural photography, no text.', image_urls:[base], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'}).then(function(d){ var u=imgUrl(d); if(!u) throw new Error('빛·날씨 이미지 실패'); STU.cache[rk]=u; return u; });
-  return falP('google/nano-banana-2.1/edit', {prompt:'Re-light this exact same photo as a calm evening / blue-hour scene. If it is an exterior: deep blue evening sky and warm golden light glowing inside every window. If it is an interior: night outside the windows, warm indirect cove lighting, wall washers and lamps switched on, soft cosy shadows. Change ONLY the light — keep the camera position, composition, building, walls, materials, furniture and colours exactly the same. Photorealistic architectural photography, no text.', image_urls:[base], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'})
+  if(target) return falP('google/nano-banana-2.1/edit', {prompt:'Change ONLY the light, time of day and weather of this exact same photo to: '+target+'.'+(wxBoost(target).indexOf('VISIBLE')>=0?' Make the rain, snow or fog clearly visible in the still image (rain streaks or snowflakes in the air, wet or snow-covered surfaces, soft mist) — obvious at first glance but natural and calm, never a storm.':'')+' Keep the camera position, composition, building, walls, materials, furniture and colours exactly the same. Photorealistic architectural photography, no text.', image_urls:[base], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'}, rk).then(function(d){ var u=imgUrl(d); if(!u) throw new Error('빛·날씨 이미지 실패'); STU.cache[rk]=u; return u; });
+  return falP('google/nano-banana-2.1/edit', {prompt:'Re-light this exact same photo as a calm evening / blue-hour scene. If it is an exterior: deep blue evening sky and warm golden light glowing inside every window. If it is an interior: night outside the windows, warm indirect cove lighting, wall washers and lamps switched on, soft cosy shadows. Change ONLY the light — keep the camera position, composition, building, walls, materials, furniture and colours exactly the same. Photorealistic architectural photography, no text.', image_urls:[base], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'}, rk)
     .then(function(d){ var u=imgUrl(d); if(!u) throw new Error('저녁 이미지 실패'); STU.cache[rk]=u; return u; }); }
 function dGen(ii, base, kind, txt){ var gk='gen:'+imgId(ii)+'|'+STU.aspect+'|'+kind+'|'+txt; if(STU.cache[gk]) return Promise.resolve(STU.cache[gk]);
   var pr = kind==='detail'
     ? 'Create a new close-up photograph (new angle) of something that is ALREADY VISIBLE in this exact photo: '+(txt||'a beautiful material detail with soft light')+'. Same object, same design, same material and colour — never invent or change built-in fixtures, furniture or finishes; small neutral life props (a steaming cup, a book, flowers, fruit) and signs of life (running water, steam, a breeze) are fine. Shallow depth of field. Real photograph, no text.'
     : 'Add one real person naturally into this exact photo: '+(txt||'a resident seen from behind, standing calmly by the window')+'. Back or side view only, face not visible, realistic human scale and lighting. Do NOT change anything else: every wall, window, door, floor, ceiling, furniture, material, colour and the camera angle stay exactly as in the photo. Real photograph, no text.';
-  return falP('google/nano-banana-2.1/edit', {prompt:pr, image_urls:[base], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'})
+  return falP('google/nano-banana-2.1/edit', {prompt:pr, image_urls:[base], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'}, gk)
     .then(function(d){ var u=imgUrl(d); if(!u) throw new Error('장면 이미지 실패'); STU.cache[gk]=u; return u; }); }
 // 2026-11-01 요청: 비·눈·바람·안개 효과가 '확실히' 보이게 — 장면 글에 날씨가 있으면 강한 시각 효과 문장을 덧붙임(구조는 그대로)
-function wxBoost(t){ t=String(t||'').toLowerCase(); var o='';
-  if(/rain|storm|drizzle|shower|비|빗|장마|소나기/.test(t)) o+=' HEAVY VISIBLE RAIN through the whole shot: dense streaks of falling rain clearly visible in the air in front of the camera and against dark backgrounds, big splashes and ripples in puddles, water dripping from eaves and edges, raindrops hitting and running down the glass, wet glossy reflective ground; the rain must be obvious at first glance.';
-  if(/snow|blizzard|눈 내|눈이|첫눈|함박|폭설|설경/.test(t)) o+=' HEAVY VISIBLE SNOWFALL through the whole shot: large snowflakes clearly falling and drifting across the frame in the foreground and background, snow settling on roofs, railings, branches and the ground; the snow must be obvious at first glance.';
-  if(/wind|breeze|leaves|leaf|sway|바람|나뭇잎|흔들/.test(t)) o+=' STRONG VISIBLE WIND: trees, branches, leaves and grass clearly swaying and fluttering, some leaves blowing across the frame, curtains billowing; the movement must be obvious.';
-  if(/fog|mist|haze|안개/.test(t)) o+=' THICK VISIBLE FOG: dense drifting mist clearly moving through the scene and softening the background; it must be obvious.';
+function wxBoost(t){ t=String(t||'').toLowerCase(); var o=' NATURAL CALM AIR: indoor plants, furniture and objects never move by wind (only if a window is visibly open, a curtain may move very slightly); outdoor trees move only gently.';
+  if(/rain|storm|drizzle|shower|비|빗|장마|소나기/.test(t)) o+=' CLEARLY VISIBLE RAIN through the whole shot: steady natural rain falling straight down (calm air, not a storm), rain streaks clearly visible against darker backgrounds, small ripples in puddles, raindrops running down the glass, wet glossy ground; obvious at first glance but realistic.';
+  if(/snow|blizzard|눈 내|눈이|첫눈|함박|폭설|설경/.test(t)) o+=' CLEARLY VISIBLE SNOWFALL through the whole shot: soft snowflakes gently and steadily falling in the foreground and background (calm air, not a blizzard), snow settling on roofs, railings and branches; obvious at first glance but peaceful.';
+  if(/wind|breeze|leaves|leaf|sway|바람|나뭇잎|흔들/.test(t)) o+=' A GENTLE BREEZE outdoors only: leaves and thin branches sway softly and slowly, tree trunks and big branches stay still (never a strong wind or storm).';
+  if(/fog|mist|haze|안개/.test(t)) o+=' VISIBLE MORNING FOG: soft mist drifting slowly through the scene and softening the background.';
   return o; }
 function dShotPrompt(sh){
   var extra = sh.kind==='detail' ? ' Macro detail shot, shallow depth of field, a very slow push or rack focus.' : sh.kind==='person' ? ' The person moves naturally and calmly (walks, turns, touches something), face never shown, real human motion.' : sh.kind==='timelapse' ? (' Time-lapse: the light and weather change naturally over time'+(sh.gen_en?(sh.rev?' from '+sh.gen_en+' back to the clear original look':' into '+sh.gen_en):' — daylight turns into dusk and the lights inside switch on')+', camera locked or drifting very slowly.') : sh.kind==='mood' ? (' The scene is in this state: '+(sh.gen_en||'evening with warm lights on')+'; natural motion that belongs to it (rain, snow, mist, light).') : '';
@@ -65765,12 +65791,12 @@ function dBrandFallback(n, style){
 }
 function dNormBrand(dir, n){
   var P=(dir&&dir.proposals||[]).slice(0,3).map(function(p){
-    var shots=(p.shots||[]).filter(function(s){ return s && +s.img>=0 && +s.img<n; }).slice(0,30).map(function(s){ var kd=KIND_LABEL[s.kind]?s.kind:'photo'; return {kind:kd, img:+s.img, dur:Math.max(2,Math.min(8,Math.round(+s.dur||4))), ko:String(s.ko||''), en:String(s.en||''), gen_en:String(s.gen_en||''), rev:!!s.rev}; });
+    var shots=(p.shots||[]).filter(function(s){ return s && +s.img>=0 && +s.img<n; }).slice(0,120).map(function(s){ var kd=KIND_LABEL[s.kind]?s.kind:'photo'; return {kind:kd, img:+s.img, dur:Math.max(2,Math.min(8,Math.round(+s.dur||4))), ko:String(s.ko||''), en:String(s.en||''), gen_en:String(s.gen_en||''), rev:!!s.rev}; });
     if(!shots.length) shots=dBrandFallback(n).proposals[0].shots;
     dAddMissingShots(shots, n);
     return {brand:true, title:String(p.title||'브랜드 필름').slice(0,30), why:String(p.why||''), score:Math.max(0,Math.min(100,(p.score==null?80:+p.score))), shots:shots, order:[], beats:[],
       hook:String(p.hook||''), mid:String(p.mid||''), ending:String(p.ending||''), narration_on:!!p.narration_on, _narRec:!!p.narration_on,
-      narration:(p.narration||[]).slice(0,3).map(function(x){ return {at:Math.max(0,Math.min(0.9,+x.at||0)), text:String(x.text||'')}; }).filter(function(x){ return x.text; }),
+      narration:(p.narration||[]).slice(0,12).map(function(x){ return {at:Math.max(0,Math.min(0.9,+x.at||0)), text:String(x.text||'')}; }).filter(function(x){ return x.text; }),
       voice:koV(p.voice||'Korean_CalmLady'), music:String(p.music||''), music_en:String(p.music_en||''), relight_end:false};
   });
   return {read:String(dir&&dir.read||''), recommended:Math.max(0,Math.min(P.length-1,+(dir&&dir.recommended)||0)), proposals:P};
@@ -65788,15 +65814,15 @@ function dTranslateShots(r){
 // 음악·내레이션(원테이크·브랜드 공통)
 function dAudio(r, T){
   var mus=STU.myMusic?Promise.resolve(STU.myMusic.url):(on('music')?(function(){ var mp=(r.music_en||'emotional cinematic piano and strings')+' — follows the film: gentle start, slowly building, heartfelt swell near the end, soft resolve. Instrumental.', mk='dmus:'+mp+'|'+Math.ceil(T); if(STU.cache[mk]) return Promise.resolve(STU.cache[mk]);
-    return falP('fal-ai/elevenlabs/music', {prompt:mp, music_length_ms:Math.max(10,Math.ceil(T))*1000, force_instrumental:true, output_format:'mp3_44100_128'}, {wf:'studio_music', vdur:Math.max(10,Math.ceil(T))}).then(function(d){ var u=audUrl(d); if(!u) throw new Error('음악 실패'); STU.cache[mk]=u; return u; }); })().catch(function(e){ console.warn('[AI 감독] 음악 실패 — 없이 진행', e); return null; }):Promise.resolve(null));
+    return falP('fal-ai/elevenlabs/music', {prompt:mp, music_length_ms:Math.max(10,Math.ceil(T))*1000, force_instrumental:true, output_format:'mp3_44100_128'}, {wf:'studio_music', vdur:Math.max(10,Math.ceil(T))}, mk).then(function(d){ var u=audUrl(d); if(!u) throw new Error('음악 실패'); STU.cache[mk]=u; return u; }); })().catch(function(e){ console.warn('[AI 감독] 음악 실패 — 없이 진행', e); return null; }):Promise.resolve(null));
   var nar=r.narration_on?Promise.all((r.narration||[]).map(function(nn){ if(!nn.text) return null; var tk='dtts:'+koV(r.voice)+'|'+nn.text; if(STU.cache[tk]) return {t:nn.at*T, url:STU.cache[tk], text:nn.text};
     return ttsP(r.voice, nn.text).then(function(d){ var u=audUrl(d); if(!u) return null; STU.cache[tk]=u; return {t:nn.at*T, url:u, text:nn.text}; }).catch(function(e){ console.warn('[AI 감독] 내레이션 실패', e); return null; }); })):Promise.resolve([]);
   return Promise.all([mus, nar]);
 }
-function runBrand(r){
+function runBrand(r, resume){
   var T=dBrandTotal(r), est=dBrandEstimate(r);
-  if(!confirm('이 '+dStyleName()+' 영상을 만들까요?\n\n예상 '+est.toLocaleString()+'cr ('+dEngName()+' '+STU.D.res+' · 장면 '+r.shots.length+'개 · 약 '+Math.round(T)+'초'+(on('music')&&!STU.myMusic?' · 음악':'')+(r.narration_on?' · 내레이션':'')+')\n이미 만든 장면은 다시 차감되지 않아요(맛보기로 만든 첫 장면 포함).')) return;
-  STU.busy=true; STU.res=STU.D.res; STU._renderEng=dEng(); refresh(); setStatus('감독이 촬영을 준비하는 중…');
+  if(!resume && !confirm('이 '+dStyleName()+' 영상을 만들까요?\n\n예상 '+est.toLocaleString()+'cr ('+dEngName()+' '+STU.D.res+' · 장면 '+r.shots.length+'개 · 약 '+Math.round(T)+'초'+(on('music')&&!STU.myMusic?' · 음악':'')+(r.narration_on?' · 내레이션':'')+')\n이미 만든 장면은 다시 차감되지 않아요(맛보기로 만든 첫 장면 포함).')) return;
+  STU.busy=true; STU.runPending={t:Date.now()}; STU.res=STU.D.res; STU._renderEng=dEng(); refresh(); setStatus(resume?'🔄 새로고침 전에 만들던 영상을 이어서 만드는 중…':'감독이 촬영을 준비하는 중…');
   var shots=r.shots.slice(), done=0;
   dTranslateShots(r).then(function(){
     setStatus('장면 촬영 중… (장면마다 1~4분 · 동시에 6개씩 · ✕로 닫아도 계속돼요)', 0);
@@ -65810,9 +65836,9 @@ function runBrand(r){
     STU._assets={shots:JSON.parse(JSON.stringify(segs)), vids:urls, music:R[1][0], tts:[], hasVo:voList.length>0, mkOpt:mkOpt}; STU.outShorts=null;
     return mkOpt().then(function(o){ return compose(segs, urls, R[1][0], [], o); });
   }).then(function(blob){
-    STU.busy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; setStatus('✅ 완성! 아래에서 확인하세요 — 갤러리(영상)에도 저장돼요'); refresh(); saveOut(blob); if(ovHidden()) toast('🎬 AI 감독 영상이 완성됐어요 — 오른쪽 아래를 눌러 확인하세요');
+    STU.busy=false; STU.runPending=null; STU.out={blob:blob, url:URL.createObjectURL(blob)}; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; setStatus('✅ 완성! 아래에서 확인하세요 — 갤러리(영상)에도 저장돼요'); refresh(); saveOut(blob); if(ovHidden()) toast('🎬 AI 감독 영상이 완성됐어요 — 오른쪽 아래를 눌러 확인하세요');
     try{ q('#stu-dout').scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
-  }).catch(function(e){ STU.busy=false; setStatus('⚠️ 실패: '+esc(String(e&&e.message||e).slice(0,160))+' — 만든 장면은 저장돼 있어서 다시 누르면 남은 장면만 만들어요 (실패한 AI 작업 크레딧은 자동 환불)'); refresh(); });
+  }).catch(function(e){ STU.busy=false; STU.runPending=null; setStatus('⚠️ 실패: '+esc(String(e&&e.message||e).slice(0,160))+' — 만든 장면은 저장돼 있어서 다시 누르면 남은 장면만 만들어요 (실패한 AI 작업 크레딧은 자동 환불)'); refresh(); });
 }
 // ✨ 첫 장면 AI 맛보기 — 회원 사진으로 실제 AI 영상 한 조각을 먼저 보여줌(브랜드 필름은 최종 영상에 그대로 재사용)
 function dTasteCost(r){ if(r.brand){ var s=r.shots[0]; return s?dcps()*Math.max(dMinDur(),Math.ceil(s.dur))+(s.kind!=='photo'?IMG_CR:0):0; } return dcps()*Math.max(dMinDur(),5); }
@@ -65920,11 +65946,12 @@ function bkWire(w){
   var wm=w.querySelector('[data-bkwm]'); if(wm) wm.onchange=function(){ bkGet().wm=wm.checked; bkSave(); refresh(); };
 }
 // 60초 = 원테이크 2개: 첫 번째의 마지막 장면(사진)을 두 번째의 시작 장면으로 써서 이음새 없이 이어짐(장면 1장 공유)
+function dOneMax(r){ return 30*Math.max(1,((r&&r.order)||[]).length-1); }
 function dTakes(kfs, beats, T){
   // 원테이크 1개 = 사진 최대 10장·30초. 사진이 10장을 넘거나 30초를 넘으면 여러 개로 나눠 찍고 이음새 사진 1장을 공유해 자연스럽게 이어 붙임
-  var nT=Math.max(T>30?2:1, Math.ceil((kfs.length-1)/9)); if(nT<=1 || kfs.length<3) return [{k:kfs, beats:beats, dur:Math.min(30,T)}];
+  var nT=Math.min(Math.max(1,kfs.length-1), Math.max(Math.ceil(T/30), Math.ceil((kfs.length-1)/9))); if(nT<=1 || kfs.length<3) return [{k:kfs, beats:beats, dur:Math.min(30,T)}];
   var segs=kfs.length-1, out=[], a=0, left=T;
-  for(var t=0;t<nT;t++){ var b=(t===nT-1)?segs:a+Math.round(segs/nT), d=(t===nT-1)?left:Math.round(T*(b-a)/segs); d=Math.min(30,Math.max(3,d)); left-=d; out.push({k:kfs.slice(a,b+1), beats:beats.slice(a,b+1), dur:d}); a=b; }
+  for(var t=0;t<nT;t++){ var b=(t===nT-1)?segs:Math.round(segs*(t+1)/nT), d=Math.floor(T/nT)+(t<T%nT?1:0); d=Math.min(30,Math.max(3,d)); out.push({k:kfs.slice(a,b+1), beats:beats.slice(a,b+1), dur:d}); a=b; }
   return out;
 }
 function dShoot(r, tk, ti, nT){
@@ -65937,7 +65964,7 @@ function dShoot(r, tk, ti, nT){
   var prompt=dPrompt(r, tk.beats, ti, nT), vkey='dir:'+[STU.D.res, T, prompt].concat(kfs).join('¦');
   if(STU.cache[vkey]) return Promise.resolve([{url:STU.cache[vkey], dur:T}]);
   var inp={prompt:prompt, start_image_url:kfs[0], duration:T, resolution:STU.D.res}; if(kfs.length>2) inp.middle_image_urls=kfs.slice(1,-1).slice(0,8); inp.end_image_url=kfs[kfs.length-1];
-  return falP('kling/v4/image-to-video', inp, {wf:'studio_video', vidEng:'kling4', vdur:T, vres:STU.D.res})
+  return falP('kling/v4/image-to-video', inp, {wf:'studio_video', vidEng:'kling4', vdur:T, vres:STU.D.res}, vkey)
     .then(function(d){ var u=vidUrl(d); if(!u) throw new Error('영상 주소 없음'); STU.cache[vkey]=u; return [{url:u, dur:T}]; })
     .catch(function(e){ if(/크레딧이 부족|402|insufficient/i.test(String(e&&e.message||e))) throw e; console.warn('[AI 감독] 한 번에 이어 찍기 실패 → 구간별로 이어 찍기', e); setStatus('구간별로 이어 찍는 중…'); return pairs(); });
 }
@@ -65971,12 +65998,13 @@ function previewDir(){
   function start(){ t0=performance.now(); if(pm){ try{ pm.currentTime=0; var pr=pm.play(); if(pr&&pr.catch) pr.catch(function(){}); }catch(e){} } frame(); }
   ov.querySelector('[data-re]').onclick=function(){ cancelAnimationFrame(raf); start(); };
 }
-function runDirector(){
+function runDirector(resume){
   var r=dRec(); if(STU.busy||!r) return; if(!(_supa&&_supaUser)){ try{ openMd('account'); }catch(e){} return; }
-  if(r.brand) return runBrand(r);
-  var T=Math.max(5,Math.min(60,+STU.D.T||20)), est=dEstimate();
-  if(!confirm('이 연출로 영상을 만들까요?\n\n예상 '+est.toLocaleString()+'cr ('+dEngName()+' '+STU.D.res+(dEng()==='seedance25'?' 장면별 이어 찍기 ':' 원테이크 ')+T+'초'+(r.relight_end?' · 마지막 저녁 불빛':'')+(on('music')&&!STU.myMusic?' · 음악':'')+(r.narration_on?' · 내레이션':'')+')\n이미 만든 부분은 다시 차감되지 않아요.')) return;
-  STU.busy=true; STU.res=STU.D.res; STU._renderEng=dEng(); refresh(); setStatus('감독이 촬영을 준비하는 중…');
+  if(r.brand) return runBrand(r, resume);
+  var T=Math.max(5,Math.min(300,+STU.D.T||20)), est=dEstimate();
+  if(T>dOneMax(r)){ alert('원테이크는 사진과 사진 사이를 최대 30초까지 이어 찍어요.\n지금 사진 '+r.order.length+'장으로는 최대 '+dOneMax(r)+'초까지 만들 수 있어요.\n\n사진을 더 넣거나, 영상 길이를 줄이거나, 컷 편집 템플릿(분양 프리미엄·인테리어 등)을 골라 주세요.'); return; }
+  if(!resume && !confirm('이 연출로 영상을 만들까요?\n\n예상 '+est.toLocaleString()+'cr ('+dEngName()+' '+STU.D.res+(dEng()==='seedance25'?' 장면별 이어 찍기 ':' 원테이크 ')+T+'초'+(r.relight_end?' · 마지막 저녁 불빛':'')+(on('music')&&!STU.myMusic?' · 음악':'')+(r.narration_on?' · 내레이션':'')+')\n이미 만든 부분은 다시 차감되지 않아요.')) return;
+  STU.busy=true; STU.runPending={t:Date.now()}; STU.res=STU.D.res; STU._renderEng=dEng(); refresh(); setStatus(resume?'🔄 새로고침 전에 만들던 영상을 이어서 만드는 중…':'감독이 촬영을 준비하는 중…');
   var order=r.order.slice(), kfs=null;
   dTranslate(r).then(function(){
     return Promise.all(order.map(function(ii){ var k='kf:'+imgId(ii)+'|'+STU.aspect; if(STU.cache[k]) return STU.cache[k]; return cropP(STU.imgs[ii]).then(upP).then(function(u){ STU.cache[k]=u; return u; }); }));
@@ -65984,14 +66012,14 @@ function runDirector(){
     if(!r.relight_end || !kfs.length) return;
     var last=order[order.length-1], rk='rl:'+imgId(last)+'|'+STU.aspect; if(STU.cache[rk]){ kfs[kfs.length-1]=STU.cache[rk]; return; }
     setStatus('마지막 장면을 불 켜진 저녁으로 바꾸는 중…');
-    return falP('google/nano-banana-2.1/edit', {prompt:'Re-light this exact same photo as a calm dusk / blue-hour scene: deep blue evening sky, warm golden lights glowing inside every window and interior lamps on, soft reflections. Keep the camera position, composition, building, materials and furniture exactly the same. Photorealistic architectural photography, no text.', image_urls:[kfs[kfs.length-1]], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'})
+    return falP('google/nano-banana-2.1/edit', {prompt:'Re-light this exact same photo as a calm dusk / blue-hour scene: deep blue evening sky, warm golden lights glowing inside every window and interior lamps on, soft reflections. Keep the camera position, composition, building, materials and furniture exactly the same. Photorealistic architectural photography, no text.', image_urls:[kfs[kfs.length-1]], num_images:1, resolution:'1K', output_format:'jpeg'}, {wf:'studio_img', resolution:'1K'}, rk)
       .then(function(d){ var u=imgUrl(d); if(u){ STU.cache[rk]=u; kfs[kfs.length-1]=u; } }).catch(function(e){ console.warn('[AI 감독] 저녁 불빛 실패 — 원본으로', e); });
   }).then(function(){
     var takes=dTakes(kfs, r.beats, T);
     setStatus((takes.length>1?'원테이크 '+takes.length+'개를 동시에 촬영 중…':'원테이크 영상 촬영 중…')+' (보통 3~6분 · ✕로 닫아도 계속돼요)');
     var vids=Promise.all(takes.map(function(tk, ti){ return dShoot(r, tk, ti, takes.length); })).then(function(L){ return [].concat.apply([], L); });
     var mus=STU.myMusic?Promise.resolve(STU.myMusic.url):(on('music')?(function(){ var mp=(r.music_en||'emotional cinematic piano and strings')+' — follows the film: gentle start, slowly building, heartfelt swell near the end, soft resolve. Instrumental.', mk='dmus:'+mp+'|'+T; if(STU.cache[mk]) return Promise.resolve(STU.cache[mk]);
-      return falP('fal-ai/elevenlabs/music', {prompt:mp, music_length_ms:Math.max(10,T)*1000, force_instrumental:true, output_format:'mp3_44100_128'}, {wf:'studio_music', vdur:Math.max(10,T)}).then(function(d){ var u=audUrl(d); if(!u) throw new Error('음악 실패'); STU.cache[mk]=u; return u; }); })().catch(function(e){ console.warn('[AI 감독] 음악 실패 — 없이 진행', e); return null; }):Promise.resolve(null));
+      return falP('fal-ai/elevenlabs/music', {prompt:mp, music_length_ms:Math.max(10,T)*1000, force_instrumental:true, output_format:'mp3_44100_128'}, {wf:'studio_music', vdur:Math.max(10,T)}, mk).then(function(d){ var u=audUrl(d); if(!u) throw new Error('음악 실패'); STU.cache[mk]=u; return u; }); })().catch(function(e){ console.warn('[AI 감독] 음악 실패 — 없이 진행', e); return null; }):Promise.resolve(null));
     var nar=r.narration_on?Promise.all((r.narration||[]).map(function(nn){ if(!nn.text) return null; var tk='dtts:'+koV(r.voice)+'|'+nn.text; if(STU.cache[tk]) return {t:nn.at*T, url:STU.cache[tk], text:nn.text};
       return ttsP(r.voice, nn.text).then(function(d){ var u=audUrl(d); if(!u) return null; STU.cache[tk]=u; return {t:nn.at*T, url:u, text:nn.text}; }).catch(function(e){ console.warn('[AI 감독] 내레이션 실패', e); return null; }); })):Promise.resolve([]);
     return Promise.all([vids, mus, nar]);
@@ -66003,9 +66031,9 @@ function runDirector(){
     STU._assets={shots:JSON.parse(JSON.stringify(segs)), vids:urls, music:R[1], tts:[], hasVo:voList.length>0, mkOpt:mkOpt}; STU.outShorts=null;
     return mkOpt().then(function(o){ return compose(segs, urls, R[1], [], o); });
   }).then(function(blob){
-    STU.busy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; setStatus('✅ 완성! 아래에서 확인하세요 — 갤러리(영상)에도 저장돼요'); refresh(); saveOut(blob); if(ovHidden()) toast('🎬 AI 감독 영상이 완성됐어요 — 오른쪽 아래를 눌러 확인하세요');
+    STU.busy=false; STU.runPending=null; STU.out={blob:blob, url:URL.createObjectURL(blob)}; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; setStatus('✅ 완성! 아래에서 확인하세요 — 갤러리(영상)에도 저장돼요'); refresh(); saveOut(blob); if(ovHidden()) toast('🎬 AI 감독 영상이 완성됐어요 — 오른쪽 아래를 눌러 확인하세요');
     try{ q('#stu-dout').scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){}
-  }).catch(function(e){ STU.busy=false; setStatus('⚠️ 실패: '+esc(String(e&&e.message||e).slice(0,160))+' — 만든 부분은 저장돼 있어서 다시 누르면 남은 부분만 만들어요 (실패한 AI 작업 크레딧은 자동 환불)'); refresh(); });
+  }).catch(function(e){ STU.busy=false; STU.runPending=null; setStatus('⚠️ 실패: '+esc(String(e&&e.message||e).slice(0,160))+' — 만든 부분은 저장돼 있어서 다시 누르면 남은 부분만 만들어요 (실패한 AI 작업 크레딧은 자동 환불)'); refresh(); });
 }
 // 2026-11-01 요청: AI 감독 모드는 항상 위에(접기/펼치기 크게), 고급 모드는 그 아래에서 열고 접기
 function refreshDir(w){
@@ -66027,11 +66055,12 @@ function dirHtml(){
   // 1. 사진
   h+='<div class="stu-card"><div class="stu-step"><b>1</b><span>사진 올리기</span><i>외관·실내 3~20장 · 많이 올려도 감독이 베스트 컷만 골라요 · 순서도 감독이 정해요</i></div><div class="stu-imgs">'+STU.imgs.map(function(src,i){ return '<div class="stu-th" draggable="true" data-ith="'+i+'" style="cursor:grab"><img src="'+esc(src)+'" draggable="false"><span class="n">'+(i+1)+'</span><button type="button" class="x" data-delimg="'+i+'">✕</button></div>'; }).join('')+
     (STU.imgs.length<maxImgs()?'<button type="button" class="stu-add" data-addimg>＋<br>내 컴퓨터에서</button><button type="button" class="stu-add" data-pickhist style="border-color:rgba(0,229,204,.35);color:#5eead4">갤러리에서<br>가져오기</button>':'')+'</div><div id="stu-hist"></div>';
-  h+='<div class="stu-fields" style="margin-top:14px">'+fld('영상 길이 (5~60초 · 직접 입력)', '<div style="display:flex;align-items:center;gap:6px"><input type="number" class="stu-in" data-dt min="5" max="60" step="1" value="'+(+D.T||20)+'" style="width:90px"><span style="font-size:13px;color:#cfd2d8">초</span></div>',150)+fld('비율', sel('data-o="aspect"',[{v:'16:9',t:'16:9 가로 (쇼츠 변환 가능)'},{v:'9:16',t:'9:16 세로'}],STU.aspect),210)+fld('영상 엔진', sel('data-deng',[{v:'kling4',t:'Kling 4.0 (추천 · 원테이크)'},{v:'seedance25',t:'Seedance 2.5 (장면별 이어 찍기)'}],dEng()),220)+fld('화질', sel('data-dres',dResOpts(),D.res),200)+'</div>';
+  h+='<div class="stu-fields" style="margin-top:14px">'+fld('영상 길이 (5~300초 · 직접 입력)', '<div style="display:flex;align-items:center;gap:6px"><input type="number" class="stu-in" data-dt min="5" max="300" step="1" value="'+(+D.T||20)+'" style="width:90px"><span style="font-size:13px;color:#cfd2d8">초</span></div>',150)+fld('비율', sel('data-o="aspect"',[{v:'16:9',t:'16:9 가로 (쇼츠 변환 가능)'},{v:'9:16',t:'9:16 세로'}],STU.aspect),210)+fld('영상 엔진', sel('data-deng',[{v:'kling4',t:'Kling 4.0 (추천 · 원테이크)'},{v:'seedance25',t:'Seedance 2.5 (장면별 이어 찍기)'}],dEng()),220)+fld('화질', sel('data-dres',dResOpts(),D.res),200)+'</div>';
   (function(){ var T=+D.T||20, rg=dGuideRange(T), n=STU.imgs.length;
     h+='<div style="margin-top:12px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)"><div style="font-size:12px;font-weight:800;margin-bottom:6px">📸 길이별 가장 잘 나오는 사진 수 <span class="tiny" style="font-weight:400">사진 1장당 약 3~5초일 때 가장 자연스러워요</span></div><div style="display:flex;gap:6px;flex-wrap:wrap">'+
       D_GUIDE.map(function(g){ var onp=g[0]===T; return '<button type="button" data-dtq="'+g[0]+'" style="padding:6px 10px;border-radius:9px;font-size:12px;cursor:pointer;font-family:inherit;border:1px solid '+(onp?'var(--ac,#00e5cc)':'rgba(255,255,255,.12)')+';background:'+(onp?'rgba(0,229,204,.1)':'transparent')+';color:'+(onp?'#5eead4':'#cfd2d8')+'"><b>'+g[0]+'초</b> · '+g[1]+'</button>'; }).join('')+'</div>';
-    if(n && rg){ var msg, col='#5eead4'; if(n<rg[0]){ msg='지금 '+n+'장 — '+T+'초엔 '+rg[0]+'장 이상이면 더 풍성해요'+(n<2?' (최소 2장)':''); col='#fbbf24'; } else if(n>rg[1]){ var rS=Math.min(60, Math.ceil(n*3.75/5)*5); msg='지금 '+n+'장 — 빼지 않고 모두 자연스럽게 넣어요. 다만 '+T+'초엔 장면이 빨리 지나가요'+(rS>T?' — 여유 있게 보려면 '+rS+'초쯤 추천':''); col='#fbbf24'; } else msg='지금 '+n+'장 — '+T+'초에 딱 좋아요 👍'; h+='<div style="margin-top:8px;font-size:12px;color:'+col+'">'+msg+'</div>'; }
+    if(n && rg){ var msg, col='#5eead4'; if(n<rg[0]){ msg='지금 '+n+'장 — '+T+'초엔 '+rg[0]+'장 이상이면 더 풍성해요'+(n<2?' (최소 2장)':''); col='#fbbf24'; } else if(n>rg[1]){ var rS=Math.min(300, Math.ceil(n*3.75/5)*5); msg='지금 '+n+'장 — 빼지 않고 모두 자연스럽게 넣어요. 다만 '+T+'초엔 장면이 빨리 지나가요'+(rS>T?' — 여유 있게 보려면 '+rS+'초쯤 추천':''); col='#fbbf24'; } else msg='지금 '+n+'장 — '+T+'초에 딱 좋아요 👍'; h+='<div style="margin-top:8px;font-size:12px;color:'+col+'">'+msg+'</div>'; }
+    if(T>60) h+='<div style="margin-top:8px;font-size:12px;color:#cfd2d8;line-height:1.6">📽 <b>긴 영상('+(T>=120?Math.floor(T/60)+'분'+(T%60?' '+(T%60)+'초':''):T+'초')+')</b> — 처음부터 이 길이로 전체 이야기(도입→공간 여정→디테일·삶→빛의 변화→엔딩)를 짜요. 사진이 적어도 감독이 디테일·빛·날씨 장면을 새로 만들어 채워요. 제안은 1가지로 깊게 · 만드는 데 약 '+Math.max(10,Math.round(T/60*6))+'~'+Math.max(20,Math.round(T/60*12))+'분</div>';
     h+='</div>'; })();
   if(STU.imgs.length && !D.props && !D.loading) h+='<div style="margin-top:14px;font-size:13px;font-weight:800;color:#5eead4">✔ 사진 '+STU.imgs.length+'장 준비됐어요 — 확인 버튼 없이 바로 아래 [🎬 AI 감독에게 맡기기]를 누르면 돼요 👇</div>';
   h+='<div style="margin-top:14px">'+btn('data-direct', D.loading?'🎬 감독이 사진을 보고 '+(dStyle()!=='onetake'?'장면을 짜는':'이야기를 짜는')+' 중… (20~60초)':(D.props?'🎬 감독에게 다시 맡기기 · 무료':'🎬 AI 감독에게 맡기기 · 무료'), true, (STU.imgs.length&&!D.loading)?'':'disabled')+'</div></div>';
@@ -66064,7 +66093,7 @@ function dirHtml(){
     h+='<div style="display:flex;gap:18px;flex-wrap:wrap">'+[['music','🎵 음악'],['voice','🎙 내레이션'],['amb','🌧 현장 소리']].map(function(x){ var v=(STU.vol||{})[x[0]]; v=v==null?100:v; return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;min-width:200px">'+x[1]+'<input type="range" data-vol="'+x[0]+'" min="0" max="150" step="5" value="'+v+'" style="flex:1;accent-color:var(--ac,#00e5cc)"><b data-volv="'+x[0]+'" style="width:42px;text-align:right;color:#5eead4">'+v+'%</b></label>'; }).join('')+'</div></div>';
     h+=bkHtml();
     // 실행 바
-    h+='<div class="stu-bar"><div style="flex:1;min-width:220px;font-size:12px;color:#aab;line-height:1.6">'+(r.brand?(dStyleName()+' · 장면 '+r.shots.length+'개 · 약 '+Math.round(dBrandTotal(r))+'초'):((+D.T||20)+'초 '+(dEng()==='seedance25'?'장면별 이어 찍기':((+D.T||20)>30?'(원테이크 2개 이어 붙이기)':'원테이크'))+' · 사진 '+r.order.length+'장'))+' · '+dEngName()+' '+D.res+'<br>예상 <span class="cost">'+dEstimate().toLocaleString()+'cr</span> <span class="tiny">'+(dPaidCr(r)>0?'<b style="color:#5eead4">이미 만든 장면 −'+dPaidCr(r).toLocaleString()+'cr 빼고 계산</b> · ':'')+'콘티는 무료 · 이미 만든 부분은 재사용</span><div id="stu-status" style="margin-top:4px;color:#cfd2d8">'+(STU.statusHtml||'')+'</div></div><div style="display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dpv','🎞 콘티 보기 (무료)')+btn('data-dtaste', D.tasteBusy?'✨ 맛보기 만드는 중… (1~4분)':'✨ 첫 장면 AI 맛보기 · 약 '+dTasteCost(r).toLocaleString()+'cr','', D.tasteBusy||STU.busy?'disabled':'')+btn('data-drender', STU.busy?'만드는 중…':(STU.out?'고친 내용으로 다시 만들기':'🎬 이 연출로 영상 만들기'), true, STU.busy?'disabled':'')+'</div></div>';
+    h+='<div class="stu-bar"><div style="flex:1;min-width:220px;font-size:12px;color:#aab;line-height:1.6">'+(r.brand?(dStyleName()+' · 장면 '+r.shots.length+'개 · 약 '+Math.round(dBrandTotal(r))+'초'):((+D.T||20)+'초 '+(dEng()==='seedance25'?'장면별 이어 찍기':((+D.T||20)>30?'(원테이크 '+Math.min(Math.max(1,r.order.length-1),Math.max(Math.ceil((+D.T||20)/30),Math.ceil((r.order.length-1)/9)))+'개 이어 붙이기)':'원테이크')+((+D.T||20)>dOneMax(r)?' <b style="color:#fbbf24">⚠ 사진 '+r.order.length+'장으론 원테이크 최대 '+dOneMax(r)+'초</b>':''))+' · 사진 '+r.order.length+'장'))+' · '+dEngName()+' '+D.res+'<br>예상 <span class="cost">'+dEstimate().toLocaleString()+'cr</span> <span class="tiny">'+(dPaidCr(r)>0?'<b style="color:#5eead4">이미 만든 장면 −'+dPaidCr(r).toLocaleString()+'cr 빼고 계산</b> · ':'')+'콘티는 무료 · 이미 만든 부분은 재사용</span><div id="stu-status" style="margin-top:4px;color:#cfd2d8">'+(STU.statusHtml||'')+'</div></div><div style="display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dpv','🎞 콘티 보기 (무료)')+btn('data-dtaste', D.tasteBusy?'✨ 맛보기 만드는 중… (1~4분)':'✨ 첫 장면 AI 맛보기 · 약 '+dTasteCost(r).toLocaleString()+'cr','', D.tasteBusy||STU.busy?'disabled':'')+btn('data-drender', STU.busy?'만드는 중…':(STU.out?'고친 내용으로 다시 만들기':'🎬 이 연출로 영상 만들기'), true, STU.busy?'disabled':'')+'</div></div>';
     if(D.taste) h+='<div id="stu-dtaste" style="margin-top:12px"><div class="tiny" style="margin-bottom:6px">✨ 첫 장면 AI 맛보기 — 회원 사진으로 만든 실제 AI 영상이에요'+(r.brand?' (최종 영상에 그대로 재사용)':' (참고용)')+'</div><video src="'+esc(D.taste.url)+'" controls autoplay muted loop playsinline style="width:'+(STU.aspect==='9:16'?'min(300px,100%)':'min(560px,100%)')+';border-radius:12px;background:#000;display:block"></video></div>';
     h+='</div>';
   }
@@ -66075,14 +66104,14 @@ function dirAdvToggle(){ var o=!!STU.advOpen; return '<button type="button" data
 function wireDir(w){
   var D=STU.D, r=dRec();
   var dd=w.querySelector('[data-direct]'); if(dd) dd.onclick=function(){ if(D.props && !confirm('감독에게 다시 맡기면 지금 고친 내용이 바뀌어요. 다시 맡길까요?')) return; callDirector(); };
-  var dt=w.querySelector('[data-dt]'); if(dt){ dt.onchange=function(){ var v=Math.round(+dt.value); if(!(v>0)) v=20; v=Math.max(5,Math.min(60,v)); D.T=v; STU.target=v; refresh(); }; dt.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); dt.blur(); } }; }
+  var dt=w.querySelector('[data-dt]'); if(dt){ dt.onchange=function(){ var v=Math.round(+dt.value); if(!(v>0)) v=20; v=Math.max(5,Math.min(300,v)); D.T=v; STU.target=v; refresh(); }; dt.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); dt.blur(); } }; }
   w.querySelectorAll('[data-dtq]').forEach(function(b){ b.onclick=function(){ D.T=+b.getAttribute('data-dtq'); STU.target=D.T; refresh(); }; });
   var dr=w.querySelector('[data-dres]'); if(dr) dr.onchange=function(){ D.res=dr.value; refresh(); };
   w.querySelectorAll('[data-dprop]').forEach(function(b){ b.onclick=function(){ D.pick=+b.getAttribute('data-dprop'); refresh(); }; });
   var ad=w.querySelector('[data-advmode]'); if(ad) ad.onclick=function(){ STU.advOpen=!STU.advOpen; refresh(); if(STU.advOpen){ try{ q('[data-advmode]').scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){} } };
   var dfo=w.querySelector('[data-dfold]'); if(dfo) dfo.onclick=function(){ D.fold=!D.fold; refresh(); };
   var pv=w.querySelector('[data-dpv]'); if(pv) pv.onclick=previewDir;
-  var rd=w.querySelector('[data-drender]'); if(rd) rd.onclick=runDirector;
+  var rd=w.querySelector('[data-drender]'); if(rd) rd.onclick=function(){ runDirector(); };
   var dto=w.querySelector('[data-dtplopen]'); if(dto) dto.onclick=function(){ D.tplOpen=!D.tplOpen; refresh(); };
   w.querySelectorAll('[data-drecipe]').forEach(function(b){ b.onclick=function(){ var k=b.getAttribute('data-drecipe'); if(dRecipe().k===k) return; if(D.props && !confirm('템플릿을 바꾸면 감독에게 다시 맡겨야 해요. 바꿀까요?')) return; var rc=D_RECIPES.filter(function(x){ return x.k===k; })[0]; D.recipe=k; D.style=rc.base; if(rc.aspect) STU.aspect=rc.aspect; if(rc.T) D.T=rc.T; D.props=null; D.taste=null; D.tplOpen=false; refresh(); }; });
   w.querySelectorAll('[data-dstyle]').forEach(function(b){ b.onclick=function(){ var v=b.getAttribute('data-dstyle'); if((D.style||'onetake')===v) return; if(D.props && !confirm('연출 방식을 바꾸면 감독에게 다시 맡겨야 해요. 바꿀까요?')) return; D.style=v; D.props=null; D.taste=null; refresh(); }; });
