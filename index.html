@@ -4026,7 +4026,7 @@ var EV=[
   {k:'veo31',        n:'Veo 3.1 Fast',       cost:114, t:'Quality',      d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true, maxDur:8, minDur:4},
   {k:'seedance2',    n:'Seedance 2.0',       cost:190, t:'Premium,Best', d:'480p/720p/1080p (해상도별 크레딧 다름) · 최고품질 · 오디오', lg:'s', res:['480p','720p','1080p'], audio:true, maxDur:15, minDur:4},
   {k:'seedance2mini',n:'Seedance 2.0 Mini',  cost:95,  t:'Fast,Cheap',   d:'$0.73/5초 · 480p/720p · 빠르고 저렴 · 오디오', lg:'m', res:['480p','720p'], audio:true, maxDur:15, minDur:4},
-  {k:'seedance25',   n:'Seedance 2.5',       cost:470, t:'New,Best',     d:'최신 · 480p/720p · 최대 30초 · 오디오 (720p 94cr/초, 480p 44cr/초)', lg:'s', res:['480p','720p'], audio:true, maxDur:30, minDur:4},
+  {k:'seedance25',   n:'Seedance 2.5',       cost:470, t:'New,Best',     d:'최신 · 480p/720p/1080p · 최대 30초 · 오디오 (480p 44 · 720p 94 · 1080p 231cr/초)', lg:'s', res:['480p','720p','1080p'], audio:true, maxDur:30, minDur:4},
   {k:'omniflash',    n:'Gemini Omni Flash',  cost:160, t:'New,Editable', d:'$0.13/초 · 720p · 대화형 편집 지원 · Google 최신 · 오디오 (최대 10초)', lg:'g', res:['720p'], audio:true, maxDur:10, minDur:3}
 ];
 var STEPS=['준비 중...','이미지 업로드...','AI 생성 중...','마무리...','완료'];
@@ -14932,7 +14932,7 @@ function getCost(){
       else if(G.vres==='480p') base = Math.round(base*0.5);   // 720p의 약 절반
     } else if(eng==='seedance25'){
       // 2026-11-01 추가: Seedance 2.5(fal 원가 720p $0.473/초, 480p $0.2205/초 — 최대 720p·30초) — 서버 fal-proxy와 같은 단가
-      base = dur*((G.vres==='480p')?44:94);
+      base = dur*((G.vres==='480p')?44:(G.vres==='1080p')?231:94); // 1080p fal $1.164/초
     } else if(eng==='seedance2mini'){
       // ⚠️ 버그 수정(치명적): 이 엔진 전용 가격 계산 분기 자체가 없어서, 맨 아래 else(사실상
       // Kling 공식)로 빠져 "Fast,Cheap"이라고 소개해놓고 실제로는 Kling과 똑같은 가격(200cr)이
@@ -49611,14 +49611,14 @@ function runSeedance25(imgDataUrl, prompt, duration, onDone, onErr, endImgDataUr
   var finalPrompt = (prompt&&prompt.trim()) ? prompt : autoVideoPrompt();
   var useAudio = (G.vidAudio===true);
   var dur = Math.max(4, Math.min(30, Math.round(duration || 5)));
-  var sRes = (G.vres==='480p') ? '480p' : '720p';
+  var sRes = (G.vres==='480p') ? '480p' : (G.vres==='1080p') ? '1080p' : '720p';
   _videoAspectFor(imgDataUrl, function(_asp){
   uploadImgToFal(imgDataUrl, function(imgUrl){
     function _go(endUrl){
       gE('ldst').textContent = 'Seedance 2.5 영상 생성 중 (1~4분)...';
       var payload = { image_url: imgUrl, prompt: finalPrompt, resolution: sRes, duration: String(dur), aspect_ratio: _asp, generate_audio: useAudio };
       if(endUrl) payload.end_image_url = endUrl;
-      falRun('bytedance/seedance-2.5/image-to-video', payload, function(d){
+      falRun(sRes==='1080p' ? 'bytedance/seedance-2.5/us/image-to-video' : 'bytedance/seedance-2.5/image-to-video', payload, /* 1080p는 fal의 US 엔드포인트에서 지원 */ function(d){
         var url = falExtractVideoUrl(d);
         if(url) onDone(url); else onErr('Seedance 2.5 영상 URL 없음. Console [FAL result] 확인.');
       }, onErr, {wf:'video', vidEng:'seedance25', vdur:dur, vres:sRes});
@@ -50644,7 +50644,7 @@ function executeSingleRender(task){
           if(vRes2==='1080p') cost = Math.round(cost*2.2);
           else if(vRes2==='480p') cost = Math.round(cost*0.5);
         } else if(vEng==='seedance25'){
-          cost = vidDur*((vRes2==='480p')?44:94);
+          cost = vidDur*((vRes2==='480p')?44:(vRes2==='1080p')?231:94);
         } else if(vEng==='seedance2mini'){
           cost = vidDur*35;
           if(vRes2==='480p') cost = Math.round(cost*0.5);
@@ -59483,7 +59483,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'psedit', t:'🔍 Ctrl+Space+클릭 확대 / +Alt 축소 (포토샵 편집)', h:'포토샵과 같아요. 포토샵 편집 화면에서 Ctrl(맥은 ⌘)+Space를 누른 채 클릭하면 클릭한 곳을 중심으로 확대(최대 8배), Ctrl+Alt+Space를 누른 채 클릭하면 축소돼요. 누르고 있는 동안 커서가 돋보기로 바뀌고, 이때는 브러시 등 다른 도구가 칠해지지 않아요. 마우스 휠로도 확대/축소, 휠 버튼 드래그로 화면 이동, 빈 곳 더블클릭으로 원래 크기예요.'},
   {c:'edit', t:'🏢 주변 건물 매싱 강조 — ① 그레이로 바꾸기 → ② 그레이 반투명', h:'주변 건물을 회색 매스로 보여 주려면 AI 편집에서 먼저 [① 그레이로 바꾸기(불투명)]를 하고, 그 결과를 클릭해 업로드 이미지로 넣은 뒤 [② 그레이 반투명]을 누르세요 — 회색 매스가 50% 정도 반투명해지면서 그 아래 도로·바닥이 비쳐 보여요. ②를 회색으로 안 바꾼 사진에 누르면 먼저 ①을 하라는 안내가 떠요. 메인건물·가로수·하늘은 그대로예요.'},
   {c:'edit', t:'🏢 광역조감도 — 도시 전경 범위 + 메인건물 N배 키우기', h:'투시도→광역조감도(좌·우 45도 포함)·조감도→광역조감도는 이제 수 km 도시 전경(먼 산·지평선·하늘까지)으로 넓게 잡아요. 광역조감도 결과(AI 편집·브이월드 광역조감도 모두)에 [🏢 메인건물 키우기] 버튼이 생기고, 렌더가 끝나면 메인 화면에 바로 키우기 창이 떠요 — 사진에서 메인건물을 사각형으로 드래그해서 고르고(무료), 배수(예: 10)를 넣고 [👁 미리보기](무료)로 확인한 뒤 [이대로 선명하게 렌더](40cr)를 누르면 키운 건물을 원래 디자인대로 선명하게 다시 그려서 새 결과로 저장해요.'},
-  {c:'video', t:'🎬 Seedance 2.5 영상 엔진', h:'영상 제작에 Seedance 2.5(최신)가 추가됐어요 — 최대 30초, 480p/720p, 오디오 지원. 720p 94cr/초(30초 2,820cr), 480p 44cr/초예요. (Seedance 2.5는 fal 기준 최대 720p라 1080p는 없어요)'},
+  {c:'video', t:'🎬 Seedance 2.5 영상 엔진', h:'영상 제작에 Seedance 2.5(최신)가 추가됐어요 — 최대 30초, 480p/720p/1080p, 오디오 지원. 480p 44cr/초, 720p 94cr/초(30초 2,820cr), 1080p 231cr/초(30초 6,930cr)예요.'},
   {c:'spaceset', t:'🎨 미래형 컨셉 10가지 한눈에 보기', h:'공간 컨셉 디자인의 🎲 미래형 다른 컨셉 버튼 아래에 지금 컨셉의 색 견본과 쉬운 설명이 보여요. [10가지 컨셉 한눈에 보고 고르기]를 누르면 루나 화이트·우드 캡슐·그라파이트 럭스 등 10가지를 색 견본과 함께 보고 바로 골라요.'},
   {c:'edit', t:'🌫 흐린 날 해 질 녘(감성 저녁) 프리셋', h:'AI 편집 시간/날씨에 "흐린 날 해 질 녘"이 추가됐어요 — 블루아워·골든아워가 아닌, 흐린 날 해가 진 직후의 차분한 회청색 하늘과 창으로 은은하게 새어 나오는 따뜻한 실내 조명 느낌이에요.'},
   {c:'edit', t:'🏚 노후 건물 프리셋 + 참고 이미지', h:'노후된 주택·빌라·빨간벽돌·상가 프리셋에 참고 이미지(원하는 오래된 건물 사진)를 넣으면 그 건물과 최대한 비슷한 모습(지붕·외벽·창호·낡은 정도)으로 만들어요. 크기는 지금 건물보다 커지지 않아요.'},
