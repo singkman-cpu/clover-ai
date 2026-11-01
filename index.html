@@ -4027,6 +4027,7 @@ var EV=[
   {k:'veo31',        n:'Veo 3.1 Fast',       cost:114, t:'Quality',      d:'$0.90/6초 · 720p/1080p/4K · Google 고품질', lg:'g', res:['720p','1080p','4K'], audio:true, maxDur:8, minDur:4},
   {k:'seedance2',    n:'Seedance 2.0',       cost:190, t:'Premium,Best', d:'480p/720p/1080p (해상도별 크레딧 다름) · 최고품질 · 오디오', lg:'s', res:['480p','720p','1080p'], audio:true, maxDur:15, minDur:4},
   {k:'seedance2mini',n:'Seedance 2.0 Mini',  cost:95,  t:'Fast,Cheap',   d:'$0.73/5초 · 480p/720p · 빠르고 저렴 · 오디오', lg:'m', res:['480p','720p'], audio:true, maxDur:15, minDur:4},
+  {k:'kling4',       n:'Kling 4.0',          cost:195, t:'New,Cinematic', d:'최신 · 720p/1080p · 3~30초 · 오디오 (720p 39cr/초, 1080p 58cr/초)', lg:'k', res:['720p','1080p'], audio:true, maxDur:30, minDur:3},
   {k:'seedance25',   n:'Seedance 2.5',       cost:470, t:'New,Best',     d:'최신 · 480p/720p/1080p · 최대 30초 · 오디오 (480p 44 · 720p 94 · 1080p 231cr/초)', lg:'s', res:['480p','720p','1080p'], audio:true, maxDur:30, minDur:4},
   {k:'omniflash',    n:'Gemini Omni Flash',  cost:160, t:'New,Editable', d:'$0.13/초 · 720p · 대화형 편집 지원 · Google 최신 · 오디오 (최대 10초)', lg:'g', res:['720p'], audio:true, maxDur:10, minDur:3}
 ];
@@ -14931,6 +14932,8 @@ function getCost(){
       // 480p는 픽셀 수가 약 45%라 더 저렴하고, 1080p는 약 2.25배라 더 비쌈.
       if(G.vres==='1080p') base = Math.round(base*2.2);       // 720p의 약 2.2배 ($0.682 vs $0.303/초)
       else if(G.vres==='480p') base = Math.round(base*0.5);   // 720p의 약 절반
+    } else if(eng==='kling4'){
+      base = dur*((G.vres==='720p')?39:58); // 2026-11-01 Kling 4.0(fal $0.157/초 720p, $0.235/초 1080p)
     } else if(eng==='seedance25'){
       // 2026-11-01 추가: Seedance 2.5(fal 원가 720p $0.473/초, 480p $0.2205/초 — 최대 720p·30초) — 서버 fal-proxy와 같은 단가
       base = dur*((G.vres==='480p')?44:(G.vres==='1080p')?231:94); // 1080p fal $1.164/초
@@ -45382,7 +45385,7 @@ function loadHistFromStorage(){
           if(x.wf==='video' && !x.vidEng){
             var engNames={
               'Wan 2.2':'wan22','Kling 3.0 Pro':'kling3',
-              'Veo 3.1 Fast':'veo31','Seedance 2.0':'seedance2','Seedance 2.0 Mini':'seedance2mini','Seedance 2.5':'seedance25',
+              'Veo 3.1 Fast':'veo31','Seedance 2.0':'seedance2','Seedance 2.0 Mini':'seedance2mini','Seedance 2.5':'seedance25','Kling 4.0':'kling4',
               'Gemini Omni Flash':'omniflash'
             };
             (x.tags||[]).forEach(function(t){
@@ -46158,7 +46161,7 @@ function addHistEl(item, scroll, targetHs, atBottom){
       var fhdLabel = fhdLabelMap[resLabel]||'HD';
       // 엔진 태그
       var vidEngTag=mk('span','ptag');
-      var vidColors={wan22:'#22d3ee',kling3:'#a78bfa',veo31:'#4ade80',seedance2:'#f59e0b',seedance25:'#f43f5e',seedance2mini:'#fb923c',omniflash:'#60a5fa'};
+      var vidColors={wan22:'#22d3ee',kling3:'#a78bfa',veo31:'#4ade80',seedance2:'#f59e0b',seedance25:'#f43f5e',kling4:'#c084fc',seedance2mini:'#fb923c',omniflash:'#60a5fa'};
       var vc=vidColors[vidEngKey]||'#22d3ee';
       vidEngTag.style.cssText='background:'+vc+';color:#000;font-weight:800;border:none';
       vidEngTag.textContent='▶ '+evFound.n;
@@ -49611,6 +49614,22 @@ function runSeedance(imgDataUrl, prompt, duration, fast, onDone, onErr, endImgDa
   });
 }
 
+// ── Kling 4.0 (image-to-video) — 2026-11-01 추가: 720p/1080p · 3~30초 · 오디오 기본 포함 ──
+function runKling4(imgDataUrl, prompt, duration, onDone, onErr, endImgDataUrl) {
+  var finalPrompt = (prompt&&prompt.trim()) ? prompt : autoVideoPrompt(); if(finalPrompt.length>2400) finalPrompt=finalPrompt.slice(0,2400);
+  var dur=Math.max(3, Math.min(30, Math.round(duration||5))), kRes=(G.vres==='720p')?'720p':'1080p';
+  _videoAspectFor(imgDataUrl, function(_asp){
+  uploadImgToFal(imgDataUrl, function(imgUrl){
+    function _go(endUrl){
+      var l=gE('ldst'); if(l) l.textContent='Kling 4.0 영상 생성 중 (1~4분)...';
+      var payload={ image_url:imgUrl, start_image_url:imgUrl, prompt:finalPrompt, duration:String(dur), resolution:kRes, aspect_ratio:_asp, negative_prompt:'blur, distort, low quality' };
+      if(endUrl) payload.end_image_url=endUrl;
+      falRun('kling/v4/image-to-video', payload, function(d){ var url=falExtractVideoUrl(d); if(url) onDone(url); else onErr('Kling 4.0 영상 URL 없음.'); }, onErr, {wf:'video', vidEng:'kling4', vdur:dur, vres:kRes});
+    }
+    if(endImgDataUrl){ uploadImgToFal(endImgDataUrl, _go, function(){ _go(null); }); } else { _go(null); }
+  }, onErr);
+  });
+}
 // ── Seedance 2.5 (image-to-video) — 2026-11-01 추가: 최대 720p · 4~30초 ──
 function runSeedance25(imgDataUrl, prompt, duration, onDone, onErr, endImgDataUrl) {
   var finalPrompt = (prompt&&prompt.trim()) ? prompt : autoVideoPrompt();
@@ -50511,7 +50530,7 @@ function executeSingleRender(task){
     _eta = _slowCombo ? 150 : 30;
   }
   if(task.wf==='video'){
-    var _vidEtaMap={kling3:120,veo31:150,seedance2:180,seedance25:200,seedance2mini:90,omniflash:60};
+    var _vidEtaMap={kling3:120,kling4:150,veo31:150,seedance2:180,seedance25:200,seedance2mini:90,omniflash:60};
     _eta = _vidEtaMap[task.vidEng||'kling3']||90;
   }
   function _startTimer(){
@@ -50648,6 +50667,8 @@ function executeSingleRender(task){
           cost = vidDur*72;
           if(vRes2==='1080p') cost = Math.round(cost*2.2);
           else if(vRes2==='480p') cost = Math.round(cost*0.5);
+        } else if(vEng==='kling4'){
+          cost = vidDur*((vRes2==='720p')?39:58);
         } else if(vEng==='seedance25'){
           cost = vidDur*((vRes2==='480p')?44:(vRes2==='1080p')?231:94);
         } else if(vEng==='seedance2mini'){
@@ -52106,6 +52127,8 @@ function procImgWithTask(task, onDone, onErr){
       runSeedance(img, vp, vdur, false, onDone, onErr, vEnd);
     } else if(engK==='seedance25'){
       runSeedance25(img, vp, vdur, onDone, onErr, vEnd);
+    } else if(engK==='kling4'){
+      runKling4(img, vp, vdur, onDone, onErr, vEnd);
     } else if(engK==='seedance2mini'){
       runSeedanceMini(img, vp, vdur, onDone, onErr, vEnd);
     } else if(engK==='omniflash'){
@@ -53033,6 +53056,8 @@ function procImg(onDone, onErr) {
       runSeedance(_vTab.inputImg, vp, _vdur, false, onDone, onErr, _vEnd);
     } else if(engK === 'seedance25') {
       runSeedance25(_vTab.inputImg, vp, _vdur, onDone, onErr, _vEnd);
+    } else if(engK === 'kling4') {
+      runKling4(_vTab.inputImg, vp, _vdur, onDone, onErr, _vEnd);
     } else if(engK === 'seedance2mini') {
       runSeedanceMini(_vTab.inputImg, vp, _vdur, onDone, onErr, _vEnd);
     } else if(engK === 'omniflash') {
@@ -59488,6 +59513,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'psedit', t:'🔍 Ctrl+Space+클릭 확대 / +Alt 축소 (포토샵 편집)', h:'포토샵과 같아요. 포토샵 편집 화면에서 Ctrl(맥은 ⌘)+Space를 누른 채 클릭하면 클릭한 곳을 중심으로 확대(최대 8배), Ctrl+Alt+Space를 누른 채 클릭하면 축소돼요. 누르고 있는 동안 커서가 돋보기로 바뀌고, 이때는 브러시 등 다른 도구가 칠해지지 않아요. 마우스 휠로도 확대/축소, 휠 버튼 드래그로 화면 이동, 빈 곳 더블클릭으로 원래 크기예요.'},
   {c:'edit', t:'🏢 주변 건물 매싱 강조 — ① 그레이로 바꾸기 → ② 그레이 반투명', h:'주변 건물을 회색 매스로 보여 주려면 AI 편집에서 먼저 [① 그레이로 바꾸기(불투명)]를 하고, 그 결과를 클릭해 업로드 이미지로 넣은 뒤 [② 그레이 반투명]을 누르세요 — 회색 매스가 50% 정도 반투명해지면서 그 아래 도로·바닥이 비쳐 보여요. ②를 회색으로 안 바꾼 사진에 누르면 먼저 ①을 하라는 안내가 떠요. 메인건물·가로수·하늘은 그대로예요.'},
   {c:'edit', t:'🏢 광역조감도 — 도시 전경 범위 + 메인건물 N배 키우기', h:'투시도→광역조감도(좌·우 45도 포함)·조감도→광역조감도는 이제 수 km 도시 전경(먼 산·지평선·하늘까지)으로 넓게 잡아요. 광역조감도 결과(AI 편집·브이월드 광역조감도 모두)에 [🏢 메인건물 키우기] 버튼이 생기고, 렌더가 끝나면 메인 화면에 바로 키우기 창이 떠요 — 사진에서 메인건물을 사각형으로 드래그해서 고르고(무료), 배수(예: 10)를 넣고 [👁 미리보기](무료)로 확인한 뒤 [이대로 선명하게 렌더](40cr)를 누르면 키운 건물을 원래 디자인대로 선명하게 다시 그려서 새 결과로 저장해요.'},
+  {c:'video', t:'🎬 Kling 4.0 영상 엔진', h:'영상 제작에 Kling 4.0(최신)이 추가됐어요 — 3~30초, 720p/1080p, 오디오 포함. 720p 39cr/초, 1080p 58cr/초로 Seedance 2.5보다 저렴해요.'},
   {c:'video', t:'🎬 Seedance 2.5 영상 엔진', h:'영상 제작에 Seedance 2.5(최신)가 추가됐어요 — 최대 30초, 480p/720p/1080p, 오디오 지원. 480p 44cr/초, 720p 94cr/초(30초 2,820cr), 1080p 231cr/초(30초 6,930cr)예요.'},
   {c:'spaceset', t:'🎨 미래형 컨셉 10가지 한눈에 보기', h:'공간 컨셉 디자인의 🎲 미래형 다른 컨셉 버튼 아래에 지금 컨셉의 색 견본과 쉬운 설명이 보여요. [10가지 컨셉 한눈에 보고 고르기]를 누르면 루나 화이트·우드 캡슐·그라파이트 럭스 등 10가지를 색 견본과 함께 보고 바로 골라요.'},
   {c:'edit', t:'🌫 흐린 날 해 질 녘(감성 저녁) 프리셋', h:'AI 편집 시간/날씨에 "흐린 날 해 질 녘"이 추가됐어요 — 블루아워·골든아워가 아닌, 흐린 날 해가 진 직후의 차분한 회청색 하늘과 창으로 은은하게 새어 나오는 따뜻한 실내 조명 느낌이에요.'},
@@ -64640,7 +64666,7 @@ window._w3dInitViewer = function(containerEl, spzUrl, metricScale, origThumb, sh
 // AI가 스토리보드(장면 순서·카메라·대사·음악)를 짜고 → 회원이 순서·음악·목소리·대사·필터를 고친 뒤 → 장면별 Seedance 2.5 영상 +
 // ElevenLabs 내레이션·음악을 만들어 브라우저에서 한 편으로 이어 붙임. 고쳐서 다시 만들 때는 바뀐 장면만 다시 렌더(같은 장면은 재사용 → 크레딧 절약)
 (function(){
-var STU = window.STU = window.STU || { mode:null, imgs:[], aspect:'16:9', res:'720p', plan:null, filter:'none', subs:true, voice:'Sarah', voices:{}, music:'', dlg:'native', userPrompt:'', genre:'멜로', cast:[], cache:{}, busy:false, out:null, target:30 };
+var STU = window.STU = window.STU || { mode:null, imgs:[], aspect:'16:9', res:'720p', plan:null, filter:'none', subs:true, voice:'Sarah', voices:{}, music:'', dlg:'native', userPrompt:'', genre:'멜로', cast:[], cache:{}, busy:false, out:null, target:30, eng:'seedance25' };
 if(!STU.target) STU.target=30;
 var MODES = [
   {k:'walk',  ic:'🎥', t:'시네마틱 워크스루', d:'사람 없이 카메라가 천천히 공간을 보여주고 음악만 흘러요', tag:'음악'},
@@ -64663,7 +64689,8 @@ var CAM_EN = {'천천히 앞으로 밀기(dolly in)':'a slow, smooth gimbal doll
 var FILTER_CSS = {none:'none', teal:'contrast(1.12) saturate(1.18)', film:'sepia(0.18) saturate(1.08) contrast(1.06)', noir:'grayscale(1) contrast(1.35) brightness(0.95)', cold:'saturate(0.78) hue-rotate(-8deg) contrast(1.14) brightness(0.93)', vintage:'sepia(0.32) saturate(0.82) contrast(0.92) brightness(1.04)', dream:'brightness(1.06) saturate(0.9) contrast(0.9)'};
 var FILTER_PROMPT = {none:'', teal:'cinematic teal-and-orange color grade', film:'warm 35mm film look with soft grain', noir:'black-and-white film noir look with deep shadows', cold:'cold desaturated blue thriller grade', vintage:'faded vintage film colors', dream:'dreamy soft glow, gentle haze-free bloom'};
 // 단가(서버 fal-proxy와 같음) — Seedance 2.5 초당, 이미지 1장, 음악 초당, 내레이션 1,000자당
-function cps(){ return STU.res==='480p'?44:(STU.res==='1080p'?231:94); }
+function cps(){ if(STU.eng==='kling4' && STU.mode!=='movie') return STU.res==='1080p'?58:39; return STU.res==='480p'?44:(STU.res==='1080p'?231:94); }
+function useK4(){ return STU.eng==='kling4' && STU.mode!=='movie'; }
 var IMG_CR=20, MUSIC_CPS=3, TTS_PER_1K=20;
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 function toast(t){ try{ _agedEnvToast(t); }catch(e){ console.log(t); } }
@@ -64705,7 +64732,7 @@ function fitTarget(p){
   sh.forEach(function(x,i){ var d=(i<n-1)?each:(S-acc); d=Math.round(Math.max(2,Math.min(8,d))*2)/2; x.dur=d; acc+=d; });
 }
 function needTts(s){ return !!(s.line && (STU.mode==='narr' || STU.mode==='season' || (STU.mode==='free' && !s.speaker && s.speaker!==0) || (STU.mode==='movie' && STU.dlg==='dub'))); }
-function shotKey(s){ return [STU.mode, s.img, rdur(s), s.cam, s.action, STU.mode==='movie'?s.line:'', s.weather||'', s.speaker==null?'':s.speaker, STU.res, STU.aspect, STU.mode==='movie'?(STU.genre+'|'+STU.filter+'|'+STU.dlg+'|'+(STU.cast||[]).map(function(c){return c.desc;}).join('/')):''].join('¦'); }
+function shotKey(s){ return [useK4()?'k4':'sd', STU.mode, s.img, rdur(s), s.cam, s.action, STU.mode==='movie'?s.line:'', s.weather||'', s.speaker==null?'':s.speaker, STU.res, STU.aspect, STU.mode==='movie'?(STU.genre+'|'+STU.filter+'|'+STU.dlg+'|'+(STU.cast||[]).map(function(c){return c.desc;}).join('/')):''].join('¦'); }
 function seasonKey(s){ return s.img+'¦'+(s.weather||'')+'¦'+s.cam; }
 function musicKey(){ return (STU.plan&&STU.plan.music||'')+'¦'+Math.ceil(totalDur()); }
 function ttsKey(s){ return (STU.mode==='movie'?(castVoice(s.speaker)):STU.voice)+'¦'+s.line; }
@@ -64723,14 +64750,15 @@ function makePlan(cb){
   var thumbs=new Array(n), left=n;
   STU.imgs.forEach(function(src,i){ thumb(src, 640, function(t){ thumbs[i]=t; if(--left===0) go(); }); });
   function go(){
-    var req={ mode:STU.mode, count:n, target:+STU.target||30, aspect:STU.aspect, genre:STU.genre, userPrompt:STU.userPrompt, images:thumbs.filter(Boolean).slice(0,10) };
+    var req={ mode:STU.mode, count:n, target:+STU.target||30, aspect:STU.aspect, genre:STU.genre, userPrompt:STU.userPrompt, images:thumbs.filter(Boolean).slice(0,10) }; if(STU.tpl) req.template=tplReq();
+    var cb0=cb; cb=function(pl, fb, srvTpl){ if(STU.tpl){ pl=enforceTpl(fb?null:pl, !!srvTpl); fitTarget(pl); } cb0(pl, fb && !STU.tpl); };
     var done=false; var to=setTimeout(function(){ if(done) return; done=true; console.warn('[영상 스튜디오] 스토리보드 AI 시간 초과 — 기본 템플릿'); var fp=fallbackPlan(); fitTarget(fp); cb(fp, true); }, 90000);
     try{
       _falProxyCall('studio-storyboard', req, function(d){ if(done) return; done=true; clearTimeout(to);
         var p=d && d.plan; if(!(p && p.shots && p.shots.length)){ console.warn('[영상 스튜디오] 스토리보드 응답 이상', d); var fp=fallbackPlan(); fitTarget(fp); cb(fp, true); return; }
         p.shots=p.shots.filter(function(s){ return s && s.img>=0 && s.img<n; }).slice(0,12).map(function(s){ return {img:+s.img, dur:Math.max(4,Math.min(8,Math.round(+s.dur||5))), cam:(CAMS.indexOf(s.cam)>=0?s.cam:CAMS[0]), action:String(s.action||''), _en:String(s.action_en||''), line:String(s.line||''), weather:String(s.weather||''), _wen:String(s.weather_en||''), speaker:(s.speaker==null||s.speaker==='')?null:+s.speaker, sfx:String(s.sfx||'')}; });
         if(!p.shots.length){ var fp=fallbackPlan(); fitTarget(fp); cb(fp, true); return; }
-        p._men=String(p.music_en||''); fitTarget(p); cb(p, false);
+        p._men=String(p.music_en||''); fitTarget(p); cb(p, false, d.tpl);
       }, function(err){ if(done) return; done=true; clearTimeout(to); console.warn('[영상 스튜디오] 스토리보드 AI 실패 — 기본 템플릿', err); var fp=fallbackPlan(); fitTarget(fp); cb(fp, true); });
     }catch(e){ if(!done){ done=true; clearTimeout(to); var fp=fallbackPlan(); fitTarget(fp); cb(fp, true); } }
   }
@@ -64797,7 +64825,7 @@ function renderShot(s, i){
   return prep.then(function(img){
     var slugBase = STU.res==='1080p' ? 'bytedance/seedance-2.5/us/' : 'bytedance/seedance-2.5/';
     var dur=String(rdur(s));
-    var bill={wf:'studio_video', vidEng:'seedance25', vdur:+dur, vres:STU.res};
+    var bill={wf:'studio_video', vidEng:useK4()?'kling4':'seedance25', vdur:+dur, vres:(useK4()&&STU.res==='480p')?'720p':STU.res};
     if(STU.mode==='movie' && (STU.cast||[]).some(function(c){ return c.img; })){
       return cropP(img).then(upP).then(function(spaceUrl){
         var imgs=STU.cast.map(function(c){ return c.img; }).concat([spaceUrl]);
@@ -64806,6 +64834,7 @@ function renderShot(s, i){
         return falP(slugBase+'reference-to-video', inp, bill);
       });
     }
+    if(useK4()) return cropP(img).then(upP).then(function(u){ return falP('kling/v4/image-to-video', {prompt:shotPrompt(s,false).slice(0,2400), image_url:u, start_image_url:u, duration:dur, resolution:(STU.res==='1080p'?'1080p':'720p'), aspect_ratio:STU.aspect, negative_prompt:'blur, distort, low quality, text, watermark'}, bill); });
     return cropP(img).then(upP).then(function(u){
       return falP(slugBase+'image-to-video', {prompt:shotPrompt(s,false), image_url:u, duration:dur, resolution:STU.res, aspect_ratio:STU.aspect, generate_audio:true}, bill);
     });
@@ -64856,7 +64885,7 @@ function runRender(){
     STU._assets={shots:JSON.parse(JSON.stringify(shots)), vids:r[0], music:r[1], tts:r[2]}; STU.outShorts=null;
     return compose(shots, r[0], r[1], r[2]);
   }).then(function(blob){
-    STU.busy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; setStatus('✅ 완성! 아래에서 확인하고 저장하세요'); refresh(); saveOut(blob);
+    STU.busy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; setStatus('✅ 완성! 아래에서 확인하고 저장하세요'); STU.outUrl=null; refresh(); saveOut(blob); tplUsed();
   }).catch(function(e){ STU.busy=false; setStatus('⚠️ 실패: '+esc(String(e&&e.message||e).slice(0,160))+' — 만든 장면은 저장돼 있어서 다시 누르면 남은 부분만 만들어요'); refresh(); });
 }
 
@@ -64865,7 +64894,7 @@ function blobUrl(u){ return fetch(u).then(function(r){ if(!r.ok) throw new Error
 function loadMedia(tag, src){ return new Promise(function(res){ var el=document.createElement(tag); el.preload='auto'; el.playsInline=true; el.crossOrigin='anonymous'; var ok=false; el.onloadeddata=el.oncanplaythrough=function(){ if(ok) return; ok=true; res(el); }; el.onerror=function(){ if(ok) return; ok=true; res(null); }; setTimeout(function(){ if(!ok){ ok=true; res(el); } }, 20000); el.src=src; el.load(); }); }
 function compose(shots, vids, music, ttsList, opt){
   opt=opt||{};
-  var R=(STU.res==='1080p')?1.5:(STU.res==='480p'?0.667:1), vert=(opt.vert!=null)?opt.vert:(STU.aspect==='9:16');
+  var R=opt.hd?1.5:((STU.res==='1080p')?1.5:(STU.res==='480p'?0.667:1)), vert=(opt.vert!=null)?opt.vert:(STU.aspect==='9:16');
   var W=Math.round((vert?720:1280)*R/2)*2, H=Math.round((vert?1280:720)*R/2)*2, XF=0.5;
   return Promise.all(vids.map(function(u){ return blobUrl(u).catch(function(){ return u; }); })).then(function(vu){
     return Promise.all([Promise.all(vu.map(function(u){ return loadMedia('video', u); })), music?blobUrl(music).then(function(u){ return loadMedia('audio',u); }).catch(function(){ return null; }):null, Promise.all((ttsList||[]).map(function(u){ return u?blobUrl(u).then(function(b){ return loadMedia('audio',b); }).catch(function(){ return null; }):null; }))]);
@@ -64971,14 +65000,15 @@ function preview(){
     cancelAnimationFrame(raf); recOn=rec; rec.start(500); start();
   };
 }
-function saveOut(blob){
+function saveOut(blob, isShorts){
   try{
     var ext=/mp4/.test(blob.type)?'mp4':'webm', f=new File([blob], 'clover-studio-'+Date.now()+'.'+ext, {type:blob.type||'video/webm'});
     _doUploadFile(f, function(url){
-      var id=Date.now()+Math.random(), item={id:id, orig:null, result:url, origThumb:null, tags:['🎬 영상 스튜디오', (MODES.find(function(m){return m.k===STU.mode;})||{}).t||'', STU.res], ai:'', preview:false, cx:50, fav:false, wf:'video', vidEng:'seedance25'};
+      if(!isShorts) STU.outUrl=url;
+      var id=Date.now()+Math.random(), item={id:id, orig:null, result:url, origThumb:null, tags:['🎬 영상 스튜디오'+(isShorts?' · 쇼츠':''), (MODES.find(function(m){return m.k===STU.mode;})||{}).t||'', STU.res].concat(STU.tpl?['📋 '+STU.tpl.title]:[]), ai:'', preview:false, cx:50, fav:false, wf:'video', vidEng:useK4()?'kling4':'seedance25'};
       G.HIST.video=G.HIST.video||[]; G.HIST.video.unshift(item); try{ saveHistToStorage(); }catch(e){}
-      try{ if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery('video', id, url, null, 'Seedance 2.5 · 영상 스튜디오', STU.res, null, ''); }catch(e){}
-      toast('🎬 완성 영상을 갤러리(영상)에 저장했어요');
+      try{ if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery('video', id, url, null, (useK4()?'Kling 4.0':'Seedance 2.5')+' · 영상 스튜디오'+(isShorts?' 쇼츠':''), STU.res, null, ''); }catch(e){}
+      toast(isShorts?'🎬 쇼츠도 갤러리(영상)에 저장했어요':'🎬 완성 영상을 갤러리(영상)에 저장했어요');
     }, function(e){ console.warn('[영상 스튜디오] 클라우드 저장 실패 — 다운로드는 가능', e); });
   }catch(e){}
 }
@@ -64991,7 +65021,8 @@ function css(){ if(q('#stu-css')) return; var st=document.createElement('style')
 '#stu-ov *{box-sizing:border-box} #stu-ov .muted{color:#8b909c} #stu-ov .tiny{font-size:11px;color:#7d828d}'+
 '.stu-top{display:flex;align-items:center;gap:12px;margin-bottom:6px}.stu-h1{font-size:22px;font-weight:800;letter-spacing:-.02em}.stu-pill{font-size:10px;font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:999px;background:linear-gradient(90deg,#f43f5e,#fb7185);color:#fff;vertical-align:middle;margin-left:6px}'+
 '.stu-card{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.07);border-radius:18px;padding:18px;margin-top:14px}'+
-'.stu-step{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}.stu-step b{font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--ac,#00e5cc)}.stu-step span{font-size:15px;font-weight:700}.stu-step i{font-style:normal;font-size:11.5px;color:#7d828d}'+
+'.stu-step{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}.stu-card.folded{padding-top:14px;padding-bottom:14px}.stu-card.folded .stu-step{margin-bottom:0}.stu-card.folded>*:not(.stu-step){display:none!important}.stu-step b{font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--ac,#00e5cc)}.stu-step span{font-size:15px;font-weight:700}.stu-step i{font-style:normal;font-size:11.5px;color:#7d828d}'+
+'.stu-tpl-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}.stu-tpl{position:relative;border-radius:12px;overflow:hidden;background:#000;cursor:pointer;aspect-ratio:16/9;border:1px solid #262a33}.stu-tpl.v{aspect-ratio:9/16;max-height:340px}.stu-tpl video{width:100%;height:100%;object-fit:cover;display:block}.stu-tpl:hover{border-color:var(--ac,#00e5cc)}.stu-tpl .cap{position:absolute;left:0;right:0;bottom:0;padding:18px 9px 7px;background:linear-gradient(transparent,rgba(0,0,0,.85));display:flex;flex-direction:column;gap:1px}.stu-tpl .cap b{font-size:12.5px;color:#fff}.stu-tpl .cap i{font-style:normal;font-size:10.5px;color:#b8bcc6}.stu-tpl .pend{position:absolute;top:6px;left:6px;font-size:10px;font-weight:800;background:#fbbf24;color:#000;border-radius:6px;padding:2px 6px}'+
 '.stu-modes{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}.stu-mode{text-align:left;padding:14px;border-radius:14px;cursor:pointer;font-family:inherit;color:inherit;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);transition:.15s}.stu-mode:hover{border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.04)}.stu-mode.on{border-color:var(--ac,#00e5cc);background:rgba(0,229,204,.06);box-shadow:0 0 0 3px rgba(0,229,204,.08)}'+
 '.stu-ic{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(0,229,204,.18),rgba(99,102,241,.14));margin-bottom:10px}.stu-ic svg{width:20px;height:20px;stroke:#d8fdf8;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.stu-mode .t{font-size:14px;font-weight:700}.stu-mode .d{font-size:11.5px;color:#8b909c;line-height:1.5;margin-top:4px}.stu-mode .g{font-size:10.5px;color:#5eead4;margin-top:8px;letter-spacing:.02em}'+
 '.stu-imgs{display:flex;flex-wrap:wrap;gap:10px}.stu-th{position:relative;width:112px;height:112px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1)}.stu-th img{width:100%;height:100%;object-fit:cover}.stu-th .n{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);font-size:10px;font-weight:700;border-radius:6px;padding:1px 6px}.stu-th .x{position:absolute;right:5px;top:5px;width:22px;height:22px;border:none;border-radius:7px;background:rgba(0,0,0,.6);color:#fff;cursor:pointer;font-size:11px}'+
@@ -65010,24 +65041,28 @@ function open(){
   var ov=document.createElement('div'); ov.id='stu-ov';
   ov.style.cssText='position:fixed;inset:0;z-index:99990;overflow:auto;font-family:inherit';
   ov.innerHTML='<div id="stu-wrap" style="max-width:1080px;margin:0 auto;padding:22px 18px 40px"></div>';
-  document.body.appendChild(ov); refresh();
+  document.body.appendChild(ov); refresh(); loadTpls();
 }
-function step(n, t, sub){ return '<div class="stu-step"><b>STEP '+n+'</b><span>'+t+'</span>'+(sub?'<i>'+sub+'</i>':'')+'</div>'; }
+function isFold(n){ STU.fold=STU.fold||{}; return !!STU.fold[n]; }
+function card(n){ return '<div class="stu-card'+(isFold(n)?' folded':'')+'">'; }
+function step(n, t, sub){ var extra=(n===1&&STU.mode&&isFold(1))?'<i style="color:#5eead4">선택: '+(STU.tpl?'📋 템플릿 · '+esc(STU.tpl.title)+' · ':'')+esc((MODES.find(function(m){return m.k===STU.mode;})||{}).t||'')+'</i>':(sub?'<i>'+sub+'</i>':''); return '<div class="stu-step" data-fold="'+n+'" style="cursor:pointer"><b>STEP '+n+'</b><span>'+t+'</span>'+extra+'<em style="margin-left:auto;font-style:normal;font-size:11px;color:#7d828d">'+(isFold(n)?'펼치기 ▾':'접기 ▴')+'</em></div>'; }
 function btn(attr, t, primary, extra){ return '<button type="button" '+attr+' class="stu-btn'+(primary?' pri':'')+(/^sm|^icon/.test(extra||'')?' '+extra:'')+'"'+(extra&&!/^sm|^icon/.test(extra)?' style="'+extra+'"':'')+'>'+t+'</button>'; }
 function sel(attr, opts, cur){ return '<select '+attr+' class="stu-in">'+opts.map(function(o){ var v=(typeof o==='object')?o.v:o, t=(typeof o==='object')?o.t:o; return '<option value="'+esc(v)+'"'+(String(v)===String(cur)?' selected':'')+'>'+esc(t)+'</option>'; }).join('')+'</select>'; }
 function fld(label, inner, w){ return '<label class="stu-f"'+(w?' style="min-width:'+w+'px"':'')+'>'+label+inner+'</label>'; }
 var MUSIC_PRE=[['잔잔하고 우아한 시네마틱 피아노와 현악, 80bpm','calm modern cinematic piano with soft strings, elegant, 80 bpm, instrumental'],['따뜻한 어쿠스틱 기타와 가벼운 퍼커션','warm acoustic guitar and light percussion, cozy lifestyle, instrumental'],['세련된 럭셔리 딥하우스, 110bpm','luxury deep house, smooth and modern, 110 bpm, instrumental'],['웅장하게 차오르는 오케스트라','epic orchestral trailer music, rising and powerful, instrumental'],['늦은 밤 재즈 피아노와 콘트라베이스','smooth late-night jazz piano and upright bass, instrumental'],['공기 같은 미니멀 앰비언트','minimal ambient electronic, airy pads, calm, instrumental'],['감성 드라마 OST 피아노 발라드','emotional korean drama ost style piano ballad, instrumental'],['긴장감 있는 스릴러 음악','tense suspense thriller score, low pulses and strings, instrumental']];
 function refresh(){
   var w=q('#stu-wrap'); if(!w) return; var p=STU.plan, h='';
-  h+='<div class="stu-top"><div style="flex:1"><div class="stu-h1">건축 영상 스튜디오<span class="stu-pill">NEW</span></div><div class="muted" style="font-size:12.5px;margin-top:4px">이미지만 넣으면 AI가 장면·카메라·음악·대사를 연출해 영화 같은 공간 영상을 만들어요 · Seedance 2.5</div></div><button type="button" data-x class="x-close">✕</button></div>';
-  h+='<div class="stu-card">'+step(1,'영상 컨셉')+'<div class="stu-modes">'+MODES.map(function(m){ return '<button type="button" data-mode="'+m.k+'" class="stu-mode'+(STU.mode===m.k?' on':'')+'"><div class="stu-ic"><svg viewBox="0 0 24 24">'+ICON[m.k]+'</svg></div><div class="t">'+m.t+'</div><div class="d">'+m.d+'</div><div class="g">'+m.tag+'</div></button>'; }).join('')+'</div></div>';
+  h+='<div class="stu-top"><div style="flex:1"><div class="stu-h1">건축 영상 스튜디오<span class="stu-pill">NEW</span></div><div class="muted" style="font-size:12.5px;margin-top:4px">이미지만 넣으면 AI가 장면·카메라·음악·대사를 연출해 영화 같은 공간 영상을 만들어요 · '+(useK4()?'Kling 4.0':'Seedance 2.5')+'</div></div><button type="button" data-x class="x-close">✕</button></div>';
+  h+=card(1)+step(1,'영상 컨셉')+tplsHtml()+'<div class="stu-modes">'+MODES.map(function(m){ return '<button type="button" data-mode="'+m.k+'" class="stu-mode'+(STU.mode===m.k?' on':'')+'"><div class="stu-ic"><svg viewBox="0 0 24 24">'+ICON[m.k]+'</svg></div><div class="t">'+m.t+'</div><div class="d">'+m.d+'</div><div class="g">'+m.tag+'</div></button>'; }).join('')+'</div></div>';
   if(STU.mode){
-    h+='<div class="stu-card">'+step(2,'공간 이미지','최대 10장 · 파일 이름은 상관없어요 — AI가 사진을 보고 공간을 알아서 판단해요')+'<div class="stu-imgs">'+STU.imgs.map(function(src,i){ return '<div class="stu-th"><img src="'+esc(src)+'"><span class="n">'+(i+1)+'</span><button type="button" class="x" data-delimg="'+i+'">✕</button></div>'; }).join('')+
+    h+=card(2)+step(2,'공간 이미지','최대 10장 · 파일 이름은 상관없어요 — AI가 사진을 보고 공간을 알아서 판단해요')+tplBanner()+'<div class="stu-imgs">'+STU.imgs.map(function(src,i){ return '<div class="stu-th"><img src="'+esc(src)+'"><span class="n">'+(i+1)+'</span><button type="button" class="x" data-delimg="'+i+'">✕</button></div>'; }).join('')+
       (STU.imgs.length<10?'<button type="button" class="stu-add" data-addimg>＋<br>내 컴퓨터에서</button><button type="button" class="stu-add" data-pickhist style="border-color:rgba(0,229,204,.35);color:#5eead4">갤러리에서<br>가져오기</button>':'')+'</div><div id="stu-hist"></div></div>';
-    h+='<div class="stu-card">'+step(3,'옵션')+'<div class="stu-fields">';
-    h+=fld('영상 길이', sel('data-o="target"',[10,15,20,30,45,60].map(function(v){ return {v:v,t:v+'초'}; }),STU.target));
+    h+=card(3)+step(3,'옵션')+'<div class="stu-fields">';
+    h+=fld('영상 길이 (초)', '<div style="display:flex;gap:6px;align-items:center"><input type="number" data-o="target" min="4" max="60" step="1" value="'+(+STU.target||30)+'" class="stu-in" style="width:76px">'+[10,15,20,30,60].map(function(v){ return '<button type="button" class="stu-btn sm" data-tq="'+v+'"'+(+STU.target===v?' style="border-color:var(--ac,#00e5cc);color:#5eead4"':'')+'>'+v+'</button>'; }).join('')+'</div>',300);
     h+=fld('비율', sel('data-o="aspect"',[{v:'16:9',t:'16:9 가로 (추천 · 완성 후 쇼츠 변환 가능)'},{v:'9:16',t:'9:16 세로(쇼츠)'}],STU.aspect),230);
-    h+=fld('화질', sel('data-o="res"',[{v:'480p',t:'480p · 44cr/초'},{v:'720p',t:'720p · 94cr/초 (추천)'},{v:'1080p',t:'1080p · 231cr/초'}],STU.res),170);
+    if(STU.mode!=='movie') h+=fld('영상 엔진', sel('data-o="eng"',[{v:'seedance25',t:'Seedance 2.5 (최고 품질)'},{v:'kling4',t:'Kling 4.0 (저렴·1080p)'}],STU.eng),190);
+    else h+=fld('영상 엔진', '<select class="stu-in" disabled title="영화 모드는 같은 배우 유지(참조 이미지) 기능 때문에 Seedance 2.5만 가능"><option>Seedance 2.5 (영화 모드 고정)</option></select>',190);
+    h+=fld('화질', useK4()?sel('data-o="res"',[{v:'720p',t:'720p · 39cr/초'},{v:'1080p',t:'1080p · 58cr/초 (추천)'}],STU.res==='480p'?'720p':STU.res):sel('data-o="res"',[{v:'480p',t:'480p · 44cr/초'},{v:'720p',t:'720p · 94cr/초 (추천)'},{v:'1080p',t:'1080p · 231cr/초'}],STU.res),170);
     if(STU.mode==='narr'||STU.mode==='season'||STU.mode==='free') h+=fld('성우 목소리', '<div style="display:flex;gap:6px">'+sel('data-o="voice"',VOICES.map(function(v){ return {v:v.k, t:v.g+' · '+v.d}; }),STU.voice)+btn('data-vtest','▶ 듣기','', 'sm')+'</div>',230);
     if(STU.mode==='movie'){ h+=fld('장르', sel('data-o="genre"',GENRES,STU.genre)); h+=fld('필터', sel('data-o="filter"',FILTERS.map(function(f){ return {v:f.k,t:f.t}; }),STU.filter),150); h+=fld('대사', sel('data-o="dlg"',[{v:'native',t:'배우가 직접 말하기 (입 모양)'},{v:'dub',t:'목소리만 입히기 (안정적)'}],STU.dlg),200); }
     if(STU.mode!=='walk') h+=fld('자막', '<label style="display:flex;align-items:center;gap:6px;color:#e9ebef;font-size:12.5px;padding:8px 0"><input type="checkbox" data-o="subs"'+(STU.subs?' checked':'')+'> 자막 넣기</label>');
@@ -65035,7 +65070,7 @@ function refresh(){
     if(STU.mode==='free'||STU.mode==='movie') h+='<textarea data-o="userPrompt" rows="3" class="stu-in" style="margin-top:12px" placeholder="'+(STU.mode==='free'?'원하는 영상을 자유롭게 적어 주세요 — 장면, 음악 장르, 넣고 싶은 대사까지 (예: 비 오는 밤, 혼자 사는 30대 남자가 퇴근해 조명을 켜고 창밖을 본다. 잔잔한 재즈 피아노. 대사: \'오늘도 수고했어\')':'(선택) 원하는 이야기 — 예: 오래 떨어져 있던 부부가 새집에서 다시 만나는 이야기')+'">'+esc(STU.userPrompt)+'</textarea>';
     h+='<div style="margin-top:14px">'+btn('data-plan', p?'스토리보드 다시 짜기 · 무료':'AI 스토리보드 만들기 · 무료', true)+'</div></div>';
     if(p){
-      h+='<div class="stu-card">'+step(4,'스토리보드','카드를 끌어서 순서를 바꾸고, 카메라·길이·내용을 자유롭게 고치세요 (한글로 쓰면 AI가 알아서 적용)');
+      h+=card(4)+step(4,'스토리보드','카드를 끌어서 순서를 바꾸고, 카메라·길이·내용을 자유롭게 고치세요 (한글로 쓰면 AI가 알아서 적용)');
       h+=fld('첫 3초 훅 문구', '<input data-pf="hook" class="stu-in" value="'+esc(p.hook||'')+'" placeholder="예: 들어오는 순간, 숨이 멎는 집">', 320);
       if(STU.mode==='movie'){
         h+='<div style="margin-top:14px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02)"><div style="font-size:13px;font-weight:700;margin-bottom:10px">배우 <span class="tiny">모든 장면에서 같은 얼굴·옷·목소리로 고정돼요</span></div>'+(STU.cast||[]).map(function(c,i){ return '<div style="display:flex;gap:10px;align-items:center;margin:8px 0;flex-wrap:wrap"><div style="width:56px;height:70px;border-radius:10px;overflow:hidden;background:#15161b;flex-shrink:0;border:1px solid rgba(255,255,255,.08)">'+(c.img?'<img src="'+esc(c.img)+'" style="width:100%;height:100%;object-fit:cover">':'<span class="tiny" style="display:block;padding:8px 6px;line-height:1.35">렌더 때 AI가 생성 (20cr)</span>')+'</div><input data-cast="'+i+'" class="stu-in" style="flex:1;min-width:200px;width:auto" value="'+esc(c.desc||'')+'" placeholder="예: 30대 초반 한국 여성, 단발, 베이지 니트">'+sel('data-castv="'+i+'"',VOICES.map(function(v){ return {v:v.k,t:v.g+' · '+v.d}; }),c.voice||STU.voice)+btn('data-castup="'+i+'"','내 사진','', 'sm')+(c.img?btn('data-castnew="'+i+'"','새 얼굴','', 'sm'):'')+'</div>'; }).join('')+((STU.cast||[]).length<3?btn('data-castadd','＋ 배우 추가','', 'sm'):'')+'</div>';
@@ -65053,21 +65088,25 @@ function refresh(){
           '</div></div>'; }).join('')+'</div>';
       h+='<div style="margin-top:10px">'+btn('data-addshot','＋ 장면 추가','', 'sm')+'</div></div>';
       // 음악
-      h+='<div class="stu-card">'+step(5,'음악','추천을 고르거나 직접 쓰거나, 내 음악 파일을 넣을 수 있어요');
+      h+=card(5)+step(5,'음악','추천을 고르거나 직접 쓰거나, 내 음악 파일을 넣을 수 있어요');
       if(STU.myMusic){ h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="font-size:12.5px">🎵 '+esc(STU.myMusic.name)+'</span><audio controls src="'+esc(STU.myMusic.url)+'" style="height:34px"></audio>'+btn('data-mymusicx','빼기','', 'sm')+'<span class="tiny">내 음악 파일은 0cr — 저작권이 있는 음악은 SNS에서 막힐 수 있어요</span></div>'; }
       else { h+='<div style="display:flex;gap:8px;flex-wrap:wrap"><input data-pf="music" class="stu-in" style="flex:1;min-width:240px;width:auto" value="'+esc(p.music||'')+'" placeholder="음악 분위기를 한글로 — 예: 잔잔한 피아노와 현악, 80bpm">'+sel('data-musicpre style="max-width:220px"',[{v:'',t:'추천 분위기'}].concat(MUSIC_PRE.map(function(m,k){ return {v:k,t:m[0]}; })),'')+btn('data-mymusic','내 음악 파일','', 'sm')+'</div>'+(STU.cache['music:'+musicKey()]?'<audio controls src="'+esc(STU.cache['music:'+musicKey()])+'" style="width:100%;margin-top:8px;height:34px"></audio>':'<div class="tiny" style="margin-top:6px">AI 음악은 렌더할 때 만들어요(약 '+(MUSIC_CPS*Math.max(10,Math.ceil(totalDur())))+'cr) · 같은 음악이면 재사용</div>'); }
       h+='</div>';
       var e1=estimate(true), e0=estimate(false), off=Math.abs(rawDur()-(+STU.target))>=1.01;
       h+='<div class="stu-bar"><div style="flex:1;min-width:220px;font-size:12px;color:#aab;line-height:1.6">'+(off?'<span style="color:#fbbf24">장면 길이 합계 '+rawDur().toFixed(1)+'초 · 목표 '+STU.target+'초</span> '+btn('data-fit','목표 길이에 맞추기','', 'sm')+'<br>':'')+'총 <b style="color:#fff">'+(Math.round(totalDur()*10)/10)+'초</b> · 장면 '+p.shots.length+'개 · 처음부터 만들면 '+e0.total.toLocaleString()+'cr<br>이번 렌더 <span class="cost">'+e1.total.toLocaleString()+'cr</span> <span class="tiny">만든 장면·음악·목소리는 재사용 · 순서만 바꾸면 영상 0cr</span><div id="stu-status" style="margin-top:4px;color:#cfd2d8"></div></div><div style="display:flex;gap:8px;flex-wrap:wrap">'+btn('data-preview','무료 미리보기')+btn('data-render', STU.busy?'만드는 중…':(STU.out?'고친 내용으로 다시 만들기':'AI 영상 만들기'), true, STU.busy?'opacity:.6;cursor:wait':'')+'</div></div>';
-      if(STU.out) h+='<div class="stu-card">'+step(6,'완성 영상')+'<video src="'+esc(STU.out.url)+'" controls playsinline style="width:'+(STU.aspect==='9:16'?'min(360px,100%)':'100%')+';border-radius:14px;background:#000;display:block"></video><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dl','다운로드',true)+(STU.aspect==='16:9'&&STU._assets?btn('data-shorts', STU.shortsBusy?'쇼츠 만드는 중…':'쇼츠로 만들기 (9:16 · 무료)'):'')+'</div>'+(STU.outShorts?'<div style="margin-top:14px"><div class="tiny" style="margin-bottom:6px">쇼츠(9:16)</div><video src="'+esc(STU.outShorts.url)+'" controls playsinline style="width:min(320px,100%);border-radius:14px;background:#000;display:block"></video><div style="margin-top:8px">'+btn('data-dls','쇼츠 다운로드',true)+'</div></div>':'')+'</div>';
+      if(STU.out) h+=card(6)+step(6,'완성 영상')+'<video src="'+esc(STU.out.url)+'" controls playsinline style="width:'+(STU.aspect==='9:16'?'min(360px,100%)':'100%')+';border-radius:14px;background:#000;display:block"></video><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dl','다운로드',true)+(STU.aspect==='16:9'&&STU._assets?sel('data-o="shortsHd"',[{v:'',t:'쇼츠 720×1280'},{v:'1',t:'쇼츠 1080×1920'}],STU.shortsHd?'1':'')+btn('data-shorts', STU.shortsBusy?'쇼츠 만드는 중…':'쇼츠로 만들기 (9:16 · 무료)'):'')+btn('data-pubtpl', isAdm()?'📤 템플릿으로 올리기 (바로 공개)':'📤 템플릿으로 올리기 (운영자 확인 후 공개)')+'</div><div class="tiny" style="margin-top:6px">완성 영상은 갤러리(영상)에 자동 저장돼요 · 템플릿으로 올리면 다른 회원이 사진만 바꿔서 같은 느낌으로 만들 수 있어요</div>'+(STU.outShorts?'<div style="margin-top:14px"><div class="tiny" style="margin-bottom:6px">쇼츠(9:16)</div><video src="'+esc(STU.outShorts.url)+'" controls playsinline style="width:min(320px,100%);border-radius:14px;background:#000;display:block"></video><div style="margin-top:8px">'+btn('data-dls','쇼츠 다운로드',true)+'</div></div>':'')+'</div>';
     }
   }
   w.innerHTML=h; wire(w);
+  // 처음(컨셉 고르기 전)엔 화면 가운데, 고르면 위로
+  w.style.minHeight=STU.mode?'':'100vh'; w.style.display=STU.mode?'':'flex'; w.style.flexDirection='column'; w.style.justifyContent=STU.mode?'':'center';
 }
 function wire(w){
   var ov=q('#stu-ov');
   w.querySelector('[data-x]').onclick=function(){ if(STU.busy && !confirm('영상을 만드는 중이에요. 닫으면 이어 붙이기가 멈춰요(만든 장면은 남아요). 닫을까요?')) return; ov.remove(); };
-  w.querySelectorAll('[data-mode]').forEach(function(b){ b.onclick=function(){ var m=b.getAttribute('data-mode'); if(STU.mode!==m){ STU.mode=m; STU.plan=null; STU.out=null; if(m==='movie' && !(STU.cast&&STU.cast.length)) STU.cast=[{desc:'30대 초반 한국 여성, 자연스러운 모습, 심플하고 우아한 옷', _en:'a Korean woman in her early 30s, natural look, simple elegant clothes', voice:'Charlotte'}]; } refresh(); }; });
+  wireTpls(w); var tx=w.querySelector('[data-tplx]'); if(tx) tx.onclick=function(){ STU.tpl=null; STU.plan=null; refresh(); };
+  w.querySelectorAll('[data-fold]').forEach(function(el){ el.onclick=function(){ var n=+el.getAttribute('data-fold'); STU.fold=STU.fold||{}; STU.fold[n]=!STU.fold[n]; refresh(); }; });
+  w.querySelectorAll('[data-mode]').forEach(function(b){ b.onclick=function(){ var m=b.getAttribute('data-mode'); if(STU.tpl){ STU.tpl=null; STU.plan=null; } STU.fold=STU.fold||{}; STU.fold[1]=true; try{ q('#stu-ov').scrollTop=0; }catch(e){} if(STU.mode!==m){ STU.mode=m; STU.plan=null; STU.out=null; if(m==='movie' && !(STU.cast&&STU.cast.length)) STU.cast=[{desc:'30대 초반 한국 여성, 자연스러운 모습, 심플하고 우아한 옷', _en:'a Korean woman in her early 30s, natural look, simple elegant clothes', voice:'Charlotte'}]; } refresh(); }; });
   var add=w.querySelector('[data-addimg]'); if(add) add.onclick=function(){ var fi=document.createElement('input'); fi.type='file'; fi.accept='image/*'; fi.multiple=true; fi.onchange=function(){ Array.prototype.slice.call(fi.files).slice(0,10-STU.imgs.length).forEach(function(f){ var r=new FileReader(); r.onload=function(){ thumb(r.result, 2048, function(t){ if(t && STU.imgs.length<10){ STU.imgs.push(t); refresh(); } }); }; r.readAsDataURL(f); }); }; fi.click(); };
   var ph=w.querySelector('[data-pickhist]'); if(ph) ph.onclick=function(){ var box=q('#stu-hist'); if(box.innerHTML){ box.innerHTML=''; return; }
     // 2026-11-01: 갤러리(클라우드에서 불러온 결과 포함) 전체를 최신순으로, 크게
@@ -65077,9 +65116,10 @@ function wire(w){
     box.innerHTML=list.length?('<div class="tiny" style="margin-top:12px">갤러리 최신순 '+list.length+'장 — 눌러서 넣기/빼기</div><div class="stu-pick">'+list.map(function(x){ return '<div class="it'+(STU.imgs.indexOf(x.u)>=0?' sel':'')+'" data-hpick="'+esc(x.u)+'"><img loading="lazy" src="'+esc(x.u)+'"><span class="w">'+(WFN[x.wf]||x.wf)+'</span></div>'; }).join('')+'</div>'):'<div class="tiny" style="margin-top:8px">갤러리에 불러올 이미지가 없어요 (로그인하면 클라우드 갤러리가 불러와져요)</div>';
     box.querySelectorAll('[data-hpick]').forEach(function(el){ el.onclick=function(){ var u=el.getAttribute('data-hpick'), k=STU.imgs.indexOf(u); if(k>=0) STU.imgs.splice(k,1); else { if(STU.imgs.length>=10){ toast('최대 10장까지예요'); return; } STU.imgs.push(u); } var pk=q('#stu-hist .stu-pick'), st=pk?pk.scrollTop:0, ws=q('#stu-ov').scrollTop; refresh(); var b2=q('[data-pickhist]'); if(b2){ b2.click(); var pk2=q('#stu-hist .stu-pick'); if(pk2) pk2.scrollTop=st; } q('#stu-ov').scrollTop=ws; }; }); };
   w.querySelectorAll('[data-delimg]').forEach(function(b){ b.onclick=function(){ var i=+b.getAttribute('data-delimg'); STU.imgs.splice(i,1); if(STU.plan){ STU.plan.shots=STU.plan.shots.filter(function(s){ return s.img!==i; }).map(function(s){ if(s.img>i) s.img--; return s; }); } refresh(); }; });
-  w.querySelectorAll('[data-o]').forEach(function(el){ el.onchange=function(){ var k=el.getAttribute('data-o'); STU[k]=(el.type==='checkbox')?el.checked:el.value; if(k==='target'){ STU.target=+el.value; if(STU.plan) fitTarget(STU.plan); } if(k!=='userPrompt') refresh(); }; });
+  w.querySelectorAll('[data-o]').forEach(function(el){ el.onchange=function(){ var k=el.getAttribute('data-o'); STU[k]=(el.type==='checkbox')?el.checked:el.value; if(k==='target'){ var tv=Math.round(+el.value)||30; STU.target=Math.max(4,Math.min(60,tv)); if(STU.plan) fitTarget(STU.plan); } if(k==='shortsHd') STU.shortsHd=!!el.value; if(k==='eng' && el.value==='kling4' && STU.res==='480p') STU.res='1080p'; if(k!=='userPrompt') refresh(); }; });
+  w.querySelectorAll('[data-tq]').forEach(function(b){ b.onclick=function(){ STU.target=+b.getAttribute('data-tq'); if(STU.plan) fitTarget(STU.plan); refresh(); }; });
   var vt=w.querySelector('[data-vtest]'); if(vt) vt.onclick=function(){ vt.disabled=true; falP('fal-ai/elevenlabs/tts/multilingual-v2',{text:'안녕하세요. 지금부터 이 공간을 소개해 드릴게요.', voice:STU.voice, language_code:'ko'},{wf:'studio_tts', chars:26}).then(function(d){ var u=audUrl(d); if(u) new Audio(u).play(); vt.disabled=false; }).catch(function(e){ vt.disabled=false; alert('미리듣기 실패: '+e); }); };
-  var pl=w.querySelector('[data-plan]'); if(pl) pl.onclick=function(){ if(!STU.imgs.length){ alert('이미지를 먼저 넣어 주세요.'); return; } if(STU.plan && !confirm('지금 스토리보드를 지우고 새로 짤까요?')) return; pl.disabled=true; pl.textContent='AI가 장면을 짜는 중… (20~60초)'; makePlan(function(p, fb){ STU.plan=p; if(p.voice && STU.mode!=='movie'){ var v=VOICES.find(function(x){ return x.k===p.voice; }); if(v) STU.voice=v.k; } if(STU.mode==='movie' && p.cast && p.cast.length){ STU.cast=p.cast.slice(0,3).map(function(c,i){ return {desc:String(c.desc||c||''), _en:String(c.desc_en||''), voice:(STU.cast[i]&&STU.cast[i].voice)||(/(남|man|male)/i.test(String(c.desc||''))?'Daniel':'Charlotte'), img:null}; }); } if(fb) toast('AI 스토리보드 서버가 아직 준비 안 돼서 기본 템플릿으로 채웠어요 — 직접 고쳐서 쓰세요'); refresh(); }); };
+  var pl=w.querySelector('[data-plan]'); if(pl) pl.onclick=function(){ if(!STU.imgs.length){ alert('이미지를 먼저 넣어 주세요.'); return; } if(STU.plan && !confirm('지금 스토리보드를 지우고 새로 짤까요?')) return; pl.disabled=true; pl.textContent='AI가 장면을 짜는 중… (20~60초)'; makePlan(function(p, fb){ STU.plan=p; if(p.voice && STU.mode!=='movie'){ var v=VOICES.find(function(x){ return x.k===p.voice; }); if(v) STU.voice=v.k; } if(STU.mode==='movie' && p.cast && p.cast.length && !STU.tpl){ STU.cast=p.cast.slice(0,3).map(function(c,i){ return {desc:String(c.desc||c||''), _en:String(c.desc_en||''), voice:(STU.cast[i]&&STU.cast[i].voice)||(/(남|man|male)/i.test(String(c.desc||''))?'Daniel':'Charlotte'), img:null}; }); } if(fb) toast('AI 스토리보드 서버가 아직 준비 안 돼서 기본 템플릿으로 채웠어요 — 직접 고쳐서 쓰세요'); refresh(); }); };
   w.querySelectorAll('[data-pf]').forEach(function(el){ el.onchange=function(){ var k=el.getAttribute('data-pf'); STU.plan[k]=el.value; if(k==='music') STU.plan._men=''; refresh(); }; });
   var mp=w.querySelector('[data-musicpre]'); if(mp) mp.onchange=function(){ if(mp.value!==''){ var m=MUSIC_PRE[+mp.value]; STU.plan.music=m[0]; STU.plan._men=m[1]; refresh(); } };
   var mm=w.querySelector('[data-mymusic]'); if(mm) mm.onclick=function(){ var fi=document.createElement('input'); fi.type='file'; fi.accept='audio/*'; fi.onchange=function(){ var f=fi.files[0]; if(!f) return; STU.myMusic={name:f.name, url:URL.createObjectURL(f)}; refresh(); }; fi.click(); };
@@ -65117,12 +65157,129 @@ function wire(w){
   var rd=w.querySelector('[data-render]'); if(rd) rd.onclick=function(){ if(!(_supa&&_supaUser)){ try{ openMd('account'); }catch(e){} return; } runRender(); };
   // 2026-11-01 요청: 16:9로 만든 영상을 버튼 하나로 9:16 쇼츠로(이미 만든 장면·음악·목소리를 세로 화면으로 다시 이어 붙임 — AI 비용 없음)
   var shb=w.querySelector('[data-shorts]'); if(shb) shb.onclick=function(){ if(STU.shortsBusy||!STU._assets) return; STU.shortsBusy=true; refresh(); setStatus('쇼츠(9:16)로 바꾸는 중… 영상 길이만큼 걸려요 — 이 창을 그대로 보고 있어 주세요');
-    var A=STU._assets; compose(JSON.parse(JSON.stringify(A.shots)), A.vids, A.music, A.tts, {vert:true}).then(function(bl){ STU.shortsBusy=false; STU.outShorts={blob:bl, url:URL.createObjectURL(bl)}; setStatus('✅ 쇼츠 완성'); refresh(); }).catch(function(e){ STU.shortsBusy=false; setStatus('⚠️ 쇼츠 변환 실패: '+esc(String(e&&e.message||e))); refresh(); }); };
+    var A=STU._assets; compose(JSON.parse(JSON.stringify(A.shots)), A.vids, A.music, A.tts, {vert:true, hd:STU.shortsHd}).then(function(bl){ STU.shortsBusy=false; STU.outShorts={blob:bl, url:URL.createObjectURL(bl)}; setStatus('✅ 쇼츠 완성 — 갤러리에도 저장해요'); refresh(); saveOut(bl, true); }).catch(function(e){ STU.shortsBusy=false; setStatus('⚠️ 쇼츠 변환 실패: '+esc(String(e&&e.message||e))); refresh(); }); };
+  var pt=w.querySelector('[data-pubtpl]'); if(pt) pt.onclick=publishTpl;
   var dls=w.querySelector('[data-dls]'); if(dls) dls.onclick=function(){ var a=document.createElement('a'); a.href=STU.outShorts.url; a.download='clover-studio-shorts.'+(/mp4/.test(STU.outShorts.blob.type)?'mp4':'webm'); document.body.appendChild(a); a.click(); a.remove(); };
   var dl=w.querySelector('[data-dl]'); if(dl) dl.onclick=function(){ var a=document.createElement('a'); a.href=STU.out.url; a.download='clover-studio.'+(/mp4/.test(STU.out.blob.type)?'mp4':'webm'); document.body.appendChild(a); a.click(); a.remove(); };
 }
+// ══ 2026-11-01 요청("힉스필드처럼 템플릿으로"): 🎬 영상 템플릿 ══
+// 잘 나온 영상을 템플릿으로 올리면 → 다른 회원이 영상을 보고 마음에 들면 사진만 자기 사진으로 바꿔 넣고
+// 나머지(컨셉·장면 수·장면 길이·카메라 움직임·날씨·음악·목소리·필터·자막·배우)는 그대로 따라가게.
+// 관리자가 올리면 바로 공개, 회원이 올리면 '확인 대기' → 관리자가 ✅ 공개(커뮤니티와 같은 방식, DB: studio_templates)
+var STUDIO_FOR_MEMBERS=false; // 지금은 관리자만 스튜디오 사용 — 회원 공개 때 true로
+function isAdm(){ return typeof G!=='undefined' && G.supaRole==='admin'; }
+function loadTpls(){
+  if(!(window._supa)) return;
+  try{
+    _supa.from('studio_templates').select('id,user_id,title,video_url,thumb_url,mode,aspect,target,img_count,recipe,approved,use_count,created_at').order('approved',{ascending:true}).order('created_at',{ascending:false}).limit(80).then(function(r){
+      if(r.error){ STU.tplErr=r.error.message||'err'; STU.tpls=[]; }
+      else { STU.tplErr=null; STU.tpls=(r.data||[]).filter(function(t){ return t && t.video_url && t.recipe; }); }
+      var box=q('#stu-tpls'); if(box){ box.outerHTML=tplsHtml(); wireTpls(q('#stu-wrap')); }
+    });
+  }catch(e){}
+}
+function modeName(k){ return (MODES.find(function(m){return m.k===k;})||{}).t||''; }
+function tplsHtml(){
+  var L=STU.tpls;
+  if(!L) return '<div id="stu-tpls" class="tiny" style="margin-bottom:14px">템플릿 불러오는 중…</div>';
+  if(STU.tplErr) return '<div id="stu-tpls">'+(isAdm()?'<div class="tiny" style="margin-bottom:14px;color:#fbbf24">템플릿 표(studio_templates)가 아직 없어요 — STUDIO_TEMPLATES.sql을 Supabase에서 실행해 주세요</div>':'')+'</div>';
+  var me=(window._supaUser&&_supaUser.id)||'';
+  var vis=L.filter(function(t){ return t.approved || isAdm() || t.user_id===me; });
+  if(!vis.length) return '<div id="stu-tpls" class="tiny" style="margin-bottom:14px">아직 템플릿이 없어요 — 영상을 완성한 뒤 \'템플릿으로 올리기\'를 누르면 여기에 생겨요</div>';
+  return '<div id="stu-tpls" style="margin-bottom:16px"><div class="tiny" style="margin-bottom:8px">🔥 템플릿으로 바로 만들기 — 영상을 보고 마음에 들면, 사진만 내 사진으로 바꿔 넣으면 같은 느낌으로 만들어져요</div><div class="stu-tpl-row">'+vis.map(function(t){
+    var vert=t.aspect==='9:16';
+    return '<div class="stu-tpl'+(vert?' v':'')+'" data-tpl="'+t.id+'"><video src="'+esc(t.video_url)+'#t=0.5" muted loop playsinline preload="metadata"'+(t.thumb_url?' poster="'+esc(t.thumb_url)+'"':'')+'></video>'+
+      (!t.approved?'<span class="pend">확인 대기</span>':'')+'<div class="cap"><b>'+esc(t.title||'영상 템플릿')+'</b><i>'+esc(modeName(t.mode))+' · 사진 '+(t.img_count||'?')+'장 · '+Math.round(+t.target||0)+'초</i></div></div>';
+  }).join('')+'</div><div class="tiny" style="margin-top:14px">또는 아래에서 컨셉을 직접 골라 처음부터 만들기</div></div>';
+}
+function wireTpls(w){
+  if(!w) return;
+  w.querySelectorAll('[data-tpl]').forEach(function(el){
+    var v=el.querySelector('video');
+    el.onmouseenter=function(){ try{ v.play(); }catch(e){} }; el.onmouseleave=function(){ try{ v.pause(); }catch(e){} };
+    el.onclick=function(){ var t=(STU.tpls||[]).find(function(x){ return String(x.id)===el.getAttribute('data-tpl'); }); if(t) tplDetail(t); };
+  });
+}
+function tplDetail(t){
+  var old=q('#stu-tpd'); if(old) old.remove();
+  var d=document.createElement('div'); d.id='stu-tpd'; d.style.cssText='position:fixed;inset:0;z-index:99996;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:14px';
+  var vert=t.aspect==='9:16', r=t.recipe||{}, slots=r.slots||[];
+  d.innerHTML='<div style="background:#111318;border:1px solid #262a33;border-radius:18px;padding:16px;max-width:'+(vert?'420px':'860px')+';width:100%;max-height:94vh;overflow:auto;color:#e8eaee">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:16px;flex:1">'+esc(t.title||'영상 템플릿')+(!t.approved?' <span style="font-size:11px;color:#fbbf24">· 확인 대기</span>':'')+'</b><button type="button" data-c class="x-close">✕</button></div>'+
+    '<video src="'+esc(t.video_url)+'" controls autoplay playsinline style="width:100%;border-radius:12px;background:#000;display:block"></video>'+
+    '<div class="tiny" style="margin:10px 0 6px">'+esc(modeName(t.mode))+' · '+Math.round(+t.target||0)+'초 · '+esc(t.aspect||'16:9')+' · 이 영상에 쓴 사진 '+(t.img_count||slots.length)+'장 (같은 순서로 비슷한 사진을 넣으면 가장 비슷하게 나와요)</div>'+
+    (slots.length?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">'+slots.map(function(u,i){ return '<div style="position:relative"><img src="'+esc(u)+'" style="width:64px;height:64px;object-fit:cover;border-radius:8px;display:block"><span style="position:absolute;left:3px;top:2px;font-size:10px;font-weight:800;color:#fff;text-shadow:0 0 3px #000">'+(i+1)+'</span></div>'; }).join('')+'</div>':'')+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">'+btn('data-use','📋 이 템플릿으로 내 영상 만들기',true)+
+    (isAdm()&&!t.approved?btn('data-ok','✅ 공개'):'')+(isAdm()?btn('data-del','✕ 삭제'):'')+'</div></div>';
+  document.body.appendChild(d);
+  d.onclick=function(e){ if(e.target===d) d.remove(); };
+  d.querySelector('[data-c]').onclick=function(){ d.remove(); };
+  d.querySelector('[data-use]').onclick=function(){ d.remove(); applyTpl(t); };
+  var ok=d.querySelector('[data-ok]'); if(ok) ok.onclick=function(){ ok.disabled=true; _supa.from('studio_templates').update({approved:true}).eq('id',t.id).then(function(r){ if(r.error){ ok.disabled=false; alert('공개 실패: '+r.error.message); return; } d.remove(); toast('✅ 템플릿을 공개했어요'); loadTpls(); }); };
+  var del=d.querySelector('[data-del]'); if(del) del.onclick=function(){ if(!confirm('이 템플릿을 삭제할까요?')) return; _supa.from('studio_templates').delete().eq('id',t.id).then(function(r){ if(r.error){ alert('삭제 실패: '+r.error.message); return; } d.remove(); loadTpls(); }); };
+}
+function applyTpl(t){
+  var r=t.recipe||{};
+  ['aspect','eng','res','filter','voice','genre','dlg'].forEach(function(k){ if(r[k]!=null) STU[k]=r[k]; });
+  STU.subs=(r.subs!==false); STU.userPrompt=r.userPrompt||'';
+  STU.mode=r.mode||t.mode||'walk'; STU.target=+r.target||+t.target||30;
+  STU.cast=(r.cast||[]).map(function(c){ return {desc:c.desc||'', _en:c._en||'', voice:c.voice||'Charlotte', img:(/^https?:/.test(c.img||'')?c.img:null)}; });
+  STU.tpl={id:t.id, title:t.title||'영상 템플릿', recipe:r};
+  STU.imgs=[]; STU.plan=null; STU.out=null; STU.outUrl=null; STU.outShorts=null; STU._assets=null; STU.myMusic=null;
+  STU.fold={1:true}; refresh(); try{ q('#stu-ov').scrollTop=0; }catch(e){}
+  toast('📋 템플릿을 불러왔어요 — 사진만 내 사진으로 넣고 스토리보드를 만들어 주세요');
+}
+function tplBanner(){
+  var T=STU.tpl; if(!T) return '';
+  var slots=(T.recipe&&T.recipe.slots)||[];
+  return '<div style="border:1px solid rgba(0,229,204,.35);background:rgba(0,229,204,.06);border-radius:12px;padding:10px 12px;margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b style="font-size:13px;color:#5eead4">📋 템플릿: '+esc(T.title)+'</b><span class="tiny">컨셉·장면 수·카메라·음악·목소리·필터는 그대로 — 사진만 바꿔 넣으세요</span><span style="margin-left:auto">'+btn('data-tplx','템플릿 해제','','sm')+'</span></div>'+
+    (slots.length?'<div class="tiny" style="margin:8px 0 5px">원본 영상에 쓴 사진 ('+slots.length+'장) — 같은 순서로 비슷한 공간 사진을 넣으면 가장 비슷하게 나와요</div><div style="display:flex;gap:6px;flex-wrap:wrap">'+slots.map(function(u,i){ var mine=STU.imgs[i]; return '<div style="position:relative;opacity:'+(mine?'.45':'1')+'"><img src="'+esc(u)+'" style="width:54px;height:54px;object-fit:cover;border-radius:7px;display:block"><span style="position:absolute;left:3px;top:1px;font-size:10px;font-weight:800;color:#fff;text-shadow:0 0 3px #000">'+(i+1)+(mine?' ✓':'')+'</span></div>'; }).join('')+'</div>':'')+'</div>';
+}
+// 서버 AI에 보낼 템플릿 요약(장면 구조) — 서버가 이걸 따라 사진에 맞는 동작·대사만 새로 씀
+function tplReq(){ var r=STU.tpl&&STU.tpl.recipe; if(!r) return null; return {title:r.title||'', hook:r.hook||'', music:r._men||r.music||'', shots:(r.shots||[]).map(function(s){ return {img:s.img, dur:s.dur, cam:s.cam, action:s._en||s.action||'', weather:s._wen||s.weather||'', line:s.line||'', speaker:s.speaker, sfx:s.sfx||''}; })}; }
+// 서버 응답이 어떻든 템플릿의 장면 구조는 그대로(장면 수·길이·카메라·날씨·음악) — 서버가 템플릿을 반영했으면 사진에 맞춘 동작·대사·사진 번호만 받아 씀
+function enforceTpl(p, serverTpl){
+  var r=STU.tpl&&STU.tpl.recipe; if(!r||!r.shots||!r.shots.length) return p;
+  var n=STU.imgs.length||1, got=(p&&p.shots)||[];
+  var shots=r.shots.map(function(s,i){
+    var g=serverTpl?got[i]:null, sameSlot=(s.img<n)?s.img:(s.img%n);
+    return {img:(g&&g.img>=0&&g.img<n)?g.img:sameSlot, dur:+s.dur||4, cam:s.cam, action:(g&&g.action)||s.action||'', _en:(g&&g._en)||(g?'':(s._en||'')), line:(g&&g.line!=null)?g.line:(s.line||''), weather:s.weather||'', _wen:s._wen||'', speaker:s.speaker==null?null:s.speaker, sfx:s.sfx||''};
+  });
+  return {title:r.title||(p&&p.title)||'', hook:(serverTpl&&p&&p.hook)||r.hook||'', music:r.music||'', _men:r._men||'', voice:r.voice||STU.voice, shots:shots, cast:(p&&p.cast)||[]};
+}
+function slotThumbs(){ // 템플릿 안내용 작은 사진(400px) — 원본 사진 순서대로
+  var used=STU.imgs.slice(0,10);
+  return Promise.all(used.map(function(src){ return new Promise(function(res){ thumb(src, 400, function(t){ if(!t){ res(null); return; } up(t, function(u){ res(u); }, function(){ res(null); }); }); }); })).then(function(a){ return a.filter(Boolean); });
+}
+function publishTpl(){
+  if(!(window._supa&&window._supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  if(!STU.out||!STU.plan){ alert('영상을 먼저 완성해 주세요.'); return; }
+  if(!STU.outUrl){ alert('완성 영상을 갤러리에 저장하는 중이에요. 잠시 뒤 다시 눌러 주세요.'); return; }
+  if(STU.tplPublished===STU.outUrl){ alert('이 영상은 이미 템플릿으로 올렸어요.'); return; }
+  var title=prompt('템플릿 이름 (다른 회원에게 보여요)', STU.plan.title||STU.plan.hook||modeName(STU.mode)); if(title==null) return;
+  title=String(title).trim().slice(0,40)||modeName(STU.mode);
+  var adm=isAdm(); setStatus('템플릿 올리는 중…');
+  slotThumbs().then(function(slots){
+    var p=STU.plan;
+    var recipe={v:1, mode:STU.mode, aspect:STU.aspect, target:+STU.target||30, eng:STU.eng, res:STU.res, filter:STU.filter, subs:STU.subs!==false, voice:STU.voice, genre:STU.genre, dlg:STU.dlg, userPrompt:STU.userPrompt||'',
+      title:p.title||'', hook:p.hook||'', music:p.music||'', _men:p._men||'',
+      cast:(STU.mode==='movie'?(STU.cast||[]).map(function(c){ return {desc:c.desc||'', _en:c._en||'', voice:c.voice||'', img:(/^https?:/.test(c.img||'')?c.img:null)}; }):[]),
+      shots:p.shots.map(function(s){ return {img:s.img, dur:s.dur, cam:s.cam, action:s.action||'', _en:s._en||'', line:s.line||'', weather:s.weather||'', _wen:s._wen||'', speaker:s.speaker==null?null:s.speaker, sfx:s.sfx||''}; }),
+      slots:slots};
+    var row={user_id:_supaUser.id, title:title, video_url:STU.outUrl, thumb_url:slots[0]||null, mode:STU.mode, aspect:STU.aspect, target:+STU.target||30, img_count:STU.imgs.length, recipe:recipe, approved:adm};
+    return _supa.from('studio_templates').insert(row).select();
+  }).then(function(r){
+    if(r.error) throw new Error(r.error.message);
+    STU.tplPublished=STU.outUrl;
+    setStatus(adm?'✅ 템플릿으로 공개했어요 — 스튜디오 첫 화면에 보여요':'✅ 템플릿 신청 완료 — 운영자가 확인한 뒤 공개돼요');
+    if(!adm){ try{ var who=(G.userEmail||(_supaUser&&_supaUser.email))||'회원';
+      fetch(SUPA_URL+'/functions/v1/send-mail',{method:'POST',headers:{'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'},body:JSON.stringify({apiKey:'',from:'no-reply@cloverai.kr',to:['cloverai.design@gmail.com'],subject:'[CLOVER AI 🎬영상 템플릿] 확인 대기 템플릿이 올라왔어요',html:'<p><b>'+String(who).replace(/</g,'&lt;')+'</b> 님이 영상 템플릿 공개를 신청했어요. 영상 스튜디오 첫 화면에서 확인 후 ✅ 공개를 눌러주세요.</p>'})}).catch(function(){}); }catch(e){} }
+    loadTpls();
+  }).catch(function(e){ setStatus('⚠️ 템플릿 올리기 실패: '+esc(String(e&&e.message||e).slice(0,140))+(/studio_templates|relation|schema/i.test(String(e&&e.message||e))?' — STUDIO_TEMPLATES.sql 실행이 필요해요':'')); });
+}
+function tplUsed(){ try{ if(STU.tpl&&STU.tpl.id&&window._supa) _supa.rpc('studio_template_used',{tid:STU.tpl.id}).then(function(){},function(){}); }catch(e){} }
 // 2026-11-01 요청: 지금은 관리자만(회원에겐 안 보임)
-window._studioOpen=function(){ if(!(typeof G!=='undefined' && G.supaRole==='admin')){ return; } open(); };
+window._studioOpen=function(){ if(!(typeof G!=='undefined' && (G.supaRole==='admin' || STUDIO_FOR_MEMBERS))){ return; } open(); };
 setInterval(function(){ try{ var c=document.getElementById('hc-studio'); if(c) c.style.display=(typeof G!=='undefined'&&G.supaRole==='admin')?'':'none'; }catch(e){} }, 1500);
 })();
 
