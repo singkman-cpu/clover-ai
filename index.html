@@ -64943,14 +64943,14 @@ function runRender(){
   var shots=null, done=0; // 번역 뒤에 장면을 복사해 둠 → 만드는 중에 장면을 고쳐도 지금 만드는 영상은 안 섞임
   setStatus('준비 중…');
   translateAll().then(function(){ shots=JSON.parse(JSON.stringify(p.shots)); }).then(ensureCast).then(ensureVoiceRefs).then(function(){
-    setStatus('장면 영상 만드는 중 (장면마다 1~4분, 동시에 3개씩)…', 0);
-    var vids=pool(shots, 3, function(s,i){ return renderShot(s,i).then(function(u){ done++; setStatus('장면 영상 '+done+'/'+shots.length+' 완료', done/shots.length*100); return u; }); });
+    setStatus('장면 영상 만드는 중 (장면마다 1~4분, 동시에 6개씩)…', 0);
+    var vids=pool(shots, 6, function(s,i){ return renderShot(s,i).then(function(u){ done++; setStatus('장면 영상 '+done+'/'+shots.length+' 완료', done/shots.length*100); return u; }); });
     var mus=(STU.myMusic?Promise.resolve(STU.myMusic.url):(on('music')?renderMusic():Promise.resolve(null))).catch(function(e){ console.warn('[영상 스튜디오] 음악 실패 — 음악 없이 진행', e); return null; });
     var tts=Promise.all(shots.map(function(s){ return (needTts(s) && on('voice')) ? renderTts(s).catch(function(e){ console.warn('[영상 스튜디오] 목소리 실패', e); return null; }) : Promise.resolve(null); }));
     return Promise.all([vids, mus, tts]);
   }).then(function(r){
     setStatus('한 편으로 이어 붙이는 중… (영상 길이만큼 걸려요 — 이 창을 그대로 보고 있어 주세요)');
-    STU._assets={shots:JSON.parse(JSON.stringify(shots)), vids:r[0], music:r[1], tts:r[2], mkOpt:brandOpt}; STU.outShorts=null;
+    STU._assets={shots:JSON.parse(JSON.stringify(shots)), vids:r[0], music:r[1], tts:r[2], hasVo:(r[2]||[]).some(function(x){ return !!x; }), mkOpt:brandOpt}; STU.outShorts=null;
     return brandOpt().then(function(b){ return compose(shots, r[0], r[1], r[2], b); });
   }).then(function(blob){
     STU.busy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; setStatus('✅ 완성! 아래에서 확인하고 저장하세요'); STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; refresh(); if(ovHidden()) toast('🎬 영상이 완성됐어요 — 오른쪽 아래를 눌러 확인하세요'); saveOut(blob); tplUsed();
@@ -64982,8 +64982,11 @@ function stuFontLoadAll(){ if(_stuFontLink) return; _stuFontLink=true; try{ var 
 function stuFontDef(){ var k=STU.font||'pretendard'; return STU_FONTS.filter(function(f){ return f.k===k; })[0]||STU_FONTS[0]; }
 function stuF(wgt, fs){ var f=stuFontDef(); return (f.w||wgt)+' '+Math.round(fs*(f.scale||1))+'px "'+f.fam+'","Pretendard","Noto Sans KR",sans-serif'; }
 function stuFontReady(){ var f=stuFontDef(); if(!f.g) return Promise.resolve(); stuFontLoadAll(); try{ return Promise.race([Promise.all([document.fonts.load(stuF(900,40),'안녕하세요 CLOVER'), document.fonts.load(stuF(700,40),'안녕하세요 CLOVER')]), new Promise(function(r){ setTimeout(r, 5000); })]).catch(function(){}); }catch(e){ return Promise.resolve(); } }
-function fontPickHtml(){ stuFontLoadAll(); var cur=stuFontDef().k;
-  return '<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:800;margin-bottom:8px">🔤 문구 글씨체 <span class="tiny" style="font-weight:400">눌러서 고르면 첫 3초·중간·마지막 문구와 자막에 그대로 써요 · 모두 상업적 무료 글꼴</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
+function fontPickHtml(){ stuFontLoadAll(); var cf=stuFontDef(), cur=cf.k, open=!!STU.fontOpen;
+  // 2026-11-02 요청: 글씨체 목록 접기·펴기(기본 접힘 · 펼치면 직접 접기 전까지 펼친 상태 유지)
+  var head='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px"><b style="font-size:12.5px">🔤 문구 글씨체</b><span style="font-family:\''+cf.fam+'\',Pretendard,sans-serif;font-weight:'+(cf.w||800)+';font-size:'+Math.round(15*(cf.scale||1))+'px;color:#5eead4">'+cf.l+'</span><button type="button" data-dfontopen style="margin-left:auto;padding:6px 12px;border-radius:9px;border:1px solid rgba(255,255,255,.15);background:transparent;color:#cfd2d8;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">'+(open?'접기 ▲':'글씨체 고르기 ('+STU_FONTS.length+'개) ▼')+'</button></div>';
+  if(!open) return '<div style="margin-top:14px">'+head+'</div>';
+  return '<div style="margin-top:14px">'+head+'<div class="tiny" style="margin-bottom:8px">눌러서 고르면 첫 3초·중간·마지막 문구와 자막에 그대로 써요 · 모두 상업적 무료 글꼴</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'+
     STU_FONTS.map(function(f){ var o=f.k===cur, fam='\''+f.fam+'\',Pretendard,sans-serif'; return '<button type="button" data-dfont="'+f.k+'" style="text-align:left;cursor:pointer;padding:0;border-radius:12px;overflow:hidden;border:'+(o?'2px solid var(--ac,#00e5cc)':'1px solid rgba(255,255,255,.12)')+';background:#0f1115;color:#fff;font-family:inherit"><div style="padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:6px"><b style="font-size:12.5px;color:'+(o?'#5eead4':'#e9ebef')+'">'+(o?'✔ ':'')+f.l+'</b><span style="font-size:11px;color:#8b909c;margin-left:auto">'+f.by+'</span></div><div style="padding:12px 12px 14px;background:linear-gradient(135deg,#2a2f38,#15181d)"><div style="font-family:'+fam+';font-weight:'+(f.w||800)+';font-size:'+Math.round(20*(f.scale||1))+'px;line-height:1.3">안녕하세요<br>CLOVER AI 입니다.</div><div style="font-family:'+fam+';font-weight:'+(f.w||400)+';font-size:'+Math.round(13*(f.scale||1))+'px;line-height:1.45;margin-top:6px;color:#d6d9df">빛이 머무는 공간, 영상으로 담아 드려요</div></div></button>'; }).join('')+'</div></div>'; }
 function compose(){ var a=arguments; return stuFontReady().then(function(){ return composeRaw.apply(null, a); }); }
 function composeRaw(shots, vids, music, ttsList, opt){
@@ -65182,7 +65185,7 @@ var STU_DB=null, _stuSaveT=null, _stuImgSig='', _stuOutRef=null, _stuShRef=null,
 function stuDb(){ if(STU_DB) return STU_DB; STU_DB=new Promise(function(res, rej){ try{ var r=indexedDB.open('clover_studio', 1); r.onupgradeneeded=function(){ try{ r.result.createObjectStore('kv'); }catch(e){} }; r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ rej(r.error); }; }catch(e){ rej(e); } }); STU_DB.catch(function(){ STU_DB=null; }); return STU_DB; }
 function stuPut(k, v){ return stuDb().then(function(db){ return new Promise(function(res){ try{ var t=db.transaction('kv','readwrite'); if(v==null) t.objectStore('kv').delete(k); else t.objectStore('kv').put(v, k); t.oncomplete=function(){ res(true); }; t.onerror=t.onabort=function(){ res(false); }; }catch(e){ res(false); } }); }).catch(function(){ return false; }); }
 function stuGet(k){ return stuDb().then(function(db){ return new Promise(function(res){ try{ var r=db.transaction('kv','readonly').objectStore('kv').get(k); r.onsuccess=function(){ res(r.result); }; r.onerror=function(){ res(null); }; }catch(e){ res(null); } }); }).catch(function(){ return null; }); }
-var STU_KEEP=['paid','font','aspect','res','eng','mode','target','cstyle','fit','vol','on','plan','cache','advOpen','fold','foldUser','tpl','filter','subs','voice','voices','music','dlg','userPrompt','genre','cast','shortsHd','outUrl','outShortsUrl','up','fxApplied'];
+var STU_KEEP=['paid','font','fontOpen','aspect','res','eng','mode','target','cstyle','fit','vol','on','plan','cache','advOpen','fold','foldUser','tpl','filter','subs','voice','voices','music','dlg','userPrompt','genre','cast','shortsHd','outUrl','outShortsUrl','up','fxApplied'];
 function stuSaveSoon(){ if(_stuRestoring) return; clearTimeout(_stuSaveT); _stuSaveT=setTimeout(stuSaveNow, 700); }
 function stuSaveNow(){
   try{
@@ -65290,6 +65293,7 @@ function refresh(){
 function wire(w){
   var ov=q('#stu-ov');
   var rsb=w.querySelector('[data-stureset]'); if(rsb) rsb.onclick=stuReset;
+  var fob=w.querySelector('[data-dfontopen]'); if(fob) fob.onclick=function(){ STU.fontOpen=!STU.fontOpen; var ov=q('#stu-ov'), st=ov?ov.scrollTop:0; refresh(); if(ov) ov.scrollTop=st; };
   w.querySelectorAll('[data-dfont]').forEach(function(bt){ bt.onclick=function(){ STU.font=bt.getAttribute('data-dfont'); var y=window.scrollY, ov=q('#stu-ov'), st=ov?ov.scrollTop:0; refresh(); if(ov) ov.scrollTop=st; }; });
   w.querySelector('[data-x]').onclick=function(){ if(STU.busy||STU.shortsBusy||STU.upBusy){ ov.style.display='none'; mini(); toast('🎬 뒤에서 계속 만들고 있어요 — 오른쪽 아래를 누르면 다시 열려요 (이 사이트 탭은 닫지 마세요)'); return; } ov.remove(); var mm=q('#stu-mini'); if(mm) mm.remove(); };
   // 만드는 중엔 결과가 섞이지 않게 옵션·사진·배우는 잠금(장면 내용·음악·자막 등은 고쳐 두면 다음 '다시 만들기'에 반영)
@@ -65328,7 +65332,7 @@ function wire(w){
   w.querySelectorAll('[data-pf]').forEach(function(el){ el.onchange=function(){ var k=el.getAttribute('data-pf'); STU.plan[k]=el.value; if(k==='music') STU.plan._men=''; refresh(); }; });
   var mp=w.querySelector('[data-musicpre]'); if(mp) mp.onchange=function(){ if(mp.value!==''){ var m=MUSIC_PRE[+mp.value]; STU.plan.music=m[0]; STU.plan._men=m[1]; refresh(); } };
   // 2026-11-01 요청("음악은 미리 들어볼수없나?"): AI 음악을 렌더 전에 먼저 만들어 듣기 — 만든 음악은 캐시돼서 영상 만들 때 재사용(이중 차감 없음)
-  w.querySelectorAll('[data-vol]').forEach(function(el){ el.oninput=function(){ var k=el.getAttribute('data-vol'); STU.vol[k]=+el.value; var lb=w.querySelector('[data-volv="'+k+'"]'); if(lb) lb.textContent=el.value+'%'; if(k==='music') w.querySelectorAll('audio').forEach(function(a){ try{ a.volume=Math.min(1,+el.value/100); }catch(e){} }); }; });
+  w.querySelectorAll('[data-vol]').forEach(function(el){ el.oninput=function(){ var k=el.getAttribute('data-vol'); STU.vol[k]=+el.value; w.querySelectorAll('[data-volv="'+k+'"]').forEach(function(lb){ lb.textContent=el.value+'%'; }); w.querySelectorAll('[data-vol="'+k+'"]').forEach(function(o){ if(o!==el) o.value=el.value; }); var sa=w.querySelector('[data-sndapply]'); if(sa && !STU.fxBusy && STU._assets) sa.disabled=false; stuSaveSoon(); if(k==='music') w.querySelectorAll('audio').forEach(function(a){ try{ a.volume=Math.min(1,+el.value/100); }catch(e){} }); }; });
   w.querySelectorAll('[data-on]').forEach(function(el){ el.onchange=function(){ STU.on=STU.on||{}; STU.on[el.getAttribute('data-on')]=!!el.checked; refresh(); }; });
   var mt=w.querySelector('[data-musictry]'); if(mt) mt.onclick=function(){ if(STU.musicBusy) return; if(!(_supa&&_supaUser)){ try{ openMd('account'); }catch(e){} return; }
     STU.musicBusy=true; refresh();
@@ -65389,6 +65393,8 @@ function wire(w){
   bkWire(w);
   w.querySelectorAll('[data-fx]').forEach(function(b){ b.onclick=function(){ fxPreview(b.getAttribute('data-fx')); refresh(); }; });
   var fa=w.querySelector('[data-fxapply]'); if(fa) fa.onclick=fxApply;
+  var sap=w.querySelector('[data-sndapply]'); if(sap) sap.onclick=sndApply;
+  var tv=w.querySelector('#stu-dtaste video'); if(tv){ try{ tv.volume=Math.min(1, 0.45*vv('amb')); }catch(e){} } // 맛보기 조각도 최종 영상과 같은 현장 소리 크기로
   w.querySelectorAll('[data-up]').forEach(function(b){ b.onclick=function(){ var a=b.getAttribute('data-up').split('|'); upscaleOut(a[0], a[1]); }; });
   w.querySelectorAll('[data-updl]').forEach(function(b){ b.onclick=function(){ var a=b.getAttribute('data-updl').split('|'); dlUrl(STU.up[a[0]][a[1]], 'clover-studio'+(a[0]==='shorts'?'-shorts':'')+'-'+(a[1]==='k4'?'4k':'fhd')+'.mp4'); }; });
   var dls=w.querySelector('[data-dls]'); if(dls) dls.onclick=function(){ var a=document.createElement('a'); a.href=STU.outShorts.url; a.download='clover-studio-shorts.'+(/mp4/.test(STU.outShorts.blob.type)?'mp4':'webm'); document.body.appendChild(a); a.click(); a.remove(); };
@@ -65793,15 +65799,15 @@ function runBrand(r){
   STU.busy=true; STU.res=STU.D.res; STU._renderEng=dEng(); refresh(); setStatus('감독이 촬영을 준비하는 중…');
   var shots=r.shots.slice(), done=0;
   dTranslateShots(r).then(function(){
-    setStatus('장면 촬영 중… (장면마다 1~4분 · 동시에 3개씩 · ✕로 닫아도 계속돼요)', 0);
-    var vids=pool(shots, 3, function(sh){ return dBrandShot(sh).then(function(v){ done++; setStatus('장면 '+done+'/'+shots.length+' 완료', done/shots.length*100); return v; }); });
+    setStatus('장면 촬영 중… (장면마다 1~4분 · 동시에 6개씩 · ✕로 닫아도 계속돼요)', 0);
+    var vids=pool(shots, 6, function(sh){ return dBrandShot(sh).then(function(v){ done++; setStatus('장면 '+done+'/'+shots.length+' 완료', done/shots.length*100); return v; }); });
     return Promise.all([vids, dAudio(r, T)]);
   }).then(function(R){
     var V=R[0], segs=shots.map(function(s){ return {dur:s.dur, line:''}; }), urls=V.map(function(v){ return v.url; }), voList=(R[1][1]||[]).filter(Boolean);
     function mkOpt(){ return Promise.all(voList.map(function(o){ return blobUrl(o.url).catch(function(){ return o.url; }).then(function(b){ return loadMedia('audio', b); }).then(function(el){ return el?{t:o.t, el:el, text:o.text}:null; }); })).then(function(vo){
       return {hook:r.hook, caps:r.mid?[{a:T*0.45, b:T*0.45+3, text:r.mid, y:0.5, size:0.036}]:[], endCard:r.ending, vo:vo.filter(Boolean), filter:'none', letterbox:!!((rRecipe(r)||dRecipe()).letterbox), musicBase:0.85, clipGain:0.45, total:T, fadeIn:0.9, hd:STU.D.res==='1080p'}; }).then(function(o){ return brandOpt().then(function(b){ return Object.assign(o,b); }); }); }
     setStatus('음악·내레이션·문구를 입혀 한 편으로 편집하는 중… (영상 길이만큼 · 이 사이트 탭은 켜 두세요)');
-    STU._assets={shots:JSON.parse(JSON.stringify(segs)), vids:urls, music:R[1][0], tts:[], mkOpt:mkOpt}; STU.outShorts=null;
+    STU._assets={shots:JSON.parse(JSON.stringify(segs)), vids:urls, music:R[1][0], tts:[], hasVo:voList.length>0, mkOpt:mkOpt}; STU.outShorts=null;
     return mkOpt().then(function(o){ return compose(segs, urls, R[1][0], [], o); });
   }).then(function(blob){
     STU.busy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; setStatus('✅ 완성! 아래에서 확인하세요 — 갤러리(영상)에도 저장돼요'); refresh(); saveOut(blob); if(ovHidden()) toast('🎬 AI 감독 영상이 완성됐어요 — 오른쪽 아래를 눌러 확인하세요');
@@ -65868,6 +65874,18 @@ function fxRowHtml(){ var cur=STU.fxPreview||'none';
     FILTERS.map(function(f){ var o=f.k===cur; return '<button type="button" data-fx="'+f.k+'" style="padding:6px 10px;border-radius:9px;font-size:12px;cursor:pointer;font-family:inherit;border:1px solid '+(o?'var(--ac,#00e5cc)':'rgba(255,255,255,.12)')+';background:'+(o?'rgba(0,229,204,.1)':'transparent')+';color:'+(o?'#5eead4':'#cfd2d8')+'">'+f.t+'</button>'; }).join('')+'</div>'+
     (cur!==(STU.fxApplied||'none')?'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+btn('data-fxapply', STU.fxBusy?'적용하는 중… (영상 길이만큼)':'✔ 이 필름으로 적용해서 저장', true, STU.fxBusy||!STU._assets?'disabled':'')+'<span class="tiny">적용한 영상은 갤러리에 새로 저장돼요 · 원본도 그대로 남아요</span></div>':'')+'</div>';
 }
+// 2026-11-02 요청: 영상이 끝난 뒤에도 음악·현장 소리·내레이션 크기를 따로 조절 → 같은 장면으로 다시 이어 붙여 저장(0cr · 영상 길이만큼 걸림)
+function sndRowHtml(){ var hasV=!!(STU._assets && STU._assets.hasVo);
+  return '<div style="margin-top:12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02)"><div style="font-size:12.5px;font-weight:800;margin-bottom:8px">🔊 소리 크기 다시 맞추기 <span class="tiny" style="font-weight:400">음악·현장 소리(바람·빗소리 등)·내레이션을 따로 조절 → [적용] 누르면 다시 이어 붙여 저장 — 0cr</span></div><div style="display:flex;gap:18px;flex-wrap:wrap">'+
+    [['music','🎵 음악'],['amb','🌧 현장 소리'],['voice','🎙 내레이션'+(hasV?'':' (없음)')]].map(function(x){ var v=(STU.vol||{})[x[0]]; v=v==null?100:v; return '<label style="display:flex;align-items:center;gap:8px;font-size:12px;min-width:200px">'+x[1]+'<input type="range" data-vol="'+x[0]+'" min="0" max="150" step="5" value="'+v+'" style="flex:1;accent-color:var(--ac,#00e5cc)"'+(x[0]==='voice'&&!hasV?' disabled':'')+'><b data-volv="'+x[0]+'" style="width:42px;text-align:right;color:#5eead4">'+v+'%</b></label>'; }).join('')+'</div>'+
+    '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+btn('data-sndapply', STU.fxBusy?'다시 맞추는 중… (영상 길이만큼)':'✔ 이 소리로 적용해서 저장', true, (STU.fxBusy||!STU._assets)?'disabled':'')+'<span class="tiny">'+(STU._assets?'적용한 영상은 갤러리에 새로 저장돼요 · 원본도 그대로 남아요':'새로고침 뒤에는 [이 연출로 영상 만들기]를 한 번 더 누르면 켜져요(이미 만든 장면 재사용 · 추가 차감 없음)')+'</span></div></div>'; }
+function sndApply(){
+  var A=STU._assets; if(!A||STU.fxBusy) return; var k=STU.fxApplied||'none';
+  STU.fxBusy=true; refresh(); setStatus('소리 크기를 다시 맞춰 이어 붙이는 중… (영상 길이만큼 · 이 사이트 탭은 켜 두세요)');
+  (A.mkOpt?A.mkOpt():Promise.resolve({})).then(function(o){ return compose(JSON.parse(JSON.stringify(A.shots)), A.vids, A.music, A.tts, Object.assign(o||{}, {filter:k})); })
+    .then(function(blob){ STU.fxBusy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; STU.outUrl=null; STU.outShorts=null; STU.up={}; setStatus('✅ 소리 조절 완료 — 갤러리에도 저장해요'); refresh(); saveOut(blob); })
+    .catch(function(e){ STU.fxBusy=false; setStatus('⚠️ 소리 조절 실패: '+esc(String(e&&e.message||e).slice(0,140))); refresh(); });
+}
 function fxPreview(k){ STU.fxPreview=k; var v=q('#stu-outvid'); if(v) v.style.filter=(FILTER_CSS[k]||'none'); }
 function fxApply(){
   var A=STU._assets, k=STU.fxPreview||'none'; if(!A||STU.fxBusy) return;
@@ -65914,7 +65932,7 @@ function dShoot(r, tk, ti, nT){
   // 사진 사이를 한 구간씩 이어 찍기(Seedance는 중간 장면을 못 받아서 항상 이 방식 · Kling은 한 번에 실패했을 때만)
   function pairs(){ var segs=[]; for(var i=0;i<kfs.length-1;i++) segs.push(i); if(!segs.length) return dVid(kfs[0], null, dPrompt(r, tk.beats, ti, nT), T).then(function(v){ return [{url:v.url, dur:T}]; });
     var sd=Math.min(30,Math.max(dMinDur(), Math.round((T+0.5*(segs.length-1))/segs.length)));
-    return pool(segs, 3, function(i){ var b=tk.beats[i+1]; return dVid(kfs[i], kfs[i+1], ('One continuous cinematic camera move from the first frame to the last frame through the real space: '+((b&&(b.en||b.ko))||'')+' Keep the architecture exactly. Photorealistic, natural light, no text.'), sd).then(function(v){ return {url:v.url, dur:sd}; }); }); }
+    return pool(segs, 6, function(i){ var b=tk.beats[i+1]; return dVid(kfs[i], kfs[i+1], ('One continuous cinematic camera move from the first frame to the last frame through the real space: '+((b&&(b.en||b.ko))||'')+' Keep the architecture exactly. Photorealistic, natural light, no text.'), sd).then(function(v){ return {url:v.url, dur:sd}; }); }); }
   if(dEng()==='seedance25' || kfs.length<2) return pairs();
   var prompt=dPrompt(r, tk.beats, ti, nT), vkey='dir:'+[STU.D.res, T, prompt].concat(kfs).join('¦');
   if(STU.cache[vkey]) return Promise.resolve([{url:STU.cache[vkey], dur:T}]);
@@ -65982,7 +66000,7 @@ function runDirector(){
     function mkOpt(){ return Promise.all(voList.map(function(o){ return blobUrl(o.url).catch(function(){ return o.url; }).then(function(b){ return loadMedia('audio', b); }).then(function(el){ return el?{t:o.t, el:el, text:o.text}:null; }); })).then(function(vo){
       return {hook:r.hook, caps:r.mid?[{a:T*0.42, b:T*0.42+3.2, text:r.mid, y:0.5, size:0.04}]:[], endCard:r.ending, vo:vo.filter(Boolean), filter:'none', musicBase:0.85, clipGain:0.45, total:segs.reduce(function(a,x){ return a+x.dur; },0)-0.5*Math.max(0,segs.length-1), hd:STU.D.res==='1080p'}; }).then(function(o){ return brandOpt().then(function(b){ return Object.assign(o,b); }); }); }
     setStatus('음악·내레이션·문구를 입혀 한 편으로 완성하는 중… (영상 길이만큼 · 이 사이트 탭은 켜 두세요)');
-    STU._assets={shots:JSON.parse(JSON.stringify(segs)), vids:urls, music:R[1], tts:[], mkOpt:mkOpt}; STU.outShorts=null;
+    STU._assets={shots:JSON.parse(JSON.stringify(segs)), vids:urls, music:R[1], tts:[], hasVo:voList.length>0, mkOpt:mkOpt}; STU.outShorts=null;
     return mkOpt().then(function(o){ return compose(segs, urls, R[1], [], o); });
   }).then(function(blob){
     STU.busy=false; STU.out={blob:blob, url:URL.createObjectURL(blob)}; STU.outUrl=null; STU.outShortsUrl=null; STU.up={}; STU.fxPreview=null; STU.fxApplied=null; setStatus('✅ 완성! 아래에서 확인하세요 — 갤러리(영상)에도 저장돼요'); refresh(); saveOut(blob); if(ovHidden()) toast('🎬 AI 감독 영상이 완성됐어요 — 오른쪽 아래를 눌러 확인하세요');
@@ -66050,7 +66068,7 @@ function dirHtml(){
     if(D.taste) h+='<div id="stu-dtaste" style="margin-top:12px"><div class="tiny" style="margin-bottom:6px">✨ 첫 장면 AI 맛보기 — 회원 사진으로 만든 실제 AI 영상이에요'+(r.brand?' (최종 영상에 그대로 재사용)':' (참고용)')+'</div><video src="'+esc(D.taste.url)+'" controls autoplay muted loop playsinline style="width:'+(STU.aspect==='9:16'?'min(300px,100%)':'min(560px,100%)')+';border-radius:12px;background:#000;display:block"></video></div>';
     h+='</div>';
   }
-  if(STU.out) h+='<div class="stu-card" id="stu-dout"><div class="stu-step"><b>3</b><span>완성 영상</span></div><video id="stu-outvid" src="'+esc(STU.out.url)+'" controls playsinline style="filter:'+(STU.fxPreview&&STU.fxPreview!==(STU.fxApplied||'none')?(FILTER_CSS[STU.fxPreview]||'none'):'none')+';width:'+(STU.aspect==='9:16'?'min(360px,100%)':'100%')+';border-radius:14px;background:#000;display:block"></video><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dl','다운로드',true)+(STU.aspect==='16:9'&&STU._assets?sel('data-o="shortsHd"',[{v:'',t:'쇼츠 720×1280'},{v:'1',t:'쇼츠 1080×1920'}],STU.shortsHd?'1':'')+btn('data-shorts', STU.shortsBusy?'쇼츠 만드는 중…':'쇼츠로 만들기 (9:16 · 무료)'):'')+upBtns('main')+(isAdm()?btn('data-dsample','⭐ 샘플로 걸기'):'')+'</div>'+fxRowHtml()+(STU.outShorts?'<div style="margin-top:14px"><div class="tiny" style="margin-bottom:6px">쇼츠(9:16)</div><video src="'+esc(STU.outShorts.url)+'" controls playsinline style="width:min(320px,100%);border-radius:14px;background:#000;display:block"></video><div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dls','쇼츠 다운로드',true)+upBtns('shorts')+'</div></div>':'')+'<div class="tiny" style="margin-top:6px">완성 영상은 갤러리(영상)에 자동 저장돼요</div></div>';
+  if(STU.out) h+='<div class="stu-card" id="stu-dout"><div class="stu-step"><b>3</b><span>완성 영상</span></div><video id="stu-outvid" src="'+esc(STU.out.url)+'" controls playsinline style="filter:'+(STU.fxPreview&&STU.fxPreview!==(STU.fxApplied||'none')?(FILTER_CSS[STU.fxPreview]||'none'):'none')+';width:'+(STU.aspect==='9:16'?'min(360px,100%)':'100%')+';border-radius:14px;background:#000;display:block"></video><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dl','다운로드',true)+(STU.aspect==='16:9'&&STU._assets?sel('data-o="shortsHd"',[{v:'',t:'쇼츠 720×1280'},{v:'1',t:'쇼츠 1080×1920'}],STU.shortsHd?'1':'')+btn('data-shorts', STU.shortsBusy?'쇼츠 만드는 중…':'쇼츠로 만들기 (9:16 · 무료)'):'')+upBtns('main')+(isAdm()?btn('data-dsample','⭐ 샘플로 걸기'):'')+'</div>'+fxRowHtml()+sndRowHtml()+(STU.outShorts?'<div style="margin-top:14px"><div class="tiny" style="margin-bottom:6px">쇼츠(9:16)</div><video src="'+esc(STU.outShorts.url)+'" controls playsinline style="width:min(320px,100%);border-radius:14px;background:#000;display:block"></video><div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'+btn('data-dls','쇼츠 다운로드',true)+upBtns('shorts')+'</div></div>':'')+'<div class="tiny" style="margin-top:6px">완성 영상은 갤러리(영상)에 자동 저장돼요</div></div>';
   return h+dirAdvToggle();
 }
 function dirAdvToggle(){ var o=!!STU.advOpen; return '<button type="button" data-advmode style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;font-family:inherit;margin:6px 0 14px;padding:12px 16px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.04);color:#fff"><span style="font-size:20px">🛠</span><span style="font-size:15px;font-weight:900">고급 모드</span><span style="font-size:12px;color:#aab">장면을 하나하나 직접 연출 (컨셉·카메라·대사·장면별 편집)</span><span style="margin-left:auto;font-size:12.5px;font-weight:800;padding:5px 12px;border-radius:999px;background:rgba(255,255,255,.1)">'+(o?'접기 ▲':'열기 ▼')+'</span></button>'; }
