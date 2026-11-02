@@ -58137,6 +58137,7 @@ function _communityPublishItemSilent(item, cb){
       }).catch(function(){ cb(false); });
   }
   if(String(src).indexOf('http')===0){ doInsert(src); }
+  else if(item.wf==='video' || /^blob:|^data:video/.test(String(src))){ alert('영상이 아직 갤러리(클라우드)에 저장되는 중이에요. 잠시 뒤 다시 눌러 주세요.'); cb(false); }
   else { _uploadLocalImageForShare(src, function(url){ if(!url){ cb(false); return; } doInsert(url); }); }
 }
 
@@ -58290,9 +58291,15 @@ function _renderCommunityGrid(posts, targetHs){
     return;
   }
   _ensureCommMasonryStyle();
-  var gridWrap=_buildCommMasonryGrid(posts);
-  gridWrap.el.style.padding='0 20px 24px';
-  hs.appendChild(gridWrap.el);
+  var nV=posts.filter(function(p){ return _commIsVid(p.image_url); }).length, cur=window._commFilter||'all', gHost=document.createElement('div'); gHost.style.cssText='width:100%';
+  var chips=document.createElement('div'); chips.style.cssText='display:flex;gap:8px;padding:0 20px 16px;flex-wrap:wrap';
+  function draw(){ chips.innerHTML=''; [['all','전체'],['img','이미지'],['vid','🎬 영상'+(nV?' '+nV:'')]].forEach(function(c){ var b=document.createElement('button'); b.type='button'; b.textContent=c[1]; var on=cur===c[0];
+      b.style.cssText='padding:7px 16px;border-radius:999px;font-size:13px;font-weight:800;cursor:pointer;font-family:inherit;border:1px solid '+(on?'var(--ac)':'var(--bd2)')+';background:'+(on?'rgba(0,229,204,.12)':'transparent')+';color:'+(on?'var(--ac)':'var(--t2)');
+      b.onclick=function(){ cur=c[0]; window._commFilter=cur; draw(); }; chips.appendChild(b); });
+    var list=posts.filter(function(p){ var v=_commIsVid(p.image_url); return cur==='all'||(cur==='vid'?v:!v); });
+    gHost.innerHTML=''; if(!list.length){ gHost.innerHTML='<div style="padding:50px 20px;text-align:center;color:var(--m2);font-size:13.5px">'+(cur==='vid'?'아직 공개된 영상이 없어요. 갤러리(영상)에서 🌍 버튼으로 첫 영상을 공개해 보세요!':'아직 공개된 이미지가 없어요.')+'</div>'; return; }
+    var gridWrap=_buildCommMasonryGrid(list); gridWrap.el.style.padding='0 20px 24px'; gHost.appendChild(gridWrap.el); }
+  hs.appendChild(chips); hs.appendChild(gHost); draw();
 }
 
 // ⚠️ 요청 반영("메인화면에서도 커뮤니티 이미지를 미드저니 Explore처럼 크게 스크롤해서 볼 수
@@ -58346,15 +58353,28 @@ function _buildCommMasonryGrid(posts){
   appendMore(posts);
   return {el:grid, appendMore:appendMore};
 }
+// 2026-11-02 요청("영상을 커뮤니티에 — 홈은 영상 한 줄 + 아래 이미지, 커뮤니티는 같이 두고 필터"): 영상 카드 공통
+function _commIsVid(u){ return /\.(mp4|webm|mov)(\?|#|$)/i.test(String(u||'')); }
+function _commFmtDur(d){ if(!(d>0)) return ''; d=Math.round(d); return Math.floor(d/60)+':'+((d%60)<10?'0':'')+(d%60); }
+var _commVidIO=null, _commTouch=(window.matchMedia && matchMedia('(hover: none)').matches);
+function _commVidWatch(v, url){ // 화면 가까이 오면 그때 불러옴(첫 장면이 썸네일처럼 보임) · 휴대폰은 화면에 보이는 영상만 소리 없이 재생
+  if(!('IntersectionObserver' in window)){ v.src=url+'#t=0.5'; return; }
+  if(!_commVidIO) _commVidIO=new IntersectionObserver(function(es){ es.forEach(function(en){ var el=en.target;
+    if(en.isIntersecting && !el.dataset.ld){ el.dataset.ld='1'; el.src=el.dataset.src+'#t=0.5'; }
+    if(_commTouch){ if(en.intersectionRatio>0.6){ document.querySelectorAll('video[data-cplay="1"]').forEach(function(o){ if(o!==el){ try{ o.pause(); }catch(e){} o.dataset.cplay=''; } }); el.dataset.cplay='1'; try{ el.play().catch(function(){}); }catch(e){} } else { try{ el.pause(); }catch(e){} el.dataset.cplay=''; } }
+  }); }, {rootMargin:'300px 0px', threshold:[0,0.6]});
+  v.dataset.src=url; _commVidIO.observe(v); }
+function _commVidEl(url, wrap){ var v=document.createElement('video'); v.muted=true; v.loop=true; v.playsInline=true; v.setAttribute('playsinline',''); v.preload='metadata';
+  var badge=document.createElement('div'); badge.style.cssText='position:absolute;top:8px;left:8px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;font-weight:800;padding:3px 8px;border-radius:999px;z-index:3;pointer-events:none'; badge.textContent='▶ 영상';
+  v.onloadedmetadata=function(){ var t=_commFmtDur(v.duration); if(t) badge.textContent='▶ '+t; };
+  if(wrap){ wrap.appendChild(badge); if(!_commTouch){ wrap.addEventListener('mouseenter', function(){ try{ v.play().catch(function(){}); }catch(e){} }); wrap.addEventListener('mouseleave', function(){ try{ v.pause(); }catch(e){} }); } }
+  _commVidWatch(v, url); return v; }
 function _buildCommCard(p){
   var card=document.createElement('div');
   card.className='comm-card';
-  var isVid=String(p.image_url).includes('.mp4')||String(p.image_url).includes('.webm');
+  var isVid=_commIsVid(p.image_url);
   if(isVid){
-    var v=document.createElement('video');
-    v.src=p.image_url;v.muted=true;v.loop=true;v.preload='none';
-    v.onmouseenter=function(){ v.play().catch(function(){}); };
-    v.onmouseleave=function(){ v.pause(); try{v.currentTime=0;}catch(e){} };
+    var v=_commVidEl(p.image_url, card); v.style.minHeight='120px'; v.style.background='#000';
     card.appendChild(v);
   } else {
     var img=document.createElement('img');
@@ -58437,6 +58457,7 @@ function _openCommunityLightbox(p, isVid){
   function close(){ ov.remove(); document.removeEventListener('keydown', onKey); }
   closeBtn.onclick=close;
   mediaWrap.appendChild(closeBtn);
+  if(isVid && window._studioOpen){ var cta=document.createElement('button'); cta.type='button'; cta.textContent='🎬 내 사진으로 이런 영상 만들기'; cta.style.cssText='display:block;margin:12px auto 0;padding:11px 22px;border-radius:12px;border:none;background:var(--ac,#00e5cc);color:#03211d;font-size:13.5px;font-weight:900;cursor:pointer;font-family:inherit'; cta.onclick=function(e){ e.stopPropagation(); close(); try{ window._studioOpen(); }catch(_e){} }; mediaWrap.appendChild(cta); }
   ov.appendChild(mediaWrap);
   ov.onclick=function(e){ if(e.target===ov) close(); };
   function onKey(e){ if(e.key==='Escape') close(); }
@@ -58721,19 +58742,29 @@ function _loadHomeCommunityShowcase(){
     subBar.style.cssText='font-size:13px;color:var(--m2);text-align:center;margin-bottom:24px';
     subBar.textContent='CLOVER AI로 완성된 실제 작업물이에요';
     wrap.appendChild(subBar);
+    if(homeVids.length){ var vh=document.createElement('div'); vh.style.cssText='display:flex;align-items:baseline;gap:8px;margin:0 0 10px'; vh.innerHTML='<b style="font-size:15px;color:var(--t)">🎬 영상</b><span style="font-size:12px;color:var(--m2)">CLOVER AI 영상 스튜디오로 만든 영상</span>';
+      var vrow=document.createElement('div'); var H=(window.innerWidth<=768)?190:260; vrow.style.cssText='display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding-bottom:8px;margin-bottom:26px;scroll-snap-type:x proximity';
+      homeVids.forEach(function(p){ var c=document.createElement('div'); c.style.cssText='position:relative;flex:0 0 auto;height:'+H+'px;border-radius:14px;overflow:hidden;background:#000;cursor:pointer;scroll-snap-align:start';
+        var v=_commVidEl(p.image_url, c); v.style.cssText='height:100%;width:auto;min-width:'+Math.round(H*0.5625)+'px;display:block'; c.appendChild(v); c.onclick=function(){ _openCommunityLightbox(p, true); }; vrow.appendChild(c); });
+      wrap.appendChild(vh); wrap.appendChild(vrow); }
     gridWrap=_buildCommMasonryGrid(firstBatch);
     wrap.appendChild(gridWrap.el);
     wrap.appendChild(moreWrap);
   }
 
-  function loadBatch(){
+  var homeVids=[], vidsAsked=false;
+  function loadVids(cb){ if(vidsAsked){ cb(); return; } vidsAsked=true;
+    _commQ(function(useA){ var q=_supa.from('community_posts').select('id,image_url,like_count,show_nickname,nickname,caption').eq('is_public',true).or('image_url.ilike.*.mp4*,image_url.ilike.*.webm*'); if(useA) q=q.eq('approved',true);
+      return q.order('sort_order',{ascending:true,nullsFirst:true}).order('created_at',{ascending:false}).limit(12); })
+      .then(function(r){ homeVids=(r&&!r.error&&r.data)||[]; cb(); }).catch(function(){ cb(); }); }
+  function loadBatch(){ if(!vidsAsked){ loadVids(loadBatch); return; }
     _commQ(function(useA){ var q=_supa.from('community_posts').select('id,image_url,like_count,show_nickname,nickname,caption',{count:'exact'})
-      .eq('is_public',true); if(useA) q=q.eq('approved',true);
+      .eq('is_public',true).not('image_url','ilike','%.mp4%').not('image_url','ilike','%.webm%'); if(useA) q=q.eq('approved',true);
       return q.order('sort_order',{ascending:true,nullsFirst:true}).order('created_at',{ascending:false}).order('id',{ascending:true})
       .range(loadedCount, Math.min(loadedCount+BATCH,CAP)-1); })
       .then(function(res){
         if(res.error || !res.data){ if(loadedCount===0) wrap.style.display='none'; return; }
-        if(loadedCount===0 && !res.data.length){ wrap.style.display='none'; return; } // 공개 작품이 하나도 없으면 섹션 자체를 숨김
+        if(loadedCount===0 && !res.data.length){ if(homeVids.length){ wrap.style.display='block'; renderShell([]); } else wrap.style.display='none'; return; } // 공개 작품이 하나도 없으면 섹션 자체를 숨김(영상만 있으면 영상 줄만)
         if(loadedCount===0){ wrap.style.display='block'; renderShell(res.data); }
         else { gridWrap.appendMore(res.data); }
         loadedCount += res.data.length;
@@ -59523,6 +59554,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
+  {c:'common', t:'🎬 커뮤니티에 영상도 공개', h:'갤러리(영상)에서 🌍 버튼을 누르면 영상도 커뮤니티에 올릴 수 있어요(운영자 확인 후 공개). 홈 Showcase 맨 위에 영상 한 줄이 가로로 보이고(마우스를 올리면 재생, 휴대폰은 화면에 보이는 영상만 소리 없이 재생), 커뮤니티 화면에서는 [전체 · 이미지 · 🎬 영상] 버튼으로 골라 볼 수 있어요. 영상을 크게 열면 [🎬 내 사진으로 이런 영상 만들기]로 바로 영상 스튜디오를 열 수 있어요.'},
   {c:'video', t:'🎬 건축·인테리어 영상 스튜디오 (AI 감독)', h:'영상 제작 맨 위 [🎬 건축·인테리어 영상 스튜디오]에서 사진(최대 20장)만 올리고 [AI 감독에게 맡기기](무료)를 누르면, 감독이 사진을 보고 31가지 템플릿 중 어울리는 연출을 골라 제안해요. 올린 사진은 빼지 않고 모두 쓰고, 공간 구조는 절대 바꾸지 않아요. 길이는 5초~5분(300초)까지 직접 입력, 엔진은 Kling 4.0(기본·1080p 58cr/초)·Seedance 2.5. 장면·문구·글씨체(14종)·성우(🌟 사람처럼 자연스러운 목소리 14명 + 한국어 성우 15명, 목소리 듣기는 내레이션 문구를 그대로 읽어요 · 내레이션은 기본 꺼짐)·음악(장르 6가지 · [▶ 음악 먼저 만들어 듣기]로 미리 듣고 그대로 사용)을 고칠 수 있고, [🎞 콘티 보기]는 컷 번호·시간·사진·카메라·화면 문구·내레이션이 담긴 콘티표(무료, 재생도 가능), [✨ 첫 장면 AI 맛보기]로 만든 장면은 최종 영상에 그대로 재사용돼 다시 차감되지 않아요. 완성 후 필름(색감) 입히기·소리 크기(음악·현장 소리·내레이션) 다시 맞추기는 무료, FHD·4K 업스케일과 쇼츠(9:16) 변환도 돼요. 만드는 중 새로고침해도 다시 열면 이어서 만들고, 작업 내용은 [🗑 전체 리셋] 전까지 이 브라우저에 저장돼요.'},
   {c:'video', t:'📱 가로 영상 → 쇼츠(9:16) 무료 변환', h:'영상 결과(갤러리 영상)를 열면 아래 버튼 줄에 [📱 쇼츠로 만들기 (9:16 · 무료)]가 있어요. 누르면 가로 영상의 가운데를 세로로 잘라 쇼츠(720×1280, 원본이 1080p 이상이면 1080×1920)로 만들고 갤러리(영상)에 따로 저장해요. 크레딧은 들지 않고, 영상 길이만큼 시간이 걸려요(그동안 화면을 켜 두세요). 영상 결과에서는 이미지 전용 기능(업스케일·AI 편집·제안서·영상 만들기)은 보이지 않아요.'},
   {c:'psedit', t:'🎯 AI 물체 선택 (포토샵 편집)', h:'포토샵 편집 왼쪽 도구 막대에서 민트색으로 크게 표시된 [AI 선택] 버튼(마술봉 위)을 누르고 사진에서 물체를 클릭하면 그 물체만 선택돼요. 옆에 뜨는 큰 상자에 "유리", "건물", "나무"처럼 이름(한글·영어 모두)을 적고 [모두 선택하기]를 누르면 해당 물체가 한 번에 다 선택돼요. Shift+클릭은 더하기, Alt+클릭은 빼기. 선택 후 아래 막대에서 색·밝기, 색조, 반투명, 하늘색으로, 레이어로 분리를 바로 할 수 있어요. 상자 아래 ③ 자주 쓰는 영역 버튼(메인 건물, 주변 건물(메인 제외), 유리·창문, 메인 건물 외벽, 바닥 전체, 하늘, 나무·조경, 자동차, 실내 벽, 실내 천장, 가구, 사람)을 누르면 바로 선택돼요. 예) 주변 건물만 반투명: [주변 건물(메인 제외)] → 아래 막대 🌫 반투명. 메인 건물은 사진 가운데의 가장 큰 건물로 판단해요. 선택은 하루 약 200번까지 무료이고, 그보다 아주 많이 쓰면 1번에 1cr이에요.'},
