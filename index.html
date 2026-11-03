@@ -11210,6 +11210,10 @@ function mkTA(p,ph){
       updBtn();
     };
     exW.appendChild(exTa);
+    if(CAMPICK_KEYS[getTab(G.wf).selK]){ (function(){ var t=getTab(G.wf), ok=_camPickValid(t), cb=mk('button',''); cb.type='button'; cb.id='cam-pick-btn';
+      cb.style.cssText='display:block;width:100%;margin-top:8px;padding:10px 12px;border-radius:10px;cursor:pointer;font-family:inherit;text-align:left;border:1.5px '+(ok?'solid #ef4444':'dashed rgba(239,68,68,.6)')+';background:'+(ok?'rgba(239,68,68,.12)':'rgba(239,68,68,.05)')+';color:var(--t)';
+      cb.innerHTML='<div style="font-size:12.5px;font-weight:800">📍 도면에서 카메라 위치·방향 정하기 '+(ok?'<span style="color:#fca5a5">✔ 정해짐 · 다시 정하기</span>':'<span style="font-size:10px;padding:1px 6px;border-radius:5px;background:#ef4444;color:#fff">도면이면 추천</span>')+'</div><div style="font-size:10.5px;color:var(--t2);margin-top:3px;line-height:1.5">평면도에서 서 있을 곳을 누르고 볼 쪽으로 끌면, AI가 그 자리에서 앞·양옆·창 위치를 도면대로 읽고 그려요 (무료)</div>';
+      cb.onclick=_camPickOpen; exW.appendChild(cb); })(); }
     var exRalBtn=mk('button','');exRalBtn.type='button';exRalBtn.textContent='🎨 RAL 컬러 선택';
     exRalBtn.style.cssText='margin-top:6px;padding:6px 12px;border-radius:7px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:11px;cursor:pointer;font-family:inherit';
     exRalBtn.onclick=function(){ _openRalPicker(exTa); };
@@ -50097,6 +50101,7 @@ function _runToolWithPromptActual(translatedPrompt){
     userExtra: (tab.extraPrompt||''), // 2026-10-26: 회원이 직접 쓴 추가 요청만(달 요청 확인용)
     renderSky: (G.wf==='render' ? (tab.selK==='render_quality_boost' ? (tab._skyQB||'keep') : (G.renderSky||'clear')) : null),
     siteMarks: (G.wf==='render' && /^site_context/.test(tab.selK||'') && tab.siteMarks) ? JSON.parse(JSON.stringify(tab.siteMarks)) : null, // 2026-10-27 대지 위치 표시
+    camPick: (typeof _camPickValid==='function' && _camPickValid(tab)) ? {x:tab.camPick.x, y:tab.camPick.y, a:tab.camPick.a} : null, // 2026-11-03 📍 도면 카메라 위치
     textProtect: (G.wf==='render' ? _tpActiveMask(tab) : null), // 2026-10-12 글자 보호 브러시
     toneRef:   (G.wf==='render' ? (tab._matchRef||tab._toneRef||null) : null), // 2026-10-20 여러 장 같은 톤: 기준 이미지(조명·색감만 맞춤) / 2026-10-25 수정 렌더: 납품본
     _bgTail:   (G.wf==='render' && tab._bgMode==='keep' && tab._bgFor===_bgKey(tab.inputImg) && !/^site_context/.test(tab.selK||'')) ? BG_KEEP_TAIL : '', // 2026-10-26 3D만(배경 원본 그대로)
@@ -51719,6 +51724,55 @@ function _sitePlanDeskewRefs(t, done){
     if(--left===0){ if(n){ try{ _saveMainTabImagesDraft(); }catch(e){} try{ renderSB(); }catch(e){} try{ _agedEnvToast('📐 위성사진 기울기를 자동으로 바로 세웠어요'); }catch(e){} } done(); }
   }); });
 }
+// ══ 2026-11-03 신고("회원이 도면으로 만들었는데 도면이랑 너무 다르다 — 창이 옆벽 전체에 생김"): 📍 도면에서 카메라 위치·방향 정하기 ══
+// 회원이 도면에서 서 있는 곳을 누르고 보는 방향으로 끌면 → 비전 AI가 그 표시를 보고 앞·왼쪽·오른쪽·뒤·창 위치·폭을 글로 정리 → 그리기 규칙으로 넣음
+// ⚠️ 표시(빨간 점·화살표)는 분석용으로만 쓰고, 그리는 AI에는 깨끗한 도면만 보냄(배치도에 그린 선이 결과에 그려졌던 일 재발 방지)
+var CAMPICK_KEYS={aerial_to_eye:1, iso_to_eye:1};
+function _camPickValid(t){ return !!(t && t.camPick && CAMPICK_KEYS[t.selK] && t.inputImg && t.camPick.sig===_siteMarkSig(t.inputImg)); }
+function _camDrawMarker(cx, W, H, cp, alpha){ var x=cp.x*W, y=cp.y*H, a=cp.a, L=Math.max(W,H)*0.16, fov=Math.PI*70/180, lw=Math.max(2,Math.round(Math.max(W,H)*0.004));
+  cx.save(); cx.globalAlpha=alpha==null?1:alpha; cx.fillStyle='rgba(239,68,68,.16)'; cx.beginPath(); cx.moveTo(x,y); cx.arc(x,y,L*1.6,a-fov/2,a+fov/2); cx.closePath(); cx.fill();
+  cx.strokeStyle='rgba(239,68,68,.55)'; cx.lineWidth=lw*0.7; cx.stroke();
+  cx.strokeStyle='#ff1a1a'; cx.lineWidth=lw*1.6; cx.beginPath(); cx.moveTo(x,y); var ex=x+Math.cos(a)*L, ey=y+Math.sin(a)*L; cx.lineTo(ex,ey); cx.stroke();
+  cx.fillStyle='#ff1a1a'; cx.beginPath(); var hs=lw*5; cx.moveTo(ex+Math.cos(a)*hs, ey+Math.sin(a)*hs); cx.lineTo(ex+Math.cos(a+2.4)*hs, ey+Math.sin(a+2.4)*hs); cx.lineTo(ex+Math.cos(a-2.4)*hs, ey+Math.sin(a-2.4)*hs); cx.closePath(); cx.fill();
+  cx.beginPath(); cx.arc(x,y,lw*3.2,0,Math.PI*2); cx.fill(); cx.strokeStyle='#fff'; cx.lineWidth=lw*0.8; cx.stroke(); cx.restore(); }
+function _camDirWord(a){ var d=['the RIGHT edge','the BOTTOM-RIGHT corner','the BOTTOM edge','the BOTTOM-LEFT corner','the LEFT edge','the TOP-LEFT corner','the TOP edge','the TOP-RIGHT corner']; var k=Math.round(((a%(2*Math.PI))+2*Math.PI)%(2*Math.PI)/(Math.PI/4))%8; return d[k]; }
+function _camPickOpen(){ var t=getTab(G.wf); if(!t||!t.inputImg){ alert('먼저 도면(평면도) 이미지를 올려 주세요.'); return; }
+  var old=document.getElementById('cam-pick-md'); if(old) old.remove();
+  var md=document.createElement('div'); md.id='cam-pick-md'; md.style.cssText='position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.82);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box';
+  md.innerHTML='<div style="background:#111318;border:1px solid #333;border-radius:14px;padding:14px;max-width:min(1200px,96vw);width:100%;max-height:96vh;overflow:auto;box-sizing:border-box;color:#eee;font-family:inherit">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b style="font-size:15px;color:#fca5a5">📍 도면에서 카메라 위치·방향 정하기</b><button type="button" data-x style="margin-left:auto;border:none;background:#2a2d35;color:#fff;border-radius:8px;width:32px;height:32px;cursor:pointer">✕</button></div>'+
+    '<div style="font-size:12.5px;color:#bbb;line-height:1.6;margin-bottom:8px"><b>서 있을 곳을 누른 채로, 바라볼 쪽으로 끌어서 놓으세요.</b> 빨간 부채꼴 안이 사진에 보이는 범위예요. 다시 하려면 다시 누르고 끌면 돼요.<br>AI가 이 위치에서 앞·왼쪽·오른쪽에 무엇이 있는지, 창이 어디 있는지 도면을 읽고 그대로 그려요 (빨간 표시는 결과에 안 그려져요).</div>'+
+    '<div style="display:flex;justify-content:center"><canvas data-cv style="max-width:100%;max-height:70vh;touch-action:none;cursor:crosshair;border-radius:8px;background:#fff"></canvas></div>'+
+    '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center"><button type="button" data-clr style="padding:10px 14px;border-radius:9px;border:1px solid #444;background:#1c1f26;color:#ddd;cursor:pointer;font-family:inherit">지우기</button><span data-st style="font-size:12px;color:#9aa0aa;flex:1"></span><button type="button" data-ok style="padding:10px 18px;border-radius:9px;border:none;background:#ef4444;color:#fff;font-weight:800;cursor:pointer;font-family:inherit">✔ 이 위치로 정하기</button></div></div>';
+  document.body.appendChild(md);
+  var cv=md.querySelector('[data-cv]'), cx=cv.getContext('2d'), img=null, cp=_camPickValid(t)?Object.assign({},t.camPick):null, drag=null, st=md.querySelector('[data-st]');
+  function draw(){ if(!img) return; cx.clearRect(0,0,cv.width,cv.height); cx.drawImage(img,0,0,cv.width,cv.height); if(cp) _camDrawMarker(cx, cv.width, cv.height, cp); st.textContent=cp?'📍 위치를 정했어요 — 화살표 쪽을 바라봐요':'아직 안 정했어요'; }
+  loadImgSafe(t.inputImg, function(im){ img=im; var w=im.naturalWidth||im.width, h=im.naturalHeight||im.height, sc=Math.min(1, 1600/Math.max(w,h)); cv.width=Math.round(w*sc); cv.height=Math.round(h*sc); draw(); }, function(){ alert('도면 이미지를 불러오지 못했어요.'); md.remove(); });
+  function pt(e){ var r=cv.getBoundingClientRect(); return {x:Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)), y:Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))}; }
+  cv.addEventListener('pointerdown',function(e){ e.preventDefault(); try{ cv.setPointerCapture(e.pointerId); }catch(_){} var p=pt(e); drag=p; cp={x:p.x, y:p.y, a:(cp&&cp.a!=null)?cp.a:-Math.PI/2}; draw(); });
+  cv.addEventListener('pointermove',function(e){ if(!drag) return; var p=pt(e), dx=(p.x-drag.x)*cv.width, dy=(p.y-drag.y)*cv.height; if(Math.abs(dx)+Math.abs(dy)>6){ cp.a=Math.atan2(dy,dx); draw(); } });
+  cv.addEventListener('pointerup',function(){ drag=null; });
+  md.querySelector('[data-clr]').onclick=function(){ cp=null; draw(); };
+  md.querySelector('[data-x]').onclick=function(){ md.remove(); };
+  md.querySelector('[data-ok]').onclick=function(){ if(cp){ cp.sig=_siteMarkSig(t.inputImg); t.camPick=cp; } else delete t.camPick; md.remove(); try{ renderSB(); updBtn(); }catch(e){}
+    try{ _agedEnvToast(cp?'📍 카메라 위치를 정했어요 — 만들 때 이 자리에서 화살표 쪽을 보고 그려요':'카메라 위치를 지웠어요'); }catch(e){} }; }
+// 비전 AI로 '이 자리에서 보이는 것' 읽기 (무료) → 그리기 규칙 문장
+var _camReadCache={};
+function _camPlanRead(src, cp, cb){ var key=_siteMarkSig(src)+'|'+cp.x.toFixed(3)+'|'+cp.y.toFixed(3)+'|'+cp.a.toFixed(2); if(_camReadCache[key]!==undefined){ cb(_camReadCache[key]); return; }
+  var done=false; function fin(v){ if(done) return; done=true; _camReadCache[key]=v; cb(v); } setTimeout(function(){ fin(null); }, 40000);
+  try{ var _ld=gE('ldst'); if(_ld) _ld.textContent='도면에서 카메라 위치 읽는 중...'; }catch(_e){}
+  loadImgSafe(src, function(im){ try{ var w=im.naturalWidth||im.width, h=im.naturalHeight||im.height, sc=Math.min(1, 1600/Math.max(w,h)), c=document.createElement('canvas'); c.width=Math.round(w*sc); c.height=Math.round(h*sc); var x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.drawImage(im,0,0,c.width,c.height); _camDrawMarker(x, c.width, c.height, cp);
+      var b64=c.toDataURL('image/jpeg',0.9).split(',')[1], fw=_camDirWord(cp.a), lw=_camDirWord(cp.a-Math.PI/2), rw=_camDirWord(cp.a+Math.PI/2), bw=_camDirWord(cp.a+Math.PI);
+      var q='This is an architectural FLOOR PLAN (top-down drawing). A RED DOT marks where a person stands (eye height 1.6 m) and the RED ARROW with the light-red cone shows the direction they look (about 70° view). On the drawing the arrow points toward '+fw+'. So for this person: their LEFT hand side is toward '+lw+' of the drawing, their RIGHT hand side is toward '+rw+', and BEHIND them is toward '+bw+'. '+
+        'Read the plan carefully (walls are thick lines, windows are thin double/triple lines in walls, doors are arcs, labels and dimensions in mm) and describe exactly what this person would SEE in a photo taken from there. Answer ONLY JSON: '+
+        '{"room":"which room/space they stand in","ahead":"what is straight ahead at the far end (walls, openings, kitchen, windows, furniture), with distance in metres","left":"what runs along the LEFT side of the view (walls, doors, built-ins, furniture, openings) — say clearly if it is a solid wall","right":"same for the RIGHT side","behind":"what is behind the camera (not visible)","windows":"exactly where windows/glass doors are visible in this view (ahead / left / right) or \\"none visible\\"","width_m":0,"depth_m":0,"furniture":"main furniture drawn in the view and its orientation","ko":"one short Korean sentence summary for the user"}';
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:q}]}]}, function(res){
+        var t=res; try{ if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||''; if(Array.isArray(t)) t=t.map(function(x){ return x.text||''; }).join(''); }catch(e){ t=''; }
+        var j=null; try{ var m=String(t||'').match(/\{[\s\S]*\}/); j=m?JSON.parse(m[0]):null; }catch(e){ j=null; } if(!j){ fin(null); return; }
+        var S=function(v){ return String(v==null?'':v).replace(/\s+/g,' ').trim().slice(0,300); };
+        var out=' 📍📍📍 CAMERA POSITION MARKED BY THE USER ON THIS FLOOR PLAN (highest priority for the layout — a vision check of the plan from that exact spot): the photo is taken standing in '+S(j.room)+' at 1.6 m eye height, looking straight ahead. STRAIGHT AHEAD (far end of the view): '+S(j.ahead)+'. LEFT SIDE of the image: '+S(j.left)+'. RIGHT SIDE of the image: '+S(j.right)+'. BEHIND the camera (must NOT appear): '+S(j.behind)+'. WINDOWS / GLASS: '+S(j.windows)+' — put windows and glass ONLY there; every other wall in the view stays a solid wall exactly as drawn (never turn a side wall into a window wall, never open the space wider). '+
+          ((+j.width_m>0)?'The space is about '+(+j.width_m)+' m wide'+((+j.depth_m>0)?' and '+(+j.depth_m)+' m deep':'')+' — keep these real proportions with a natural ~24 mm lens, do not make it look bigger or more open. ':'')+(j.furniture?'Furniture drawn here: '+S(j.furniture)+'. ':'')+'The red dot/arrow only exist on the analysis copy — never draw any marker, line or text.';
+        fin({txt:out, ko:S(j.ko)}); }, function(){ fin(null); }); }catch(e){ fin(null); } }, function(){ fin(null); }); }
 function _siteMarkOpen(onRun){ // onRun이 있으면 렌더 버튼에서 연 것 — 저장 후 렌더, '표시 없이 렌더'도 가능
   var t=getTab('render'); _siteMarkOpen._inner(onRun); } // 2026-10-28 사용자 결정("위성사진을 돌리지 말고 메인건물을 위성사진에 맞춰야"): 입력은 그대로, 건물을 거리 방향에 맞추고 → 결과 전체를 한 번에 바로 세움
 _siteMarkOpen._inner=function(onRun){
@@ -52120,6 +52174,11 @@ function procImgWithTask(task, onDone, onErr){
   if(task && task.matchRef && task.matchKeep && task.matchOld && task.toneRef && !task._mtWrapped && typeof onDone==='function'){
     task._mtWrapped=true; var _mtOD=onDone;
     onDone=function(ri){ if(typeof ri!=='string'){ _mtOD.apply(this, arguments); return; } try{ _mtComposite(task, ri, function(out){ _mtOD(out); }); }catch(e){ _mtOD(ri); } };
+  }
+  // 2026-11-03 📍 도면에서 정한 카메라 위치 → 비전 AI가 앞·좌·우·창 위치를 읽어 그리기 규칙으로 (그리는 AI에는 표시 없는 깨끗한 도면)
+  if(task && task.camPick && task.img && task._camTxt===undefined && typeof _camPlanRead==='function'){
+    _camPlanRead(task.img, task.camPick, function(r){ task._camTxt=r?r.txt:''; if(r && r.txt) task.prompt=tx(task.prompt||'')+r.txt; try{ _agedEnvToast(r?('📍 도면 읽기: '+(r.ko||'카메라 위치 반영')):'📍 도면에서 카메라 위치를 읽지 못해서 일반 방식으로 만들어요'); }catch(e){} procImgWithTask(task, onDone, onErr); });
+    return;
   }
   // 2026-10-23 신고("실사화가 메인 건물 마감재를 임의로 다 바꾼다 — 흰 사이딩이 원목·유리로"): 규칙 문구만으로는 AI가 '실제 재료로 바꿔라'를 재료 교체로 해석함 →
   // 실사화 전에 비전 AI가 원본의 요소별 마감재·색을 글로 읽어서(무료, 이미지당 1번) 프롬프트 맨 끝에 '이 재료·색 그대로' 목록으로 못박음
@@ -59684,6 +59743,9 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
+  {c:'video', t:'🔍 영상 편집에서 저장하면서 업스케일', h:'영상 편집 화면 오른쪽 저장 칸에서 [FHD] 또는 [4K]를 고르고 [💾 새 영상으로 저장]을 누르면, 편집한 영상을 먼저 갤러리에 저장한 뒤 Topaz Video AI로 한 번 더 선명하게 키워서 따로 저장해요(편집본도 그대로 남아요). 비용은 영상 길이(초) × '+31+'cr예요. 예전에 업스케일 없이 만든 영상도 편집에서 불러와 업스케일할 수 있어요. 실패하면 업스케일 크레딧은 자동 환불돼요.'},
+  {c:'render', t:'📍 도면에서 카메라 위치·방향 정하기', h:'조감도→투시도·아이소→투시도로 평면도를 투시도로 바꿀 때, [📍 도면에서 카메라 위치·방향 정하기]를 누르고 도면에서 서 있을 곳을 누른 채 바라볼 쪽으로 끌어 주세요. AI가 그 자리에서 앞·왼쪽·오른쪽에 무엇이 있는지, 창이 어디 있는지, 공간 폭이 얼마인지 도면을 먼저 읽고 그대로 그려요(무료). 옆벽이 통창으로 바뀌거나 공간이 실제보다 넓어지는 실수가 줄어요. 빨간 표시는 결과에 그려지지 않아요. 도면만으로는 AI가 구조를 추측하는 부분이 남아서, 정확한 구조가 꼭 필요하면 스케치업 같은 간단한 3D 화면 캡처로 3D 렌더 실사화를 쓰는 게 가장 정확해요.'},
+  {c:'video', t:'🎓 전문 해설 내레이션 (AI 감독)', h:'영상 스튜디오 AI 감독 화면의 아이디어 칸 아래 [🎓 전문 해설 내레이션]을 켜면, 성우가 사진에 보이는 설계(중정·높은 천장·깊은 처마·간접조명·아일랜드·붙박이장 등)를 왜 이렇게 만들었는지, 어떤 효과와 장단점이 있는지 건축가처럼 설명해요. 예) 중정은 집 한가운데까지 빛과 바람을 들이고 바깥 시선 없는 마당이 되지만, 외벽이 늘어 단열과 배수 관리가 중요해요. 보는 사람이 배워 가는 영상이라 구독과 신뢰에 좋아요. 사진에 안 보이는 것이나 숫자·브랜드는 지어내지 않아요 — 아이디어 칸에 설계 의도·현장 정보를 적으면 더 정확해져요. 내레이션 몇 cr이 추가돼요.'},
   {c:'video', t:'⏱ 낸 만큼 다 쓰기 (AI 감독 영상)', h:'AI 영상은 한 장면에 최소 길이(Kling 3초·Seedance 4초) 요금이 나가요. [⏱ 낸 만큼 다 쓰기](기본 켜짐)를 켜 두면 그보다 짧게 잘라 버리지 않고 낸 길이를 다 써요 — 추가 요금 없이 영상이 더 여유 있고 길어져요. 감독도 2초짜리 짧은 컷 여러 개 대신 3~6초 넉넉한 컷으로 장면을 짜서, 같은 길이라도 장면 수가 줄어 비용이 덜 들어요. 💰 절약 모드의 무료 장면(사진+카메라 효과)은 2초도 그대로 쓸 수 있어요.'},
   {c:'video', t:'✂️ 영상 편집 — 어떤 영상이든 불러와서 편집', h:'왼쪽 [영상 제작·편집] → [✂️ 영상 편집]을 누르면 갤러리 영상을 고르거나 내 컴퓨터 영상(mp4·mov·webm, 1GB 이하)을 불러와 편집할 수 있어요(무료). 아래 타임라인의 자막·성우·음악·원래 소리 줄 앞 👁 눈 버튼으로 바로 켜고 끌 수 있고, 시네마틱 필터는 한 번 누르면 적용·한 번 더 누르면 풀려요. 영상이 버벅이면 재생 버튼 옆 [미리보기: 중간/작게]로 바꾸세요 — 미리보기만 가벼워지고 저장되는 영상 화질은 그대로예요. 편집 화면 위 [📂 다른 영상 열기]로 다른 영상으로 바꿀 수 있어요. 다른 프로그램으로 만든 영상은 자막·성우가 그림·소리에 섞여 있어 따로 뺄 수는 없고 원래 소리 크기로 함께 줄이거나 꺼요.'},
   {c:'edit', t:'🌆 새 프리셋 — 초저녁 트와일라잇 (건축 사진)', h:'AI 편집 → 시간/날씨/분위기 → 초저녁 트와일라잇. 해가 막 진 직후처럼 하늘은 아직 밝은 하늘색이고, 그림자 없이 부드럽고 고른 빛에 실내 조명만 따뜻하게 켜진 건축 잡지 트와일라잇 사진 느낌으로 바꿔요. 블루아워보다 밝고 밤이 아니에요. 건물·나무·구도는 그대로 두고 빛과 하늘만 바꿔요. 실내 사진은 창밖에 밝은 초저녁 하늘이 보이고 조명이 켜진 모습이 돼요.'},
@@ -65891,12 +65953,12 @@ function callDirector(){
   var AUTO=dRecipe().k==='auto', B=!AUTO && dStyle()!=='onetake'; function FB(){ return B?dBrandFallback(n, dStyle()):dFallback(n); }
   function done(dir, fb, why){ var r=(AUTO&&!fb)?dNormMixed(dir, n):(B?dNormBrand(dir, n):dNorm(dir, n)); if(!r.proposals.length) r=B?dNormBrand(FB(), n):dNorm(FB(), n); D.read=r.read; D.props=r.proposals; D.pick=r.recommended; D.rec=r.recommended; D.polishDone=false;
     // 2026-11-02 요청("내레이션 멘트는 괜히 넣은 것 같다"): 내레이션은 기본 꺼짐(감독 추천은 표시만) — 건축가 소개 템플릿만 켜 둠
-    D.props.forEach(function(p){ if(/^(architect|docu)$/.test(p.recipe||dRecipe().k)) p.narration_on=p._narRec; /* 2026-11-02: 건축 다큐도 성우 해설 켜진 채로 */ });
+    D.props.forEach(function(p){ if(/^(architect|docu)$/.test(p.recipe||dRecipe().k)) p.narration_on=p._narRec; /* 2026-11-02: 건축 다큐도 성우 해설 켜진 채로 */ if(D.expert && (p.narration||[]).length) p.narration_on=true; /* 2026-11-03: 🎓 전문 해설 */ });
     // 원테이크인데 사진이 길이에 비해 너무 많으면(공간마다 3.5초 미만) 다른 제안을 추천으로
     if(D.props[D.pick] && dTooFast(D.props[D.pick])){ for(var qi=0;qi<D.props.length;qi++){ if(!dTooFast(D.props[qi])){ D.pick=D.rec=qi; break; } } } try{ if(D.props[D.pick]) dEngFor(rRecipe(D.props[D.pick])); }catch(e){} D.loading=false; D.fb=!!fb; D.err=fb?String(why||'').slice(0,200):''; D.taste=null; refresh(); try{ q('#stu-dprops').scrollIntoView({behavior:'smooth', block:'start'}); }catch(e){} }
   function go(){
     var fin=false, to=setTimeout(function(){ if(fin) return; fin=true; done(FB(), true, '170초 동안 응답이 없었어요'); }, 170000);
-    try{ _falProxyCall('studio-director', {idea:dIdeaFill(D.idea), tplGuide:(STU.tpl&&STU.tpl.guide)||undefined, images:thumbs.filter(Boolean).slice(0,20), target:+D.T||20, aspect:STU.aspect, style:AUTO?'auto':dStyle(), recipe:(dRecipe().brief?{title:dRecipe().t, brief:dRecipe().brief+(dFillOn()?dFillRule():'')}:(dFillOn()&&!AUTO?{title:dRecipe().t||'브랜드 필름', brief:dFillRule()}:null)), recipes:AUTO?D_RECIPES.filter(function(x){ return x.k!=='auto'; }).map(function(x){ return {k:x.k, t:x.t, base:x.base, fit:(x.fit_en||''), brief:(x.fit_en?'BEST FOR: '+x.fit_en+'. ':'')+(x.brief||x.d)}; }):null}, function(d){ if(fin) return; fin=true; clearTimeout(to); if(d && d.director && d.director.proposals) done(d.director, false); else { console.warn('[AI 감독] 응답 이상', d); done(FB(), true, (d&&d.error)||'서버 응답 모양이 달라요'); } },
+    try{ _falProxyCall('studio-director', {idea:dIdeaFill(D.idea), tplGuide:(STU.tpl&&STU.tpl.guide)||undefined, images:thumbs.filter(Boolean).slice(0,20), target:+D.T||20, aspect:STU.aspect, style:AUTO?'auto':dStyle(), recipe:(dRecipe().brief?{title:dRecipe().t, brief:dRecipe().brief+(dFillOn()?dFillRule():'')+(dExpertOn()?EXPERT_BRIEF:'')}:((dFillOn()||dExpertOn())&&!AUTO?{title:dRecipe().t||'브랜드 필름', brief:(dFillOn()?dFillRule():'')+(dExpertOn()?EXPERT_BRIEF:'')}:null)), recipes:AUTO?D_RECIPES.filter(function(x){ return x.k!=='auto'; }).map(function(x){ return {k:x.k, t:x.t, base:x.base, fit:(x.fit_en||''), brief:(x.fit_en?'BEST FOR: '+x.fit_en+'. ':'')+(x.brief||x.d)}; }):null}, function(d){ if(fin) return; fin=true; clearTimeout(to); if(d && d.director && d.director.proposals) done(d.director, false); else { console.warn('[AI 감독] 응답 이상', d); done(FB(), true, (d&&d.error)||'서버 응답 모양이 달라요'); } },
       function(e){ if(fin) return; fin=true; clearTimeout(to); console.warn('[AI 감독] 실패 → 기본 제안', e); done(FB(), true, (e&&e.message)||e); }); }catch(e){ if(!fin){ fin=true; clearTimeout(to); done(FB(), true, e&&e.message); } }
   }
 }
@@ -66129,7 +66191,12 @@ function runBrand(r, resume){
 function dIsFree(s){ return !!(s && s.free && s.kind==='photo'); }
 // 2026-11-03 요청("보통 2~3초 쓰면서 요금은 더 내잖아 — 아깝다, 낸 만큼 효율적으로"): AI 장면은 최소 dMinDur()초(Kling 3초·Seedance 4초) 요금이 나가므로, 그보다 짧게 자르지 않고 낸 길이만큼 다 씀 (추가 요금 0 · 같은 장면 재사용)
 function dFillOn(){ return STU.D.fill!==false; }
-function dIdeaFill(idea){ var t=String(idea||'').trim(); if(!dFillOn()) return t.slice(0,400)||undefined; var m=dMinDur(), rule='[COST RULE: every AI shot is billed at least '+m+' s — plan every shot '+m+'-6 s, never shorter; use fewer, richer shots]'; return (t?t.slice(0,400-rule.length-1)+' ':'')+rule; }
+// 2026-11-03 요청("구독해서 보고 싶게 — 중정이 있으면 왜 만들었는지·효과·장단점 같은 건축·인테리어 설명도 넣어주면 신뢰가 간다"): 🎓 전문 해설 내레이션
+function dExpertOn(){ return !!STU.D.expert; }
+var EXPERT_BRIEF=' EXPERT NARRATION (the member turned on expert commentary — viewers should learn real architecture & interior knowledge and trust the channel): narration_on MUST be true; write about 1 Korean line per 6-8 seconds of film (minimum 4, maximum 10 lines), polite calm 합니다 tone, about 5 Korean characters per second, never overlapping, each line starting while the shot showing that feature is on screen ("at" = that moment as a fraction of the film). Each line explains WHY a design feature that is CLEARLY VISIBLE in the photos is used and what it does for living there — e.g. a courtyard (중정) brings daylight and cross-ventilation deep into the house and makes a private outdoor room, but adds exterior wall area (heat loss) and needs careful drainage and waterproofing; double-height ceilings, deep eaves, clerestory windows, exposed concrete, wood slats, indirect lighting, kitchen island, built-in storage, sliding doors, floor level changes and so on. Where natural, give one benefit AND one honest trade-off or point to check, like a respected architect teaching. Use only general, well-established design knowledge. NEVER invent numbers, sizes, costs, energy ratings, brand or product names, awards, the architect, the location or any fact about this specific project that cannot be seen; never explain a feature that is not visible. The first line can be a short curiosity hook (a question). Keep the hook/mid/ending captions short and separate from the narration.';
+function dIdeaFill(idea){ var t=String(idea||'').trim(), add=''; if(dFillOn()){ var m=dMinDur(); add+='[COST RULE: AI shots are billed ≥'+m+' s — plan shots '+m+'-6 s, never shorter]'; }
+  if(dExpertOn() && dStyle()==='auto') add+='[EXPERT VO: narration_on true; 4-8 Korean 합니다 lines; each explains why a VISIBLE design feature works + one honest trade-off (e.g. 중정: 채광·통풍·프라이버시 / 단열·배수 관리); no invented numbers, brands or project facts]';
+  if(!add) return t.slice(0,400)||undefined; return (t?t.slice(0,Math.max(0,399-add.length))+' ':'')+add; }
 function dFillApply(r){ if(!r||!r.brand||!dFillOn()) return 0; var m=dMinDur(), n=0; (r.shots||[]).forEach(function(s){ if(!dIsFree(s) && (+s.dur||0)<m){ s.dur=m; n++; } }); return n; }
 function dFillRule(){ var m=dMinDur(); return ' COST RULE (the member pays for every generated second): every AI shot is generated at least '+m+' seconds long and billed in full, so NEVER plan a shot shorter than '+m+' seconds. Plan each shot '+m+'-6 seconds with the slow camera move continuing for the whole shot, so the paid length is fully used. To reach the target length use FEWER, richer shots — never many 2-second cuts.'; }
 function dEcoApply(r, on){ if(!r||!r.brand) return; var n=r.shots.length; r.shots.forEach(function(s,k){ s.free = !!(on && s.kind==='photo' && k>0 && k<n-1 && s.dur<4); }); }
@@ -66389,7 +66456,8 @@ function dirHtml(){
   // 1. 사진
   h+='<div class="stu-card"><div class="stu-step"><b>1</b><span>사진 올리기</span><i>외관·실내 3~20장 · 많이 올려도 감독이 베스트 컷만 골라요 · 순서도 감독이 정해요</i></div><div class="stu-imgs">'+STU.imgs.map(function(src,i){ var _ai=STU.aiTag&&STU.aiTag[imgId(i)]; return '<div class="stu-th" draggable="true" data-ith="'+i+'" title="'+(_ai?'🪄 AI 추가 장면 · ':'')+'누르면 크게 보기 · 끌어서 순서 바꾸기" style="cursor:grab'+(_ai?';outline:2px solid #a855f7':'')+'"><img src="'+esc(src)+'" draggable="false" style="cursor:zoom-in"><span class="n">'+(i+1)+(_ai?' 🪄':'')+'</span><button type="button" class="x" data-delimg="'+i+'">✕</button></div>'; }).join('')+
     (STU.imgs.length<maxImgs()?'<button type="button" class="stu-add" data-addimg>＋<br>내 컴퓨터에서</button><button type="button" class="stu-add" data-pickhist style="border-color:rgba(0,229,204,.35);color:#5eead4">갤러리에서<br>가져오기</button>':'')+'</div><div id="stu-hist"></div>'+dWishHtml();
-  h+='<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:800;margin-bottom:6px">✍️ 감독에게 내 아이디어 전하기 <span class="tiny" style="font-weight:400">선택 · 적으면 감독이 가장 먼저 반영해요</span></div><textarea data-didea class="stu-in" rows="2" maxlength="400" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="예) 비 오는 밤에 퇴근해 들어오는 느낌, 마지막엔 거실 불이 켜지며 끝나게 / 아이가 뛰어노는 따뜻한 가족 영상">'+esc(D.idea||'')+'</textarea></div>';
+  h+='<div style="margin-top:14px"><div style="font-size:12.5px;font-weight:800;margin-bottom:6px">✍️ 감독에게 내 아이디어 전하기 <span class="tiny" style="font-weight:400">선택 · 적으면 감독이 가장 먼저 반영해요</span></div><textarea data-didea class="stu-in" rows="2" maxlength="400" style="width:100%;box-sizing:border-box;resize:vertical" placeholder="예) 비 오는 밤에 퇴근해 들어오는 느낌, 마지막엔 거실 불이 켜지며 끝나게 / 아이가 뛰어노는 따뜻한 가족 영상">'+esc(D.idea||'')+'</textarea></div>'+
+    '<label style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:10px 12px;border-radius:12px;cursor:pointer;border:1px solid '+(D.expert?'rgba(168,85,247,.55)':'rgba(255,255,255,.1)')+';background:'+(D.expert?'rgba(168,85,247,.08)':'transparent')+'"><input type="checkbox" data-dexpert'+(D.expert?' checked':'')+' style="accent-color:#a855f7;margin-top:2px"><span style="font-size:12.5px;line-height:1.55"><b>🎓 전문 해설 내레이션</b> <span class="tiny">— 성우가 사진에 보이는 설계(중정·높은 천장·깊은 처마·간접조명·아일랜드 등)를 <b>왜 이렇게 만들었는지, 어떤 효과와 장단점이 있는지</b> 건축가처럼 설명해요. 보는 사람이 배워 가는 영상이라 구독·신뢰에 좋아요 · 아이디어 칸에 설계 의도·현장 정보를 적으면 더 정확해져요 · 내레이션 몇 cr 추가</span></span></label>';
   h+='<div class="stu-fields" style="margin-top:14px">'+fld('영상 길이 (5~300초 · 직접 입력)', '<div style="display:flex;align-items:center;gap:6px"><input type="number" class="stu-in" data-dt min="5" max="300" step="1" value="'+(+D.T||20)+'" style="width:90px"><span style="font-size:13px;color:#cfd2d8">초</span></div>',150)+fld('비율', sel('data-o="aspect"',[{v:'16:9',t:'16:9 가로 (쇼츠 변환 가능)'},{v:'9:16',t:'9:16 세로'}],STU.aspect),210)+fld('영상 엔진', sel('data-deng',[{v:'kling4',t:'Kling 4.0 (추천 · 원테이크)'},{v:'seedance25',t:'Seedance 2.5 (장면별 이어 찍기)'}],dEng()),220)+fld('화질', sel('data-dres',dResOpts(),D.res),200)+'</div>';
   (function(){ var T=+D.T||20, rg=dGuideRange(T), n=STU.imgs.length;
     h+='<div style="margin-top:12px;padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07)"><div style="font-size:12px;font-weight:800;margin-bottom:6px">📸 길이별 가장 잘 나오는 사진 수 <span class="tiny" style="font-weight:400">사진 1장당 약 3~5초일 때 가장 자연스러워요</span></div><div style="display:flex;gap:6px;flex-wrap:wrap">'+
@@ -66458,7 +66526,7 @@ function dRepolish(){ var D=STU.D, r=dRec(); D.polishWait=false; if(!r||STU.busy
   function fail(){ if(D.polishV===v){ D.polishBusy=false; refresh(); } }
   idx.forEach(function(ii,k){ thumb(STU.imgs[ii], idx.length>10?448:640, function(t){ th[k]=t; if(--left===0) go(); }); });
   function go(){ var fin=false, to=setTimeout(function(){ if(!fin){ fin=true; fail(); } }, 150000);
-    try{ _falProxyCall('studio-director', {idea:dIdeaFill(D.idea), tplGuide:(STU.tpl&&STU.tpl.guide)||undefined, images:th.filter(Boolean), target:T, aspect:STU.aspect, style:base, recipe:{title:'구성 수정', brief:brief+(dFillOn()?dFillRule():'')}}, function(d){ if(fin) return; fin=true; clearTimeout(to);
+    try{ _falProxyCall('studio-director', {idea:dIdeaFill(D.idea), tplGuide:(STU.tpl&&STU.tpl.guide)||undefined, images:th.filter(Boolean), target:T, aspect:STU.aspect, style:base, recipe:{title:'구성 수정', brief:brief+(dFillOn()?dFillRule():'')+(dExpertOn()?EXPERT_BRIEF:'')}}, function(d){ if(fin) return; fin=true; clearTimeout(to);
       if(D.polishV!==v) return; D.polishBusy=false; var p=d&&d.director&&d.director.proposals&&d.director.proposals[0]; if(!p){ refresh(); return; }
       if(r.brand){ var ps=p.shots||[]; if(ps.length===r.shots.length) r.shots.forEach(function(s,k){ var q2=ps[k]||{}; if(dShotPaid(s)) return; if(q2.ko) s.ko=String(q2.ko); if(q2.en) s.en=String(q2.en); if(s.kind!=='photo' && q2.gen_en) s.gen_en=String(q2.gen_en); }); }
       else { var bm={}; (p.beats||[]).forEach(function(b,k){ if(b) bm[(b.img!=null)?+b.img:k]=b; }); r.beats.forEach(function(b,k){ var q2=bm[k]; if(q2){ if(q2.ko) b.ko=String(q2.ko); if(q2.en) b.en=String(q2.en); } }); if(p.flow_en) r.flow_en=String(p.flow_en); }
@@ -67181,7 +67249,9 @@ function veSideHtml(){ var p=VE.proj, h='';
     '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px"><label class="ck"><input type="checkbox" data-veck="lb"'+(VE.lb?' checked':'')+'>시네마 비율 (2.39:1 위아래 검은 띠)</label><label class="ck"><input type="checkbox" data-veck="vig"'+(VE.vig?' checked':'')+'>가장자리 어둡게</label><label class="ck"><input type="checkbox" data-veck="grain"'+(VE.grain?' checked':'')+'>필름 입자</label></div></div>';
   // 저장
   var T=veTotal();
-  h+='<div class="ve-sec" style="border-color:rgba(0,229,204,.35)"><div class="tiny" style="margin-bottom:8px">새 영상 길이 약 '+stuTc(T)+(VE.mus==='ai'?' · AI 음악 약 '+musicCr(T).toLocaleString()+'cr':' · 0cr')+' · 영상 길이만큼 걸려요 (이 탭은 켜 두세요)</div>'+btn('data-vesave', VE.busy?'저장하는 중… '+VE.pc+'%':'💾 새 영상으로 저장', true, VE.busy?'disabled':'')+'<div id="ve-st" class="tiny" style="margin-top:8px">'+(VE.status||'')+'</div>'+
+  var _uL=veOutLong(), _uOpts=[['none','업스케일 안 함 (0cr)']].concat(_uL<1900?[['fhd','FHD (긴 쪽 1920px)']]:[]).concat([['k4','4K (긴 쪽 3840px)']]), _uCr=VE.up&&VE.up!=='none'?veUpCost(T):0;
+  h+='<div class="ve-sec" style="border-color:rgba(0,229,204,.35)"><div style="font-size:12.5px;font-weight:800;margin-bottom:6px">🔍 저장하면서 업스케일 <span class="tiny" style="font-weight:400">Topaz Video AI · 지금 저장 화질 긴 쪽 '+_uL+'px</span></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">'+_uOpts.map(function(o){ var on=(VE.up||'none')===o[0]; return '<button type="button" class="stu-btn sm'+(on?' pri':'')+'" data-veup2="'+o[0]+'">'+o[1]+(o[0]!=='none'?' · '+veUpCost(T).toLocaleString()+'cr':'')+'</button>'; }).join('')+'</div><div class="tiny" style="margin-bottom:10px">편집한 영상을 먼저 저장한 뒤, 그 영상을 한 번 더 선명하게 키워서 갤러리에 따로 저장해요 (편집본도 그대로 남아요) · 몇 분 걸려요 · 실패하면 크레딧은 자동 환불</div>'+
+    '<div class="tiny" style="margin-bottom:8px">새 영상 길이 약 '+stuTc(T)+(VE.mus==='ai'?' · AI 음악 약 '+musicCr(T).toLocaleString()+'cr':'')+(_uCr?' · 업스케일 '+_uCr.toLocaleString()+'cr':'')+((VE.mus!=='ai'&&!_uCr)?' · 0cr':'')+' · 영상 길이만큼 걸려요 (이 탭은 켜 두세요)</div>'+btn('data-vesave', VE.busy?'저장하는 중… '+VE.pc+'%':'💾 새 영상으로 저장', true, VE.busy?'disabled':'')+'<div id="ve-st" class="tiny" style="margin-top:8px">'+(VE.status||'')+'</div>'+
     (VE.out?'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><a class="stu-btn pri" style="text-decoration:none" href="'+esc(VE.out.url)+'" download="clover-edit-'+Date.now()+'.'+(/mp4/.test(VE.out.blob.type)?'mp4':'webm')+'">↓ 다운로드</a>'+btn('data-veplayout','▶ 저장한 영상 보기','', 'sm')+'</div>':'')+'</div>';
   return h; }
 function veTotal(){ if(!VE) return 0; if(VE.proj){ var P=VE.proj.meta; return Math.max(0, VE.order.reduce(function(a,i){ return a+(+P[i].dur||0); },0)-0.5*Math.max(0,VE.order.length-1)); } var S=veSegs().filter(function(s){ return !s.off; }); return Math.max(0, S.reduce(function(a,s){ return a+(s.b-s.a); },0)-0.5*Math.max(0,S.length-1)); }
@@ -67206,15 +67276,32 @@ function veWire(sd){
   on('[data-vefile]', function(b){ b.onclick=function(){ var fi=document.createElement('input'); fi.type='file'; fi.accept='audio/*'; fi.onchange=function(){ var f=fi.files&&fi.files[0]; if(!f) return; if(f.size>40*1024*1024){ alert('음악 파일이 너무 커요 (40MB 이하).'); return; } VE.musFile=f; VE.musFileName=f.name; VE.musUrl=URL.createObjectURL(f); veRender(); }; fi.click(); }; });
   on('[data-vefl]', function(b){ b.onclick=function(){ var k=b.getAttribute('data-vefl'); VE.filter=(VE.filter===k)?'none':k; veRender(); }; }); /* 2026-11-03 요청: 한 번 더 누르면 풀림 */
   on('[data-vesave]', function(b){ b.onclick=veSave; });
+  on('[data-veup2]', function(b){ b.onclick=function(){ VE.up=b.getAttribute('data-veup2'); veRender(); }; });
   on('[data-veplayout]', function(b){ b.onclick=function(){ var v=q('#ve-vid'); if(v&&VE.out){ v.src=VE.out.url; v.style.filter='none'; VE.showingOut=true; try{ v.play(); }catch(e){} } }; });
 }
 // 원래 시간 → 새 시간 (뺀 장면에 있던 자막·성우는 같이 빠짐)
 function veMapT(t){ var P=VE.proj.meta, st=veStarts(P), pi=-1; for(var i=0;i<P.length;i++){ if(t>=st[i]-0.01 && t<st[i]+Math.max(0.3,(+P[i].dur||0)-0.5)+0.01){ pi=i; break; } } if(pi<0) pi=P.length-1; var pos=VE.order.indexOf(pi); if(pos<0) return null; var ns=0; for(var k=0;k<pos;k++) ns+=Math.max(0.3,(+P[VE.order[k]].dur||0)-0.5); return ns+(t-st[pi]); }
 function veSettings(){ return {order:VE.order, cuts:VE.cuts, drop:VE.drop, fxAmt:VE.fxAmt, filter:VE.filter, lb:VE.lb, grain:VE.grain, vig:VE.vig, hookOn:VE.hookOn, hook:VE.hook, endOn:VE.endOn, end:VE.end, caps:VE.caps, voiceOn:VE.voiceOn, voSubs:VE.voSubs, mus:VE.mus, musUrl:/^https?:/.test(String(VE.musUrl||''))?VE.musUrl:null, musFileName:VE.musFileName, musAi:VE.musAi, musPre:VE.musPre, musicVol:VE.musicVol, voiceVol:VE.voiceVol, ambVol:VE.ambVol}; }
+// 2026-11-03 요청("새 영상 저장하기 전에 업스케일 — 기존에 못했던 거 여기서라도"): 저장 화질(긴 쪽)과 업스케일 비용
+function veOutLong(){ var hd; if(VE.proj) hd=!!VE.proj.hd; else hd=Math.max(VE.vw||0,VE.vh||0)>=1000; return hd?1920:(STU.res==='1080p'?1920:(STU.res==='480p'?854:1280)); }
+function veUpCost(T){ return Math.max(upMin(), Math.ceil((T||veTotal())*upCps())); }
+function veUpRun(V, url){ var name=V.up==='k4'?'4K':'FHD', target=V.up==='k4'?3840:1920, f=Math.round(target/V._outLong*100)/100, T=V._T; if(f<=1.01){ return; }
+  var bill={wf:'upscale', upscaleEng:'topaz_video', vdur:Math.ceil(T)}; function st(t){ if(VE===V){ VE.status=t; veRender(); } }
+  st('🔍 '+name+' 업스케일 중… (몇 분 걸려요 · 편집본은 이미 갤러리에 저장됐어요)');
+  function go(fac){ return falP('fal-ai/topaz/upscale/video', {video_url:url, upscale_factor:fac}, bill); }
+  go(f).catch(function(e){ var r=Math.ceil(f); if(r!==f && !/크레딧이 부족|402|insufficient/i.test(String(e))) return go(r); throw e; })
+  .then(function(d){ var u=vidUrl(d); if(!u) throw new Error('업스케일 결과가 없어요'); var id=Date.now()+Math.random();
+    G.HIST.video=G.HIST.video||[]; G.HIST.video.unshift({id:id, orig:null, result:u, origThumb:null, tags:['✂️ 영상 편집', name+' 업스케일'], ai:'', preview:false, cx:50, fav:false, wf:'video', noCompare:true, vidRes:name, proj:V.proj||undefined, veSet:V._set||undefined}); try{ saveHistToStorage(); }catch(e){}
+    try{ if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery('video', id, u, null, '영상 편집 '+name+' 업스케일', name, null, '', false, {proj:V.proj||null, ve:V._set||null}); }catch(e){}
+    try{ if(G.wf==='video' && typeof renderMain==='function') renderMain('video', true); }catch(e){}
+    if(VE===V){ VE.upOut=u; } st('✅ '+name+' 업스케일 완성 — 갤러리(영상)에 따로 저장했어요 (편집본도 그대로 있어요)'); toast('🔍 '+name+' 업스케일 영상을 갤러리에 저장했어요'); })
+  .catch(function(e){ st('⚠️ 업스케일 실패: '+esc(String(e&&e.message||e).slice(0,140))+' — 편집본은 저장돼 있어요 (업스케일 크레딧은 자동 환불)'); toast('⚠️ 업스케일 실패 — 편집본은 갤러리에 저장돼 있어요'); }); }
 function veSave(){ if(!VE||VE.busy) return; if(!(_supa&&_supaUser)){ try{ openMd('account'); }catch(e){} return; }
   var T=veTotal(); if(T<1.5){ alert('남은 영상이 너무 짧아요.'); return; }
   if(VE.mus==='file' && !VE.musUrl){ alert('음악 파일을 먼저 골라 주세요.'); return; }
   if(VE.mus==='ai'){ var cr=musicCr(T); if(!confirm('AI 음악을 새로 만들어 넣을까요? 약 '+cr.toLocaleString()+'cr')) return; if(!stuCrOk(cr)) return; }
+  if(VE.up && VE.up!=='none'){ var ucr=veUpCost(T)+(VE.mus==='ai'?musicCr(T):0); if(!confirm('저장한 뒤 '+(VE.up==='k4'?'4K':'FHD')+'로 업스케일까지 할까요?\n\n업스케일 '+veUpCost(T).toLocaleString()+'cr (Topaz Video AI · 약 '+Math.ceil(T)+'초) · 몇 분 걸려요\n편집본도 따로 저장돼요')) return; if(!stuCrOk(ucr)) return; }
+  VE._T=T; VE._outLong=veOutLong();
   var p=VE.proj, shots=[], vids=[], o={};
   if(p){ var P=p.meta, lastCi=-1; VE.order.forEach(function(pi){ (P[pi].parts||[]).forEach(function(pt){ var pv=shots[shots.length-1]; if(pv && lastCi===pt.ci && Math.abs((pv.in+pv.dur)-(pt.in||0))<0.05){ pv.dur+=pt.dur; return; } shots.push({dur:pt.dur, line:'', in:pt.in||0}); vids.push(p.vids[pt.ci]); lastCi=pt.ci; }); });
     o=JSON.parse(JSON.stringify(p.optBase||{})); o.total=T; o.vert=!!p.vert; o.hd=!!p.hd;
@@ -67245,6 +67332,7 @@ function veUpload(blob){ var V=VE, set=veSettings(), proj=V.proj, ext=/mp4/.test
       G.HIST.video=G.HIST.video||[]; G.HIST.video.unshift(item); try{ saveHistToStorage(); }catch(e){}
       try{ if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery('video', id, url, null, '영상 편집', V.item.vidRes||'', null, '', false, {proj:proj||null, ve:set}); }catch(e){}
       if(VE===V){ VE.status='✅ 저장 완료 — 갤러리(영상)에 새 영상으로 저장했어요 (원본도 그대로 있어요)'; veRender(); }
+      V._set=set; if(V.up && V.up!=='none' && /^https?:/.test(String(url||''))) veUpRun(V, url);
       try{ if(G.wf==='video' && typeof renderMain==='function') renderMain('video', true); }catch(e){} toast('✂️ 편집한 영상을 갤러리에 저장했어요'); }, function(e){ if(VE===V){ VE.status='⚠️ 갤러리 저장 실패 — [다운로드]는 가능해요'; veRender(); } }); }catch(e){} }
   // 내 음악 파일은 다음에 다시 편집할 수 있게 같이 올려 둠
   if(V.mus==='file' && V.musFile && typeof _doUploadFile==='function'){ try{ _doUploadFile(V.musFile, function(u){ done(u); }, function(){ done(null); }); }catch(e){ done(null); } }
@@ -67358,6 +67446,7 @@ function wireDir(w){
   var dfill=w.querySelector('[data-dfill]'); if(dfill) dfill.onchange=function(){ STU.D.fill=dfill.checked; var r0=dRec(), n=dfill.checked?dFillApply(r0):0; try{ stuSaveSoon(); }catch(e){} refresh(); toast(dfill.checked?('⏱ 낸 만큼 다 쓰기'+(n?' — 짧던 장면 '+n+'개를 '+dMinDur()+'초로 늘렸어요 (추가 요금 없음)':'')):'장면 길이를 직접 정해요 (짧은 장면은 남는 부분을 잘라 버려요)'); };
   var deco=w.querySelector('[data-deco]'); if(deco) deco.onchange=function(){ var r0=dRec(); if(!r0) return; r0.eco=deco.checked; dEcoApply(r0, r0.eco); refresh(); toast(r0.eco?'💰 절약 모드: 무료 장면 '+dEcoCount(r0)+'개 — 예상 금액이 줄었어요':'모든 장면을 AI로 만들어요'); };
   w.querySelectorAll('[data-sfree]').forEach(function(b){ b.onclick=function(){ var r0=dRec(); if(!r0) return; var sh=r0.shots[+b.getAttribute('data-sfree')]; if(!sh) return; sh.free=!dIsFree(sh); refresh(); }; });
+  var dex=w.querySelector('[data-dexpert]'); if(dex) dex.onchange=function(){ STU.D.expert=dex.checked; try{ stuSaveSoon(); }catch(e){} refresh(); toast(dex.checked?'🎓 전문 해설 켜짐 — [AI 감독에게 맡기기]를 누르면 감독이 설계 설명이 담긴 내레이션을 써요':'🎓 전문 해설 꺼짐'); };
   var dia=w.querySelector('[data-didea]'); if(dia) dia.oninput=function(){ STU.D.idea=dia.value; stuSaveSoon(); };
   var dsh=w.querySelector('[data-dshare]'); if(dsh) dsh.onclick=dShare;
   var dtx=w.querySelector('[data-dtplclear]'); if(dtx) dtx.onclick=function(){ STU.tpl=null; refresh(); };
