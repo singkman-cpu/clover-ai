@@ -59756,6 +59756,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
+  {c:'video', t:'✍️ 내레이션 자동으로 쓰기 (무료)', h:'AI 감독 제안 화면의 🎙 성우 내레이션 칸에 문장이 비어 있으면 [✍️ 내레이션 자동으로 쓰기]를 누르세요. 감독이 짠 장면 순서·길이에 맞춰 성우가 읽을 문장을 써 줘요(무료). [영상에 성우 넣기]를 켤 때 문장이 없으면 자동으로 써요. 🎓 전문 해설을 켜 두면 설계 의도·장단점을 설명하는 문장으로 써요. 줄마다 "N초부터 읽기"는 성우가 그 문장을 읽기 시작하는 시간이에요. 마음에 안 들면 바로 고치거나 [✍️ 다시 쓰기]를 누르면 돼요.'},
   {c:'video', t:'💰 절약 모드 — 감독이 AI 장면을 골라요 · 가격 바로 비교', h:'AI 감독 화면 아래 [이 연출로 영상 만들기] 옆 예상 금액에 "💰 절약 모드면 약 N cr (−M)" 버튼이 보여요. 누르면 바로 절약 모드가 켜져요. 절약 모드에선 감독이 장면마다 "카메라가 실제로 움직여야 살아나는 장면"(진입·계단·통창 너머·빛 변화·대표 장면·처음과 끝)만 AI 영상으로 만들고, 사진만으로 충분한 장면은 사진에 천천히 줌·이동 효과를 넣어 무료로 채워요. 장면마다 🤖/🆓 버튼으로 직접 바꿀 수도 있어요.'},
   {c:'video', t:'🧠 AI 감독이 최신 최고 모델(Claude Opus 5.5)로', h:'영상 스튜디오의 AI 감독(장면 구성·내레이션·전문 해설·스토리보드)이 가장 유능한 최신 모델 Claude Opus 5.5로 바뀌었어요. 사진 분석(도면 읽기·마감재 읽기·쇼츠 주인공 찾기)과 AI 상담은 Claude Sonnet 5.5를 써요. 장면 길이도 영화처럼 리듬 있게 짜요 — 첫 장면·대표 장면·마지막은 5~6초, 공간은 4초, 디테일은 3초. 감독을 부를 때마다 사진 수에 따라 약 20~40cr이 들어요(사진 20장이면 40cr · 감독이 실패하면 자동 환불 · 🪄 있으면 좋은 장면 물어보기도 같아요). 순서를 바꿀 때 자동으로 다시 다듬는 기능은 이제 직접 켜야 동작해요.'},
   {c:'video', t:'🎯 쇼츠로 만들 때 장면마다 주인공 맞춰 꽉 채우기', h:'16:9로 만든 영상을 [쇼츠로 만들기]할 때 기본 방식이 [🎯 장면마다 주인공 맞춰 꽉 채우기]예요. 가운데만 자르면 건물이 왼쪽에 있는 장면이 잘려 나가는데, AI가 장면마다 주인공(건물·대표 가구·계단 등)을 찾아 그 자리를 9:16 화면에 꽉 채워 보여줘요(무료). 아래 장면별 썸네일에서 밝은 칸이 쇼츠에 보이는 부분이고, 썸네일을 누르거나 ◀ ● ▶로 직접 옮길 수 있어요. 자막·제목은 세로 화면에 맞게 다시 배치돼요. 유튜브 쇼츠는 세로(9:16) 영상이어야 쇼츠로 올라가요.'},
@@ -66004,6 +66005,21 @@ function dNorm(dir, n){
 }
 // 2026-11-03 요청("감독 부를 때마다 비용이 나가니 금액에 맞는 크레딧을"): 서버(fal-proxy)와 같은 계산 — 사진 수에 따라 10+1.5×장, 최대 40cr · 실패하면 서버가 자동 환불
 function dDirCost(n){ n=Math.min(20, n==null?STU.imgs.length:n); return Math.min(40, 10+Math.ceil(n*1.5)); }
+// 2026-11-03 요청("성우 내레이션 자막을 자동으로 만들어 주는 거지?" — 감독이 문장을 안 써서 빈 칸만 보였음): ✍️ 내레이션 자동으로 쓰기 (무료)
+// 감독이 짠 장면 구성(장면 설명·길이)·문구·회원 아이디어를 보고, 장면 타이밍에 맞춰 성우가 읽을 문장을 씀 — 사진 분석과 같은 Claude(무료)
+function dNarHas(r){ return (r&&r.narration||[]).some(function(n){ return n && String(n.text||'').trim(); }); }
+function dNarWrite(r, silent){ var D=STU.D; if(!r || D.narWriting) return; if(!(_supa&&_supaUser)){ try{ openMd('account'); }catch(e){} return; }
+  var T=r.brand?dBrandTotal(r):(+D.T||20), n=Math.max(3, Math.min(dExpertOn()?8:10, Math.round(T/(dExpertOn()?7:9)))), t=0, plan=[];
+  if(r.brand) r.shots.forEach(function(s,k){ plan.push((k+1)+'. '+Math.round(t)+'~'+Math.round(t+s.dur)+'s ['+(s.kind||'photo')+'] '+String(s.ko||'').slice(0,60)); t+=s.dur-0.5; });
+  else (r.beats||[]).forEach(function(b,k){ var a=T*k/Math.max(1,(r.beats.length||1)); plan.push((k+1)+'. ~'+Math.round(a)+'s '+String(b.ko||'').slice(0,60)); });
+  var q='You write the Korean voice-over for a '+Math.round(T)+'-second architecture & interior film. Shot plan (time range, kind, what we see):\n'+plan.join('\n')+'\nOn-screen captions already used: opening "'+(r.hook||'')+'", middle "'+(r.mid||'')+'", ending "'+(r.ending||'')+'".'+(String(D.idea||'').trim()?' Member idea: "'+String(D.idea).trim().slice(0,300)+'".':'')+
+    '\nWrite exactly '+n+' Korean narration lines, calm and natural, polite 합니다/요 tone, about 5 Korean characters per second of speaking, each line about 12-30 Korean characters, never overlapping, with silence between lines. Each line must start while the shot it talks about is on screen; "at" = its start time as a fraction of the film (0.0-0.9). Talk only about what the shots show.'+
+    (dExpertOn()?' EXPERT MODE: each line explains WHY a visible design feature is used and what it does for living there, with one honest trade-off where natural (e.g. 중정: 채광·통풍·프라이버시 / 외벽이 늘어 단열·배수 관리). Use only general, well-established design knowledge.':' Make it emotional and specific to the spaces, like a premium real-estate or house film.')+
+    ' Never invent numbers, sizes, prices, brands, awards, the architect or facts not visible. Do not repeat the on-screen captions. Answer ONLY JSON: {"lines":[{"at":0.1,"text":""}]}';
+  D.narWriting=true; refresh(); var done=false, to=setTimeout(function(){ fin(null, '응답이 늦어요 — 다시 눌러 주세요'); }, 60000);
+  function fin(L, err){ if(done) return; done=true; clearTimeout(to); D.narWriting=false; if(L && L.length){ r.narration=L; if(!silent) toast('✍️ 내레이션 '+L.length+'줄을 썼어요 — 바로 고칠 수 있어요'); } else if(err) toast('✍️ 내레이션을 쓰지 못했어요 — '+err); refresh(); }
+  try{ _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'text', text:q}]}]}, function(res){ var t2=res; try{ if(t2 && typeof t2==='object') t2=t2.reply||t2.text||''; var m=String(t2||'').match(/\{[\s\S]*\}/), j=m?JSON.parse(m[0]):null;
+      var L=((j&&j.lines)||[]).map(function(x){ return {at:Math.max(0,Math.min(0.9,+x.at||0)), text:String(x.text||'').trim().slice(0,120)}; }).filter(function(x){ return x.text; }).sort(function(a,b){ return a.at-b.at; }).slice(0,12); fin(L, L.length?'':'형식이 달라요'); }catch(e){ fin(null, '형식이 달라요'); } }, function(e){ fin(null, String(e&&e.message||e).slice(0,60)); }); }catch(e){ fin(null, String(e&&e.message||e)); } }
 function callDirector(){
   var D=STU.D, n=STU.imgs.length; if(!n){ alert('사진을 먼저 올려 주세요.'); return; }
   if(!(_supa&&_supaUser)){ try{ openMd('account'); }catch(e){} return; }
@@ -66573,7 +66589,8 @@ function dirHtml(){
     h+=(!r.narration_on && STU.D.narAll===false)?'<div class="tiny" style="margin:6px 0 0">감독이 쓴 내레이션 문장이에요 — 지금은 목소리를 만들지 않아요(0cr). 나중에 편집에서 성우를 켜려면 위를 체크해 두세요 · 여기서 문장을 바로 고칠 수 있어요</div>':'<div class="tiny" style="margin:6px 0 0">감독이 쓴 내레이션 문장이에요 — <b>꺼 두어도 목소리·자막을 같이 만들어 두니</b>(약 '+Math.max(1,Math.ceil((r.narration||[]).reduce(function(a,n){ return a+String(n.text||'').length; },0)/1000*TTS_PER_1K))+'cr) 나중에 갤러리 [🎬 영상 편집]에서 0cr로 켜고 끄고 고칠 수 있어요 · 여기서 지금 바로 고쳐도 돼요</div>';
     if(r.narration_on) h+='<div style="margin:10px 0 0">'+sel('data-dnarmode',[{v:'both',t:'🎙 + 💬 목소리와 자막 함께'},{v:'voice',t:'🎙 목소리만 (자막 없음)'},{v:'sub',t:'💬 자막만 (목소리 없음)'}],r.narMode||'both')+'</div>';
     h+='<div style="display:flex;gap:6px;margin:10px 0 8px">'+sel('data-dvoice',VOICES.map(function(v){ return {v:v.k, t:v.g+' · '+v.d}; }),koV(r.voice))+btn('data-dvtest','▶ 목소리 듣기','', 'sm')+'</div>'+
-      (r.narration.length?r.narration:[{at:0.1,text:''}]).map(function(nn,k){ var TT=r.brand?dBrandTotal(r):(+D.T||20); return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><span class="tiny" style="width:54px">'+Math.round(nn.at*TT)+'초부터</span><input data-dnar="'+k+'" class="stu-in" style="flex:1;width:auto" value="'+esc(nn.text)+'" placeholder="내레이션 문장">'+(r.narration.length>1?'<button type="button" data-dnarx="'+k+'" class="stu-btn sm">✕</button>':'')+'</div>'; }).join('')+(r.narration.length<12?btn('data-dnaradd','+ 문장 추가','', 'sm'):'');
+      (dNarHas(r)?'<div style="display:flex;justify-content:flex-end;margin:0 0 6px">'+btn('data-dnarw', STU.D.narWriting?'✍️ 쓰는 중…':'✍️ 다시 쓰기 (무료)', false, STU.D.narWriting?'disabled':'sm')+'</div>':'<div style="margin:4px 0 10px;padding:12px 14px;border-radius:12px;border:1.5px dashed rgba(0,229,204,.5);background:rgba(0,229,204,.05);display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="flex:1;min-width:200px;font-size:13px">아직 내레이션 문장이 없어요 — 장면 구성에 맞춰 <b>자동으로 써 드릴게요</b>'+(dExpertOn()?' (🎓 전문 해설로)':'')+'</span>'+btn('data-dnarw', STU.D.narWriting?'✍️ 쓰는 중…':'✍️ 내레이션 자동으로 쓰기 (무료)', true, STU.D.narWriting?'disabled':'')+'</div>')+
+      (r.narration.length?r.narration:[{at:0.1,text:''}]).map(function(nn,k){ var TT=r.brand?dBrandTotal(r):(+D.T||20); return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><span class="tiny" style="width:70px" title="성우가 이 문장을 읽기 시작하는 시간">'+Math.round(nn.at*TT)+'초부터 읽기</span><input data-dnar="'+k+'" class="stu-in" style="flex:1;width:auto" value="'+esc(nn.text)+'" placeholder="성우가 읽을 문장을 직접 적거나, 위 [✍️ 자동으로 쓰기]를 누르세요">'+(r.narration.length>1?'<button type="button" data-dnarx="'+k+'" class="stu-btn sm">✕</button>':'')+'</div>'; }).join('')+(r.narration.length<12?btn('data-dnaradd','+ 문장 추가','', 'sm'):'');
     h+='</div>';
     // 음악·불빛·볼륨
     h+='<div style="margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;gap:10px">';
@@ -67607,7 +67624,8 @@ function wireDir(w){
   w.querySelectorAll('[data-dbeat]').forEach(function(el){ el.onchange=function(){ var b=r.beats[+el.getAttribute('data-dbeat')]; b.ko=el.value; b.en=''; }; });
   var dap=w.querySelector('[data-dautop]'); if(dap) dap.onchange=function(){ STU.D.autoPolish=dap.checked; if(!dap.checked){ clearTimeout(_dpT); STU.D.polishWait=false; } refresh(); };
   var nmd=w.querySelector('[data-dnarmode]'); if(nmd) nmd.onchange=function(){ r.narMode=nmd.value; refresh(); };
-  var nn=w.querySelector('[data-dnaron]'); if(nn) nn.onchange=function(){ r.narration_on=nn.checked; if(r.narration_on && !r.narration.length) r.narration=[{at:0.1, text:''}]; refresh(); };
+  var nn=w.querySelector('[data-dnaron]'); if(nn) nn.onchange=function(){ r.narration_on=nn.checked; if(r.narration_on && !dNarHas(r)){ r.narration=[]; dNarWrite(r); return; } refresh(); };
+  var nw=w.querySelector('[data-dnarw]'); if(nw) nw.onclick=function(){ if(dNarHas(r) && !confirm('지금 문장을 지우고 새로 쓸까요?')) return; dNarWrite(r); };
   var dna=w.querySelector('[data-dnarall]'); if(dna) dna.onchange=function(){ STU.D.narAll=dna.checked; try{ stuSaveSoon(); }catch(e){} refresh(); };
   w.querySelectorAll('[data-dnarx]').forEach(function(b){ b.onclick=function(){ r.narration.splice(+b.getAttribute('data-dnarx'),1); refresh(); }; });
   w.querySelectorAll('[data-dnar]').forEach(function(el){ el.onchange=function(){ var k=+el.getAttribute('data-dnar'); if(!r.narration[k]) r.narration[k]={at:0.1+0.3*k, text:''}; r.narration[k].text=el.value; r.narration=r.narration.filter(function(x,i){ return x.text || i===0; }); refresh(); }; });
