@@ -45666,6 +45666,8 @@ function addHistEl(item, scroll, targetHs, atBottom){
       vid.muted=true;
       vid.setAttribute('style',VID_STYLE);
       vid.setAttribute('playsinline','');
+      vid.preload='metadata';
+      try{ if(window._vPoster) window._vPoster(vid, vidUrl); }catch(_e){}
       vid.src = vidUrl;
       cw.appendChild(vid);
 
@@ -57785,6 +57787,7 @@ function renderGalleryGrid(items){
       // 있어서, 갤러리에 영상이 여러 개면 스크롤도 안 했는데 동시에 여러 대용량 파일을 열려고
       // 해서 버벅임의 핵심 원인이 됐음. 이제 IntersectionObserver로 실제 화면(또는 그 근처)에
       // 들어올 때만 src를 할당하도록 함 — 사진의 lazy loading과 동일한 효과.
+      try{ if(window._vPoster) window._vPoster(v, src, true); }catch(_e){}
       _galVideoLazyObserve(v, src);
       var _vBroken=false;
       v.onerror=function(){ _vBroken=true; };
@@ -58567,6 +58570,20 @@ function _buildCommMasonryGrid(posts){
   return {el:grid, appendMore:appendMore};
 }
 // 2026-11-02 요청("영상을 커뮤니티에 — 홈은 영상 한 줄 + 아래 이미지, 커뮤니티는 같이 두고 필터"): 영상 카드 공통
+// 2026-11-04 요청("영상 제작 탭 영상이 아주 늦게 떠서 검은 화면으로 있음"): 영상 첫 장면을 작은 그림(포스터)으로 만들어 이 컴퓨터에 기억 → 다음부터는 열자마자 그림이 보임
+(function(){ var Q=[], busy=false, KEY='clover_vp_idx';
+  function k(u){ var s=String(u||'').split('#')[0], h=0; for(var i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))|0; } return 'clover_vp:'+h; }
+  function get(u){ try{ return localStorage.getItem(k(u)); }catch(e){ return null; } }
+  function put(u, d){ try{ var idx=JSON.parse(localStorage.getItem(KEY)||'[]'), kk=k(u); idx=idx.filter(function(x){ return x!==kk; }); idx.push(kk); while(idx.length>60){ try{ localStorage.removeItem(idx.shift()); }catch(e){} } localStorage.setItem(kk, d); localStorage.setItem(KEY, JSON.stringify(idx)); }catch(e){ try{ var idx2=JSON.parse(localStorage.getItem(KEY)||'[]'); for(var i=0;i<20 && idx2.length;i++) localStorage.removeItem(idx2.shift()); localStorage.setItem(KEY, JSON.stringify(idx2)); }catch(_e){} } }
+  function next(){ if(busy||!Q.length) return; busy=true; var job=Q.shift(), done=false, v=document.createElement('video'), to=setTimeout(function(){ fin(null); }, 25000);
+    function fin(d){ if(done) return; done=true; clearTimeout(to); try{ v.removeAttribute('src'); v.load(); }catch(e){} if(d){ put(job.u, d); job.cbs.forEach(function(cb){ try{ cb(d); }catch(e){} }); } busy=false; setTimeout(next, 50); }
+    v.muted=true; v.playsInline=true; v.preload='metadata'; v.crossOrigin='anonymous';
+    v.onloadedmetadata=function(){ try{ v.currentTime=Math.min(0.6, Math.max(0,(v.duration||1)-0.1)); }catch(e){ fin(null); } };
+    v.onseeked=function(){ try{ var w=360, h=Math.round(w*(v.videoHeight||9)/(v.videoWidth||16)), c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(v,0,0,w,h); fin(c.toDataURL('image/jpeg',0.55)); }catch(e){ fin(null); } };
+    v.onerror=function(){ fin(null); }; v.src=job.u; }
+  window._vPoster=function(vEl, url, noGen){ if(!vEl||!url||/^blob:/.test(url)) return; var d=get(url); if(d){ vEl.poster=d; return; } if(noGen) return;
+    var j=Q.filter(function(x){ return x.u===url; })[0], cb=function(dd){ if(!vEl.poster && !(vEl.readyState>=2 && vEl.currentTime>0)) vEl.poster=dd; }; if(j) j.cbs.push(cb); else { Q.push({u:url, cbs:[cb]}); next(); } };
+})();
 function _commIsVid(u){ return /\.(mp4|webm|mov)(\?|#|$)/i.test(String(u||'')); }
 function _commFmtDur(d){ if(!(d>0)) return ''; d=Math.round(d); return Math.floor(d/60)+':'+((d%60)<10?'0':'')+(d%60); }
 var _commVidIO=null, _commTouch=(window.matchMedia && matchMedia('(hover: none)').matches);
@@ -59779,6 +59796,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'video', t:'🎬 시작 제목 (검은 화면 + 성우가 읽기)', h:'영상 스튜디오 AI 감독 화면의 [🎬 시작 제목] 칸에 건물 이름이나 하고 싶은 말(예: 자연을 품은 집)을 적으면 첫 화면에 제목이 나오고 성우가 읽어요. 옆에서 ⬛ 검은 화면에 제목(영상 앞에 약 3초 추가) 또는 🖼 첫 장면 위에 제목(영상 길이 그대로, 첫 장면 위에 글자)을 고를 수 있어요. 원래 첫 3초 문구는 제목 바로 뒤로 옮겨져요. 약 1cr. 비워 두면 예전처럼 바로 영상이 시작돼요. 완성 뒤에도 갤러리 [🎬 영상 편집]에서 🎬 시작 제목 글자, 제목 성우 읽기, 검은 화면 장면을 각각 켜고 끌 수 있어요(0cr). 원테이크 스타일에도 들어가요.'},
   {c:'video', t:'🎙 내레이션·성우·자막은 항상 만들어 두고 켜고 끄기는 내 선택', h:'AI 감독은 이제 영상마다 내레이션 문장을 항상 써 두고, 꺼져 있어도 성우 목소리와 자막을 같이 만들어 둬요(영상 1편에 약 5cr · 원하지 않으면 [영상에 안 넣어도 목소리를 미리 만들어 두기] 체크를 끄면 0cr). 감독 제안 화면에서 바로 문장을 고치거나 빼고 더할 수 있고, 완성 뒤에도 갤러리 [🎬 영상 편집]에서 0cr로 성우·자막을 켜고 끌 수 있어요. 편집에서 문장을 고치면 저장할 때 성우가 고친 문장으로 다시 읽어요(고친 문장만 · 1,000자당 20cr).'},
   {c:'video', t:'📋 템플릿으로 내 집 영상 만들기 (사진 장수 상관없이)', h:'메인·영상제작 화면의 🎬 템플릿 중 "내 사진으로 만들기" 템플릿을 누르면 영상 스튜디오가 열려요. ① 내 사진 올리기(장수가 달라도 돼요) → ② [AI 감독에게 맡기기] → 감독이 그 템플릿의 연출(장면 리듬·카메라·문구 스타일·음악·내레이션 방식)대로 내 사진에 맞춰 다시 짜요 → ③ 장면·내레이션·자막을 바로 고치고(선택) → ④ [만들기]. 똑같은 장면이 아니라 같은 느낌으로 만들어져요. 템플릿으로 만든 영상도 갤러리 [🎬 영상 편집]에서 성우·음악·효과음·자막을 각각 켜고 끌 수 있어요.'},
+  {c:'common', t:'⚡ 영상이 검은 화면으로 오래 있던 것 개선', h:'영상 결과 화면에서 영상이 다 불러와질 때까지 검은 화면만 보이던 것을, 처음 한 번 영상 첫 장면을 작은 그림으로 만들어 이 컴퓨터에 기억해 두고 다음부터는 열자마자 그림이 먼저 보이게 했어요. 영상 편집 화면에는 [← 뒤로 (다른 영상 고르기)] 버튼이 닫기 옆에 있어요.'},
   {c:'video', t:'➕ 영상 편집에서 장면(사진) 추가하기', h:'영상 스튜디오로 만든 영상은 편집에서 장면을 더 넣을 수 있어요. 오른쪽 [장면 빼기·순서 바꾸기] 아래 [＋ 사진으로 장면 추가] → 갤러리나 내 컴퓨터 사진을 여러 장 고르면, 사진의 공간(거실·주방·욕실 등 갤러리 태그)을 보고 비슷한 공간 옆 자연스러운 자리에 들어가요(마지막 장면은 그대로 마무리). 자리는 끌어서 바꿀 수 있어요. 추가한 장면은 기본이 📷 사진에 카메라 효과(0cr)이고, 장면 옆 [📷 사진]을 누르면 🎥 AI 영상(초당 39~58cr)으로 바뀌어요. 저장할 때 AI로 고른 장면만 먼저 만들고 기존 장면은 그대로 써서 이어 붙여요. 길이(3~6초)도 고를 수 있어요.'},
   {c:'video', t:'💬 영상 편집 — 자막 추가·고치기·빼기·시간 옮기기·불러오기', h:'영상 편집 오른쪽 🎙 성우 칸에서 자막(내레이션)을 자유롭게 고칠 수 있어요. [＋ 지금 위치에 자막 추가]를 누르거나 아래 작업바 🎙 성우 줄의 빈 곳을 더블클릭하면 그 시간에 새 자막 칸이 생겨요. 줄마다 왼쪽 숫자(초)를 바꾸면 시작 시간이 옮겨지고, 🗑로 뺄 수 있어요. 작업바의 자막 칸을 누르면 오른쪽 해당 문장으로 바로 가요. [📋 자막 불러오기]에 "00:00~00:05 | 외관" 다음 줄 "문장" 형식(챗GPT가 써 준 글 그대로)이나 SRT를 붙여 넣으면 그 초에 딱 맞춰 들어가요. 저장할 때 바뀐 문장만 성우가 새로 읽어요(1,000자당 약 20cr).'},
   {c:'video', t:'🎬 AI 감독 장면 구성 — 사진 바꾸기·장면 120개까지·바꾼 뒤 안내', h:'AI 감독이 짜 준 장면 목록에서 장면의 사진(썸네일)을 누르면 갤러리나 내 컴퓨터 사진으로 바꿀 수 있고, 고른 사진은 위쪽 [사진 올리기]에도 자동으로 들어가요. [+ 장면 추가]는 120개까지 돼요(5분 영상도 가능). 순서·장면·사진을 직접 바꾼 뒤 [첫 장면 AI 맛보기]·[콘티 보기]·[영상 만들기]를 누르면 "감독이 글만 다시 다듬고 진행" 또는 "이대로 진행"을 고를 수 있어요. 내레이션은 이제 공간마다 한 줄씩(4~6초마다) 영상 처음부터 끝까지 이어지는 다큐 스타일로 써요.'},
@@ -67262,8 +67280,8 @@ function veOpen(item){ if(!item) return; var src=item.result||item.cloud_url; if
   if(VE.mus==='file' && !VE.musUrl) VE.mus=p&&p.music?'orig':'none';
   veCss(); var ov=q('#ve-ov'); if(ov) ov.remove(); ov=document.createElement('div'); ov.id='ve-ov'; vePlace(ov);
   VE.pps=0; VE.zoomK=1; VE.sel=-1; VE.frames=[]; VE.pi=0;
-  vePauseBg(); VE.pq=vePqGet();
-  ov.innerHTML='<div class="ve-top"><b>🎬 영상 편집</b><span class="tiny" style="opacity:.45">v11-04e</span><span class="tiny">원본은 그대로 두고, 고친 영상은 갤러리에 새로 저장돼요'+(p?' · 영상 스튜디오 재료로 다시 이어 붙여요 (0cr)':'')+'</span><button type="button" data-vehome class="stu-btn" style="margin-left:auto">📂 다른 영상 열기</button><button type="button" data-vex class="stu-btn">✕ 닫기</button></div>'+
+  vePauseBg(); VE.pq=vePqGet(); try{ VE._set0=JSON.parse(JSON.stringify(veSettings())); }catch(e){ VE._set0=null; }
+  ov.innerHTML='<div class="ve-top"><b>🎬 영상 편집</b><span class="tiny" style="opacity:.45">v11-04e</span><span class="tiny">원본은 그대로 두고, 고친 영상은 갤러리에 새로 저장돼요'+(p?' · 영상 스튜디오 재료로 다시 이어 붙여요 (0cr)':'')+'</span><button type="button" data-vehome class="stu-btn" style="margin-left:auto" title="편집할 영상 고르는 화면으로 돌아가기">← 뒤로 (다른 영상 고르기)</button><button type="button" data-vex class="stu-btn">✕ 닫기</button></div>'+
     '<div class="ve-main"><div class="ve-view"><div class="ve-stagewrap"><div class="ve-stage" id="ve-stage"><video id="ve-vid" playsinline crossorigin="anonymous"></video><div class="ve-raw" id="ve-raw"></div><div class="ve-ovl" id="ve-ovl"></div><div class="ve-vig" id="ve-vig"></div><div class="ve-lb t"></div><div class="ve-lb b"></div><div class="ve-cap" id="ve-cap"></div><div class="ve-hook" id="ve-hook"></div><div class="ve-sub" id="ve-sub"></div></div></div>'+
     '<div class="ve-transport"><button type="button" data-veback title="처음으로">⏮</button><button type="button" data-veplay class="play" title="재생/멈춤 (Space)">▶</button><span id="ve-time" class="tm">00:00.0 / 00:00.0</span><select class="ve-pq" data-vepq title="미리보기만 가볍게 — 저장되는 영상 화질은 그대로 원본">'+[['auto','미리보기: 자동']].concat(VE_PQ.map(function(x){ return [x[0],'미리보기: '+x[1]]; })).map(function(x){ return '<option value="'+x[0]+'"'+(VE.pq===x[0]?' selected':'')+'>'+x[1]+'</option>'; }).join('')+'</select><div class="ve-snd" id="ve-snd"></div></div></div>'+
     '<aside class="ve-side" id="ve-side"></aside></div>'+
@@ -67606,6 +67624,7 @@ function veSubImport(){ var old=q('#ve-imp'); if(old) old.remove(); var m=docume
   m.querySelector('[data-impok]').onclick=function(){ var L=veSubParse(ta.value); if(!L.length){ alert('시간(예: 00:00~00:05)과 문장을 찾지 못했어요.'); return; } var p=VE.proj, T=veTotal();
     if(m.querySelector('[data-imprep]').checked){ for(var i=p.voList.length-1;i>=0;i--){ var o=p.voList[i]; if(o.intro) continue; if(o.added && !o.url){ p.voList.splice(i,1); VE.voTx.splice(i,1); if(VE.aud && VE.aud.vo) VE.aud.vo.splice(i,1); } else VE.voTx[i]=''; } }
     var n=0; L.forEach(function(x){ if(x.a>=T-0.5) return; veSubAdd(x.a, x.text); n++; }); VE.voiceOn=true; VE.voSubs=true; m.remove(); veRender(); veHead(); toast('📋 자막 '+n+'줄을 시간에 맞춰 넣었어요'+(n<L.length?' (영상보다 뒤에 있는 '+(L.length-n)+'줄은 뺐어요)':'')+' — 저장하면 성우가 읽어요'); }; }
+function veDirty(){ try{ if(!VE) return false; var s0=JSON.stringify(VE._set0||null); return !!VE._set0 && JSON.stringify(veSettings())!==s0 || veVoCost()>0 || (VE.proj&&VE.proj.meta.some(function(m){ return m.added; })); }catch(e){ return false; } }
 function veVoAt(o){ if(!o) return null; if(o.tN!=null) return Math.max(0, Math.min(veTotal()-0.6, +o.tN)); return veMapT(o.t); } // 2026-11-04: 새로 넣거나 시간을 옮긴 자막은 새 영상 시간(tN) 그대로
 function veVoText(i){ var o=(VE.proj&&VE.proj.voList||[])[i]; if(!o) return ''; var t=VE.voTx&&VE.voTx[i]!=null?VE.voTx[i]:String(o.text||''); return t; }
 function veVoChanged(i){ var o=(VE.proj&&VE.proj.voList||[])[i]; return !!(o && (o.stale || veVoText(i)!==String(o.text||''))); }
@@ -67696,7 +67715,7 @@ function veResumeBg(){ var L=VE_BG; VE_BG=[]; if(q('#ve-ov')) return; L.forEach(
 function veFileItem(f){ if(!f) return null; if(!/^video\//.test(f.type||'') && !/\.(mp4|webm|mov|m4v)$/i.test(f.name||'')){ alert('영상 파일(mp4·mov·webm)만 열 수 있어요.'); return null; }
   if(f.size>1024*1024*1024){ alert('영상이 너무 커요 (1GB 이하로 올려 주세요).'); return null; }
   return {id:Date.now()+Math.random(), orig:null, result:URL.createObjectURL(f), tags:['📁 내 영상'], ai:'', preview:false, cx:50, fav:false, wf:'video', extName:f.name}; }
-function veHome(){ if(VE && VE.busy){ if(!confirm('저장하는 중이에요. 멈추고 다른 영상을 열까요?')) return; } if(VE) veClose(true);
+function veHome(){ if(VE && VE.busy){ if(!confirm('저장하는 중이에요. 멈추고 다른 영상을 열까요?')) return; } else if(VE && VE.out==null && veDirty() && !confirm('고친 내용이 아직 저장되지 않았어요. 저장하지 않고 뒤로 갈까요?')) return; if(VE) veClose(true);
   veCss(); var ov=q('#ve-ov'); if(ov) ov.remove(); ov=document.createElement('div'); ov.id='ve-ov'; vePlace(ov); vePauseBg();
   var L=veGalList(), N=Math.min(L.length, 60);
   ov.innerHTML='<div class="ve-top"><b>✂️ 영상 편집</b><span class="tiny">편집할 영상을 고르세요 · 원본은 그대로 두고 고친 영상은 갤러리에 새로 저장돼요</span><button type="button" data-vex class="stu-btn" style="margin-left:auto">✕ 닫기</button></div>'+
