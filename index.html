@@ -67565,7 +67565,7 @@ function veAudioEls(){ var A=VE.aud||(VE.aud={mus:null, musKey:null, vo:[], voIn
   if(A.musKey!==mu){ if(A.mus){ try{ A.mus.pause(); }catch(e){} } A.mus=null; A.musKey=mu; if(mu){ var a=new Audio(); a.preload='auto'; a.loop=true; A.mus=a; blobUrl(mu).catch(function(){ return mu; }).then(function(u){ if(A.musKey===mu) a.src=u; }); } }
   // 2026-11-04: 성우 파일이 바뀌면(새로 읽은 자막) 미리보기 플레이어도 새 파일로 — 예전 목소리가 계속 나오던 문제
   if(p && p.voList){ var sig=p.voList.map(function(o){ return o.url||''; }).join('|'); if(A.voSig!==sig){ A.voSig=sig; A.voInit=true; A.voC=A.voC||{}; (A.vo||[]).forEach(function(x){ if(x.el && !x.el.paused) try{ x.el.pause(); }catch(e){} });
-    A.vo=p.voList.map(function(o){ if(!o.url) return {o:o, el:null}; var c=A.voC[o.url]; if(!c){ var a=new Audio(); a.preload='auto'; c={el:a}; blobUrl(o.url).then(function(u){ c.bu=true; a.src=u; }, function(){ a.src=o.url; }); A.voC[o.url]=c; } c.o=o; return c; }); } }
+    A.vo=p.voList.map(function(o){ if(!o.url) return {o:o, el:null}; var c=o.__ve; if(!c || c.url!==o.url){ var a=new Audio(); a.preload='auto'; c={el:a, url:o.url}; blobUrl(o.url).then(function(u){ c.bu=true; a.src=u; }, function(){ a.src=o.url; }); try{ Object.defineProperty(o, '__ve', {value:c, writable:true, configurable:true, enumerable:false}); }catch(e){} } c.o=o; return c; }); } }
   return A; }
 // 2026-11-04 요청: 성우가 150%여도 작게 들림 — 미리보기도 저장본처럼 실제로 키워서(압축기 포함) 들려줌
 // 2026-11-04 요청: 슬라이더(소리 크기·강도 등)를 더블클릭하면 숫자를 키보드로 바로 입력
@@ -67583,7 +67583,8 @@ function veAudioSync(){ if(!VE) return; var v=q('#ve-vid'); if(!v) return; var p
   if(VE.showingOut){ v.muted=false; veAudioStop(); return; }
   var p=VE.proj; if(p) v.muted=true; else { v.muted=!(VE.ambVol>0); try{ v.volume=Math.max(0,Math.min(1,VE.ambVol/100)); }catch(e){} }
   var A=veAudioEls(), nt=veNewT(), speaking=false;
-  (A.vo||[]).forEach(function(x, xi){ if(!x.el) return; if(veVoChanged(xi)){ if(!x.el.paused) try{ x.el.pause(); }catch(e){} return; } var a=veVoAt(x.o), el=x.el, d=(el.duration&&isFinite(el.duration))?el.duration:Math.max(2.5,String(x.o.text||'').length/5), on=playing && (x.o.intro?VE.titleVo!==false:VE.voiceOn) && a!=null && nt>=a && nt<a+d;
+  var _top=-1; (A.vo||[]).forEach(function(x, xi){ if(!x.el||!x.o) return; var o2=(VE.proj.voList||[])[xi]; if(o2!==x.o || veVoChanged(xi) || (!o2.intro && !veVoText(xi).trim())) return; var a2=veVoAt(o2), d2=(x.el.duration&&isFinite(x.el.duration))?x.el.duration:2.5; if(a2!=null && nt>=a2 && nt<a2+d2 && a2>_top) _top=a2; }); // 한 번에 한 목소리만(가장 최근 문장)
+  (A.vo||[]).forEach(function(x, xi){ if(!x.el) return; var _o=(VE.proj.voList||[])[xi]; if(!_o || _o!==x.o || (!_o.intro && !veVoText(xi).trim())){ if(!x.el.paused) try{ x.el.pause(); }catch(e){} return; } if(veVoChanged(xi)){ if(!x.el.paused) try{ x.el.pause(); }catch(e){} return; } var a=veVoAt(x.o), el=x.el, d=(el.duration&&isFinite(el.duration))?el.duration:Math.max(2.5,String(x.o.text||'').length/5), on=playing && (x.o.intro?VE.titleVo!==false:VE.voiceOn) && a!=null && nt>=a && nt<a+d && a>=_top-0.01;
     if(on){ speaking=true; veVoGain(x); if(!x.g) el.volume=Math.max(0,Math.min(1,VE.voiceVol/100)); if(el.paused){ try{ el.currentTime=Math.max(0,nt-a); var pr=el.play(); if(pr&&pr.catch) pr.catch(function(){}); }catch(e){} } else if(Math.abs(el.currentTime-(nt-a))>0.5){ try{ el.currentTime=nt-a; }catch(e){} } }
     else if(!el.paused){ try{ el.pause(); }catch(e){} } });
   if(A.mus){ if(playing && VE.mus!=='none'){ var md=(A.mus.duration&&isFinite(A.mus.duration))?A.mus.duration:0, tt=md?(nt%md):nt; var _T=veTotal(), _fo=Math.min(3.5,_T*0.15), _fk=(_T-nt<_fo)?Math.max(0,(_T-nt)/_fo):1; A.mus.volume=Math.max(0,Math.min(1,(VE.musicVol/100)*0.7*(speaking?0.35:1)*_fk)); if(A.mus.paused){ try{ A.mus.currentTime=tt; var pm=A.mus.play(); if(pm&&pm.catch) pm.catch(function(){}); }catch(e){} } else if(md && Math.abs(A.mus.currentTime-tt)>0.6){ try{ A.mus.currentTime=tt; }catch(e){} } } else if(!A.mus.paused){ try{ A.mus.pause(); }catch(e){} } } }
@@ -67815,7 +67816,7 @@ function veUpload(blob){ var V=VE, set=veSettings(), proj=V.proj, ext=/mp4/.test
   if(V.mus==='file' && V.musFile && typeof _doUploadFile==='function'){ try{ _doUploadFile(V.musFile, function(u){ done(u); }, function(){ done(null); }); }catch(e){ done(null); } }
   else if(V.mus==='ai' && /^https?:/.test(String(V.musicUsed||''))){ set.mus='file'; set.musFileName='AI 음악'; done(V.musicUsed); }
   else done(null); }
-window._veOpen=veOpen; window._stuProjSnap=stuProjSnap;
+window._veOpen=veOpen; window._stuProjSnap=stuProjSnap; window._veDbg=function(){ return VE; };
 // 2026-11-04 요청: 영상 편집을 연 채로 왼쪽 메뉴(영상 스튜디오·영상→완성 등)나 홈/갤러리 줄을 누르면 편집 화면은 저절로 닫힘
 document.addEventListener('click', function(ev){ var ov=q('#ve-ov'); if(!ov) return; var t=ev.target; if(!t||!t.closest) return; if(ov.contains(t) || t.closest('#ve-sbcard') || t.closest('#ve-dest')) return;
   var c=t.closest('button,a,[role=button],.wft,[onclick],[data-w]'); if(!c || !c.closest('.body')) return;
