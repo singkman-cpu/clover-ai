@@ -23892,14 +23892,16 @@ function _roomVarietyFinal(basePrompt, typeName){
   var upper=/2층|이층|다락|복층|로프트|메자닌|옥탑/.test(t);
   var ceil, view;
   if(/거실|리빙|라운지/.test(t)){ ceil='a high flat ceiling with a deep recessed cove and linear lights (or, only if the house clearly has two storeys, an open double-height void over part of the living room) — not a pitched gable ceiling'; view='the main front garden and the approach to the house, seen through a wide floor-to-ceiling window wall'; }
-  else if(/주방|키친|다이닝|식당/.test(t)){ ceil='a flat ceiling with a warm wood-slat or plaster finish and recessed linear lights over the island'; view='a side yard or small kitchen garden with a fence or hedge, seen through a horizontal window above the counter or a side door'; }
+  else if(/주방|키친|다이닝|식당/.test(t)){ ceil='a flat ceiling with recessed linear lights over the island'; view='a side yard or small kitchen garden with a fence or hedge, seen through a horizontal window above the counter or a side door'; }
   else if(/안방|마스터|부부/.test(t)){ ceil=upper?'a gently sloped ceiling under the roof (allowed because this room is upstairs)':'a flat ceiling with a shallow tray and soft cove light'; view='the quiet back garden with trees, seen through a large window with a sill'; }
   else if(/아이|키즈|자녀|플레이/.test(t)){ ceil='a flat ceiling (optionally with a playful curved soffit)'; view='a side garden with a tree and a lawn, seen through a normal-height window with a low sill or window seat'; }
   else if(/펫|반려|강아지|고양이/.test(t)){ ceil='a flat ceiling with simple downlights'; view='a small back yard or patio seen through a glass door or a medium window'; }
   else if(/욕실|화장실|파우더|드레스|세탁|다용도|팬트리/.test(t)){ ceil='a flat ceiling'; view='only a small high window or frosted glass (or no window)'; }
   else if(/침실|게스트|손님|서재|오피스|홈오피스|작업/.test(t)){ ceil=upper?'a sloped attic-style ceiling (allowed because this room is upstairs)':'a flat ceiling with simple lighting'; view='a different side of the plot — trees, a neighbour\'s wall or the sky — through a standard window with a sill'; }
   else { ceil='a flat ceiling suited to the room'; view='a different side of the plot from the other rooms'; }
-  return ' 🧭 ROOM VARIETY FINAL CHECK (each room of the set is a different place in the same house — read last): this '+t+' has '+ceil+'. Its window shows '+view+'. Do NOT copy the ceiling shape, the window shape (e.g. a triangular gable window) or the outside view of the other rooms\' images attached for consistency — those only define the shared materials, colours and design language. A pitched gable ceiling appears in at most one or two upstairs rooms of a house, never in every room; ground-floor rooms sit under the floor above and have flat ceilings. Change the camera direction so this room\'s own layout is shown, not the same corner and window as the other rooms.';
+  var _sur=/건물 주변 배경은|이 건물은 (한국의 산속|한국 시골|넓은 공원|한국의 오래된|서울 북쪽)/.test(String(basePrompt||''));
+  if(_sur) view='the SAME surroundings the user chose for this house (see the surroundings instruction — the same lake, sea, river, mountains, forest, park or neighbourhood), only seen from this room\'s side at a slightly different angle — never a different place such as a plain back yard with neighbouring houses';
+  return ' 🧭 ROOM VARIETY FINAL CHECK (each room of the set is a different place in the same house — read last): this '+t+' has '+ceil+' (only the SHAPE and lighting layout differ — the ceiling FINISH and COLOUR must match the other rooms of this house, e.g. if their ceilings are white plaster this one is white plaster too; do not introduce wood slats unless the other rooms have them). Its window shows '+view+'. Do NOT copy the ceiling shape, the window shape (e.g. a triangular gable window)'+(_sur?'':' or the outside view')+' of the other rooms\' images attached for consistency — those only define the shared materials, colours and design language. A pitched gable ceiling appears in at most one or two upstairs rooms of a house, never in every room; ground-floor rooms sit under the floor above and have flat ceilings. Change the camera direction so this room\'s own layout is shown, not the same corner and window as the other rooms.';
 }
 // 2026-10-24 신고("공간컨셉에서 한국 아파트 구조를 체크했는데 단독주택처럼 나온다 — 34평 기준으로"): 칩 문구가 프롬프트 중간에 묻히고, 창밖 저층·미래형 문구가 단독주택처럼 보이게 함
 // → 실내 공간은 맨 끝에 '34평(전용 84㎡) 한국 아파트 쉘' 최종 체크를 붙임(다른 디자인 스타일은 이 쉘 안의 마감·가구로만 적용)
@@ -25018,6 +25020,7 @@ function _autoRoomRetryOne(idx){
   // 모드를 캡처해서 끝까지 들고 다님.
   var _isAptForThisRun = (st && typeof st.isApt!=='undefined') ? !!st.isApt : !!spTab.isAptSimpleMode;
   var prevResult2 = st.results[idx];
+  try{ st.orig=st.orig||{}; if(!st.orig[idx] && prevResult2 && prevResult2.url) st.orig[idx]=prevResult2.url; }catch(_o){} // 2026-11-08: 다시 만들어도 처음 느낌을 잃지 않게 첫 버전을 기억
   st.results[idx]=null;
   if(st.cands) delete st.cands[idx]; // 다시 생성하면 예전 후보 썸네일은 지움
   st.running=true; st.step=idx;
@@ -25218,6 +25221,14 @@ function _autoRoomRetryOne(idx){
     if(_isExteriorViewType(typeName) && spTab.autoRoomCurtainBg!==false) _looseP2 += EXTERIOR_CURTAIN_FINAL;
     if(_looseP2.indexOf('숲과 나무가 우거진 자연 환경')!==-1) _looseP2 += SURROUND_FOREST_FINAL; // 2026-10-05: "숲과 나무 배경 골랐는데 단독주택이 많이 나온다"
     try{ var _arTl2=(window._arTailMap||{})[prompt]; if(_arTl2) _looseP2 += ' ⏬ FINAL DESIGN DIRECTION (repeated last on purpose — this is what the user chose):'+_arTl2; }catch(e){}
+    // 2026-11-08 신고("기존 주방은 호수가 보이고 천장도 화이트인데, 다시 만들 때마다 천장이 나무로 바뀌고 창밖이 뒷집이 됨"): 이 방의 처음 버전을 맨 앞 참고로 붙이고 마감·창밖 풍경을 유지시킴
+    // 2026-11-09 요청 보충("어느 공간을 다시 걸든, 지금 렌더링되고 있는 컨셉을 유지"): 이 방의 예전 버전(마음에 안 든 것)이 아니라, 지금 세트의 기준 공간(먼저 만든 다른 방 — 보통 거실)을 컨셉 기준으로 맨 앞에 붙임
+    var _keepRef2 = (_looseGenPool2 && _looseGenPool2.length) ? _looseGenPool2[0] : ((st.orig && st.orig[idx]) || null);
+    var _vert2=(_looseAspect2==='9:16' || _looseAspect2==='3:4');
+    if(_keepRef2 && spTab.autoRoomFidelity!=='tight' && !(_vert2 && imgs0b.primary && !imgs0b.noDirectMatch)){
+      _looseRefs2 = _vert2 ? [_keepRef2] : [_keepRef2].concat(_looseRefs2.filter(function(v){ return v!==_keepRef2; })).slice(0,3); // 세로는 참고 1장만(여러 장이면 콜라주로 나오는 문제)
+      _looseP2 += ' 🔁🔁🔁 RE-RENDER OF THE SAME ROOM (read last, overrides the room-variety and ceiling suggestions above): the FIRST attached image is another room of THIS SAME house that defines the approved concept of this set (the user is happy with it). This room is a different room of that house, so its layout and camera are its own — but keep from that image exactly: the ceiling finish and colour (e.g. if it is a white plaster ceiling, it stays white — do NOT turn it into wood slats), the wall, floor and cabinet materials and colours, the overall colour mood and light, and the SAME outside view through the windows (the same place and scenery — e.g. the same lake and mountains; never replace it with a back yard or neighbouring houses). Design this room\'s own layout, furniture and camera freshly so it fits that concept — it must look like the same house, not a different one.';
+    }
     var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 해상도 누락 수정
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
     // ⚠️ 위 _autoRoomGenerateStep과 동일한 치명적 버그 수정: 참고 사진이 있으면 반드시 /edit
@@ -59904,6 +59915,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
+  {c:'spaceset', t:'🔁 공간 컨셉: 다시 만들어도 지금 컨셉 그대로', h:'자동으로 만든 공간 중 어느 것을 다시 만들어도, 이 세트에서 먼저 만든 공간(보통 거실)을 기준으로 천장 마감·색(예: 흰 천장), 벽·바닥·가구 마감, 색감, 창밖 풍경(같은 호수·산 등)을 맞추고 그 방의 배치와 구도만 새로 만들어요. 주변 배경을 골랐다면 모든 방의 창밖도 같은 장소로 맞춰요.'},
   {c:'spaceset', t:'🏛️ 주변 배경: 고급 주택가 (산자락 언덕)', h:'공간 컨셉의 [주변 배경]에 고급 주택가가 생겼어요. 바위산 자락 언덕에 석축과 소나무 사이로 넓은 고급 단독주택들이 있는 동네로, 외관은 언덕 대지에 앉은 모습, 실내는 창밖으로 언덕 아래 주택 지붕과 뒤쪽 산이 보여요.'},
   {c:'spaceset', t:'🏢 한국 아파트 구조: 방마다 창 위치를 평면대로', h:'공간 컨셉에서 [한국 아파트 구조]를 고르면, 큰 발코니 창은 앞쪽 거실에만 있고 주방·식당은 뒤쪽이라 작은 창이나 다용도실 문만 보이게 맞춰요. 침실은 창턱 있는 보통 창, 욕실·현관은 창이 없거나 작은 창이에요. 같은 집인데 방마다 똑같은 큰 창이 나오던 문제를 줄였어요.'},
   {c:'spaceset', t:'🪟 창틀 색상 6가지 · 주변 배경 3가지 추가', h:'공간 컨셉의 [창호(창틀) 색상 통일]에 다크 우드(월넛) · 다크브라운 · 브론즈 · 샴페인골드 · 실버(알루미늄)가 생겼고, 우드톤은 밝은 오크로 이름이 바뀌었어요. [주변 배경]에는 전원 마을(논밭) · 공원 앞 · 골목 주택가가 추가됐어요.'},
