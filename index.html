@@ -4103,7 +4103,7 @@ var G={
     space:{
       inputImg:null, resultImg:null,
       refs:Array(6).fill(null),
-      prompt:'', selK:null, resolution:'1K',
+      prompt:'', selK:null, resolution:'2K',
       status:'idle'
     },
     // ⚠️ 요청 반영: "공간 컨셉 디자인"/"AI 견적"이 "현장사진 디자인"이랑 똑같이 getTab('space')만
@@ -4123,7 +4123,7 @@ var G={
     render:{
       inputImg:null, resultImg:null,
       refs:Array(6).fill(null),
-      prompt:'', selK:null, resolution:'1K',
+      prompt:'', selK:null, resolution:'2K',
       status:'idle'
     },
     edit:{
@@ -4135,7 +4135,7 @@ var G={
       // 있었음(위쪽 mkResolution의 해상도 안내 로직 참고). "무조건 크게"가 항상 좋은 게 아니라
       // "원본 크기에 맞추는 게" 기본적으로 더 나으므로, 다른 탭들과 똑같이 1K를 기본값으로 되돌림
       // — 소스가 이미 고화질이면 사용자가 직접 2K/4K로 올리면 됨(그때는 위 안내가 정확히 알려줌).
-      prompt:'', selK:null, resolution:'1K',
+      prompt:'', selK:null, resolution:'2K',
       maskData:null,
       status:'idle'
     },
@@ -9206,6 +9206,13 @@ function sbPsEdit(p){
 }
 
 // ── G.tabs 헬퍼 ─────────────────────────────────────────────────
+// 2026-11-09 요청: 이미지 생성 기본 해상도 2K — 회원이 1K·4K로 바꾸면 그날 작업하는 동안은 그대로 두고, 다음 날 처음 열면 다시 2K
+var RES_DAY_KEYS=['space.resolution','render.resolution','edit.resolution','space.agentResolution','spaceset.multiRoomResolution','spaceset.autoRoomResolution'];
+function _resToday(){ return new Date(Date.now()+9*3600000).toISOString().slice(0,10); }
+function _resDayGet(k){ try{ var o=JSON.parse(localStorage.getItem('clover_res_day')||'null'); if(o && o.d===_resToday() && o.v && /^[124]K$/.test(o.v[k]||'')) return o.v[k]; }catch(e){} return null; }
+function _resDaySave(){ try{ if(!G||!G.tabs) return; var td=_resToday(); if(_resDaySave._d && _resDaySave._d!==td){ RES_DAY_KEYS.forEach(function(k){ var a=k.split('.'), t=G.tabs[a[0]]; if(t && t[a[1]]) t[a[1]]='2K'; }); try{ renderSB(); }catch(_r){} } _resDaySave._d=td; var v={}; RES_DAY_KEYS.forEach(function(k){ var a=k.split('.'), t=G.tabs[a[0]]; if(t && /^[124]K$/.test(t[a[1]]||'')) v[k]=t[a[1]]; }); var js=JSON.stringify({d:_resToday(), v:v}); if(js!==_resDaySave._l){ _resDaySave._l=js; localStorage.setItem('clover_res_day', js); } }catch(e){} }
+function _resDayRestore(){ try{ RES_DAY_KEYS.forEach(function(k){ var a=k.split('.'), t=G.tabs[a[0]], v=_resDayGet(k); if(t && v) t[a[1]]=v; }); }catch(e){} setInterval(_resDaySave, 3000); try{ window.addEventListener('pagehide', _resDaySave); document.addEventListener('visibilitychange', _resDaySave); }catch(e){} }
+setTimeout(_resDayRestore, 0);
 function getTab(wf){ return G.tabs[wf||G.wf] || G.tabs.space; }
 // ⚠️ "공간 컨셉 디자인"(spaceset)/"AI 견적"(budget)은 진짜 워크플로우가 아니라 sbSpace를
 // 재사용하는 진입점이라 G.wf에 그대로 들어있을 수 있음 — 실제 생성 작업(task.wf)이나
@@ -19701,7 +19708,7 @@ function mkMultiRoomSpace(p){
         spTab.multiRoomRefDesignImg = data.multiRoomRefDesignImg || null;
         spTab.multiRoomPrompt = data.multiRoomPrompt || '';
         spTab.multiRoomCategory = data.multiRoomCategory || 'residential';
-        spTab.multiRoomResolution = data.multiRoomResolution || '1K';
+        spTab.multiRoomResolution = _resDayGet('spaceset.multiRoomResolution') || '2K'; // 2026-11-09: 기본 2K · 회원이 바꾼 값은 그날만 유지
         // ⚠️ 요청 반영("9:16으로 한번 했으면 다른 걸로 직접 바꾸기 전에는 그대로 계속 9:16 유지해줘")
         if(data.forcedAspect) spTab.forcedAspect = data.forcedAspect;
         if(data.autoRoomWeather && !spTab.autoRoomWeather) spTab.autoRoomWeather = data.autoRoomWeather;
@@ -20154,7 +20161,7 @@ function mkMultiRoomSpace(p){
 
   var resWrap=dv('ss');resWrap.innerHTML='<div class="lbl">해상도</div>';
   var resRow=dv('');resRow.style.cssText='display:flex;gap:6px';
-  if(!spTab.multiRoomResolution) spTab.multiRoomResolution='1K';
+  if(!spTab.multiRoomResolution) spTab.multiRoomResolution=_resDayGet('spaceset.multiRoomResolution')||'2K';
   [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
     var key=pair[0];
     var isOn=spTab.multiRoomResolution===key;
@@ -21910,7 +21917,7 @@ function mkAptSimpleDesign(p){
   // 있어서 서로 안 맞을 뻔했음 — mkAutoRoomCamera에서 쓰는 것과 동일한 전용 해상도 UI를 씀.
   var resWrapApt=dv('ss');resWrapApt.innerHTML='<div class="lbl">해상도</div>';
   var resRowApt=dv('');resRowApt.style.cssText='display:flex;gap:6px';
-  if(!spTab.autoRoomResolution) spTab.autoRoomResolution='1K';
+  if(!spTab.autoRoomResolution) spTab.autoRoomResolution=_resDayGet('spaceset.autoRoomResolution')||'2K';
   [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
     var key=pair[0];
     var isOn=spTab.autoRoomResolution===key;
@@ -22734,7 +22741,7 @@ function mkAutoRoomCamera(p){
 
   var resWrap2=dv('ss');resWrap2.innerHTML='<div class="lbl">해상도</div>';
   var resRow2=dv('');resRow2.style.cssText='display:flex;gap:6px';
-  if(!spTab.autoRoomResolution) spTab.autoRoomResolution='1K';
+  if(!spTab.autoRoomResolution) spTab.autoRoomResolution=_resDayGet('spaceset.autoRoomResolution')||'2K';
   [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
     var key=pair[0];
     var isOn=spTab.autoRoomResolution===key;
@@ -27905,7 +27912,7 @@ function sbAgent(p){
   p.appendChild(vcWrap);
 
   // ⚠️ 요청 반영: 에이전트도 1K/2K 해상도를 고를 수 있게 함 (예전엔 항상 1K 고정).
-  if(!tab.agentResolution) tab.agentResolution='1K';
+  if(!tab.agentResolution) tab.agentResolution=_resDayGet('space.agentResolution')||'2K';
   var resWrap3=dv('ss');resWrap3.innerHTML='<div class="lbl">해상도</div>';
   var resRow3=dv('');resRow3.style.cssText='display:flex;gap:6px';
   [['1K','1.0x'],['2K','1.5x'],['4K','2.0x']].forEach(function(pair){
@@ -59915,6 +59922,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
+  {c:'space', t:'🖼 기본 해상도가 2K로 바뀌었어요', h:'현장사진 디자인·렌더 실사화·AI 편집·공간 컨셉 디자인은 이제 기본 2K로 더 선명하게 만들어요. 1K나 4K로 바꾸면 그날 작업하는 동안은 그대로 유지되고, 다음 날 다시 2K부터 시작해요.'},
   {c:'spaceset', t:'🔁 공간 컨셉: 다시 만들어도 지금 컨셉 그대로', h:'자동으로 만든 공간 중 어느 것을 다시 만들어도, 이 세트에서 먼저 만든 공간(보통 거실)을 기준으로 천장 마감·색(예: 흰 천장), 벽·바닥·가구 마감, 색감, 창밖 풍경(같은 호수·산 등)을 맞추고 그 방의 배치와 구도만 새로 만들어요. 주변 배경을 골랐다면 모든 방의 창밖도 같은 장소로 맞춰요.'},
   {c:'spaceset', t:'🏛️ 주변 배경: 고급 주택가 (산자락 언덕)', h:'공간 컨셉의 [주변 배경]에 고급 주택가가 생겼어요. 바위산 자락 언덕에 석축과 소나무 사이로 넓은 고급 단독주택들이 있는 동네로, 외관은 언덕 대지에 앉은 모습, 실내는 창밖으로 언덕 아래 주택 지붕과 뒤쪽 산이 보여요.'},
   {c:'spaceset', t:'🏢 한국 아파트 구조: 방마다 창 위치를 평면대로', h:'공간 컨셉에서 [한국 아파트 구조]를 고르면, 큰 발코니 창은 앞쪽 거실에만 있고 주방·식당은 뒤쪽이라 작은 창이나 다용도실 문만 보이게 맞춰요. 침실은 창턱 있는 보통 창, 욕실·현관은 창이 없거나 작은 창이에요. 같은 집인데 방마다 똑같은 큰 창이 나오던 문제를 줄였어요.'},
