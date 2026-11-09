@@ -51940,13 +51940,13 @@ function _camPlanRead(src, cp, cb){ var key=_siteMarkSig(src)+'|'+cp.x.toFixed(3
       var q='This is an architectural FLOOR PLAN (top-down drawing). A RED DOT marks where a person stands (eye height 1.6 m) and the RED ARROW with the light-red cone shows the direction they look (about 70° view). On the drawing the arrow points toward '+fw+'. So for this person: their LEFT hand side is toward '+lw+' of the drawing, their RIGHT hand side is toward '+rw+', and BEHIND them is toward '+bw+'. '+
         'Read the plan carefully (walls are thick lines, windows are thin double/triple lines in walls, doors are arcs, labels and dimensions in mm) and describe exactly what this person would SEE in a photo taken from there. Answer ONLY one compact JSON object (no code fences; never use double-quote characters inside values — write 2.4 m, not 2.4"; keep each value under 45 words): '+
         '{"room":"which room/space they stand in","ahead":"what is straight ahead at the far end (walls, openings, kitchen, windows, furniture), with distance in metres","left":"what runs along the LEFT side of the view (walls, doors, built-ins, furniture, openings) — say clearly if it is a solid wall","right":"same for the RIGHT side","behind":"what is behind the camera (not visible)","windows":"exactly where windows/glass doors are visible in this view (ahead / left / right) or \\"none visible\\"","width_m":0,"depth_m":0,"furniture":"main furniture drawn in the view and its orientation","sequence":"everything that appears across the photo in order from the LEFT EDGE to the RIGHT EDGE, near to far (e.g. left: kitchen counter with sink under the window 2 m away, then bedroom door 3.5 m away ...) — include every door with which room it leads to and its distance from the camera","not_visible":"things near the camera that are OUTSIDE the view cone or hidden behind walls and must NOT appear in the photo (e.g. the entrance, shoe cabinet, corridor behind the camera, other rooms behind solid walls)","ko":"one short Korean sentence summary for the user"}';
-      _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:q}]}]}, function(res){
+      var _try=0; (function _ask(){ _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:(_try?q+' (Second try: reply with the JSON object only, in English, short values.)':q)}]}]}, function(res){
         var t=res; try{ if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||''; if(Array.isArray(t)) t=t.map(function(x){ return x.text||''; }).join(''); }catch(e){ t=''; }
-        var j=_camJsonLoose(t); if(!j){ try{ console.warn('[📍 카메라 위치] 도면 읽기 답 해석 실패 — AI 답: '+String(t||'(빈 답)').slice(0,600)); }catch(_e){} fin(_mk0?{txt:'',ko:'',mk:_mk0}:null); return; }
+        var j=_camJsonLoose(t); if(!j){ try{ console.warn('[📍 카메라 위치] 도면 읽기 답 해석 실패'+(_try?' (다시 시도도 실패)':' → 한 번 더 시도')+' — AI 답: '+String(t||'(빈 답)').slice(0,600)+' | 서버 응답: '+JSON.stringify(res&&typeof res==='object'?{stop_reason:res.stop_reason, types:res.types, model:res.model, keys:Object.keys(res)}:res).slice(0,300)); }catch(_e){} if(_try<1){ _try++; _ask(); return; } fin(_mk0?{txt:'',ko:'',mk:_mk0}:null); return; }
         var S=function(v){ return String(v==null?'':v).replace(/\s+/g,' ').trim().slice(0,300); };
         var out=' 📍📍📍 CAMERA POSITION MARKED BY THE USER ON THIS FLOOR PLAN (highest priority for the layout — a vision check of the plan from that exact spot): the photo is taken standing in '+S(j.room)+' at 1.6 m eye height, looking straight ahead. STRAIGHT AHEAD (far end of the view): '+S(j.ahead)+'. LEFT SIDE of the image: '+S(j.left)+'. RIGHT SIDE of the image: '+S(j.right)+'. ACROSS THE PHOTO FROM LEFT EDGE TO RIGHT EDGE: '+S(j.sequence)+' — keep this exact order and these distances; every door, the kitchen and the sink stay exactly where listed. BEHIND the camera (must NOT appear): '+S(j.behind)+'. ALSO NOT VISIBLE (outside the view or behind walls — never draw them anywhere in the photo): '+S(j.not_visible)+'. WINDOWS / GLASS: '+S(j.windows)+' — put windows and glass ONLY there; every other wall in the view stays a solid wall exactly as drawn (never turn a side wall into a window wall, never open the space wider). '+
           ((+j.width_m>0)?'The space is about '+(+j.width_m)+' m wide'+((+j.depth_m>0)?' and '+(+j.depth_m)+' m deep':'')+' — keep these real proportions with a natural ~24 mm lens, do not make it look bigger or more open. ':'')+(j.furniture?'Furniture drawn here: '+S(j.furniture)+'. ':'')+'The red dot/arrow only exist on the analysis copy — never draw any marker, line or text.';
-        out+=KAPT_PLAN_RULE; fin({txt:out, ko:S(j.ko), mk:_mk0}); }, function(er){ try{ console.warn('[📍 카메라 위치] 도면 읽기 요청 실패', er); }catch(_e){} fin(_mk0?{txt:'',ko:'',mk:_mk0}:null); }); }catch(e){ try{ console.warn('[📍 카메라 위치] 도면 읽기 오류', e); }catch(_e){} fin(_mk0?{txt:'',ko:'',mk:_mk0}:null); } }, function(){ fin(null); }); }
+        out+=KAPT_PLAN_RULE; fin({txt:out, ko:S(j.ko), mk:_mk0}); }, function(er){ try{ console.warn('[📍 카메라 위치] 도면 읽기 요청 실패', er); }catch(_e){} fin(_mk0?{txt:'',ko:'',mk:_mk0}:null); }); })(); }catch(e){ try{ console.warn('[📍 카메라 위치] 도면 읽기 오류', e); }catch(_e){} fin(_mk0?{txt:'',ko:'',mk:_mk0}:null); } }, function(){ fin(null); }); }
 function _planLayoutRead(src, cb){ var key='lay|'+_siteMarkSig(src); if(_camReadCache[key]!==undefined){ cb(_camReadCache[key]); return; }
   var done=false; function fin(v){ if(done) return; done=true; _camReadCache[key]=v; cb(v); } setTimeout(function(){ fin(null); }, 75000);
   try{ var _ld=gE('ldst'); if(_ld) _ld.textContent='평면도의 방 배치를 읽는 중...'; }catch(_e){}
@@ -66345,6 +66345,123 @@ window._vidToShorts=function(item, btnEl, mode){
     }, function(e){ STU.vsBusy=false; bt(t0txt); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='clover-shorts.'+ext; document.body.appendChild(a); a.click(); a.remove(); alert('갤러리 저장은 실패해서 바로 다운로드했어요.'); });
   }).catch(function(e){ STU.vsBusy=false; bt(t0txt); alert('쇼츠 만들기 실패: '+String(e&&e.message||e).slice(0,120)); });
 };
+// ══ 2026-11-09 요청(관리자): "16:9 사용자 가이드 화면 녹화 영상을 쇼츠로 — 글 내용도, 카메라 위치도 자동으로" ══
+// 화면 녹화 mp4(소리 없음, 1~5분) → ① 프레임 차이로 마우스·바뀌는 곳 추적(무료) ② 장면 묶음 그림을 AI가 보고 핵심 단계 40~55초·문구·성우 말·주목 위치를 정함
+// ③ 세로 1080×1920: 위 큰 제목 · 가운데 확대 화면(움직이는 곳을 따라감) · 아래 자막 + AI 성우(차분한 남자) ④ 갤러리 저장 + 제목·설명·해시태그
+var REC_SH={busy:false}; window.REC_SH=REC_SH;
+function recShUI(){ var m=document.getElementById('rec-sh-md'); if(m) return m; m=document.createElement('div'); m.id='rec-sh-md';
+  m.style.cssText='position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;font-family:inherit';
+  m.innerHTML='<div style="width:min(520px,92vw);max-height:88vh;overflow:auto;background:#16181d;border:1px solid rgba(0,229,204,.4);border-radius:16px;padding:18px 20px;color:#fff"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-size:15px">🖥 화면 녹화 → 쇼츠 자동</b><span class="tiny">관리자</span><button type="button" data-rx class="stu-btn sm" style="margin-left:auto">✕</button></div><div data-rst style="font-size:13px;line-height:1.6;color:#cfd3da">준비 중…</div><div data-rbar style="height:6px;border-radius:4px;background:#2a2d35;margin:10px 0;overflow:hidden"><div style="height:100%;width:0;background:#00e5cc;transition:width .3s"></div></div><div data-rout></div></div>';
+  document.body.appendChild(m); m.querySelector('[data-rx]').onclick=function(){ REC_SH.cancel=true; m.remove(); }; return m; }
+function recShSt(t, pct){ var m=recShUI(); m.querySelector('[data-rst]').innerHTML=(REC_SH.pfx||'')+t; if(pct!=null) m.querySelector('[data-rbar] div').style.width=Math.max(0,Math.min(100,pct))+'%'; }
+function recShSeek(v, t){ return new Promise(function(res){ var done=false; function ok(){ if(done) return; done=true; v.removeEventListener('seeked', ok); res(); } v.addEventListener('seeked', ok); v.currentTime=Math.max(0, Math.min((v.duration||t)-0.05, t)); setTimeout(ok, 1500); }); }
+function recShWrap(x, text, maxW){ var w=String(text||'').split(/\s+/), lines=[], cur=''; w.forEach(function(s){ var t=cur?cur+' '+s:s; if(x.measureText(t).width>maxW && cur){ lines.push(cur); cur=s; } else cur=t; }); if(cur) lines.push(cur); return lines.slice(0,3); }
+function recShShowAll(outs){ var m=recShUI(); REC_SH.pfx=''; recShSt('✅ 완성! 쇼츠 '+outs.length+'개'+(outs.every(function(o){ return o.saved; })?' · 갤러리(영상)에 저장했어요':' · 일부는 갤러리 저장에 실패했어요 — 다운로드로 받으세요'), 100); var o=m.querySelector('[data-rout]');
+  o.innerHTML=outs.map(function(r,i){ var P=r.plan||{}, tx=(P.title||'')+'\n\n'+(P.desc||'')+'\n\n'+((P.tags||[]).slice(0,5).join(' ')); r._tx=tx; return '<div style="display:flex;gap:12px;align-items:flex-start;margin:10px 0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)"><video src="'+esc(r.url)+'" controls playsinline style="width:130px;flex:0 0 auto;border-radius:8px;background:#000"></video><div style="flex:1;min-width:0"><b style="font-size:12.5px">'+(outs.length>1?(i+1)+'편 · ':'')+esc(P.hook||'')+'</b><textarea readonly style="width:100%;min-height:96px;margin-top:6px;background:#0f1115;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px;font-family:inherit;font-size:12px">'+esc(tx)+'</textarea><div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="stu-btn sm" data-rcp="'+i+'">📋 글 복사</button><button type="button" class="stu-btn sm" data-rdl="'+i+'">⬇ 다운로드</button></div></div></div>'; }).join('');
+  o.querySelectorAll('[data-rcp]').forEach(function(b){ b.onclick=function(){ try{ navigator.clipboard.writeText(outs[+b.getAttribute('data-rcp')]._tx); toast('📋 복사했어요'); }catch(e){} }; });
+  o.querySelectorAll('[data-rdl]').forEach(function(b){ b.onclick=function(){ var r=outs[+b.getAttribute('data-rdl')], a=document.createElement('a'); a.href=URL.createObjectURL(r.blob); a.download='clover-guide-shorts-'+(+b.getAttribute('data-rdl')+1)+'.'+r.ext; document.body.appendChild(a); a.click(); a.remove(); }; }); }
+window._recToShorts=function(file){
+  if(REC_SH.busy){ alert('지금 다른 화면 녹화를 바꾸는 중이에요.'); return; } if(!file) return;
+  REC_SH.busy=true; REC_SH.cancel=false; var srcUrl=URL.createObjectURL(file), v=null, SW=0, SH=0, D=0;
+  function chk(){ if(REC_SH.cancel) throw new Error('취소했어요'); }
+  recShSt('영상을 불러오는 중…', 2);
+  loadMedia('video', srcUrl).then(function(el){ v=el; if(!v||!v.videoWidth) throw new Error('영상을 불러오지 못했어요'); SW=v.videoWidth; SH=v.videoHeight; D=v.duration||0; v.muted=true;
+    return (isFinite(D)&&D>0)?null:recShSeek(v, 1e7).then(function(){ D=v.duration; if(!isFinite(D)) D=v.currentTime; return recShSeek(v, 0); }); }).then(function(){
+    if(!(D>3)) throw new Error('영상 길이를 읽지 못했어요'); if(SH>=SW) throw new Error('이미 세로 영상이에요');
+    // ① 움직임 추적 + 장면 묶음용 프레임
+    var step=Math.max(0.5, D/360), sw=192, sh=Math.round(192*SH/SW), sc=document.createElement('canvas'); sc.width=sw; sc.height=sh; var sx=sc.getContext('2d', {willReadFrequently:true});
+    var mot=[], keys=[], prev=null, t=0, ki=0;
+    function nextS(){ chk(); if(t>D-0.05) return Promise.resolve(); return recShSeek(v, t).then(function(){ sx.drawImage(v,0,0,sw,sh); var d=sx.getImageData(0,0,sw,sh).data, g=new Uint8Array(sw*sh), i;
+        for(i=0;i<sw*sh;i++) g[i]=(d[i*4]*3+d[i*4+1]*6+d[i*4+2])/10;
+        if(prev){ var sxm=0, sym=0, n=0, x0=sw, y0=sh, x1=0, y1=0; for(var yy=0;yy<sh;yy++) for(var xx=0;xx<sw;xx++){ var j=yy*sw+xx; if(Math.abs(g[j]-prev[j])>28){ sxm+=xx; sym+=yy; n++; if(xx<x0)x0=xx; if(xx>x1)x1=xx; if(yy<y0)y0=yy; if(yy>y1)y1=yy; } }
+          var fr=n/(sw*sh); mot.push({t:t, a:fr, cx:n?(sxm/n)/sw:0.5, cy:n?(sym/n)/sh:0.5, big:fr>0.25}); }
+        prev=g;
+        recShSt('🔍 화면에서 움직이는 곳을 찾는 중… '+Math.round(t/D*100)+'%', 4+t/D*26); t+=step; return nextS(); }); }
+    return nextS().then(function(){ return {mot:mot}; });
+  }).then(function(A){ chk(); REC_SH.mot=A.mot;
+    if(D<=(REC_SH.longSec||330)) return [{a:0, b:D, topic:''}];
+    // 5분 넘으면: 전체를 훑어 주제별 구간(편)으로 나눔 → 편마다 쇼츠 1개
+    recShSt('🗂 영상이 길어서 AI가 주제별로 나누는 중…', 31);
+    return grabKeys(0, D, 24).then(function(K){ chk(); var sheets=recShSheets(K);
+      var q='These '+sheets.length+' images are contact sheets of a '+D.toFixed(0)+'-second SILENT screen recording of a Korean web app tutorial (each frame has a red tag "#n time" in seconds). Split the WHOLE video into '+Math.max(2,Math.round(D/150))+' (±1) consecutive parts by topic, so each part can become its own 40–55 second YouTube Short. Each part should cover one clear task (e.g. uploading a photo, choosing a preset, editing the result), be at least 60 seconds of the original, parts in order, covering the useful content without overlaps. Answer ONLY compact JSON, no code fences, no double quotes inside values: {"parts":[{"from":0,"to":150,"topic":"short Korean topic"}]}';
+      return recShAsk(sheets, q).then(function(j){ var P=(j&&Array.isArray(j.parts))?j.parts:[], out=[];
+        P.forEach(function(p){ var a=Math.max(0,+p.from||0), b=Math.min(D,+p.to||0); if(b-a>=Math.min(30, D/4)) out.push({a:a, b:b, topic:String(p.topic||'').slice(0,40)}); });
+        out.sort(function(p,q){ return p.a-q.a; });
+        if(!out.length){ var n=Math.max(2,Math.round(D/150)); for(var i=0;i<n;i++) out.push({a:D*i/n, b:D*(i+1)/n, topic:''}); }
+        console.log('[화면녹화→쇼츠] '+out.length+'편으로 나눔', out); return out.slice(0,5); }); });
+  }).then(function(parts){ var outs=[];
+    return parts.reduce(function(p, pt, i){ return p.then(function(){ chk(); REC_SH.pfx=parts.length>1?'<b>'+(i+1)+'/'+parts.length+'편</b>'+(pt.topic?' ('+esc(pt.topic)+')':'')+' · ':''; return makePart(pt, i, parts.length).then(function(o){ outs.push(o); }); }); }, Promise.resolve()).then(function(){ return outs; });
+  }).then(function(outs){ REC_SH.busy=false; REC_SH.pfx=''; recShShowAll(outs);
+  }).catch(function(e){ REC_SH.busy=false; REC_SH.pfx=''; try{ if(v) v.pause(); }catch(_e){} var msg=String(e&&e.message||e).slice(0,160); if(REC_SH.cancel){ return; } recShSt('⚠️ 실패: '+esc(msg), 100); console.warn('[화면녹화→쇼츠]', e); });
+  function grabKeys(a, b, N){ var keys=[], k=0; function one(){ chk(); if(k>=N) return Promise.resolve(keys); var t=a+(k+0.5)*(b-a)/N; k++; return recShSeek(v, t).then(function(){ var kc=document.createElement('canvas'); kc.width=960; kc.height=Math.round(960*SH/SW); kc.getContext('2d').drawImage(v,0,0,kc.width,kc.height); keys.push({t:t, c:kc}); recShSt('🖼 장면 모으는 중… '+k+'/'+N, null); return one(); }); } return one(); }
+  function recShSheets(K){ var sheets=[]; for(var s=0;s<K.length && sheets.length<6;s+=4){ var cw=960, ch=Math.round(960*SH/SW), c=document.createElement('canvas'); c.width=cw*2; c.height=ch*2; var x=c.getContext('2d'); x.fillStyle='#000'; x.fillRect(0,0,c.width,c.height);
+      for(var j=0;j<4 && s+j<K.length;j++){ var kk=K[s+j], px=(j%2)*cw, py=Math.floor(j/2)*ch; x.drawImage(kk.c, px, py, cw, ch); x.fillStyle='rgba(255,0,0,.85)'; x.fillRect(px, py, 230, 54); x.fillStyle='#fff'; x.font='bold 36px sans-serif'; x.fillText('#'+(s+j+1)+'  '+kk.t.toFixed(1)+'s', px+10, py+40); x.strokeStyle='#ff0'; x.lineWidth=3; x.strokeRect(px+1.5,py+1.5,cw-3,ch-3); }
+      sheets.push(c.toDataURL('image/jpeg',0.78).split(',')[1]); } return sheets; }
+  function recShAsk(sheets, q){ var content=sheets.map(function(b){ return {type:'image', source:{type:'base64', media_type:'image/jpeg', data:b}}; }); content.push({type:'text', text:q});
+    return new Promise(function(res, rej){ var tries=0; (function go(){ var done=false, to=setTimeout(function(){ if(done) return; done=true; rej(new Error('AI 분석 시간 초과')); }, 120000);
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:content}]}, function(r){ if(done) return; done=true; clearTimeout(to); var t=r; try{ if(t && typeof t==='object') t=t.reply||t.text||''; }catch(e){ t=''; }
+        var j=(typeof _camJsonLoose==='function')?_camJsonLoose(t):null; if(!j){ console.warn('[화면녹화→쇼츠] AI 답 해석 실패'+(tries?'':' → 한 번 더')+': '+String(t||'(빈 답)').slice(0,400)+' | '+JSON.stringify(r&&typeof r==='object'?{stop_reason:r.stop_reason, types:r.types}:r).slice(0,200)); if(!tries){ tries++; go(); return; } rej(new Error('AI 답을 해석하지 못했어요')); return; }
+        res(j); }, function(e){ if(done) return; done=true; clearTimeout(to); rej(new Error(String(e))); }); })(); }); }
+  function makePart(pt, pi, pn){ return grabKeys(pt.a, pt.b, 24).then(function(keys){ var A={mot:REC_SH.mot, keys:keys}; chk();
+    // ② 2×2 묶음 그림(최대 6장) → AI가 핵심 단계·문구·주목 위치를 정함
+    recShSt('🤖 AI가 화면을 보고 핵심 장면·문구를 정하는 중…', 34);
+    var sheets=recShSheets(A.keys); var q=(pn>1?'This is PART '+(pi+1)+' of '+pn+' of a longer tutorial series; the frames cover only seconds '+pt.a.toFixed(0)+'–'+pt.b.toFixed(0)+' (topic: '+(pt.topic||'')+'), so use ONLY moments inside that range, and start the hook with "'+(pi+1)+'편 ". ':'')+'These '+sheets.length+' images are contact sheets of a '+D.toFixed(0)+'-second SILENT screen recording of a Korean web app (CLOVER AI — AI interior/architecture image tool). Each sheet holds up to 4 frames, each labeled with a red tag "#n time" (seconds in the original video). '+
+      'Make a Korean YouTube Shorts / Reels tutorial (vertical 9:16) from it: pick the 6–10 KEY moments in time order (what menu/button is clicked, what is typed/selected, and the result) totalling 40–55 seconds. The vertical video shows a ZOOMED crop of the screen, so for each moment give the center (fx, fy as 0–1 of the full screen width/height) of the exact area the viewer must look at (the button, panel or result being used) and a zoom 1.3–2.4 (higher = tighter on small buttons/text, lower = to show a whole result image). '+
+      'Writing rules (Korean, easy, friendly, for beginners): "hook" = the big title shown at the top for the whole video, max 16 characters, makes people curious (e.g. 사진 한 장으로 인테리어 끝). Each "line" = ONE-line on-screen subtitle, max 18 characters. Each "say" = what a calm narrator says in that moment, one natural sentence, about 2.5–4 seconds to speak (max 45 characters), it may differ from "line". The first moment must hook in 3 seconds; the last one ends with a short call to action (예: 프로필 링크에서 무료로 해보세요). Never invent features that are not on screen. If the recording already has burned-in subtitles or captions (e.g. added in CapCut), read them and build your lines and narration on what they say (shorter, cleaner), and report where that subtitle band is. '+
+      'Answer ONLY one compact JSON object, no code fences, no double-quote characters inside values: {"hook":"...","segs":[{"from":0.0,"to":5.0,"line":"...","say":"...","fx":0.5,"fy":0.5,"zoom":1.8}],"title":"YouTube title max 40 chars","desc":"2–3 sentence description","tags":["#tag1","#tag2","#tag3","#tag4","#tag5"],"burned":{"has":false,"y0":0.82,"y1":0.96}} — burned = burned-in subtitle band of the ORIGINAL frames (y0/y1 as 0–1 of the height), has:false if none — from/to are seconds in the ORIGINAL video (each 3–8 s, not overlapping, in order).';
+    return recShAsk(sheets, q).then(function(j){ if(!j || !Array.isArray(j.segs) || !j.segs.length) throw new Error('AI가 장면을 고르지 못했어요'); A.plan=j; return A; });
+  }).then(function(A){ chk(); var P=A.plan, segs=[];
+    P.segs.forEach(function(s){ var a=Math.max(pt.a,+s.from||0), b=Math.min(pt.b,+s.to||0); if(!(b-a>=1)) return; segs.push({a:a, b:b, line:String(s.line||'').slice(0,40), say:String(s.say||s.line||'').slice(0,80), fx:Math.max(0,Math.min(1,+s.fx||0.5)), fy:Math.max(0,Math.min(1,+s.fy||0.5)), z:Math.max(1.2,Math.min(2.6,+s.zoom||1.7))}); });
+    segs.sort(function(p,q){ return p.a-q.a; }); if(!segs.length) throw new Error('쓸 장면이 없어요');
+    // ③ 성우(차분한 남자) — 장면별 한 문장
+    var ac=new (window.AudioContext||window.webkitAudioContext)(), n=0;
+    recShSt('🎙 AI 성우 목소리 만드는 중… 0/'+segs.length, 40);
+    return segs.reduce(function(p, s){ return p.then(function(){ chk(); return ttsP('g:Charon', s.say).then(function(d){ return fetch(audUrl(d)).then(function(r){ return r.arrayBuffer(); }).then(function(ab){ return ac.decodeAudioData(ab); }); }).then(function(buf){ s.buf=buf; }).catch(function(e){ console.warn('[화면녹화→쇼츠] 성우 실패', e); s.buf=null; }).then(function(){ n++; recShSt('🎙 AI 성우 목소리 만드는 중… '+n+'/'+segs.length, 40+n/segs.length*15); }); }); }, Promise.resolve()).then(function(){ A.segs=segs; A.ac=ac; return A; });
+  }).then(function(A){ chk(); var segs=A.segs, ac=A.ac, P=A.plan;
+    // 장면 길이 = 원본 구간(2배속까지 빠르게) 과 목소리 길이+0.5초 중 긴 쪽
+    var T=0; segs.forEach(function(s){ var len=s.b-s.a, vd=s.buf?s.buf.duration+0.5:0; s.rate=len>8?Math.min(2, len/8):1; s.out=Math.max(len/s.rate, vd, 2.5); s.t0=T; T+=s.out; }); T+=0.6;
+    var W=1080, H=1920, cv=document.createElement('canvas'); cv.width=W; cv.height=H; var x=cv.getContext('2d');
+    var PY=360, PH=960, PA=W/PH; // 가운데 확대 화면
+    var BUR=0; try{ if(P.burned && P.burned.has && +P.burned.y0>0.5 && +P.burned.y0<0.99){ BUR=+P.burned.y0-0.01; console.log('[화면녹화→쇼츠] 원래 자막 띠 피해서 확대 (위 '+Math.round(BUR*100)+'%까지만)'); } }catch(_e){}
+    var blur=document.createElement('canvas'); blur.width=72; blur.height=128; var bx=blur.getContext('2d');
+    var dest=ac.createMediaStreamDestination(), stream=cv.captureStream(30); dest.stream.getAudioTracks().forEach(function(tr){ stream.addTrack(tr); });
+    var mime=(typeof _v2vMime==='function')?_v2vMime():'', ch=[], rec=new MediaRecorder(stream, mime?{mimeType:mime, videoBitsPerSecond:12000000}:undefined); rec.ondataavailable=function(e){ if(e.data&&e.data.size) ch.push(e.data); };
+    function motAt(t){ var best=null, bd=1e9; A.mot.forEach(function(m){ var d=Math.abs(m.t-t); if(d<0.9 && m.a>0.0015 && !m.big && d<bd){ bd=d; best=m; } }); return best; }
+    var cur=null, camX=0.5, camY=0.5, camZ=1.7, si=-1;
+    function draw(tOut){ var i=0; while(i<segs.length-1 && tOut>=segs[i+1].t0) i++; var s=segs[i];
+      if(i!==si){ si=i; try{ v.playbackRate=s.rate; }catch(e){} v.currentTime=s.a; var pp=v.play(); if(pp&&pp.catch) pp.catch(function(){}); if(i===0){ camX=s.fx; camY=s.fy; camZ=s.z; } }
+      if(v.currentTime>=s.b-0.03 && !v.paused) v.pause();
+      var m=motAt(v.currentTime), tx=s.fx, ty=s.fy; if(m){ tx=s.fx*0.45+m.cx*0.55; ty=s.fy*0.45+m.cy*0.55; }
+      camX+=(tx-camX)*0.06; camY+=(ty-camY)*0.06; camZ+=(s.z-camZ)*0.05;
+      // 배경: 같은 화면 흐리게
+      bx.drawImage(v, 0, 0, 72, 128); x.imageSmoothingEnabled=true; x.drawImage(blur, 0, 0, W, H); x.fillStyle='rgba(8,10,14,.72)'; x.fillRect(0,0,W,H);
+      // 가운데 확대 화면
+      var chh=SH/camZ, cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } var _yMax=SH; if(BUR){ _yMax=Math.max(SH*0.45, BUR*SH); if(chh>_yMax){ chh=_yMax; cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } } } var cx0=Math.max(0, Math.min(SW-cww, camX*SW-cww/2)), cy0=Math.max(0, Math.min(_yMax-chh, camY*SH-chh/2));
+      x.save(); x.beginPath(); if(x.roundRect) x.roundRect(24, PY, W-48, PH, 28); else x.rect(24, PY, W-48, PH); x.clip(); x.drawImage(v, cx0, cy0, cww, chh, 24, PY, W-48, PH); x.restore();
+      x.strokeStyle='rgba(0,229,204,.55)'; x.lineWidth=3; x.beginPath(); if(x.roundRect) x.roundRect(24, PY, W-48, PH, 28); else x.rect(24, PY, W-48, PH); x.stroke();
+      // 위 제목
+      x.textAlign='center'; x.textBaseline='middle'; x.lineJoin='round'; x.font='900 76px Pretendard, sans-serif'; var hl=recShWrap(x, P.hook||'', W-120); hl.forEach(function(l,k){ var y=210+(k-(hl.length-1)/2)*92; x.lineWidth=12; x.strokeStyle='#000'; x.strokeText(l, W/2, y); x.fillStyle=k===0?'#fff':'#00e5cc'; x.fillText(l, W/2, y); });
+      // 단계 점
+      var dots=segs.length, dw=18, gap=10, ox=W/2-(dots*dw+(dots-1)*gap)/2; for(var dI=0; dI<dots; dI++){ x.fillStyle=dI===i?'#00e5cc':'rgba(255,255,255,.3)'; x.fillRect(ox+dI*(dw+gap), PY+PH+22, dw, 6); }
+      // 아래 자막 (한 줄 우선, 길면 두 줄)
+      x.font='800 64px Pretendard, sans-serif'; var sl=recShWrap(x, s.line, W-120); sl.slice(0,2).forEach(function(l,k){ var y=PY+PH+110+k*80; x.lineWidth=11; x.strokeStyle='#000'; x.strokeText(l, W/2, y); x.fillStyle='#fff'; x.fillText(l, W/2, y); });
+      try{ if(typeof _shortsDrawWatermark==='function') _shortsDrawWatermark(x, W, H); }catch(e){}
+    }
+    recShSt('🎬 쇼츠 만드는 중… (실제 길이만큼 걸려요, 약 '+Math.round(T)+'초)', 56);
+    return new Promise(function(res, rej){ var raf=null, done=false, t0=0;
+      function loop(){ if(done) return; if(REC_SH.cancel){ fin(); return; } var tOut=ac.currentTime-t0; if(tOut>=T){ fin(); return; } draw(tOut); recShSt('🎬 쇼츠 만드는 중… '+Math.round(tOut)+' / '+Math.round(T)+'초', 56+tOut/T*38); raf=requestAnimationFrame(loop); }
+      function fin(){ if(done) return; done=true; cancelAnimationFrame(raf); try{ v.pause(); }catch(e){} try{ rec.stop(); }catch(e){} }
+      rec.onstop=function(){ try{ ac.close(); }catch(e){} if(REC_SH.cancel){ rej(new Error('취소했어요')); return; } res({blob:new Blob(ch,{type:(mime||'video/webm').split(';')[0]}), plan:P}); };
+      ac.resume().then(function(){ t0=ac.currentTime+0.15; segs.forEach(function(s){ if(!s.buf) return; var src=ac.createBufferSource(); src.buffer=s.buf; src.connect(dest); src.start(t0+s.t0+0.25); }); rec.start(500); loop(); }).catch(rej);
+    });
+  }).then(function(R){ var P=R.plan, blob=R.blob, ext=/mp4/.test(blob.type)?'mp4':'webm';
+    recShSt('☁️ 갤러리에 저장 중…', 97);
+    var f=new File([blob], 'clover-guide-shorts-'+(pn>1?(pi+1)+'-':'')+Date.now()+'.'+ext, {type:blob.type||'video/webm'});
+    return new Promise(function(res){ _doUploadFile(f, function(url){ var id=Date.now()+Math.random(); G.HIST.video=G.HIST.video||[]; G.HIST.video.unshift({id:id, orig:null, result:url, origThumb:null, tags:['📱 화면녹화→쇼츠'+(pn>1?' '+(pi+1)+'/'+pn:''), String(P.hook||'').slice(0,20)], ai:'', preview:false, cx:50, fav:false, wf:'video', vidEng:''}); try{ saveHistToStorage(); }catch(e){}
+      try{ if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery('video', id, url, null, '화면녹화→쇼츠', '', null, ''); }catch(e){}
+      res({url:url, blob:blob, ext:ext, plan:P, saved:true}); }, function(){ res({url:URL.createObjectURL(blob), blob:blob, ext:ext, plan:P, saved:false}); }); });
+  }); }
+};
 // ══ 2026-11-01 요청("5개 컨셉을 하나로 — 사진만 올리면 AI 감독이 가장 어울리는 걸 확신 있게 추천, 회원은 추천을 고칠 수 있게. 평범하면 안 됨, 감동과 스토리"): 🎬 AI 감독 모드 ══
 // 사진(외관·실내) → 감독(Claude)이 사진을 보고 이야기 2~3개 제안·하나 추천(이유·점수) → 회원이 문구·내레이션·음악·순서·마지막 불빛을 고침
 // → 무료 미리보기 → Kling 4.0 '시작+중간+끝 키프레임' 한 번 호출로 끊기지 않는 원테이크(실제 공간을 걷는 느낌) + 음악 + 내레이션 + 문구 3개 + 엔딩
@@ -68403,6 +68520,7 @@ function veHome(go){ if(VE && VE.busy){ if(!confirm('저장하는 중이에요. 
   addMore(); var mb=ov.querySelector('[data-vemore]'); if(mb) mb.onclick=addMore;
   function openFile(f){ var it=veFileItem(f); if(it) veOpen(it); }
   ov.querySelector('[data-vepick]').onclick=function(){ var fi=document.createElement('input'); fi.type='file'; fi.accept='video/*,.mp4,.mov,.webm,.m4v'; fi.onchange=function(){ openFile(fi.files&&fi.files[0]); }; fi.click(); };
+  try{ if(isAdm()){ var _rb=document.createElement('div'); _rb.style.cssText='display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;border-radius:14px;border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.06);margin:-10px 0 22px'; _rb.innerHTML='<span style="font-size:26px">🖥</span><div style="flex:1;min-width:200px"><b>화면 녹화 → 쇼츠 자동</b> <span class="tiny">(관리자)</span><div class="tiny">16:9 화면 녹화(소리 없음)를 넣으면 AI가 핵심 장면 40~55초를 골라 움직이는 곳을 따라 확대하고, 제목·자막·성우·해시태그까지 만들어요</div></div><button type="button" class="stu-btn pri" data-recsh>녹화 영상 고르기</button>'; var _dz0=ov.querySelector('#ve-drop'); _dz0.parentNode.insertBefore(_rb, _dz0.nextSibling); _rb.querySelector('[data-recsh]').onclick=function(){ var fi=document.createElement('input'); fi.type='file'; fi.accept='video/*,.mp4,.mov,.webm,.m4v'; fi.onchange=function(){ var f=fi.files&&fi.files[0]; if(f) window._recToShorts(f); }; fi.click(); }; } }catch(_e){}
   var dz=ov.querySelector('#ve-drop'); dz.ondragover=function(e){ e.preventDefault(); dz.style.background='rgba(0,229,204,.14)'; }; dz.ondragleave=function(){ dz.style.background='rgba(0,229,204,.05)'; }; dz.ondrop=function(e){ e.preventDefault(); dz.style.background='rgba(0,229,204,.05)'; openFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); };
   ov.querySelector('[data-vex]').onclick=function(){ ov.remove(); veResumeBg(); }; }
 // 트랙 앞 👁 켜고 끄기
