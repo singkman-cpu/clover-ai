@@ -65281,11 +65281,17 @@ function gV(v){ return GV_MAP[v]||v; }
 var G_STYLE='Speak natural native Korean (Seoul standard) like a real Korean narrator of a premium architecture and interior documentary: calm, warm and sincere, conversational and human, never like an announcer or a robot, natural breathing with short pauses between phrases, unhurried, no exaggeration.';
 var OLDV={Sarah:'Korean_CalmLady', Charlotte:'Korean_SoothingLady', Jessica:'Korean_FriendlyBigSister', Brian:'Korean_IntellectualMan', Daniel:'Korean_CalmGentleman', George:'Korean_ReliableYouth'};
 var FALLV={}; Object.keys(OLDV).forEach(function(k){ FALLV[OLDV[k]]=k; });
+function ttsGenderOk(d, fem){ return new Promise(function(res){ var done=false; function fin(v){ if(!done){ done=true; res(v); } } setTimeout(function(){ fin(true); }, 8000);
+  try{ fetch(audUrl(d)).then(function(r){ return r.arrayBuffer(); }).then(function(ab){ var C=window.OfflineAudioContext||window.webkitOfflineAudioContext; var c=new C(1, 16000, 16000); return new Promise(function(ok, no){ var p=c.decodeAudioData(ab, ok, no); if(p&&p.then) p.then(ok, no); }); })
+    .then(function(buf){ var f0=(typeof window.recShF0==='function')?window.recShF0(buf):0; if(!f0){ fin(true); return; } fin(fem ? f0>=150 : f0<=170); }).catch(function(){ fin(true); }); }catch(e){ fin(true); } }); }
+window.ttsGenderOk=ttsGenderOk;
 function koV(v){ return OLDV[v]||v||'g:Sulafat'; }
-function ttsP(voice, text){ var kv=koV(voice);
+function ttsP(voice, text, _gtry){ var kv=koV(voice);
   if(/^g:/.test(kv)){ var gn=kv.slice(2), fem=/Sulafat|Despina|Achernar|Vindemiatrix|Aoede|Kore|Gacrux|Zephyr|Leda|Callirrhoe|Autonoe|Erinome|Laomedeia|Pulcherrima/.test(gn);
     return falP('fal-ai/gemini-3.1-flash-tts', {prompt:text, voice:gn, style_instructions:G_STYLE, output_format:'mp3'}, {wf:'studio_tts', chars:String(text).length})
       .then(function(d){ if(!audUrl(d)) throw new Error('구글 성우 결과 없음'); return d; })
+      // 2026-11-10 신고("AI 감독 쇼츠에서 남자 성우가 말하다가 여자 목소리로 바뀐다"): 구글 성우가 가끔 다른 성별 목소리로 나옴 → 목소리 높이를 재서 고른 성별과 다르면 다시 만들기(최대 2번)
+      .then(function(d){ if((_gtry||0)>=2) return d; return ttsGenderOk(d, fem).then(function(ok){ if(ok) return d; console.warn('[영상 스튜디오] 성우 목소리가 '+(fem?'남자':'여자')+' 쪽으로 나와서 다시 만들어요 ('+gn+')'); return ttsP(voice, text, (_gtry||0)+1); }); })
       .catch(function(e){ if(/크레딧이 부족|402|insufficient/i.test(String(e&&e.message||e))) throw e; console.warn('[영상 스튜디오] 구글 성우 실패 → 한국어 성우로 대신', e); return ttsP(fem?'Korean_CalmLady':'Korean_CalmGentleman', text); }); }
   // 2026-11-02: 더 사람 같은 최신 엔진(MiniMax Speech 2.8 HD · 입력 이름이 prompt) 먼저 → 안 되면 02 HD → 그래도 안 되면 ElevenLabs
   function hd02(){ return falP('fal-ai/minimax/speech-02-hd', {text:text, voice_setting:{voice_id:kv, speed:0.95, vol:1, pitch:0}, language_boost:'Korean'} /* 2026-11-01: output_format:'mp3'는 이 엔진이 거절(422) */, {wf:'studio_tts', chars:String(text).length})
@@ -66356,9 +66362,23 @@ function recShUI(){ var m=document.getElementById('rec-sh-md'); if(m) return m; 
 function recShSt(t, pct){ var m=recShUI(); m.querySelector('[data-rst]').innerHTML=(REC_SH.pfx||'')+t; if(pct!=null) m.querySelector('[data-rbar] div').style.width=Math.max(0,Math.min(100,pct))+'%'; }
 function recShSeek(v, t){ return new Promise(function(res){ var done=false; function ok(){ if(done) return; done=true; v.removeEventListener('seeked', ok); res(); } v.addEventListener('seeked', ok); v.currentTime=Math.max(0, Math.min((v.duration||t)-0.05, t)); setTimeout(ok, 1500); }); }
 function recShWrap(x, text, maxW){ var w=String(text||'').split(/\s+/), lines=[], cur=''; w.forEach(function(s){ var t=cur?cur+' '+s:s; if(x.measureText(t).width>maxW && cur){ lines.push(cur); cur=s; } else cur=t; }); if(cur) lines.push(cur); return lines.slice(0,3); }
+// 2026-11-10 신고("성우가 말하다가 갑자기 여자 목소리였다가 다시 남자로"): 구글 성우는 문장마다 따로 만들면 목소리가 바뀔 때가 있음 → 목소리가 고정된 한국 남자 성우(차분한 앵커) 하나로
+// 2026-11-10 요청: 성우는 "남 · 맑고 또렷한"(구글 Iapetus) — 구글 성우가 가끔 여자 목소리로 바뀌는 문제는 목소리 높이를 재서 여자 쪽이면 다시 만들게(최대 2번)
+function recShF0(buf){ try{ var d=buf.getChannelData(0), sr=buf.sampleRate, N=Math.round(sr*0.05), lo=Math.round(sr/400), hi=Math.round(sr/70), f=[], step=Math.max(1,Math.round(sr/8000));
+    for(var k=0;k+N<d.length && f.length<80;k+=N*2){ var e=0, i; for(i=0;i<N;i+=step) e+=d[k+i]*d[k+i]; if(e/(N/step)<0.0004) continue; var best=0, bl=0, e0=0; for(i=0;i<N;i+=step) e0+=d[k+i]*d[k+i];
+      for(var L=lo;L<hi;L+=step){ var c=0; for(i=0;i+L<N;i+=step) c+=d[k+i]*d[k+i+L]; if(c>best){ best=c; bl=L; } } if(bl && best>0.3*e0) f.push(sr/bl); }
+    if(f.length<4) return 0; f.sort(function(a,b){ return a-b; }); return f[Math.floor(f.length/2)]; }catch(e){ return 0; } }
+window.recShF0=recShF0;
+function recShVoice(text, ac, tries){ tries=tries||0; return ttsP('g:Iapetus', text).then(function(d){ return fetch(audUrl(d)).then(function(r){ return r.arrayBuffer(); }).then(function(ab){ return ac.decodeAudioData(ab); }); }).then(function(buf){ var f0=recShF0(buf);
+    if(f0>170 && tries<2){ console.warn('[화면녹화→쇼츠] 성우 목소리가 높게(여자 쪽 '+Math.round(f0)+'Hz) 나와서 다시 만들어요'); return recShVoice(text, ac, tries+1); } return buf; }); }
 function recShShowAll(outs){ var m=recShUI(); REC_SH.pfx=''; recShSt('✅ 완성! 쇼츠 '+outs.length+'개'+(outs.every(function(o){ return o.saved; })?' · 갤러리(영상)에 저장했어요':' · 일부는 갤러리 저장에 실패했어요 — 다운로드로 받으세요'), 100); var o=m.querySelector('[data-rout]');
-  o.innerHTML=outs.map(function(r,i){ var P=r.plan||{}, tx=(P.title||'')+'\n\n'+(P.desc||'')+'\n\n'+((P.tags||[]).slice(0,5).join(' ')); r._tx=tx; return '<div style="display:flex;gap:12px;align-items:flex-start;margin:10px 0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)"><video src="'+esc(r.url)+'" controls playsinline style="width:130px;flex:0 0 auto;border-radius:8px;background:#000"></video><div style="flex:1;min-width:0"><b style="font-size:12.5px">'+(outs.length>1?(i+1)+'편 · ':'')+esc(P.hook||'')+'</b><textarea readonly style="width:100%;min-height:96px;margin-top:6px;background:#0f1115;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px;font-family:inherit;font-size:12px">'+esc(tx)+'</textarea><div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="stu-btn sm" data-rcp="'+i+'">📋 글 복사</button><button type="button" class="stu-btn sm" data-rdl="'+i+'">⬇ 다운로드</button></div></div></div>'; }).join('');
+  o.innerHTML=outs.map(function(r,i){ var P=r.plan||{}, tx=(P.title||'')+'\n\n'+(P.desc||'')+'\n\n'+((P.tags||[]).slice(0,5).join(' ')); r._tx=tx; return '<div style="display:flex;gap:12px;align-items:flex-start;margin:10px 0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)"><video src="'+esc(r.url)+'" controls playsinline style="width:130px;flex:0 0 auto;border-radius:8px;background:#000"></video><div style="flex:1;min-width:0"><b style="font-size:12.5px">'+(outs.length>1?(i+1)+'편 · ':'')+esc(P.hook||'')+'</b><textarea readonly style="width:100%;min-height:96px;margin-top:6px;background:#0f1115;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px;font-family:inherit;font-size:12px">'+esc(tx)+'</textarea><div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="stu-btn sm" data-rcp="'+i+'">📋 글 복사</button><button type="button" class="stu-btn sm" data-rdl="'+i+'">⬇ 다운로드</button>'+(r.A?'<button type="button" class="stu-btn sm pri" data-red="'+i+'">✏️ 자막 고치기</button>':'')+'</div><div data-redp="'+i+'" style="display:none;margin-top:8px"></div></div></div>'; }).join('');
   o.querySelectorAll('[data-rcp]').forEach(function(b){ b.onclick=function(){ try{ navigator.clipboard.writeText(outs[+b.getAttribute('data-rcp')]._tx); toast('📋 복사했어요'); }catch(e){} }; });
+  o.querySelectorAll('[data-red]').forEach(function(b){ b.onclick=function(){ var i=+b.getAttribute('data-red'), r=outs[i], pn=o.querySelector('[data-redp="'+i+'"]'); if(pn.style.display==='block'){ pn.style.display='none'; return; } pn.style.display='block';
+      var inp='width:100%;box-sizing:border-box;background:#0f1115;color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:7px;padding:6px 8px;font-family:inherit;font-size:12.5px;margin-top:4px';
+      pn.innerHTML='<div class="tiny">위 큰 제목</div><input data-rh style="'+inp+'" value="'+esc(r.A.plan.hook||'')+'">'+r.A.segs.map(function(s,k){ return '<div class="tiny" style="margin-top:6px">'+(k+1)+'번 장면 자막 <span style="opacity:.6">(바꾸면 성우도 이 말로 다시 읽어요)</span></div><input data-rl="'+k+'" style="'+inp+'" value="'+esc(s.line)+'">'; }).join('')+'<button type="button" class="stu-btn sm pri" data-rgo style="margin-top:10px">🔄 고친 대로 다시 만들기</button>';
+      pn.querySelector('[data-rgo]').onclick=function(){ var lines=[].map.call(pn.querySelectorAll('[data-rl]'), function(e){ return e.value; }), hook=pn.querySelector('[data-rh]').value; REC_SH.pfx=(outs.length>1?'<b>'+(i+1)+'편</b> · ':'');
+        REC_SH.redo(r, hook, lines).then(function(nr){ outs[i]=nr; REC_SH.pfx=''; recShShowAll(outs); toast('✅ 고친 쇼츠를 다시 만들었어요 (갤러리에도 새로 저장)'); }).catch(function(e){ REC_SH.pfx=''; if(String(e&&e.message)!=='busy') recShSt('⚠️ 다시 만들기 실패: '+esc(String(e&&e.message||e).slice(0,120)), 100); }); }; }; });
   o.querySelectorAll('[data-rdl]').forEach(function(b){ b.onclick=function(){ var r=outs[+b.getAttribute('data-rdl')], a=document.createElement('a'); a.href=URL.createObjectURL(r.blob); a.download='clover-guide-shorts-'+(+b.getAttribute('data-rdl')+1)+'.'+r.ext; document.body.appendChild(a); a.click(); a.remove(); }; }); }
 window._recToShorts=function(file){
   if(REC_SH.busy){ alert('지금 다른 화면 녹화를 바꾸는 중이에요.'); return; } if(!file) return;
@@ -66377,7 +66397,7 @@ window._recToShorts=function(file){
           var fr=n/(sw*sh); mot.push({t:t, a:fr, cx:n?(sxm/n)/sw:0.5, cy:n?(sym/n)/sh:0.5, big:fr>0.25}); }
         prev=g;
         recShSt('🔍 화면에서 움직이는 곳을 찾는 중… '+Math.round(t/D*100)+'%', 4+t/D*26); t+=step; return nextS(); }); }
-    return nextS().then(function(){ return {mot:mot}; });
+    return {mot:[]}; // 2026-11-10 요청: 움직이는 영상 대신 멈춘 이미지로 → 움직임 추적 안 함
   }).then(function(A){ chk(); REC_SH.mot=A.mot;
     if(D<=(REC_SH.longSec||330)) return [{a:0, b:D, topic:''}];
     // 5분 넘으면: 전체를 훑어 주제별 구간(편)으로 나눔 → 편마다 쇼츠 1개
@@ -66408,59 +66428,61 @@ window._recToShorts=function(file){
     var sheets=recShSheets(A.keys); var q=(pn>1?'This is PART '+(pi+1)+' of '+pn+' of a longer tutorial series; the frames cover only seconds '+pt.a.toFixed(0)+'–'+pt.b.toFixed(0)+' (topic: '+(pt.topic||'')+'), so use ONLY moments inside that range, and start the hook with "'+(pi+1)+'편 ". ':'')+'These '+sheets.length+' images are contact sheets of a '+D.toFixed(0)+'-second SILENT screen recording of a Korean web app (CLOVER AI — AI interior/architecture image tool). Each sheet holds up to 4 frames, each labeled with a red tag "#n time" (seconds in the original video). '+
       'Make a Korean YouTube Shorts / Reels tutorial (vertical 9:16) from it: pick the 6–10 KEY moments in time order (what menu/button is clicked, what is typed/selected, and the result) totalling 40–55 seconds. The vertical video shows a ZOOMED crop of the screen, so for each moment give the center (fx, fy as 0–1 of the full screen width/height) of the exact area the viewer must look at (the button, panel or result being used) and a zoom 1.3–2.4 (higher = tighter on small buttons/text, lower = to show a whole result image). '+
       'Writing rules (Korean, easy, friendly, for beginners): "hook" = the big title shown at the top for the whole video, max 16 characters, makes people curious (e.g. 사진 한 장으로 인테리어 끝). Each "line" = ONE-line on-screen subtitle, max 18 characters. Each "say" = what a calm narrator says in that moment, one natural sentence, about 2.5–4 seconds to speak (max 45 characters), it may differ from "line". The first moment must hook in 3 seconds; the last one ends with a short call to action (예: 프로필 링크에서 무료로 해보세요). Never invent features that are not on screen. If the recording already has burned-in subtitles or captions (e.g. added in CapCut), read them and build your lines and narration on what they say (shorter, cleaner), and report where that subtitle band is. '+
-      'Answer ONLY one compact JSON object, no code fences, no double-quote characters inside values: {"hook":"...","segs":[{"from":0.0,"to":5.0,"line":"...","say":"...","fx":0.5,"fy":0.5,"zoom":1.8}],"title":"YouTube title max 40 chars","desc":"2–3 sentence description","tags":["#tag1","#tag2","#tag3","#tag4","#tag5"],"burned":{"has":false,"y0":0.82,"y1":0.96}} — burned = burned-in subtitle band of the ORIGINAL frames (y0/y1 as 0–1 of the height), has:false if none — from/to are seconds in the ORIGINAL video (each 3–8 s, not overlapping, in order).';
+      'Answer ONLY one compact JSON object, no code fences, no double-quote characters inside values: {"hook":"...","segs":[{"from":0.0,"to":5.0,"line":"...","say":"...","at":4.0,"fx":0.5,"fy":0.5,"zoom":1.8}],"title":"YouTube title max 40 chars","desc":"2–3 sentence description","tags":["#tag1","#tag2","#tag3","#tag4","#tag5"],"burned":{"has":false,"y0":0.82,"y1":0.96}} — burned = burned-in subtitle band of the ORIGINAL frames (y0/y1 as 0–1 of the height), has:false if none — from/to are seconds in the ORIGINAL video (each 3–8 s, not overlapping, in order); each moment is shown as ONE FROZEN STILL image, so "at" = the exact second inside from–to where the screen shows that step most clearly (menu open, button highlighted, result visible — avoid frames where the mouse covers the important part or the screen is mid-transition).';
     return recShAsk(sheets, q).then(function(j){ if(!j || !Array.isArray(j.segs) || !j.segs.length) throw new Error('AI가 장면을 고르지 못했어요'); A.plan=j; return A; });
   }).then(function(A){ chk(); var P=A.plan, segs=[];
-    P.segs.forEach(function(s){ var a=Math.max(pt.a,+s.from||0), b=Math.min(pt.b,+s.to||0); if(!(b-a>=1)) return; segs.push({a:a, b:b, line:String(s.line||'').slice(0,40), say:String(s.say||s.line||'').slice(0,80), fx:Math.max(0,Math.min(1,+s.fx||0.5)), fy:Math.max(0,Math.min(1,+s.fy||0.5)), z:Math.max(1.2,Math.min(2.6,+s.zoom||1.7))}); });
+    P.segs.forEach(function(s){ var a=Math.max(pt.a,+s.from||0), b=Math.min(pt.b,+s.to||0); if(!(b-a>=1)) return; segs.push({a:a, b:b, at:Math.max(a,Math.min(b,(s.at!=null&&isFinite(+s.at))?+s.at:b-0.4)), line:String(s.line||'').slice(0,40), say:String(s.say||s.line||'').slice(0,80), fx:Math.max(0,Math.min(1,+s.fx||0.5)), fy:Math.max(0,Math.min(1,+s.fy||0.5)), z:Math.max(1.2,Math.min(2.6,+s.zoom||1.7))}); });
     segs.sort(function(p,q){ return p.a-q.a; }); if(!segs.length) throw new Error('쓸 장면이 없어요');
     // ③ 성우(차분한 남자) — 장면별 한 문장
-    var ac=new (window.AudioContext||window.webkitAudioContext)(), n=0;
+    var ac=REC_SH.dac||(REC_SH.dac=new (window.AudioContext||window.webkitAudioContext)()), n=0;
     recShSt('🎙 AI 성우 목소리 만드는 중… 0/'+segs.length, 40);
-    return segs.reduce(function(p, s){ return p.then(function(){ chk(); return ttsP('g:Charon', s.say).then(function(d){ return fetch(audUrl(d)).then(function(r){ return r.arrayBuffer(); }).then(function(ab){ return ac.decodeAudioData(ab); }); }).then(function(buf){ s.buf=buf; }).catch(function(e){ console.warn('[화면녹화→쇼츠] 성우 실패', e); s.buf=null; }).then(function(){ n++; recShSt('🎙 AI 성우 목소리 만드는 중… '+n+'/'+segs.length, 40+n/segs.length*15); }); }); }, Promise.resolve()).then(function(){ A.segs=segs; A.ac=ac; return A; });
-  }).then(function(A){ chk(); var segs=A.segs, ac=A.ac, P=A.plan;
-    // 장면 길이 = 원본 구간(2배속까지 빠르게) 과 목소리 길이+0.5초 중 긴 쪽
-    var T=0; segs.forEach(function(s){ var len=s.b-s.a, vd=s.buf?s.buf.duration+0.5:0; s.rate=len>8?Math.min(2, len/8):1; s.out=Math.max(len/s.rate, vd, 2.5); s.t0=T; T+=s.out; }); T+=0.6;
-    var W=1080, H=1920, cv=document.createElement('canvas'); cv.width=W; cv.height=H; var x=cv.getContext('2d');
-    var PY=360, PH=960, PA=W/PH; // 가운데 확대 화면
-    var BUR=0; try{ if(P.burned && P.burned.has && +P.burned.y0>0.5 && +P.burned.y0<0.99){ BUR=+P.burned.y0-0.01; console.log('[화면녹화→쇼츠] 원래 자막 띠 피해서 확대 (위 '+Math.round(BUR*100)+'%까지만)'); } }catch(_e){}
-    var blur=document.createElement('canvas'); blur.width=72; blur.height=128; var bx=blur.getContext('2d');
+    return segs.reduce(function(p, s){ return p.then(function(){ chk(); return recShVoice(s.say, ac).then(function(buf){ s.buf=buf; }).catch(function(e){ console.warn('[화면녹화→쇼츠] 성우 실패', e); s.buf=null; }).then(function(){ n++; recShSt('🎙 AI 성우 목소리 만드는 중… '+n+'/'+segs.length, 40+n/segs.length*15); }); }); }, Promise.resolve()).then(function(){ A.segs=segs; return A; });
+  }).then(function(A){ return renderPart(A, pt, pi, pn); }); }
+  // 멈춘 이미지(장면마다 1장)로 세로 쇼츠 만들기 — 수정 후 다시 만들 때도 이 함수
+  function renderPart(A, pt, pi, pn){ var segs=A.segs, P=A.plan;
+    var W=1080, H=1920, PY=360, PH=1328, PA=W/PH; // 2026-11-10 요청: 쇼츠 탭 레터박스처럼 — 위 검은 띠 큰 제목 · 가운데 꽉 찬 이미지 · 아래 검은 띠 clover ai
+    var BUR=0; try{ if(P.burned && P.burned.has && +P.burned.y0>0.5 && +P.burned.y0<0.99) BUR=+P.burned.y0-0.01; }catch(_e){}
+    // ① 장면마다 멈춘 이미지 1장 (원본 크기)
+    var k=0; function still(){ chk(); if(k>=segs.length) return Promise.resolve(); var sg=segs[k]; k++; if(sg.img) return still(); recShSt('🖼 장면 이미지 뽑는 중… '+k+'/'+segs.length, 58); // 2026-11-10: 로딩 중 하얀 화면 같은 빈 장면이면 같은 구간에서 더 또렷한 장면을 찾음
+      var tries=[sg.at, sg.a+(sg.b-sg.a)*0.75, sg.a+(sg.b-sg.a)*0.5, sg.b-0.15, sg.a+(sg.b-sg.a)*0.25], best=null, bestSd=-1, ti=0;
+      function grab(){ if(ti>=tries.length || bestSd>=14) { sg.img=best; return still(); } var tt=tries[ti++]; return recShSeek(v, tt).then(function(){ var c=document.createElement('canvas'); c.width=SW; c.height=SH; c.getContext('2d').drawImage(v,0,0,SW,SH);
+        var sm=document.createElement('canvas'); sm.width=64; sm.height=36; var sx2=sm.getContext('2d'); sx2.drawImage(c,0,0,64,36); var d=sx2.getImageData(0,0,64,36).data, m=0, q2=0, n=64*36; for(var ii=0;ii<n;ii++){ var gg=(d[ii*4]+d[ii*4+1]+d[ii*4+2])/3; m+=gg; q2+=gg*gg; } m/=n; var sd=Math.sqrt(Math.max(0,q2/n-m*m));
+        if(sd>bestSd){ bestSd=sd; best=c; } return grab(); }); }
+      return grab(); }
+    return still().then(function(){ chk();
+    var T=0; segs.forEach(function(s){ var vd=s.buf?s.buf.duration+0.6:0; s.out=Math.max(vd, 2.8); s.t0=T; T+=s.out; }); T+=0.6;
+    var ac=new (window.AudioContext||window.webkitAudioContext)(), cv=document.createElement('canvas'); cv.width=W; cv.height=H; var x=cv.getContext('2d');
     var dest=ac.createMediaStreamDestination(), stream=cv.captureStream(30); dest.stream.getAudioTracks().forEach(function(tr){ stream.addTrack(tr); });
     var mime=(typeof _v2vMime==='function')?_v2vMime():'', ch=[], rec=new MediaRecorder(stream, mime?{mimeType:mime, videoBitsPerSecond:12000000}:undefined); rec.ondataavailable=function(e){ if(e.data&&e.data.size) ch.push(e.data); };
-    function motAt(t){ var best=null, bd=1e9; A.mot.forEach(function(m){ var d=Math.abs(m.t-t); if(d<0.9 && m.a>0.0015 && !m.big && d<bd){ bd=d; best=m; } }); return best; }
-    var cur=null, camX=0.5, camY=0.5, camZ=1.7, si=-1;
-    function draw(tOut){ var i=0; while(i<segs.length-1 && tOut>=segs[i+1].t0) i++; var s=segs[i];
-      if(i!==si){ si=i; try{ v.playbackRate=s.rate; }catch(e){} v.currentTime=s.a; var pp=v.play(); if(pp&&pp.catch) pp.catch(function(){}); if(i===0){ camX=s.fx; camY=s.fy; camZ=s.z; } }
-      if(v.currentTime>=s.b-0.03 && !v.paused) v.pause();
-      var m=motAt(v.currentTime), tx=s.fx, ty=s.fy; if(m){ tx=s.fx*0.45+m.cx*0.55; ty=s.fy*0.45+m.cy*0.55; }
-      camX+=(tx-camX)*0.06; camY+=(ty-camY)*0.06; camZ+=(s.z-camZ)*0.05;
-      // 배경: 같은 화면 흐리게
-      bx.drawImage(v, 0, 0, 72, 128); x.imageSmoothingEnabled=true; x.drawImage(blur, 0, 0, W, H); x.fillStyle='rgba(8,10,14,.72)'; x.fillRect(0,0,W,H);
-      // 가운데 확대 화면
-      var chh=SH/camZ, cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } var _yMax=SH; if(BUR){ _yMax=Math.max(SH*0.45, BUR*SH); if(chh>_yMax){ chh=_yMax; cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } } } var cx0=Math.max(0, Math.min(SW-cww, camX*SW-cww/2)), cy0=Math.max(0, Math.min(_yMax-chh, camY*SH-chh/2));
-      x.save(); x.beginPath(); if(x.roundRect) x.roundRect(24, PY, W-48, PH, 28); else x.rect(24, PY, W-48, PH); x.clip(); x.drawImage(v, cx0, cy0, cww, chh, 24, PY, W-48, PH); x.restore();
-      x.strokeStyle='rgba(0,229,204,.55)'; x.lineWidth=3; x.beginPath(); if(x.roundRect) x.roundRect(24, PY, W-48, PH, 28); else x.rect(24, PY, W-48, PH); x.stroke();
-      // 위 제목
-      x.textAlign='center'; x.textBaseline='middle'; x.lineJoin='round'; x.font='900 76px Pretendard, sans-serif'; var hl=recShWrap(x, P.hook||'', W-120); hl.forEach(function(l,k){ var y=210+(k-(hl.length-1)/2)*92; x.lineWidth=12; x.strokeStyle='#000'; x.strokeText(l, W/2, y); x.fillStyle=k===0?'#fff':'#00e5cc'; x.fillText(l, W/2, y); });
-      // 단계 점
-      var dots=segs.length, dw=18, gap=10, ox=W/2-(dots*dw+(dots-1)*gap)/2; for(var dI=0; dI<dots; dI++){ x.fillStyle=dI===i?'#00e5cc':'rgba(255,255,255,.3)'; x.fillRect(ox+dI*(dw+gap), PY+PH+22, dw, 6); }
-      // 아래 자막 (한 줄 우선, 길면 두 줄)
-      x.font='800 64px Pretendard, sans-serif'; var sl=recShWrap(x, s.line, W-120); sl.slice(0,2).forEach(function(l,k){ var y=PY+PH+110+k*80; x.lineWidth=11; x.strokeStyle='#000'; x.strokeText(l, W/2, y); x.fillStyle='#fff'; x.fillText(l, W/2, y); });
-      try{ if(typeof _shortsDrawWatermark==='function') _shortsDrawWatermark(x, W, H); }catch(e){}
-    }
-    recShSt('🎬 쇼츠 만드는 중… (실제 길이만큼 걸려요, 약 '+Math.round(T)+'초)', 56);
+    // 배경용 흐린 이미지 미리
+    segs.forEach(function(s){ if(s.bg) return; var b=document.createElement('canvas'); b.width=72; b.height=128; var bx=b.getContext('2d'), sc2=Math.max(72/SW,128/SH); bx.drawImage(s.img,(72-SW*sc2)/2,(128-SH*sc2)/2,SW*sc2,SH*sc2); s.bg=b; });
+    function crop(s, z){ var chh=SH/z, cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } var yM=SH; if(BUR){ yM=Math.max(SH*0.45, BUR*SH); if(chh>yM){ chh=yM; cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } } }
+      return [Math.max(0, Math.min(SW-cww, s.fx*SW-cww/2)), Math.max(0, Math.min(yM-chh, s.fy*SH-chh/2)), cww, chh]; }
+    function panel(s, u, a){ var z=s.z*(1+0.07*u), c=crop(s, z); x.globalAlpha=a; x.drawImage(s.img, c[0], c[1], c[2], c[3], 0, PY, W, PH); x.globalAlpha=1; } // 천천히 살짝 다가가기
+    function draw(tOut){ var i=0; while(i<segs.length-1 && tOut>=segs[i+1].t0) i++; var s=segs[i], u=Math.max(0,Math.min(1,(tOut-s.t0)/s.out)), fa=Math.min(1,(tOut-s.t0)/0.35), pv=i>0?segs[i-1]:null;
+      x.globalAlpha=1; x.imageSmoothingEnabled=true; x.fillStyle='#000'; x.fillRect(0,0,W,H);
+      x.save(); x.beginPath(); x.rect(0, PY, W, PH); x.clip(); if(pv && fa<1) panel(pv, 1, 1); panel(s, u, pv?fa:1); x.restore();
+      x.textAlign='center'; x.textBaseline='middle'; x.lineJoin='round'; x.font='900 80px Pretendard, sans-serif'; var hl=recShWrap(x, P.hook||'', W-110).slice(0,2); hl.forEach(function(l,kk){ var y=PY/2+(kk-(hl.length-1)/2)*100; x.fillStyle='#fff'; x.fillText(l, W/2, y); });
+      x.font='800 60px Pretendard, sans-serif'; var sl=recShWrap(x, s.line, W-120).slice(0,2); sl.forEach(function(l,kk){ var y=PY+PH-90-(sl.length-1-kk)*74; x.lineWidth=10; x.strokeStyle='rgba(0,0,0,.85)'; x.strokeText(l, W/2, y); x.fillStyle='#fff'; x.fillText(l, W/2, y); });
+      x.font='900 66px Pretendard, sans-serif'; x.fillStyle='#00e5cc'; x.fillText('clover ai', W/2, PY+PH+(H-PY-PH)/2);
+      try{ if(typeof _shortsDrawWatermark==='function') _shortsDrawWatermark(x, W, H); }catch(e){} }
+    recShSt('🎬 쇼츠 만드는 중… (약 '+Math.round(T)+'초)', 62);
     return new Promise(function(res, rej){ var raf=null, done=false, t0=0;
-      function loop(){ if(done) return; if(REC_SH.cancel){ fin(); return; } var tOut=ac.currentTime-t0; if(tOut>=T){ fin(); return; } draw(tOut); recShSt('🎬 쇼츠 만드는 중… '+Math.round(tOut)+' / '+Math.round(T)+'초', 56+tOut/T*38); raf=requestAnimationFrame(loop); }
-      function fin(){ if(done) return; done=true; cancelAnimationFrame(raf); try{ v.pause(); }catch(e){} try{ rec.stop(); }catch(e){} }
+      function loop(){ if(done) return; if(REC_SH.cancel){ fin(); return; } var tOut=ac.currentTime-t0; if(tOut>=T){ fin(); return; } draw(Math.max(0,tOut)); recShSt('🎬 쇼츠 만드는 중… '+Math.round(Math.max(0,tOut))+' / '+Math.round(T)+'초', 62+Math.max(0,tOut)/T*33); raf=requestAnimationFrame(loop); }
+      function fin(){ if(done) return; done=true; cancelAnimationFrame(raf); try{ rec.stop(); }catch(e){} }
       rec.onstop=function(){ try{ ac.close(); }catch(e){} if(REC_SH.cancel){ rej(new Error('취소했어요')); return; } res({blob:new Blob(ch,{type:(mime||'video/webm').split(';')[0]}), plan:P}); };
-      ac.resume().then(function(){ t0=ac.currentTime+0.15; segs.forEach(function(s){ if(!s.buf) return; var src=ac.createBufferSource(); src.buffer=s.buf; src.connect(dest); src.start(t0+s.t0+0.25); }); rec.start(500); loop(); }).catch(rej);
-    });
-  }).then(function(R){ var P=R.plan, blob=R.blob, ext=/mp4/.test(blob.type)?'mp4':'webm';
+      ac.resume().then(function(){ draw(0); t0=ac.currentTime+0.15; segs.forEach(function(s){ if(!s.buf) return; var src=ac.createBufferSource(); src.buffer=s.buf; src.connect(dest); src.start(t0+s.t0+0.25); }); rec.start(500); loop(); }).catch(rej);
+    }); }).then(function(R){ var blob=R.blob, ext=/mp4/.test(blob.type)?'mp4':'webm';
     recShSt('☁️ 갤러리에 저장 중…', 97);
     var f=new File([blob], 'clover-guide-shorts-'+(pn>1?(pi+1)+'-':'')+Date.now()+'.'+ext, {type:blob.type||'video/webm'});
-    return new Promise(function(res){ _doUploadFile(f, function(url){ var id=Date.now()+Math.random(); G.HIST.video=G.HIST.video||[]; G.HIST.video.unshift({id:id, orig:null, result:url, origThumb:null, tags:['📱 화면녹화→쇼츠'+(pn>1?' '+(pi+1)+'/'+pn:''), String(P.hook||'').slice(0,20)], ai:'', preview:false, cx:50, fav:false, wf:'video', vidEng:''}); try{ saveHistToStorage(); }catch(e){}
+    return new Promise(function(res){ var base={blob:blob, ext:ext, plan:P, A:A, pt:pt, pi:pi, pn:pn}; _doUploadFile(f, function(url){ var id=Date.now()+Math.random(); G.HIST.video=G.HIST.video||[]; G.HIST.video.unshift({id:id, orig:null, result:url, origThumb:null, tags:['📱 화면녹화→쇼츠'+(pn>1?' '+(pi+1)+'/'+pn:''), String(P.hook||'').slice(0,20)], ai:'', preview:false, cx:50, fav:false, wf:'video', vidEng:''}); try{ saveHistToStorage(); }catch(e){}
       try{ if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery('video', id, url, null, '화면녹화→쇼츠', '', null, ''); }catch(e){}
-      res({url:url, blob:blob, ext:ext, plan:P, saved:true}); }, function(){ res({url:URL.createObjectURL(blob), blob:blob, ext:ext, plan:P, saved:false}); }); });
-  }); }
+      res(Object.assign(base, {url:url, saved:true})); }, function(){ res(Object.assign(base, {url:URL.createObjectURL(blob), saved:false})); }); }); }); }
+  // ✏️ 수정 후 다시 만들기: 바뀐 자막만 성우를 새로 만들고(자막 = 성우 말) 같은 이미지로 다시 렌더링
+  REC_SH.redo=function(o, hook, lines){ if(REC_SH.busy){ alert('지금 만드는 중이에요.'); return Promise.reject(new Error('busy')); } REC_SH.busy=true; REC_SH.cancel=false; var A=o.A, ac=REC_SH.dac||(REC_SH.dac=new (window.AudioContext||window.webkitAudioContext)()), ch=[];
+    if(hook!=null) A.plan.hook=hook; A.segs.forEach(function(s,i){ var t=String(lines[i]==null?s.line:lines[i]).trim(); if(t && t!==s.line){ s.line=t; s.say=t; ch.push(s); } });
+    var n=0; return ch.reduce(function(p, s){ return p.then(function(){ recShSt('🎙 바뀐 자막 성우 다시 만드는 중… '+(++n)+'/'+ch.length, 20); return recShVoice(s.say, ac).then(function(b){ s.buf=b; }).catch(function(){ s.buf=null; }); }); }, Promise.resolve())
+      .then(function(){ return renderPart(A, o.pt, o.pi, o.pn); }).then(function(r){ REC_SH.busy=false; return r; }, function(e){ REC_SH.busy=false; throw e; }); };
 };
 // ══ 2026-11-01 요청("5개 컨셉을 하나로 — 사진만 올리면 AI 감독이 가장 어울리는 걸 확신 있게 추천, 회원은 추천을 고칠 수 있게. 평범하면 안 됨, 감동과 스토리"): 🎬 AI 감독 모드 ══
 // 사진(외관·실내) → 감독(Claude)이 사진을 보고 이야기 2~3개 제안·하나 추천(이유·점수) → 회원이 문구·내레이션·음악·순서·마지막 불빛을 고침
