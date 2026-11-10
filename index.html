@@ -10076,14 +10076,19 @@ function _noAutofill(inp){
     inp.addEventListener('change', wipe);
   }catch(e){}
 }
+// 2026-11-10 에러 로그("aspect_ratio Input should be 'auto','21:9',... input:'3000:1368'" 회원 렌더 5건 실패·환불): 직접 입력 비율(픽셀 크기 등)을
+// AI에 그대로 보내서 거절됨 → AI가 받는 비율 목록 중 가장 가까운 것으로 바꿔서 보냄
+function _apiAspect(a){ try{ a=String(a||'auto').trim(); if(a==='auto') return a; var ok=(typeof _NB2_ASPECT_RATIOS!=='undefined')?_NB2_ASPECT_RATIOS.map(function(p){ return p[0]; }):[]; if(ok.indexOf(a)>=0) return a;
+  var m=a.match(/^(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)$/); if(m){ var r=_nearestAspectRatioStr(+m[1], +m[2]); console.log('[출력 비율] 직접 입력 '+a+' → AI가 받는 가장 가까운 비율 '+r); return r; } return 'auto'; }catch(e){ return 'auto'; } }
+window._apiAspect=_apiAspect;
 function _withExplicitAspect(imgSrc, cb, forcedOverride){
   // ⚠️ 버그 수정: 대기열 작업은 "지금 보고 있는 탭"이 아니라 "작업을 넣은 탭"의 출력 비율을 써야 함 —
   // forcedOverride(작업 생성 시점에 저장한 값)가 넘어오면 그걸 우선함.
   if(typeof forcedOverride==='string'){
-    if(forcedOverride && forcedOverride!=='auto'){ cb(forcedOverride); return; }
+    if(forcedOverride && forcedOverride!=='auto'){ cb(_apiAspect(forcedOverride)); return; }
   } else {
     var _fTab = getTab(G.wf);
-    if(_fTab && _fTab.forcedAspect && _fTab.forcedAspect!=='auto'){ cb(_fTab.forcedAspect); return; }
+    if(_fTab && _fTab.forcedAspect && _fTab.forcedAspect!=='auto'){ cb(_apiAspect(_fTab.forcedAspect)); return; }
   }
   if(!imgSrc){ cb('auto'); return; }
   loadImgSafe(imgSrc, function(pi){
@@ -24381,7 +24386,7 @@ function _padExteriorTo916WithBlur(url, cb){
     // 무관하게 9:16을 고르면 전부 3:4로 안전하게 생성하도록 범위를 넓힘.
     // ⚠️ 요청 반영("임의로 넓히지 마, 그냥 9:16으로 해"): 3:4로 다운그레이드하던 안전장치를 완전히
     // 제거함 — 선택한 비율(9:16 포함)이 그대로 API에 전달됨. 겹침 방지는 아래 프롬프트 지시문으로만 대응.
-    var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
+    var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? _apiAspect(spTab.forcedAspect) : '3:4';
     // ⚠️ 요청 반영(되돌림): 예전엔 "건물이 2개로 겹쳐 나오는" 버그 때문에 건축 외관 뷰일 땐 9:16을
     // 자동으로 3:4로 낮췄는데, 사용자가 선택한 비율과 실제 출력 비율이 달라서 오히려 "비율이
     // 이상하다"는 혼란을 줬음. 사용자가 위험을 감수하고 진짜 9:16을 시도해보길 원해서, 이 강제
@@ -25049,7 +25054,7 @@ function _autoRoomRetryOne(idx){
   // ⚠️ 요청 반영(최종 확정): "이 뷰만 다시 생성"에도 동일하게 적용 — 세 반영도 전부 이제 순수
   // 생성 경로를 씀(전에는 loose만 이 경로였음).
   {
-    var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? spTab.forcedAspect : '3:4';
+    var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? _apiAspect(spTab.forcedAspect) : '3:4';
     // (위 _looseAspect와 동일한 이유로 9:16→3:4 강제 다운그레이드 제거함)
     var _looseP2 = '';
     if(spTab.aptCustomPrompt && spTab.aptCustomPrompt.trim()){
@@ -28275,7 +28280,7 @@ function _agentGenerateTextOnly(promptText, onDone, onErr, resolution){
   var ap = 'Interior architecture photography, photorealistic. ' + promptText + '. High quality, sharp details, professional real estate photography style.' + NO_BRAND_TRADEMARK_RULE + NO_BLUR_RULE + SINGLE_IMAGE_OUTPUT_RULE + KOREA_BACKGROUND_RULE + AC_CONSISTENCY_RULE + MAIN_LIGHT_CONSISTENCY_RULE + (promptText.indexOf('사람')===-1 && promptText.indexOf('한국인')===-1?NO_PEOPLE_ANIMALS_RULE:'');
   var _bill = {wf:'space', resolution:resolution||'1K'};
   var _agentTab = getTab('agent');
-  var _agentAspect = (_agentTab.forcedAspect && _agentTab.forcedAspect!=='auto') ? _agentTab.forcedAspect : '16:9';
+  var _agentAspect = (_agentTab.forcedAspect && _agentTab.forcedAspect!=='auto') ? _apiAspect(_agentTab.forcedAspect) : '16:9';
   falRun('fal-ai/bytedance/seedream-v4.5', {prompt:ap, aspect_ratio:_agentAspect, num_images:1}, function(d){
     var url=falExtractImageUrl(d);
     if(url) onDone(url); else onErr('이미지 URL을 찾지 못했습니다');
@@ -52037,7 +52042,7 @@ function _siteMarkCrop(rd, box, cb){
   }catch(e){ cb(null); } }, function(){ cb(null); });
 }
 // 2026-10-28 신고("확대 사본 방식은 건물이 엄청 크게 들어갔다"): 배치도는 다시 1번 이미지에 직접 표시(자리·크기 정확) — 대신 자홍색 선으로 그리고, 결과에 그 선이 남으면 그 자리 픽셀만 주변 색으로 메워서 지움
-function _planLineErase(src, box, cb){
+function _planLineErase(src, box, cb, red){
   loadImgSafe(src, function(im){ try{
     var w=im.naturalWidth||im.width, h=im.naturalHeight||im.height, c=document.createElement('canvas'); c.width=w; c.height=h; var x=c.getContext('2d'); x.drawImage(im,0,0,w,h);
     var bd=Math.max(8, Math.round(Math.max(w,h)*0.02));
@@ -52051,7 +52056,7 @@ function _planLineErase(src, box, cb){
       var nearH=(Math.abs(gy-by0)<=bd||Math.abs(gy-by1)<=bd) && gx>=bx0-bd && gx<=bx1+bd;
       if(!nearV && !nearH) continue;
       var i=(yy*RW+xx)*4, r=d[i], g=d[i+1], b=d[i+2];
-      if(r>130 && b>110 && g < 0.62*Math.min(r,b)){ M[yy*RW+xx]=1; n++; }
+      if(red ? (r>140 && g<0.5*r && b<0.5*r) : (r>130 && b>110 && g < 0.62*Math.min(r,b))){ M[yy*RW+xx]=1; n++; }
     }
     if(n<20){ cb(null); return; }
     // 2px 넓혀서 테두리 번짐까지
@@ -53401,12 +53406,13 @@ function procImgWithTask(task, onDone, onErr){
       });
       return;
     }
-    var _ru3=new Array(_refs3.length),_d3=0,_f3=0,_need3=_refs3.length,_markUrl3=null,_planBox3=null;
+    var _ru3=new Array(_refs3.length),_d3=0,_f3=0,_need3=_refs3.length,_markUrl3=null,_planBox3=null,_anyBox3=false,_camBox3=null;
     // 2026-10-28 신고("배치도에 빨간 테두리까지 렌더링됐다"): 배치도는 1번(위성사진)을 깨끗한 원본으로 보내고, 빨간 사각형 그린 사본은 맨 끝 '위치 안내'로만 따로 보냄
     var _isPlan3 = !!(_aerialCamRef && task && task.selK==='site_context_composite_plan');
     function _chk3(){ if(_d3+_f3===_need3) _go3(); }
     _refs3.forEach(function(rd,ri){
       var _smBox = (_siteMarksNow && _siteMarksNow[_siteMarkSig(rd)]) || null; // 2026-10-27 대지 위치 표시
+      if(_smBox){ _anyBox3=true; if(rd===_aerialCamRef) _camBox3=_smBox; }
       if(_isPlan3 && _smBox && rd===_aerialCamRef){
         _planBox3=_smBox;
         _siteMarkApply(rd, _smBox, function(md){ uploadImgToFal(md,function(rUrl){_ru3[ri]=rUrl;_d3++;_chk3();},function(){_f3++;_chk3();}); }, '#ff00ff');
@@ -53420,9 +53426,12 @@ function procImgWithTask(task, onDone, onErr){
       var _camI = _aerialCamRef ? _refs3.indexOf(_aerialCamRef) : -1; // 2026-10-27 조감도류: 1번 이미지 = 브이월드 캡처(카메라), 2번 = 3D 디자인
       var _urls3 = (_camI>=0 && _ru3[_camI]) ? [_ru3[_camI], imgUrl].concat(_ru3.filter(function(u,ii){ return u && ii!==_camI; })) : [imgUrl].concat(_ru3.filter(Boolean));
       if(_isPlan3 && _planBox3 && _camI>=0 && _ru3[_camI]){ ap += ' 📍 TARGET LOT: in image 1 the target lot is marked with a thin MAGENTA (pink-purple) rectangle — that rectangle is only a marker, it is not part of the photo. Replace the existing building inside it; the new roof must stay entirely INSIDE that rectangle (same size as the existing building there, never bigger, never spreading over neighboring roofs) — everything outside the rectangle keeps its own buildings. In the result paint over the magenta line with the real ground/roof that is under it: NO magenta, red, blue or any colored frame, box or outline anywhere.'; }
+      // 2026-11-10 신고(회원 결과에 빨간 사각형이 그대로 남음 → 메인건물 실사화까지 따라감): 대지 위치 표시 사각형은 표시일 뿐 — 결과에 절대 그리지 않게
+      if(_anyBox3 && !_isPlan3) ap += ' 🟥 The RED rectangle drawn on a reference photo is ONLY a location marker added by the user — it is NOT part of the scene. NEVER draw any red rectangle, red frame, red outline or red line anywhere in the result; the result must look like a clean real photograph.';
       _withExplicitAspect((_camI>=0 && _ru3[_camI]) ? _aerialCamRef : img, function(_asp){
         falRun(_nbSlug3,{prompt:ap,image_urls:_urls3,num_images:1,resolution:apiRes,aspect_ratio:_asp,output_format:'jpeg'},
           function(d){var url=falExtractImageUrl(d);if(!url){ onErr('NB2 URL 없음'); return; }
+            if(_camBox3 && !_isPlan3 && typeof _planLineErase==='function'){ var _od=onDone; onDone=function(u0){ _planLineErase(u0, _camBox3, function(du){ if(du) console.log('[대지 위치 표시] 결과에 남은 빨간 사각형 선을 지웠어요'); _od(du||u0); }, true); }; }
             if(_aerialCamRef && /^site_context_composite_aerial/.test(task.selK||'')){ _surroundPass(url, apiRes, function(f){ onDone(f||url); }); return; }
             if(_isPlan3 && _planBox3){ _planLineErase(url, _planBox3, function(du){ var u1=du||url; _planRoofPass(u1, _planBox3, imgUrl, apiRes, function(f){ onDone(f||u1); }); }); return; }
             onDone(url);},onErr, _bill);
@@ -65303,7 +65312,7 @@ function gV(v){ return GV_MAP[v]||v; }
 // 2026-11-10: 내레이션이 "말 잘하는 똑똑한 개그맨" 느낌으로 바뀌어서 읽는 말투도 다큐 톤 → 친근하고 생기 있는 진행자 톤
 var G_STYLE_DOC='Speak natural native Korean (Seoul standard) like a real Korean narrator of a premium architecture and interior documentary: calm, warm and sincere, conversational and human, never like an announcer or a robot, natural breathing with short pauses between phrases, unhurried, no exaggeration.';
 function gStyleNow(){ if(window._gStyleForce) return window._gStyleForce; try{ var k=(typeof dNarSt==='function')?dNarSt():'fun'; return (k==='fun'||k==='host')?G_STYLE:G_STYLE_DOC; }catch(e){ return G_STYLE; } }
-var G_STYLE='Speak natural native Korean (Seoul standard) like a warm, quick-witted Korean TV variety-show host talking to friends: lively and friendly with a smile in the voice, natural comic timing — a tiny pause before a punchline, playful rise on questions — conversational and human, never like an announcer, a documentary narrator or a robot, not shouting, not over-acting.';
+var G_STYLE='Speak natural native Korean (Seoul standard) like a smart, warm and composed Korean TV host talking to friends: friendly, relaxed and confident with a light smile in the voice and subtle wit — calm, steady pace, low-key humor delivered dryly with a tiny natural pause, never hyper, never squeaky or overexcited, no exaggerated ups and downs, not over-acting, not shouting, never like an announcer or a robot. (2026-11-10: 유머·센스·진행자 느낌은 좋은데 너무 까불지 않게)';
 var OLDV={Sarah:'Korean_CalmLady', Charlotte:'Korean_SoothingLady', Jessica:'Korean_FriendlyBigSister', Brian:'Korean_IntellectualMan', Daniel:'Korean_CalmGentleman', George:'Korean_ReliableYouth'};
 var FALLV={}; Object.keys(OLDV).forEach(function(k){ FALLV[OLDV[k]]=k; });
 function ttsGenderOk(d, fem){ return new Promise(function(res){ var done=false; function fin(v){ if(!done){ done=true; res(v); } } setTimeout(function(){ fin(true); }, 8000);
@@ -66517,12 +66526,12 @@ window._recToShorts=function(file){
     // ② 2×2 묶음 그림(최대 6장) → AI가 핵심 단계·문구·주목 위치를 정함
     recShSt('🤖 AI가 화면을 보고 핵심 장면·문구를 정하는 중…', 34);
     var sheets=recShSheets(A.keys, A.keys.length>24); if(A.picked){ var qp='These '+sheets.length+' images are contact sheets of '+A.keys.length+' screenshots that the USER PICKED from a screen recording of a Korean web app (CLOVER AI — AI interior/architecture image tool), in order, labeled #1 to #'+A.keys.length+' (with their time). Every picked image becomes one scene of a Korean YouTube Short (vertical 9:16, each image shown as a zoomed still). When two picked images compare things (e.g. a map/street view or a 3D model and the rendered photo of the same place), say so in the lines (before → after). '+
-      'TONE (2026-11-10 request — not stiff, humorous, like a TV host): write like a warm, quick-witted Korean TV variety-show host who is also smart, showing a friend a cool app — talk TO the viewer (여러분 / 자, 보세요), react playfully to what happens on screen (e.g. 클릭 한 번에 집이 완성? / 이거 제가 한 거 아니고 AI가 한 거예요), light everyday or self-deprecating humor, a small twist or punchline now and then, but every step stays clear and true; never a dry manual, never mean jokes; no clichés like 실화/미쳤다/대박/레전드. The FIRST line/hook must make people curious within 3 seconds. '+NAT_KO+' Writing rules (Korean, easy, friendly, for beginners): "hook" = big title at the top for the whole video, max 16 characters, makes people curious. For EACH image: "line" = ONE-line subtitle max 18 characters; "say" = one natural narrator sentence about 2.5–4 seconds (max 45 characters); fx, fy = center (0–1 of the screen width/height) of the area to look at; zoom 1.0–1.4 (keep it low so the image stays sharp; 1.0 = the whole screen width). The first scene hooks in 3 seconds; the LAST scene must end with this call to action (say it naturally, same meaning): 프로필 링크로 CLOVER AI에 들어가서 무료로 테스트해 보세요 — never 팔로우/구독 asks. Never invent features that are not on screen; if burned-in subtitles exist, use their meaning. '+
+      'TONE (2026-11-10 request — not stiff, humorous, like a TV host): write like a warm, quick-witted Korean TV variety-show host who is also smart, showing a friend a cool app — talk TO the viewer (여러분 / 자, 보세요), react with relaxed wit to what happens on screen (e.g. 클릭 한 번에 집이 완성? / 이거 제가 한 거 아니고 AI가 한 거예요), light everyday or self-deprecating humor, a small twist now and then — classy and composed, never silly, hyper or childish, at most one exclamation mark in the whole script — and every step stays clear and true; never a dry manual, never mean jokes; no clichés like 실화/미쳤다/대박/레전드. The FIRST line/hook must make people curious within 3 seconds. '+NAT_KO+' Writing rules (Korean, easy, friendly, for beginners): "hook" = big title at the top for the whole video, max 16 characters, makes people curious. For EACH image: "line" = ONE-line subtitle max 18 characters; "say" = one natural narrator sentence about 2.5–4 seconds (max 45 characters); fx, fy = center (0–1 of the screen width/height) of the area to look at; zoom 1.0–1.4 (keep it low so the image stays sharp; 1.0 = the whole screen width). The first scene hooks in 3 seconds; the LAST scene must end with this call to action (say it naturally, same meaning): 프로필 링크로 CLOVER AI에 들어가서 무료로 테스트해 보세요 — never 팔로우/구독 asks. Never invent features that are not on screen; if burned-in subtitles exist, use their meaning. '+
       'Answer ONLY one compact JSON object, no code fences, no double-quote characters inside values: {"hook":"...","segs":[{"n":1,"line":"...","say":"...","fx":0.5,"fy":0.5,"zoom":1.6}],"title":"YouTube title max 40 chars","desc":"2–3 sentences","tags":["#tag1","#tag2","#tag3","#tag4","#tag5"],"burned":{"has":false,"y0":0.82,"y1":0.96}} — segs must have exactly '+A.keys.length+' items, n = image number, in the same order.';
       return recShAsk(sheets, qp, function(j){ return Array.isArray(j.segs) && j.segs.length || recShRecover(j, 'segs'); }).then(function(j){ if(!(Array.isArray(j.segs) && j.segs.length)) recShRecover(j, 'segs'); var L=Array.isArray(j.segs)?j.segs:[]; j.segs=A.keys.map(function(k,i){ var g=null; L.forEach(function(x){ if(+x.n===i+1) g=x; }); g=g||L[i]||{}; return {from:Math.max(0,k.t-1), to:Math.min(D,k.t+1), at:k.t, fixed:1, line:g.line||'', say:g.say||g.line||'', fx:g.fx, fy:g.fy, zoom:g.zoom}; }).filter(function(x){ return x.line; }); if(!j.segs.length) throw new Error('AI가 자막을 쓰지 못했어요 (콘솔에 AI 답이 있어요)'); A.plan=j; return A; }); }
     var q=(pn>1?'This is PART '+(pi+1)+' of '+pn+' of a longer tutorial series; the frames cover only seconds '+pt.a.toFixed(0)+'–'+pt.b.toFixed(0)+' (topic: '+(pt.topic||'')+'), so use ONLY moments inside that range, and start the hook with "'+(pi+1)+'편 ". ':'')+'These '+sheets.length+' images are contact sheets of a '+D.toFixed(0)+'-second SILENT screen recording'+(A.keys.length>24?' (9 frames per sheet)':'')+' of a Korean web app (CLOVER AI — AI interior/architecture image tool). Each sheet holds up to 4 frames, each labeled with a red tag "#n time" (seconds in the original video). '+
       'Make a Korean YouTube Shorts / Reels tutorial (vertical 9:16) from it: pick the 6–10 KEY moments in time order (what menu/button is clicked, what is typed/selected, and the result) totalling 40–55 seconds. The vertical video shows a ZOOMED crop of the screen, so for each moment give the center (fx, fy as 0–1 of the full screen width/height) of the exact area the viewer must look at (the button, panel or result being used) and a zoom 1.0–1.4 (keep it low so the image stays sharp; slightly higher only for a small button). '+
-      'TONE (2026-11-10 request — not stiff, humorous, like a TV host): write like a warm, quick-witted Korean TV variety-show host who is also smart, showing a friend a cool app — talk TO the viewer (여러분 / 자, 보세요), react playfully to what happens on screen (e.g. 클릭 한 번에 집이 완성? / 이거 제가 한 거 아니고 AI가 한 거예요), light everyday or self-deprecating humor, a small twist or punchline now and then, but every step stays clear and true; never a dry manual, never mean jokes; no clichés like 실화/미쳤다/대박/레전드. The FIRST line/hook must make people curious within 3 seconds. '+NAT_KO+' Writing rules (Korean, easy, friendly, for beginners): "hook" = the big title shown at the top for the whole video, max 16 characters, makes people curious (e.g. 사진 한 장으로 인테리어 끝). Each "line" = ONE-line on-screen subtitle, max 18 characters. Each "say" = what a calm narrator says in that moment, one natural sentence, about 2.5–4 seconds to speak (max 45 characters), it may differ from "line". The first moment must hook in 3 seconds; the LAST one must end with this call to action (same meaning, natural words): 프로필 링크로 CLOVER AI에 들어가서 무료로 테스트해 보세요 — never ask to follow/subscribe (팔로우/구독). Never invent features that are not on screen. If the recording already has burned-in subtitles or captions (e.g. added in CapCut), read them and build your lines and narration on what they say (shorter, cleaner), and report where that subtitle band is. '+
+      'TONE (2026-11-10 request — not stiff, humorous, like a TV host): write like a warm, quick-witted Korean TV variety-show host who is also smart, showing a friend a cool app — talk TO the viewer (여러분 / 자, 보세요), react with relaxed wit to what happens on screen (e.g. 클릭 한 번에 집이 완성? / 이거 제가 한 거 아니고 AI가 한 거예요), light everyday or self-deprecating humor, a small twist now and then — classy and composed, never silly, hyper or childish, at most one exclamation mark in the whole script — and every step stays clear and true; never a dry manual, never mean jokes; no clichés like 실화/미쳤다/대박/레전드. The FIRST line/hook must make people curious within 3 seconds. '+NAT_KO+' Writing rules (Korean, easy, friendly, for beginners): "hook" = the big title shown at the top for the whole video, max 16 characters, makes people curious (e.g. 사진 한 장으로 인테리어 끝). Each "line" = ONE-line on-screen subtitle, max 18 characters. Each "say" = what a calm narrator says in that moment, one natural sentence, about 2.5–4 seconds to speak (max 45 characters), it may differ from "line". The first moment must hook in 3 seconds; the LAST one must end with this call to action (same meaning, natural words): 프로필 링크로 CLOVER AI에 들어가서 무료로 테스트해 보세요 — never ask to follow/subscribe (팔로우/구독). Never invent features that are not on screen. If the recording already has burned-in subtitles or captions (e.g. added in CapCut), read them and build your lines and narration on what they say (shorter, cleaner), and report where that subtitle band is. '+
       'Answer ONLY one compact JSON object, no code fences, no double-quote characters inside values: {"hook":"...","segs":[{"from":0.0,"to":5.0,"line":"...","say":"...","at":4.0,"fx":0.5,"fy":0.5,"zoom":1.8}],"title":"YouTube title max 40 chars","desc":"2–3 sentence description","tags":["#tag1","#tag2","#tag3","#tag4","#tag5"],"burned":{"has":false,"y0":0.82,"y1":0.96}} — burned = burned-in subtitle band of the ORIGINAL frames (y0/y1 as 0–1 of the height), has:false if none — from/to are seconds in the ORIGINAL video (each 3–8 s, not overlapping, in order); each moment is shown as ONE FROZEN STILL image, so "at" = the exact second inside from–to where the screen shows that step most clearly (menu open, button highlighted, result visible — avoid frames where the mouse covers the important part or the screen is mid-transition).';
     return recShAsk(sheets, q, function(j){ return Array.isArray(j.segs) && j.segs.length || recShRecover(j, 'segs'); }).then(function(j){ if(!(Array.isArray(j.segs) && j.segs.length)) recShRecover(j, 'segs'); if(!(Array.isArray(j.segs) && j.segs.length)) throw new Error('AI가 장면을 고르지 못했어요 (콘솔에 AI 답이 있어요)'); A.plan=j; return A; });
   }).then(function(A){ chk(); var P=A.plan, segs=[];
@@ -66699,8 +66708,8 @@ var NAR_HOOK3=' 🪝 FIRST 3 SECONDS RULE (every style, always): the FIRST line 
 function dNarSt(){ var k=(STU.D&&STU.D.narStyle)||'fun'; return /^(fun|host|info|tour)$/.test(k)?k:'fun'; }
 window.dNarSt=dNarSt; setTimeout(function(){ try{ window.dNarInfoQ=dNarInfoQ; window.gStyleNow=gStyleNow; }catch(e){} },0);
 function dNarPersona(k){
-  if(k==='fun') return 'VOICE / PERSONA: write like a beloved, quick-witted Korean TV variety-show comedian who is also surprisingly smart — warm and friendly to the viewer, talks TO them (\"여러분\", questions they want to answer), reacts playfully to what is on screen, uses light self-deprecating or everyday-life humor that any Korean adult gets (no mean jokes, no making fun of people, no politics), drops ONE real fact as a fun surprise, and lands a small twist or punchline. Natural spoken Korean with rhythm (짧게 치고 빠지는 말맛), like a real person talking — not a narrator reading text. Never use worn-out reaction clichés such as 실화?, 미쳤다, 대박, 레전드; get the curiosity from concrete details instead.\n';
-  if(k==='host') return 'VOICE / PERSONA: write like a friendly, energetic Korean TV show host (진행자) guiding viewers — bright, warm and confident, talks TO the viewer (\"여러분\", \"자, 보시죠\"), builds curiosity step by step, smiles in the words, an occasional light witty remark but mostly smooth, clear hosting; one real fact presented as an interesting discovery. No worn-out clichés such as 실화?, 미쳤다, 대박, 레전드.\n';
+  if(k==='fun') return 'VOICE / PERSONA: write like a beloved, quick-witted Korean TV variety-show comedian who is also surprisingly smart — warm and friendly to the viewer, talks TO them (\"여러분\", questions they want to answer), reacts playfully to what is on screen, uses light self-deprecating or everyday-life humor that any Korean adult gets (no mean jokes, no making fun of people, no politics), drops ONE real fact as a fun surprise, and lands a small twist or punchline. Keep it CLASSY: witty and relaxed, never silly, hyper or childish — no over-the-top reactions, no repeated exclamations, at most one exclamation mark in the whole script. Natural spoken Korean with rhythm (짧게 치고 빠지는 말맛), like a real person talking — not a narrator reading text. Never use worn-out reaction clichés such as 실화?, 미쳤다, 대박, 레전드; get the curiosity from concrete details instead.\n';
+  if(k==='host') return 'VOICE / PERSONA: write like a friendly, energetic Korean TV show host (진행자) guiding viewers — bright, warm and confident, talks TO the viewer (\"여러분\", \"자, 보시죠\"), builds curiosity step by step, smiles in the words, an occasional light witty remark but mostly smooth, calm, confident hosting (never hyper or silly, at most one exclamation mark in the whole script); one real fact presented as an interesting discovery. No worn-out clichés such as 실화?, 미쳤다, 대박, 레전드.\n';
   return '';
 }
 function dNarStep2(k, n){
