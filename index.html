@@ -49097,7 +49097,7 @@ function _surroundPass(url, res, cb){
     console.log('[대지 합성 조감도] 2단계 — 주변 건물 실사화 자동 실행');
     try{ _agedEnvToast('🏙 주변 건물을 실제 사진처럼 다듬는 중이에요 (2단계)…'); }catch(e){}
     _withExplicitAspect(url, function(asp){
-      falRun('fal-ai/nano-banana-pro/edit', {prompt: ps.pt + USER_SIGNAGE_KEEP_RULE + NO_COLOR_CAST_RULE + SURROUND_CARS_TREES, image_urls:[url], num_images:1, resolution: res||'2K', aspect_ratio: asp, output_format:'jpeg'},
+      falRun('fal-ai/nano-banana-pro/edit', {prompt: ps.pt + USER_SIGNAGE_KEEP_RULE + NO_COLOR_CAST_RULE + SURROUND_CARS_TREES + ' ⛰ Keep the land exactly as it is: same mountains, hills, forests, fields, roads and buildings in the same places — only make them look real; never remove a hill or forest, never add new roads or buildings.', image_urls:[url], num_images:1, resolution: res||'2K', aspect_ratio: asp, output_format:'jpeg'},
         function(d){ var u2=falExtractImageUrl(d); if(!u2){ fin(null); return; } _surroundComposite(url, u2, function(f){ fin(f||u2); }); },
         function(e){ console.warn('[대지 합성 조감도] 2단계 실패 — 1단계 결과 사용', e); fin(null); },
         {wf:'edit', resolution:'1K', eng:'nano_pro', selK:'surround_real'}); // 2026-10-28 사용자 결정: 조감도·광역조감도 2K = 90cr(렌더 50 + 2단계 40 고정 — 서버 나노바나나 Pro 1K 단가 40cr로 청구)
@@ -53427,6 +53427,8 @@ function procImgWithTask(task, onDone, onErr){
       var _urls3 = (_camI>=0 && _ru3[_camI]) ? [_ru3[_camI], imgUrl].concat(_ru3.filter(function(u,ii){ return u && ii!==_camI; })) : [imgUrl].concat(_ru3.filter(Boolean));
       if(_isPlan3 && _planBox3 && _camI>=0 && _ru3[_camI]){ ap += ' 📍 TARGET LOT: in image 1 the target lot is marked with a thin MAGENTA (pink-purple) rectangle — that rectangle is only a marker, it is not part of the photo. Replace the existing building inside it; the new roof must stay entirely INSIDE that rectangle (same size as the existing building there, never bigger, never spreading over neighboring roofs) — everything outside the rectangle keeps its own buildings. In the result paint over the magenta line with the real ground/roof that is under it: NO magenta, red, blue or any colored frame, box or outline anywhere.'; }
       // 2026-11-10 신고(회원 결과에 빨간 사각형이 그대로 남음 → 메인건물 실사화까지 따라감): 대지 위치 표시 사각형은 표시일 뿐 — 결과에 절대 그리지 않게
+      // 2026-11-10 회원 문의("참고 이미지에서 모델링만 반영해야 하는데 산을 없애고 도로랑 건물을 세워놨다"): 대지 합성은 땅·산·숲·길을 참고 사진 그대로 두고 새 건물만 넣기
+      if(/^site_context/.test((task&&task.selK)||'')) ap += ' ⛰ KEEP THE REAL LAND EXACTLY: the terrain, mountains, hills, slopes, forests and trees, fields, rivers, existing roads and every existing neighbouring building must stay exactly as in the reference photo — same shapes, same positions, same amount of green. Only the target lot changes: put the new building there at its real size, with just the small yard / retaining walls / driveway that the 3D design itself shows. NEVER flatten or remove a mountain, hill or forest, NEVER add new roads, streets, parking lots, houses or other buildings that are not in the reference photo, and never move or widen the existing roads.';
       if(_anyBox3 && !_isPlan3) ap += ' 🟥 The RED rectangle drawn on a reference photo is ONLY a location marker added by the user — it is NOT part of the scene. NEVER draw any red rectangle, red frame, red outline or red line anywhere in the result; the result must look like a clean real photograph.';
       _withExplicitAspect((_camI>=0 && _ru3[_camI]) ? _aerialCamRef : img, function(_asp){
         falRun(_nbSlug3,{prompt:ap,image_urls:_urls3,num_images:1,resolution:apiRes,aspect_ratio:_asp,output_format:'jpeg'},
@@ -66539,9 +66541,7 @@ window._recToShorts=function(file){
     segs.sort(function(p,q){ return p.a-q.a; }); if(!segs.length) throw new Error('쓸 장면이 없어요');
     // ③ 성우(차분한 남자) — 장면별 한 문장
     var ac=REC_SH.dac||(REC_SH.dac=new (window.AudioContext||window.webkitAudioContext)()), n=0;
-    recShSt('🎙 AI 성우 목소리 만드는 중… 0/'+segs.length, 40);
-    recShCTA(segs);
-    return recShVoiceSegs(segs, ac, function(n){ recShSt('🎙 AI 성우 목소리 만드는 중… '+n+'/'+segs.length, 40+n/segs.length*15); }).then(function(){ A.segs=segs; return A; });
+    recShCTA(segs); A.segs=segs; return A; // 성우는 미리보기에서 자막을 다 고친 뒤(렌더 직전)에 한 번에 만듦
   }).then(function(A){ return renderPart(A, pt, pi, pn); }); }
   // 멈춘 이미지(장면마다 1장)로 세로 쇼츠 만들기 — 수정 후 다시 만들 때도 이 함수
   function renderPart(A, pt, pi, pn){ var segs=A.segs, P=A.plan;
@@ -66557,7 +66557,39 @@ window._recToShorts=function(file){
     var endImg=null; try{ if(typeof SHORTS_ENDING_IMG==='string'){ endImg=new Image(); endImg.src=SHORTS_ENDING_IMG; } }catch(_e){}
     function musLoad(){ if(!REC_SH.music) return Promise.resolve(null); if(REC_SH.musBuf && REC_SH.musBuf._u===REC_SH.music.url) return Promise.resolve(REC_SH.musBuf); recShSt('🎵 음악 불러오는 중…', 58); var dac=REC_SH.dac||(REC_SH.dac=new (window.AudioContext||window.webkitAudioContext)());
       return fetch(REC_SH.music.url).then(function(r){ return r.arrayBuffer(); }).then(function(ab){ return dac.decodeAudioData(ab); }).then(function(b){ b._u=REC_SH.music.url; REC_SH.musBuf=b; return b; }).catch(function(e){ console.warn('[화면녹화→쇼츠] 음악을 못 불러와서 빼고 만들어요', e); return null; }); }
-    return still().then(musLoad).then(function(MB){ chk();
+    // 2026-11-10 요청: 렌더 전에 미리보기 — 장면마다 마우스로 끌어 이미지 위치 옮기기(휠 = 확대) · 자막 고치기 → [렌더]
+    function preview(){ if(REC_SH.noPreview) return Promise.resolve(); return new Promise(function(res, rej){ var m=recShUI(), o=m.querySelector('[data-rout]'), bx=m.firstElementChild; if(bx){ bx.style.width='min(1280px,97vw)'; bx.style.maxHeight='96vh'; }
+      recShSt('👀 미리보기 — 이미지를 <b>마우스로 끌어서</b> 위치를 옮기고(휠 = 확대·축소) 자막을 고친 뒤 <b>[🎬 이대로 쇼츠 만들기]</b>를 누르세요', 58);
+      var zMax=Math.max(1, SH/(PH/1.35)), CW=270, CH=480, sc=CW/W;
+      function crop2(sg){ var z=Math.min(Math.max(1, sg.z||1), zMax), chh=SH/z, cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } var yM=SH; if(BUR){ yM=Math.max(SH*0.45, BUR*SH); if(chh>yM){ chh=yM; cww=chh*PA; if(cww>SW){ cww=SW; chh=cww/PA; } } }
+        return [Math.max(0, Math.min(SW-cww, sg.fx*SW-cww/2)), Math.max(0, Math.min(yM-chh, sg.fy*SH-chh/2)), cww, chh]; }
+      function wrap(x, t, mw){ return recShWrap(x, t, mw); }
+      function draw1(cv, sg, hook){ var x=cv.getContext('2d'); x.setTransform(sc,0,0,sc,0,0); x.fillStyle='#000'; x.fillRect(0,0,W,H); var c=crop2(sg);
+        try{ x.filter='contrast(1.08) saturate(1.12) brightness(1.02)'; }catch(_e){} x.drawImage(sg.img, c[0], c[1], c[2], c[3], 0, PY, W, PH); try{ x.filter='none'; }catch(_e){}
+        x.textAlign='center'; x.textBaseline='middle'; x.lineJoin='round'; x.font='900 80px Pretendard, sans-serif'; var hl=wrap(x, hook||'', W-110).slice(0,2); hl.forEach(function(l,k){ x.fillStyle='#fff'; x.fillText(l, W/2, PY/2+(k-(hl.length-1)/2)*100); });
+        x.font='800 60px Pretendard, sans-serif'; var sl=wrap(x, sg.line||'', W-120).slice(0,2); sl.forEach(function(l,k){ var y=PY+PH-90-(sl.length-1-k)*74; x.lineWidth=10; x.strokeStyle='rgba(0,0,0,.85)'; x.strokeText(l, W/2, y); x.fillStyle='#fff'; x.fillText(l, W/2, y); });
+        x.font='900 66px Pretendard, sans-serif'; x.fillStyle='#00e5cc'; x.fillText('clover ai', W/2, PY+PH+(H-PY-PH)/2); x.setTransform(1,0,0,1,0,0); }
+      var inp='width:100%;box-sizing:border-box;background:#0f1115;color:#fff;border:1px solid rgba(255,255,255,.18);border-radius:7px;padding:6px 8px;font-family:inherit;font-size:13px;margin-top:6px';
+      o.innerHTML='<div class="tiny" style="margin-bottom:4px">위 큰 제목 (모든 장면 공통)</div><input data-phk style="'+inp+';font-size:15px;font-weight:800" value="'+esc(P.hook||'')+'">'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;margin-top:12px;max-height:66vh;overflow:auto;padding:2px">'+segs.map(function(sg,i){ return '<div style="background:#0f1115;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px"><div class="tiny" style="margin-bottom:6px"><b>'+(i+1)+'번 장면</b> · 끌어서 이동 · 휠 확대</div><canvas data-pcv="'+i+'" width="'+CW+'" height="'+CH+'" style="display:block;width:100%;max-width:'+CW+'px;margin:0 auto;border-radius:8px;cursor:grab;touch-action:none;background:#000"></canvas><input data-pln="'+i+'" style="'+inp+'" value="'+esc(sg.line||'')+'"><div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="stu-btn sm" data-prs="'+i+'">↺ 위치 처음대로</button></div></div>'; }).join('')+'</div>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center"><button type="button" class="stu-btn pri" data-pgo2>🎬 이대로 쇼츠 만들기</button><span class="tiny">자막을 고치면 성우도 그 말로 읽어요 (성우는 이때 한 번에 만들어요)</span></div>';
+      var hk=o.querySelector('[data-phk]'); function redrawAll(){ segs.forEach(function(sg,i){ var cv=o.querySelector('[data-pcv="'+i+'"]'); if(cv) draw1(cv, sg, hk.value); }); }
+      segs.forEach(function(sg,i){ sg._fx0=sg.fx; sg._fy0=sg.fy; sg._z0=sg.z; var cv=o.querySelector('[data-pcv="'+i+'"]'), drag=null;
+        cv.addEventListener('pointerdown', function(e){ if(e.button!==0) return; drag={x:e.clientX, y:e.clientY, fx:sg.fx, fy:sg.fy}; cv.setPointerCapture(e.pointerId); cv.style.cursor='grabbing'; e.preventDefault(); });
+        cv.addEventListener('pointermove', function(e){ if(!drag) return; var r=cv.getBoundingClientRect(), k=W/r.width, c=crop2(sg); var dx=(e.clientX-drag.x)*k, dy=(e.clientY-drag.y)*k; // 화면에서 끈 만큼 원본에서 반대로
+          sg.fx=Math.max(0, Math.min(1, drag.fx - dx*(c[2]/W)/SW)); sg.fy=Math.max(0, Math.min(1, drag.fy - dy*(c[3]/PH)/SH)); draw1(cv, sg, hk.value); });
+        function up(e){ if(drag){ drag=null; cv.style.cursor='grab'; var c=crop2(sg); sg.fx=(c[0]+c[2]/2)/SW; sg.fy=(c[1]+c[3]/2)/SH; } } cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+        cv.addEventListener('wheel', function(e){ e.preventDefault(); sg.z=Math.max(1, Math.min(zMax, (sg.z||1)*(e.deltaY<0?1.05:1/1.05))); draw1(cv, sg, hk.value); }, {passive:false});
+        o.querySelector('[data-pln="'+i+'"]').addEventListener('input', function(e){ sg.line=e.target.value; draw1(cv, sg, hk.value); });
+        o.querySelector('[data-prs="'+i+'"]').onclick=function(){ sg.fx=sg._fx0; sg.fy=sg._fy0; sg.z=sg._z0; draw1(cv, sg, hk.value); }; });
+      hk.addEventListener('input', redrawAll); redrawAll();
+      o.querySelector('[data-pgo2]').onclick=function(){ P.hook=hk.value.trim()||P.hook; segs.forEach(function(sg,i){ var t=String(o.querySelector('[data-pln="'+i+'"]').value||'').trim(); if(!t) return; if(t!==sg._line0){ if(sg.buf) sg.buf=null; sg.say=(sg._line0!=null && t!==sg._line0)?t:(sg.say||t); } sg.line=t; });
+        o.innerHTML=''; if(bx) bx.style.width='min(1100px,96vw)'; res(); };
+    }); }
+    segs.forEach(function(sg){ if(sg._line0==null) sg._line0=sg.line; });
+    function voice(){ if(segs.every(function(sg){ return sg.buf; })) return Promise.resolve(); var dac=REC_SH.dac||(REC_SH.dac=new (window.AudioContext||window.webkitAudioContext)());
+      recShSt('🎙 AI 성우 목소리 만드는 중… (목소리가 바뀌지 않게 전체를 한 번에)', 60); return recShVoiceSegs(segs, dac, function(){}).then(function(){ segs.forEach(function(sg){ sg._line0=sg.line; }); }); }
+    return still().then(preview).then(voice).then(musLoad).then(function(MB){ chk();
     var T=0; segs.forEach(function(s){ var vd=s.buf?s.buf.duration+0.6:0; s.out=Math.max(vd, 2.8); s.t0=T; T+=s.out; }); T+=0.6; var TM=T, END=endImg?3.5:0; T+=END; // 2026-11-10 요청: 마지막에 CLOVER AI 엔딩
     var ac=new (window.AudioContext||window.webkitAudioContext)(), cv=document.createElement('canvas'); cv.width=W; cv.height=H; var x=cv.getContext('2d');
     var dest=ac.createMediaStreamDestination(), stream=cv.captureStream(30); dest.stream.getAudioTracks().forEach(function(tr){ stream.addTrack(tr); });
