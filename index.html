@@ -1235,6 +1235,11 @@ function cloverDownload(src, fname){
   // 재생 화면으로 넘어가거나(브라우저가 다운로드를 지원 안 하는 교차 출처 상황) 둘 중 하나는
   // 반드시 일어나서, 최소한 "완전히 무반응"인 상황만큼은 없앰.
   if(/\.(mp4|webm|mov)(\?|#|$)/i.test(fname) || /\.(mp4|webm|mov)(\?|#|$)/i.test(src||'')){
+    /* 2026-11-12 신고("영상 편집·영상 제작에서 받은 mp4가 또 3초로 표시"): 갤러리 다운로드가 서버 파일(브라우저 녹화 그대로 = 조각난 MP4)을 바로 받고 있었음
+       → 먼저 받아서 표준 MP4로 정리한 뒤 저장. 받아오기가 안 되면 예전처럼 바로 받기 */
+    if(window._snsSave && /^https?:|^blob:/.test(src||'') && !window._cdlRaw){ try{ toast('📱 어디서나 제 길이로 보이는 MP4로 정리하는 중…'); }catch(e){}
+      fetch(src).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.blob(); }).then(function(bl){ var nm=String(fname).replace(/\.(mp4|webm|mov)$/i,''); window._snsSave((/mp4|webm/.test(bl.type)?bl:new Blob([bl],{type:/webm/i.test(fname)?'video/webm':'video/mp4'})), nm); })
+        .catch(function(e){ console.warn('[영상 다운로드] 정리 실패 → 바로 받기', e); window._cdlRaw=1; try{ cloverDownload(src, fname); }finally{ window._cdlRaw=0; } }); return; }
     try{
       var vA=document.createElement('a');
       vA.href=src; vA.download=fname; vA.rel='noopener'; vA.target='_blank';
@@ -65963,7 +65968,7 @@ function preview(){
     cancelAnimationFrame(raf); recOn=rec; rec.start(500); start();
   };
 }
-function saveOut(blob, isShorts){
+function saveOut(blob, isShorts){ if(blob && !blob._sns && window._snsMp4 && /mp4/.test(blob.type||'')){ window._snsMp4(blob).then(function(b){ try{ b._sns=1; }catch(e){} saveOut(b, isShorts); }, function(){ try{ blob._sns=1; }catch(e){} saveOut(blob, isShorts); }); return; } /* 2026-11-12: 갤러리에 올리기 전에 표준 MP4로 */
   try{
     var ext=/mp4/.test(blob.type)?'mp4':'webm', f=new File([blob], 'clover-studio-'+Date.now()+'.'+ext, {type:blob.type||'video/webm'});
     _doUploadFile(f, function(url){
@@ -66524,7 +66529,7 @@ window._vidToShorts=function(item, btnEl, mode){
       v.onended=fin; rec.onstop=function(){ try{ ac.close(); }catch(e){} res(new Blob(ch,{type:(mime||'video/webm').split(';')[0]})); };
       ac.resume().then(function(){ rec.start(500); v.currentTime=0; var pr=v.play(); if(pr&&pr.catch) pr.catch(function(e){ rej(e); }); draw(); setTimeout(fin, (dur?dur*1000+1500:120000)); }).catch(rej);
     });
-  }).then(function(blob){
+  }).then(function(blob){ if(blob && !blob._sns && window._snsMp4 && /mp4/.test(blob.type||'')) return window._snsMp4(blob).then(function(b){ b._sns=1; return b; }, function(){ return blob; }); return blob; }).then(function(blob){
     if(!blob) return;
     bt('갤러리에 저장 중…');
     var ext=/mp4/.test(blob.type)?'mp4':'webm', f=new File([blob], 'clover-shorts-'+Date.now()+'.'+ext, {type:blob.type||'video/webm'});
@@ -68017,7 +68022,7 @@ function qtKling(inp, dur){ var rs=QS.res==='720p'?'720p':'1080p'; return klP(Ob
 function qtMusic(mood, T){ var m=QS.musicMode; if(m==='none') return Promise.resolve(null); if(m==='tpl' && QS.tplMusic){ QS.musicUrl=QS.tplMusic; return Promise.resolve(QS.tplMusic); }
   var mp=mood+MUS_QUALITY, mk='qtmus:'+mp+'|'+Math.ceil(T); if(STU.cache[mk]){ QS.musicUrl=STU.cache[mk]; return Promise.resolve(STU.cache[mk]); }
   return musicGenP(mp, T, mk).then(function(u){ QS.musicUrl=u; return u; }).catch(function(){ return null; }); }
-function qtSave(blob, tag){ try{ var ext=/mp4/.test(blob.type)?'mp4':'webm', f=new File([blob], 'clover-'+QS.k+'-'+Date.now()+'.'+ext, {type:blob.type||'video/webm'}), pjP=(QS.projP||Promise.resolve(null)).catch(function(){ return null; }); QS.projP=null;
+function qtSave(blob, tag){ if(blob && !blob._sns && window._snsMp4 && /mp4/.test(blob.type||'')){ window._snsMp4(blob).then(function(b){ try{ b._sns=1; }catch(e){} qtSave(b, tag); }, function(){ try{ blob._sns=1; }catch(e){} qtSave(blob, tag); }); return; } try{ var ext=/mp4/.test(blob.type)?'mp4':'webm', f=new File([blob], 'clover-'+QS.k+'-'+Date.now()+'.'+ext, {type:blob.type||'video/webm'}), pjP=(QS.projP||Promise.resolve(null)).catch(function(){ return null; }); QS.projP=null;
   _doUploadFile(f, function(url){ pjP.then(function(pj){ QS.outUrl=url; var id=Date.now()+Math.random(), item={id:id, orig:null, result:url, origThumb:null, tags:['🎬 템플릿', tag], ai:'', preview:false, cx:50, fav:false, wf:'video', noCompare:true, vidEng:'kling4', vidRes:QS.res, engine:'Kling 4.0', proj:pj||undefined}; G.HIST.video=G.HIST.video||[]; G.HIST.video.unshift(item); try{ saveHistToStorage(); }catch(e){} try{ if(typeof _saveResultToCloudGallery==='function') _saveResultToCloudGallery('video', id, url, null, 'Kling 4.0 · '+tag, QS.res, null, '', false, pj?{proj:pj}:undefined); }catch(e){} toast('🎬 완성 영상을 갤러리(영상)에 저장했어요'+(pj?' — [🎬 영상 편집]에서 성우·음악·문구를 따로 켜고 끌 수 있어요':'')); }); }, function(e){ console.warn('[템플릿] 저장 실패 — 다운로드는 가능', e); }); }catch(e){} }
 // 2026-11-03 요청("템플릿 영상도 편집에서 성우·음악·효과음·자막 각각 켜고 끄기"): 이어 붙일 때 재료(장면 조각·음악·성우·문구)를 같이 남겨 둠 → 갤러리 [🎬 영상 편집]에서 다시 이어 붙이기
 function qtProjSnap(clips, music, o){ try{ var ob={}; Object.keys(o||{}).forEach(function(k){ if(k!=='vo' && k!=='logo' && k!=='_brand') ob[k]=o[k]; }); ob=JSON.parse(JSON.stringify(ob));
@@ -68653,6 +68658,65 @@ function veSaveAsk(anchor){ if(!VE||VE.busy) return; var old=q('#ve-dest'); if(o
   d.querySelectorAll('[data-vedest]').forEach(function(b){ b.onclick=function(ev){ ev.stopPropagation(); VE.dest=b.getAttribute('data-vedest'); d.remove(); veSave(); }; });
   setTimeout(function(){ document.addEventListener('click', function cl(ev){ if(!d.contains(ev.target)){ d.remove(); document.removeEventListener('click', cl, true); } }, true); }, 0); }
 function veDownload(blob){ window._snsSave(blob, 'clover-edit-'+Date.now()); }
+/* 2026-11-12: 브라우저 녹화 MP4(조각난 fMP4)를 표준 MP4로 다시 묶음 — 재인코딩 없이 헤더·색인만 새로 씀 */
+function _mp4Defrag(ab){
+  var dv=new DataView(ab), U8=new Uint8Array(ab), L=ab.byteLength;
+  function typ(p){ return String.fromCharCode(U8[p+4],U8[p+5],U8[p+6],U8[p+7]); }
+  function kids(s,e){ var o=[], p=s; while(p+8<=e){ var sz=dv.getUint32(p), h=8; if(sz===1){ sz=dv.getUint32(p+8)*4294967296+dv.getUint32(p+12); h=16; } else if(sz===0) sz=e-p; if(sz<8||p+sz>e) break; o.push({t:typ(p), s:p, h:h, c:p+h, e:p+sz}); p+=sz; } return o; }
+  function find(arr,t){ for(var i=0;i<arr.length;i++) if(arr[i].t===t) return arr[i]; return null; }
+  function u64(p){ return dv.getUint32(p)*4294967296+dv.getUint32(p+4); }
+  var top=kids(0,L), ftyp=find(top,'ftyp'), moov=find(top,'moov'); if(!moov) throw new Error('moov 없음');
+  if(!top.some(function(b){ return b.t==='moof'; })) return null; /* 이미 표준 */
+  var mk=kids(moov.c,moov.e), mvhd=find(mk,'mvhd'), mvex=find(mk,'mvex'), TR={}, order=[];
+  mk.filter(function(b){ return b.t==='trak'; }).forEach(function(tb){ var tk=kids(tb.c,tb.e), tkhd=find(tk,'tkhd'), v=U8[tkhd.c], id=dv.getUint32(tkhd.c+(v===1?20:12)), mdia=find(tk,'mdia'), mdk=kids(mdia.c,mdia.e), mdhd=find(mdk,'mdhd'), mv=U8[mdhd.c], ts=dv.getUint32(mdhd.c+(mv===1?20:12)), hdlr=find(mdk,'hdlr'), minf=find(mdk,'minf'), mik=kids(minf.c,minf.e), stbl=find(mik,'stbl'), stsd=find(kids(stbl.c,stbl.e),'stsd');
+    TR[id]={id:id, tb:tb, tkhd:tkhd, mdhd:mdhd, ts:ts, hdlr:hdlr, minf:minf, mik:mik, stsd:stsd, vide:typ(hdlr.c+4)==='vide'||String.fromCharCode(U8[hdlr.c+8],U8[hdlr.c+9],U8[hdlr.c+10],U8[hdlr.c+11])==='vide', S:[], chunks:[], dd:0, ds:0, df:0}; order.push(id); });
+  if(mvex) kids(mvex.c,mvex.e).forEach(function(b){ if(b.t==='trex'){ var id=dv.getUint32(b.c+4), T=TR[id]; if(T){ T.dd=dv.getUint32(b.c+12); T.ds=dv.getUint32(b.c+16); T.df=dv.getUint32(b.c+20); } } });
+  top.forEach(function(mf){ if(mf.t!=='moof') return; kids(mf.c,mf.e).forEach(function(tf){ if(tf.t!=='traf') return; var tk=kids(tf.c,tf.e), th=find(tk,'tfhd'), fl=dv.getUint32(th.c)&0xffffff, p=th.c+4, id=dv.getUint32(p), T=TR[id]; if(!T) return; p+=4;
+      var base=mf.s, dd=T.dd, ds=T.ds, df=T.df; if(fl&1){ base=u64(p); p+=8; } if(fl&2) p+=4; if(fl&8){ dd=dv.getUint32(p); p+=4; } if(fl&0x10){ ds=dv.getUint32(p); p+=4; } if(fl&0x20){ df=dv.getUint32(p); p+=4; }
+      var off=base; tk.forEach(function(tr){ if(tr.t!=='trun') return; var v=U8[tr.c], f=dv.getUint32(tr.c)&0xffffff, q=tr.c+4, n=dv.getUint32(q); q+=4; var doff=0, ff=null; if(f&1){ doff=dv.getInt32(q); q+=4; } if(f&4){ ff=dv.getUint32(q); q+=4; }
+        var pos=(f&1)?base+doff:off, ch={first:T.S.length, n:n, off:pos};
+        for(var i=0;i<n;i++){ var d=dd, sz=ds, sf=(i===0&&ff!==null)?ff:df, ct=0; if(f&0x100){ d=dv.getUint32(q); q+=4; } if(f&0x200){ sz=dv.getUint32(q); q+=4; } if(f&0x400){ sf=dv.getUint32(q); q+=4; } if(f&0x800){ ct=v?dv.getInt32(q):dv.getUint32(q); q+=4; }
+          T.S.push({d:d, sz:sz, sync:!(sf&0x10000), ct:ct, src:pos}); pos+=sz; }
+        T.chunks.push(ch); off=pos; }); }); });
+  /* 새 파일 쓰기 */
+  var parts=[], total=0; function box(t, payload){ var n=8; payload.forEach(function(x){ n+=x.byteLength; }); var h=new Uint8Array(8), d=new DataView(h.buffer); d.setUint32(0,n); for(var i=0;i<4;i++) h[4+i]=t.charCodeAt(i); var o=new Uint8Array(n); o.set(h,0); var p=8; payload.forEach(function(x){ o.set(x,p); p+=x.byteLength; }); return o; }
+  function raw(b){ return U8.slice(b.s, b.e); } function u32a(arr){ var o=new Uint8Array(arr.length*4), d=new DataView(o.buffer); arr.forEach(function(x,i){ d.setUint32(i*4, x>>>0); }); return o; }
+  function full(t, vf, arr){ return box(t,[u32a([vf].concat(arr))]); }
+  var mts=dv.getUint32(mvhd.c+(U8[mvhd.c]===1?20:12)), movDur=0;
+  order.forEach(function(id){ var T=TR[id]; T.dur=0; T.S.forEach(function(s){ T.dur+=s.d; }); movDur=Math.max(movDur, Math.round(T.dur*mts/T.ts)); });
+  var mdatStart, data=0; order.forEach(function(id){ TR[id].S.forEach(function(s){ data+=s.sz; }); }); var big=data>4000000000;
+  function buildMoov(mdatDataStart){ var cur=mdatDataStart, coMap={}; /* 조각 순서대로 섞어 씀 */
+    var seq=[]; order.forEach(function(id){ TR[id].chunks.forEach(function(c){ seq.push({id:id, c:c}); }); }); seq.sort(function(a,b){ return a.c.off-b.c.off; });
+    seq.forEach(function(x){ var T=TR[x.id], sz=0; for(var i=0;i<x.c.n;i++) sz+=T.S[x.c.first+i].sz; x.c.newOff=cur; cur+=sz; });
+    var traks=order.map(function(id){ var T=TR[id], S=T.S;
+      var stts=[], last=null; S.forEach(function(s){ if(last && last[1]===s.d) last[0]++; else { last=[1,s.d]; stts.push(last); } });
+      var anyCt=S.some(function(s){ return s.ct; }), neg=S.some(function(s){ return s.ct<0; }), ctts=[]; if(anyCt){ var lc=null; S.forEach(function(s){ if(lc && lc[1]===s.ct) lc[0]++; else { lc=[1,s.ct]; ctts.push(lc); } }); }
+      var stss=[]; if(T.vide) S.forEach(function(s,i){ if(s.sync) stss.push(i+1); });
+      var stsc=[], prevN=-1; T.chunks.forEach(function(c,i){ if(c.n!==prevN){ stsc.push([i+1, c.n, 1]); prevN=c.n; } });
+      var tbl=[raw(T.stsd), full('stts',0,[stts.length].concat([].concat.apply([],stts))) ];
+      if(anyCt) tbl.push(full('ctts', neg?0x01000000:0, [ctts.length].concat([].concat.apply([],ctts))));
+      if(T.vide && stss.length && stss.length<S.length) tbl.push(full('stss',0,[stss.length].concat(stss)));
+      tbl.push(full('stsc',0,[stsc.length].concat([].concat.apply([],stsc))));
+      tbl.push(full('stsz',0,[0,S.length].concat(S.map(function(s){ return s.sz; }))));
+      if(big){ var a=new Uint8Array(8+T.chunks.length*8), d=new DataView(a.buffer); d.setUint32(4,T.chunks.length); T.chunks.forEach(function(c,i){ d.setUint32(8+i*8, Math.floor(c.newOff/4294967296)); d.setUint32(12+i*8, c.newOff>>>0); }); tbl.push(box('co64',[a])); }
+      else tbl.push(full('stco',0,[T.chunks.length].concat(T.chunks.map(function(c){ return c.newOff; }))));
+      var minfKids=T.mik.filter(function(b){ return b.t!=='stbl'; }).map(raw).concat([box('stbl',tbl)]);
+      var mdhd=raw(T.mdhd), md=new DataView(mdhd.buffer); if(mdhd[8]===1){ md.setUint32(32,Math.floor(T.dur/4294967296)); md.setUint32(36,T.dur>>>0); } else md.setUint32(24,T.dur>>>0);
+      var tkhd=raw(T.tkhd), td=new DataView(tkhd.buffer), tdur=Math.round(T.dur*mts/T.ts); tkhd[11]|=3; if(tkhd[8]===1){ td.setUint32(36,Math.floor(tdur/4294967296)); td.setUint32(40,tdur>>>0); } else td.setUint32(28,tdur>>>0);
+      var mdia=box('mdia',[mdhd, raw(T.hdlr), box('minf',minfKids)]);
+      var other=kids(T.tb.c,T.tb.e).filter(function(b){ return b.t!=='tkhd'&&b.t!=='mdia'&&b.t!=='edts'; }).map(raw);
+      return box('trak',[tkhd].concat(other).concat([mdia])); });
+    var mv=raw(mvhd), mdv=new DataView(mv.buffer); if(mv[8]===1){ mdv.setUint32(32,Math.floor(movDur/4294967296)); mdv.setUint32(36,movDur>>>0); } else mdv.setUint32(24,movDur>>>0);
+    var rest=mk.filter(function(b){ return b.t!=='mvhd'&&b.t!=='trak'&&b.t!=='mvex'; }).map(raw);
+    return {moov:box('moov',[mv].concat(traks).concat(rest)), seq:seq}; }
+  var ft=ftyp?raw(ftyp):box('ftyp',[new Uint8Array([105,115,111,109,0,0,2,0,105,115,111,109,105,115,111,50,97,118,99,49,109,112,52,49])]);
+  var mdHdr=big?16:8, trial=buildMoov(0), start=ft.byteLength+trial.moov.byteLength+mdHdr, res=buildMoov(start);
+  if(res.moov.byteLength!==trial.moov.byteLength) throw new Error('moov 크기 불일치');
+  var out=new Uint8Array(start+data); out.set(ft,0); out.set(res.moov, ft.byteLength); var od=new DataView(out.buffer), mp=ft.byteLength+res.moov.byteLength;
+  if(big){ od.setUint32(mp,1); out.set([109,100,97,116],mp+4); od.setUint32(mp+8,Math.floor((data+16)/4294967296)); od.setUint32(mp+12,(data+16)>>>0); } else { od.setUint32(mp,data+8); out.set([109,100,97,116],mp+4); }
+  res.seq.forEach(function(x){ var T=TR[x.id], c=x.c, sz=0; for(var i=0;i<c.n;i++) sz+=T.S[c.first+i].sz; out.set(U8.subarray(c.off, c.off+sz), c.newOff); });
+  return out.buffer; }
+window._mp4Defrag=_mp4Defrag;
 // 2026-11-08 신고("받은 mp4를 릴스에 올리면 영상이 안 보임, 유튜브는 됨"): 브라우저가 녹화한 MP4는 소리가 Opus이고 조각난(fragmented) 구조라 인스타가 못 읽음
 // → 받을 때 ffmpeg(브라우저 안)로 표준 MP4로 다시 묶음: 영상은 그대로(화질 손실 없음) + 소리 AAC + 앞부분 색인(faststart). 실패하면 원본 그대로 받음
 (function(){ var FFP=null, V={f:'@ffmpeg/ffmpeg@0.12.10', c:'@ffmpeg/core@0.12.6', u:'@ffmpeg/util@0.12.1'}, CDN='https://cdn.jsdelivr.net/npm/';
@@ -68661,7 +68725,13 @@ function veDownload(blob){ window._snsSave(blob, 'clover-edit-'+Date.now()); }
       return Promise.all([U.toBlobURL(CDN+V.f+'/dist/umd/814.ffmpeg.js','text/javascript'), U.toBlobURL(CDN+V.c+'/dist/esm/ffmpeg-core.js','text/javascript'), U.toBlobURL(CDN+V.c+'/dist/esm/ffmpeg-core.wasm','application/wasm')])
         .then(function(L){ return F.load({classWorkerURL:L[0], coreURL:L[1], wasmURL:L[2]}).then(function(){ return F; }); }); });
     FFP.catch(function(){ FFP=null; }); return FFP; }
-  window._snsMp4=function(blob){ if(!blob || blob._sns || !/mp4/.test(blob.type||'')) return Promise.resolve(blob); return load().then(function(F){ var id='i'+Date.now(); return blob.arrayBuffer().then(function(ab){ return F.writeFile(id+'.mp4', new Uint8Array(ab)); })
+  /* 2026-11-12: 소리가 이미 AAC면 ffmpeg 없이 _mp4Defrag로 바로 표준 MP4(빠르고 실패 적음), Opus면 ffmpeg로 AAC 변환 — ffmpeg가 실패해도 _mp4Defrag로 최소한 길이는 바로잡음 */
+  function _defragBlob(blob){ return blob.arrayBuffer().then(function(ab){ var o=window._mp4Defrag(ab); if(!o) return blob; var b=new Blob([o],{type:'video/mp4'}); b._sns=1; console.log('[MP4 정리] 표준 MP4로 다시 묶음 (재인코딩 없음)'); return b; }); }
+  window._snsMp4=function(blob){ if(!blob || blob._sns || !/mp4/.test(blob.type||'')) return Promise.resolve(blob);
+    return blob.slice(0, Math.min(blob.size, 65536)).arrayBuffer().then(function(h){ var t=new TextDecoder('latin1').decode(new Uint8Array(h)), opus=/Opus|opus/.test(t);
+      if(!opus) return _defragBlob(blob).catch(function(e){ console.warn('[MP4 정리] 직접 정리 실패 → ffmpeg', e); return window._snsMp4ff(blob); });
+      return window._snsMp4ff(blob).catch(function(e){ console.warn('[MP4 정리] ffmpeg 실패 → 길이만 바로잡음', e); return _defragBlob(blob); }); }); };
+  window._snsMp4ff=function(blob){ if(!blob || blob._sns || !/mp4/.test(blob.type||'')) return Promise.resolve(blob); return load().then(function(F){ var id='i'+Date.now(); return blob.arrayBuffer().then(function(ab){ return F.writeFile(id+'.mp4', new Uint8Array(ab)); })
       .then(function(){ return F.exec(['-i', id+'.mp4', '-map','0:v:0','-map','0:a:0?', '-c:v','copy', '-c:a','aac','-b:a','192k','-ar','48000', '-movflags','+faststart', id+'o.mp4']); })
       .then(function(rc){ if(rc) throw new Error('변환 실패 '+rc); return F.readFile(id+'o.mp4'); }).then(function(d){ try{ F.deleteFile(id+'.mp4'); F.deleteFile(id+'o.mp4'); }catch(e){} if(!d || d.length<1000) throw new Error('결과 없음'); return new Blob([d.buffer], {type:'video/mp4'}); }); }); };
   // 2026-11-08 요청("커뮤니티·쇼케이스 쇼츠가 엄청 느리다"): 보여주기용 가벼운 사본(긴 쪽 1280px · 약 2Mbps · 앞부분 색인) — 원본은 그대로 두고 화면에는 이걸 틀어 줌
