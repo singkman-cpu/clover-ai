@@ -65394,10 +65394,11 @@ function tcPick(role, fem){ var key=role+'|'+(fem?'f':'m'); if(TC.pick[key]!==un
 function tcLang(t){ t=String(t||''); if(/[\uac00-\ud7a3]/.test(t)) return 'kor'; if(/[\u3040-\u30ff]/.test(t)) return 'jpn'; if(/[\u4e00-\u9fff]/.test(t)) return 'zho'; if(/[a-z]/i.test(t)) return 'eng'; return 'kor'; }
 /* 2026-11-12 원인("사람은 2명인데 목소리가 엄청 여러 개"): 내레이션 10줄을 한꺼번에 보내서 타입캐스트 동시 호출 한도(무료 2개)에 걸린 줄들이
    예전 성우(구글 등)로 넘어갔음 → 타입캐스트는 2개씩 차례로 보내고, 한도(429)·일시 오류는 기다렸다 다시 (예전 성우로 넘어가는 건 마지막 수단) */
-var TCQ={run:0, max:2, q:[]};
+var TCQ={run:0, max:1, q:[]}; /* 2026-11-12 타입캐스트 403 UNUSUAL_ACTIVITY_DETECTED(짧은 시간에 요청이 몰림) → 한 번에 하나씩, 사이 0.4초 */
 function tcQ(fn){ return new Promise(function(res, rej){ TCQ.q.push({fn:fn, res:res, rej:rej}); tcQNext(); }); }
-function tcQNext(){ while(TCQ.run<TCQ.max && TCQ.q.length){ var it=TCQ.q.shift(); TCQ.run++; it.fn().then(function(v){ TCQ.run--; it.res(v); tcQNext(); }, function(e){ TCQ.run--; it.rej(e); tcQNext(); }); } }
+function tcQNext(){ while(TCQ.run<TCQ.max && TCQ.q.length){ (function(it){ TCQ.run++; it.fn().then(function(v){ setTimeout(function(){ TCQ.run--; tcQNext(); }, 400); it.res(v); }, function(e){ setTimeout(function(){ TCQ.run--; tcQNext(); }, 400); it.rej(e); }); })(TCQ.q.shift()); } }
 function tcTTS(voiceId, text, ctx, _try){ _try=_try||0; return tcQ(function(){ return tcTTS1(voiceId, text, ctx); }).catch(function(e){ var m=String(e&&e.message||e);
+    if(/UNUSUAL_ACTIVITY|: 403 /i.test(m)){ window._tcBlockUntil=Date.now()+10*60*1000; console.warn('[성우] 타입캐스트가 요청이 몰렸다고 잠시 막음 → 10분 동안 타입캐스트를 부르지 않아요'); throw e; }
     if(_try<6 && !/크레딧이 부족|emotion|: 400 |: 401 |: 404 /i.test(m)){ var w=[1500,3000,5000,8000,12000,15000][_try]; /* 2026-11-12: 타입캐스트가 잠깐 실패해도 다른 목소리로 바꾸기 전에 더 오래 기다렸다 다시 (최대 약 45초) */ console.warn('[성우] 타입캐스트 잠깐 막힘('+m.slice(0,60)+') → '+(w/1000)+'초 뒤 다시'); return new Promise(function(r){ setTimeout(r, w); }).then(function(){ return tcTTS(voiceId, text, ctx, _try+1); }); }
     throw e; }); }
 function tcTTS1(voiceId, text, ctx){ return new Promise(function(res, rej){
@@ -65469,6 +65470,7 @@ document.addEventListener('mousedown', function(e){ var el=e.target && e.target.
 function ttsVoiceFem(voice){ var kv=koV(voice); if(/^tc:/.test(kv)){ var _tv=(TC.voices||[]).filter(function(v){ return 'tc:'+v.id===kv; })[0]; if(_tv) return /^f|female/i.test(_tv.gender); var _vv=VOICES.filter(function(v){ return v.k===kv; })[0]; return !!(_vv && /여/.test(_vv.g)); } if(/^g:/.test(kv)) return /Sulafat|Despina|Achernar|Vindemiatrix|Aoede|Kore|Gacrux|Zephyr|Leda|Callirrhoe|Autonoe|Erinome|Laomedeia|Pulcherrima/.test(kv); return /Lady|Woman|Sister|Girl|Female|여/i.test(kv); }
 function ttsP(voice, text, _gtry, _style){
   if(window._tcOff) return ttsP0(voice, text, _gtry, _style);
+  if(window._tcBlockUntil && Date.now()<window._tcBlockUntil){ tcFailNote(new Error('UNUSUAL_ACTIVITY (막힘 유지 중)')); return ttsP0(voice, text, _gtry, _style); }
   var rm=String(text||'').match(NAR_TAG_RE), role=rm?rm[1]:null, t=narStrip(text);
   return tcInit().then(function(on){ if(!on) return ttsP0(voice, text, _gtry, _style);
     var _host=(!role || role==='진행자' || role==='사장님'), _ri=_host?null:narRoleInfo(role), kv0=koV(voice), fem=_ri?_ri.fem:ttsVoiceFem(voice), id=_ri?tcPick(role, fem):(/^tc:/.test(kv0)?kv0.slice(3):tcPick('host', fem)); if(!_ri && id) TC.mainId=id; /* 2026-11-12: 진행자 = 회원이 고른 성우 그대로, 나머지 인물은 각자 목소리 */
@@ -65477,7 +65479,7 @@ function ttsP(voice, text, _gtry, _style){
     var _laugh=/(아?하하|으하하|푸하하|푸핫|크크|킥킥|헤헤|호호호|흐흐|깔깔|ㅋㅋ|ㅎㅎ)/.test(t);
     return (_laugh?tcTTS(id, t, {emo:'happy', ei:1.5}).catch(function(e){ if(/크레딧이 부족/.test(String(e&&e.message))) throw e; return tcTTS(id, t); }):tcTTS(id, t)).catch(function(e){ console.warn('[성우] 타입캐스트 실패 → 기존 성우로', e&&e.message); if(/크레딧이 부족/.test(String(e&&e.message))) throw e; tcFailNote(e); return ttsP0(voice, text, _gtry, _style); }); }); }
 /* 2026-11-12 신고("대사 바꾸고 다시 재생하니 성우 목소리가 바뀐다"): 타입캐스트가 실패한 줄은 예전 성우로 조용히 바뀌어서 목소리가 섞였음 → 왜 바뀌었는지 바로 알려 줌 */
-function tcFailNote(e){ var m=String(e&&e.message||e||''), why=/402|403|quota|credit|insufficient|exceed|한도|크레딧/i.test(m)?'타입캐스트 이번 달 크레딧(무료 15,000자)을 다 쓴 것 같아요':/401/.test(m)?'타입캐스트 키가 맞지 않아요(Supabase 비밀값 확인)':/429|too many/i.test(m)?'타입캐스트가 지금 너무 바빠요(동시 사용 한도)':'타입캐스트 연결이 잠깐 안 됐어요';
+function tcFailNote(e){ var m=String(e&&e.message||e||''), why=/UNUSUAL_ACTIVITY/i.test(m)?'타입캐스트가 짧은 시간에 요청이 많다고 잠시 막았어요(10분 뒤 다시 써요)':/402|quota|credit|insufficient|exceed|한도|크레딧/i.test(m)?'타입캐스트 이번 달 크레딧(무료 15,000자)을 다 쓴 것 같아요':/401/.test(m)?'타입캐스트 키가 맞지 않아요(Supabase 비밀값 확인)':/429|too many/i.test(m)?'타입캐스트가 지금 너무 바빠요(동시 사용 한도)':'타입캐스트 연결이 잠깐 안 됐어요';
   window._tcLastFail=why+' · '+m.slice(0,120); var now=Date.now(); if(window._tcFailT && now-window._tcFailT<60000) return; window._tcFailT=now; try{ toast('⚠️ '+why+' — 이 문장은 예전 성우 목소리로 읽었어요. 목소리가 섞이면 잠시 뒤 다시 읽혀 주세요.'); }catch(_e){} }
 function ttsP0(voice, text, _gtry, _style){ var _rm=String(text||'').match(NAR_TAG_RE); if(_rm){ text=narStrip(text); var _ro=narRoleInfo(_rm[1]); if(_ro) return ttsP0(_ro.v, text, _gtry, _ro.st); }
   var kv=koV(voice); if(/^tc:/.test(kv)){ kv=ttsVoiceFem(kv)?'g:Sulafat':'g:Charon'; voice=kv; }
