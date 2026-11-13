@@ -19313,6 +19313,27 @@ function _scheduleProposalCloudSync(statusEl){
 }
 // ⚠️ 탭을 열 때 한 번, 클라우드에 저장된 게 있으면 불러와서 채워줌(이미 이 세션에서 사진을 올린
 // 상태라면 덮어쓰지 않음 — 방금 올린 새 사진이 사라지면 안 되니까).
+function _arSnapOf(spTab){ var st=spTab.autoRoomState; return {
+    autoRoomExtAnchors:(spTab.autoRoomExtAnchors||[]).map(function(a){ return {img:a.img||null, label:a.label}; }),
+    autoRoomIntAnchors:(spTab.autoRoomIntAnchors||[]).map(function(a){ return {img:a.img||null, label:a.label}; }),
+    autoRoomPrompt:spTab.autoRoomPrompt, autoRoomPromptByCat:spTab.autoRoomPromptByCat||{}, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity,
+    autoRoomWeather:spTab.autoRoomWeather, autoRoomSelected:spTab.autoRoomSelected, forcedAspect:spTab.forcedAspect, autoRoomResolution:spTab.autoRoomResolution, autoRoomUrbanMode:spTab.autoRoomUrbanMode, autoRoomCurtainBg:spTab.autoRoomCurtainBg,
+    arResults:(st && !st.isApt && st.results)?st.results.map(function(r){ return (r && r.url && /^https?:/.test(r.url))?{url:r.url, prevUrl:(r.prevUrl&&/^https?:/.test(r.prevUrl))?r.prevUrl:null}:null; }):null }; }
+var _arCloudTimer=null;
+function _arCloudSave(spTab, snap){ if(!(_supa && _supaUser) || !snap.ets || snap.ets===spTab._arCloudSavedEts) return; clearTimeout(_arCloudTimer);
+  _arCloudTimer=setTimeout(function(){ var S=JSON.parse(JSON.stringify(snap)), list=[], pend=0;
+    ['autoRoomExtAnchors','autoRoomIntAnchors'].forEach(function(k){ (S[k]||[]).forEach(function(a,i){ if(a.img && /^data:/.test(a.img)) list.push({k:k, i:i, a:a}); }); });
+    function fin(){ spTab._arCloudSavedEts=S.ets; _saveWorkspaceState('spaceset_full', S); }
+    if(!list.length){ fin(); return; } pend=list.length;
+    list.forEach(function(x){ var orig=x.a.img; _uploadDataUrlIfNeeded(orig, 'arfull_'+x.k+x.i, function(u){ x.a.img=u; try{ var live=(spTab[x.k]||[])[x.i]; if(live && live.img===orig && /^https?:/.test(u)) live.img=u; }catch(e){} if(--pend<=0) fin(); }); }); }, 2500); }
+function _arApplyCloud(spTab, d){ if(!d) return false; if(!(d.ets>0) || d.ets<=(spTab._arEts||0)) return false; if(spTab.autoRoomState && spTab.autoRoomState.running) return false;
+  spTab._arEts=d.ets; spTab._arSigInit=false; spTab._arCloudApplied=true; spTab._acAppliedTs=Math.max(spTab._acAppliedTs||0, d.ts||0);
+  if(d.autoRoomExtAnchors && d.autoRoomExtAnchors.length) spTab.autoRoomExtAnchors=d.autoRoomExtAnchors; if(d.autoRoomIntAnchors && d.autoRoomIntAnchors.length) spTab.autoRoomIntAnchors=d.autoRoomIntAnchors;
+  ['autoRoomPrompt','autoRoomPromptByCat','autoRoomCategory','autoRoomFidelity','autoRoomWeather','forcedAspect','autoRoomResolution','autoRoomUrbanMode','autoRoomCurtainBg'].forEach(function(k){ if(d[k]!==undefined && d[k]!==null) spTab[k]=d[k]; });
+  if(d.autoRoomSelected && d.autoRoomSelected.length) spTab.autoRoomSelected=d.autoRoomSelected;
+  if(d.arResults && d.arResults.some(Boolean)) spTab.autoRoomState={results:d.arResults.map(function(r){ return r?{url:r.url, prevUrl:r.prevUrl||null}:null; }), running:false, isApt:false, step:0};
+  console.log('[공간 컨셉] 다른 기기에서 하던 작업을 불러왔어요'); try{ toast('☁️ 다른 기기에서 하던 공간 컨셉 작업을 불러왔어요'); }catch(e){} return true; }
+window._arSnapOf=_arSnapOf; window._arApplyCloud=_arApplyCloud;
 function _tryRestoreSpacesetAnchors(spTab){
   if(spTab._cloudAnchorSyncTried) return;
   // ⚠️ 버그 수정("모바일에서 참고 이미지가 안 불러와진다"): 로그인(_supaUser)이 아직 준비되기
@@ -19322,6 +19343,8 @@ function _tryRestoreSpacesetAnchors(spTab){
   // 다음 렌더(탭을 다시 열거나 화면이 갱신될 때) 때 다시 시도하게 함.
   if(!(_supa && _supaUser)) return;
   spTab._cloudAnchorSyncTried=true;
+  /* 2026-11-13: 전체 작업 상태(참고 이미지·선택한 뷰·날씨·문구·결과)를 먼저 확인 — 다른 기기에서 더 최근에 고쳤으면 그걸로 */
+  _loadWorkspaceState('spaceset_full', function(d){ if(_arApplyCloud(spTab, d)){ if(G.wf==='spaceset') renderSB(); } });
   var hasAnyLocal = (spTab.autoRoomExtAnchors||[]).some(function(a){return a.img;}) || (spTab.autoRoomIntAnchors||[]).some(function(a){return a.img;});
   if(hasAnyLocal) return; // 이미 이 기기에서 사진을 올려둔 상태면 덮어쓰지 않음
   _loadWorkspaceState('spaceset_anchors', function(data){
@@ -22258,7 +22281,9 @@ function mkAutoRoomCamera(p){
       // 덮어쓰지 않음(위 _scheduleSpacesetAnchorSync·_tryRestoreSpacesetAnchors 쪽도 동일 적용).
       var _draftTs = data.ts || 1;
       if((spTab._acAppliedTs||0) > _draftTs) return;
-      spTab._acAppliedTs = _draftTs;
+      if(spTab._arCloudApplied && (spTab._arEts||0) > (data.ets||0)) return; /* 다른 기기에서 더 최근에 고친 게 이미 적용됨 */
+      spTab._acAppliedTs = _draftTs; spTab._arEts=data.ets||0; spTab._arSigInit=false; if(!data.ets){ spTab._arLegacyTs=data.ts||0; } /* 예전 저장분(수정 시각 없음): 열어 두기만 해도 클라우드로 한 번 올려서 다른 기기에서 이어 볼 수 있게 */
+      if(data.autoRoomResolution) spTab.autoRoomResolution=data.autoRoomResolution; if(data.autoRoomUrbanMode!=null) spTab.autoRoomUrbanMode=data.autoRoomUrbanMode; if(data.autoRoomCurtainBg!=null) spTab.autoRoomCurtainBg=data.autoRoomCurtainBg;
       spTab.autoRoomExtAnchors = (data.autoRoomExtAnchors && data.autoRoomExtAnchors.length) ? data.autoRoomExtAnchors : spTab.autoRoomExtAnchors;
       spTab.autoRoomIntAnchors = (data.autoRoomIntAnchors && data.autoRoomIntAnchors.length) ? data.autoRoomIntAnchors : spTab.autoRoomIntAnchors;
       spTab.autoRoomPrompt = data.autoRoomPrompt || spTab.autoRoomPrompt || '';
@@ -22307,18 +22332,13 @@ function mkAutoRoomCamera(p){
   clearTimeout(window._autoRoomDraftSaveTimer);
   window._autoRoomDraftSaveTimer = setTimeout(function(){
     if(!spTab._arDraftReady || spTab._arDraftKey!==_autoRoomDraftKey()) return; // 불러오기 전엔 저장 금지
-    idbSaveDraft(_autoRoomDraftKey(), {
-      autoRoomExtAnchors: spTab.autoRoomExtAnchors,
-      autoRoomIntAnchors: spTab.autoRoomIntAnchors,
-      autoRoomPrompt: spTab.autoRoomPrompt,
-      autoRoomPromptByCat: spTab.autoRoomPromptByCat||{},
-      autoRoomCategory: spTab.autoRoomCategory,
-      autoRoomFidelity: spTab.autoRoomFidelity,
-      autoRoomWeather: spTab.autoRoomWeather,
-      autoRoomSelected: spTab.autoRoomSelected,
-      forcedAspect: spTab.forcedAspect,
-      ts: Date.now()
-    }).catch(function(){});
+    var _arSnap=_arSnapOf(spTab), _arSig=JSON.stringify(_arSnap);
+    /* 2026-11-13 요청("PC에서 하던 공간 컨셉 디자인이 모바일에선 전부 리셋 — PC·모바일 연동"): 실제로 바뀐 때만 '수정 시각(ets)'을 올림 → 기기끼리 가장 최근에 '고친' 쪽이 이김 (그냥 열어 보기만 한 기기가 이기지 않게) */
+    if(_arSig!==spTab._arLastSig){ if(spTab._arSigInit) spTab._arEts=Date.now(); spTab._arLastSig=_arSig; spTab._arSigInit=true; }
+    if(!spTab._arEts && spTab._arLegacyTs && _supa && _supaUser){ spTab._arEts=spTab._arLegacyTs; spTab._arLegacyTs=0; }
+    _arSnap.ts=Date.now(); _arSnap.ets=spTab._arEts||0;
+    idbSaveDraft(_autoRoomDraftKey(), _arSnap).catch(function(){});
+    _arCloudSave(spTab, _arSnap);
   }, 600);
 
   mkNote(p,'<strong style="color:var(--ac)">🎥 AI 카메라 자동</strong><br>건물 외관·실내 사진 둘 다 뷰 이름표를 붙여서 여러 장 올려주세요(최소 1장). 이름표 붙인 뷰는 그 실제 사진 기준으로, 사진 없는 나머지 뷰는 AI가 스타일에 맞춰 상상해서 만들어요.<br><span style="font-size:10px;color:#f59e0b">⚠️ 상상해서 만드는 부분은 실제 구조와 다를 수 있어요 — 홍보용 컨셉 이미지 용도예요.</span>');
@@ -60094,6 +60114,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
+  {c:'space', t:'☁️ 공간 컨셉 디자인 PC·모바일 이어서 작업', h:'공간 컨셉 디자인(AI 카메라 자동)에서 넣은 참고 사진, 고른 뷰, 날씨·계절, 문구, 만든 결과가 계정에 저장돼서, PC에서 하던 걸 모바일(또는 다른 PC)에서 같은 계정으로 열면 그대로 이어서 볼 수 있어요. 두 기기에서 모두 고쳤다면 가장 최근에 고친 쪽이 보여요.'},
   {c:'space', t:'🏠 갤러리 → 공간 컨셉 칸에 끌어다 놓기', h:'갤러리에서 공간 컨셉 디자인 결과를 여러 장 고른 뒤(🔀 여러 장 선택 또는 Ctrl+클릭), 공간 컨셉 디자인 화면의 왼쪽 패널로 끌어다 놓거나 "🏠 공간 컨셉 디자인에 넣기"를 누르면, 거실·침실·외관 등 공간 이름에 맞는 칸(실내 사진/건축 외관)에 알아서 들어가요.'},
   {c:'space', t:'▶ 멈춘 자리부터 이어서 생성', h:'공간 컨셉·아파트 컨셉 디자인에서 여러 뷰를 만들다가 ⏹ 정지를 눌렀다면, 바로 아래 "▶ 이어서 생성" 버튼으로 멈춘 뷰부터 남은 뷰를 이어서 만들 수 있어요. 이미 만든 뷰는 그대로 두고 남은 것만 만들어요.'},
   {c:'edit', t:'💙 애니 감성 맑은 하늘(실사)', h:'AI 편집 › 시간/날씨/분위기와 공간 컨셉 디자인 › 날씨·계절 연출에 "애니 감성 맑은 하늘(실사)"이 생겼어요 — 애니 영화 한 장면처럼 진한 파란 하늘·또렷한 뭉게구름·비 갠 뒤 맑은 공기·낮은 옆 햇살·싱그러운 색감으로 바꾸되, 그림이 아니라 진짜 사진처럼. 건물·길·나무 위치와 구도는 그대로예요.'},
