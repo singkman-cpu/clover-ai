@@ -57617,6 +57617,10 @@ function openPanel(id){
     _openBulkPresetApply(picked);
   };
   selBar.appendChild(selBulkBtn);
+  var selSpBtn=document.createElement('button'); selSpBtn.id='gal-sel-space-btn';
+  selSpBtn.style.cssText='background:rgba(0,229,204,.12);border:1px solid rgba(0,229,204,.4);color:var(--ac);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;display:none';
+  selSpBtn.onclick=function(){ var ids=Array.from(G._galSelected||[]).map(String); _galToSpaceset(ids, true); };
+  selBar.appendChild(selSpBtn);
   // ⚠️ 요청 반영("갤러리에서 한 개씩 눌러서 커뮤니티 공개하기엔 시간이 너무 오래 걸린다"):
   // Ctrl+클릭/드래그로 여러 장 고른 뒤 한 번에 커뮤니티로 공개하는 버튼. 항상 즉시·익명으로
   // 올라가고(번거로운 확인창 없음), 닉네임을 공개하고 싶으면 나중에 "커뮤니티 → 내 공개 작품
@@ -57970,6 +57974,20 @@ function _galleryZoomShow(list, idx){
 // ⚠️ 요청 반영: 갤러리에서 Ctrl+클릭/드래그로 고른 항목 개수·삭제 버튼 상태를 갱신함 — 선택된
 // 게 있으면 "선택 삭제" 바를 보여주고, 없으면 통째로 숨김. renderGalleryGrid가 다시 그려질
 // 때마다, 그리고 선택이 바뀔 때마다 호출됨.
+function _galAllItems(){ var A=[]; Object.keys(G.HIST||{}).forEach(function(wf){ (G.HIST[wf]||[]).forEach(function(it){ A.push(it); }); }); (G.FAVS||[]).forEach(function(it){ A.push(it); }); return A; }
+function _galRoomLabelOf(it){ var T=(it&&it.tags)||[], all={}; try{ Object.keys(SPACE_CATEGORIES).forEach(function(k){ (SPACE_CATEGORIES[k].types||[]).forEach(function(t){ all[t]=1; }); }); }catch(e){}
+  for(var i=0;i<T.length;i++){ var t=String(T[i]||'').trim(); if(!t) continue; if(all[t]) return t; try{ if(_isExteriorViewType(t)) return t; }catch(e){} } return null; }
+function _galToSpaceset(ids, fromBtn){ ids=(ids||[]).map(String); if(!ids.length) return; var A=_galAllItems(), seen={}, ok=[], skip=0, full=0;
+  ids.forEach(function(id){ if(seen[id]) return; seen[id]=1; var it=A.filter(function(x){ return String(x.id)===id; })[0]; if(!it) return; var url=it.result||it.orig; var lbl=_galRoomLabelOf(it); if(!url || !lbl){ skip++; return; } if(_pushResultAsRef(url, lbl)) ok.push(lbl); else full++; });
+  var msg=ok.length?('🏠 '+ok.length+'장을 공간 이름에 맞게 넣었어요 — '+ok.slice(0,8).join(', ')+(ok.length>8?' 외':'')):'넣을 수 있는 공간 컨셉 결과가 없어요';
+  if(skip) msg+=' · '+skip+'장은 공간 이름(거실·침실·외관 등)을 몰라서 뺐어요'; if(full) msg+=' · '+full+'장은 칸이 다 차서 못 넣었어요';
+  try{ toast(msg); }catch(e){ alert(msg); } if(ok.length){ try{ if(G.wf==='spaceset') renderSB(); else if(fromBtn && confirm(msg+'\n\n공간 컨셉 디자인 화면으로 갈까요?')){ if(typeof selectWF==='function') selectWF('spaceset'); } }catch(e){} } }
+window._galToSpaceset=_galToSpaceset;
+(function(){ function has(e){ try{ return Array.prototype.indexOf.call(e.dataTransfer.types||[], 'text/clover-gal')>=0 || !!window._galDragIds; }catch(_e){ return false; } }
+  document.addEventListener('dragover', function(e){ var sb=e.target && e.target.closest && e.target.closest('#sb'); if(!sb || !has(e) || G.wf!=='spaceset') return; e.preventDefault(); e.stopPropagation(); try{ e.dataTransfer.dropEffect='copy'; }catch(_e){} sb.classList.add('gal-drop-on'); }, true);
+  document.addEventListener('dragleave', function(e){ var sb=document.getElementById('sb'); if(sb && e.target===sb) sb.classList.remove('gal-drop-on'); }, true);
+  document.addEventListener('drop', function(e){ var sb=e.target && e.target.closest && e.target.closest('#sb'); if(!sb || !has(e) || G.wf!=='spaceset') return; e.preventDefault(); e.stopPropagation(); sb.classList.remove('gal-drop-on','gal-drop-hint'); var ids=null; try{ ids=JSON.parse(e.dataTransfer.getData('text/clover-gal')||'null'); }catch(_e){} ids=ids||window._galDragIds||[]; window._galDragIds=null; _galToSpaceset(ids); }, true);
+  try{ var st=document.createElement('style'); st.textContent='#sb.gal-drop-hint{outline:2px dashed rgba(0,229,204,.55);outline-offset:-4px}#sb.gal-drop-on{outline:3px solid #00e5cc;outline-offset:-4px;background:rgba(0,229,204,.06)}'; document.head.appendChild(st); }catch(_e){} })();
 function _updateGalSelectionBar(){
   var bar=document.getElementById('gal-selection-bar');
   if(!bar) return;
@@ -57981,6 +57999,7 @@ function _updateGalSelectionBar(){
   if(delBtn) delBtn.textContent = '🗑 선택 삭제 ('+n+')';
   var cmpBtn=document.getElementById('gal-sel-compare-btn');
   if(cmpBtn) cmpBtn.style.display = (n===2) ? '' : 'none';
+  var spBtn=document.getElementById('gal-sel-space-btn'); if(spBtn){ spBtn.style.display=(n>0)?'':'none'; spBtn.textContent='🏠 공간 컨셉 디자인에 넣기 ('+n+')'; }
   var bulkBtn=document.getElementById('gal-sel-bulk-btn');
   if(bulkBtn){ bulkBtn.style.display = (n>0) ? '' : 'none'; bulkBtn.textContent = '🎨 선택한 '+n+'개에 프리셋 일괄 적용'; }
   var commBtn=document.getElementById('gal-sel-community-btn');
@@ -58231,6 +58250,8 @@ function renderGalleryGrid(items){
     selChk.textContent='✓';
     card.appendChild(selChk);
     card.dataset.itemId = item.id;
+    /* 2026-11-13 요청("갤러리에서 공간 컨셉 결과를 여러 장 골라 왼쪽 공간 컨셉 칸에 끌어다 놓으면 공간 이름에 맞게 알아서 들어가게"): 카드를 끌면 고른 것 전부(안 골랐으면 이 한 장)를 함께 끌어감 */
+    if(item.result||item.orig){ card.draggable=true; card.addEventListener('dragstart', function(e){ try{ var me=String(card.dataset.itemId), sel=Array.from(G._galSelected||[]).map(String), ids=(sel.indexOf(me)>=0)?sel:[me]; e.dataTransfer.effectAllowed='copy'; e.dataTransfer.setData('text/clover-gal', JSON.stringify(ids)); e.dataTransfer.setData('text/plain', 'clover-gal'); window._galDragIds=ids; if(G.wf==='spaceset'){ var sb=document.getElementById('sb'); if(sb) sb.classList.add('gal-drop-hint'); } }catch(_e){} }); card.addEventListener('dragend', function(){ var sb=document.getElementById('sb'); if(sb) sb.classList.remove('gal-drop-hint','gal-drop-on'); setTimeout(function(){ window._galDragIds=null; }, 50); }); }
     if(G._galSelected.has(item.id)){ card.classList.add('gal-selected'); selChk.style.display='flex'; }
     // 클릭 → 확대팝업 (다운로드/즐겨찾기 포함, 다시 클릭하면 닫힘)
     (function(it, chkEl){
@@ -60070,6 +60091,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 // 2026-10-26 요청("지금까지 수정한 것들 사용가이드랑 AI 상담에서 다 대답해주지?"): 새 기능 목록 —
 // 사용 가이드 맨 위 '🆕 새로 생긴 기능'과 💬 AI 상담 답변 지식에 같이 쓰임(여기만 고치면 둘 다 반영)
 var CLOVER_NEW_FEATURES=[
+  {c:'space', t:'🏠 갤러리 → 공간 컨셉 칸에 끌어다 놓기', h:'갤러리에서 공간 컨셉 디자인 결과를 여러 장 고른 뒤(🔀 여러 장 선택 또는 Ctrl+클릭), 공간 컨셉 디자인 화면의 왼쪽 패널로 끌어다 놓거나 "🏠 공간 컨셉 디자인에 넣기"를 누르면, 거실·침실·외관 등 공간 이름에 맞는 칸(실내 사진/건축 외관)에 알아서 들어가요.'},
   {c:'space', t:'▶ 멈춘 자리부터 이어서 생성', h:'공간 컨셉·아파트 컨셉 디자인에서 여러 뷰를 만들다가 ⏹ 정지를 눌렀다면, 바로 아래 "▶ 이어서 생성" 버튼으로 멈춘 뷰부터 남은 뷰를 이어서 만들 수 있어요. 이미 만든 뷰는 그대로 두고 남은 것만 만들어요.'},
   {c:'edit', t:'💙 애니 감성 맑은 하늘(실사)', h:'AI 편집 › 시간/날씨/분위기와 공간 컨셉 디자인 › 날씨·계절 연출에 "애니 감성 맑은 하늘(실사)"이 생겼어요 — 애니 영화 한 장면처럼 진한 파란 하늘·또렷한 뭉게구름·비 갠 뒤 맑은 공기·낮은 옆 햇살·싱그러운 색감으로 바꾸되, 그림이 아니라 진짜 사진처럼. 건물·길·나무 위치와 구도는 그대로예요.'},
   {c:'space', t:'❄️ 계절 연출이 더 다양해졌어요', h:'공간 컨셉 디자인의 날씨·계절 연출에 새 계절이 생겼어요 — ⛄ 눈 그친 뒤 소복한 겨울, 🌨 첫눈 살짝, 🕯 눈 쌓인 겨울밤 불빛, 🧊 서리 낀 맑은 겨울 아침, 🍂 늦가을 낙엽비, 🍁 쨍한 가을 하늘 단풍, 🌿 신록의 늦봄, 🌦 여름 소나기 뒤. 도심 사진도 숲·산을 새로 만들지 않고 가로수·화단·옥상정원·처마 위 눈·길가 낙엽으로 계절이 느껴지게 만들어요.'},
