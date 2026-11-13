@@ -39457,6 +39457,13 @@ function _shortsGenerate(){
 
 // ── 🔔 자막 효과음(2026-10-14 요청: 자막에 띵 같은 간단한 효과음) — 음원 파일 없이 그때그때 합성 ──
 var SHORTS_SFX=[{k:'',l:'없음'},{k:'ding',l:'띵'},{k:'pop',l:'뿅'},{k:'click',l:'딸깍'},{k:'whoosh',l:'휙'},{k:'chime',l:'짠'}];
+/* 2026-11-14 신고("효과음이 훅도 아니고 회초리 소리"): 빠른 컷 전용 — 낮고 묵직한 '후욱' (갈색 잡음 + 낮은 대역 스윕 + 아주 낮은 울림) — 사용자 요청 '묵직한 소리' */
+function _seqWhoosh(ac, dest, at, vol){ try{ vol=vol||0.5; var D=0.55, n=Math.max(1,Math.round(ac.sampleRate*D)), b=ac.createBuffer(1,n,ac.sampleRate), d=b.getChannelData(0), last=0; for(var i=0;i<n;i++){ last=(last+0.02*(Math.random()*2-1))/1.02; d[i]=last*3.5; }
+  var src=ac.createBufferSource(); src.buffer=b; var bp=ac.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=0.9; bp.frequency.setValueAtTime(140,at); bp.frequency.exponentialRampToValueAtTime(620,at+D*0.42); bp.frequency.exponentialRampToValueAtTime(150,at+D);
+  var lp=ac.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1100; var g=ac.createGain(); g.gain.setValueAtTime(0.0001,at); g.gain.exponentialRampToValueAtTime(Math.max(0.002,vol*1.6),at+D*0.42); g.gain.exponentialRampToValueAtTime(0.0001,at+D);
+  src.connect(bp); bp.connect(lp); lp.connect(g); g.connect(dest); src.start(at); src.stop(at+D+0.02);
+  var o=ac.createOscillator(), og=ac.createGain(); o.type='sine'; o.frequency.setValueAtTime(78,at+D*0.25); o.frequency.exponentialRampToValueAtTime(36,at+D); og.gain.setValueAtTime(0.0001,at+D*0.25); og.gain.exponentialRampToValueAtTime(Math.max(0.002,vol*0.9),at+D*0.42); og.gain.exponentialRampToValueAtTime(0.0001,at+D); o.connect(og); og.connect(dest); o.start(at+D*0.25); o.stop(at+D+0.02);
+}catch(e){} }
 function _shortsSfx(ac, dest, kind, at, vol){
   if(!kind) return; vol=vol||0.6;
   function tone(freq, t, dur, v, type, f2){
@@ -39475,6 +39482,7 @@ function _shortsSfx(ac, dest, kind, at, vol){
     tone(1800, at, 0.04, vol*0.25, 'square');
   }
   else if(kind==='whoosh'){ _shortsPlaySwoosh(ac, dest, at, vol*1.1); }
+  else if(kind==='seqwhoosh'){ _seqWhoosh(ac, dest, at, vol); }
   else if(kind==='chime'){ tone(1046.5, at, 0.5, vol*0.4); tone(1318.5, at+0.08, 0.5, vol*0.4); tone(1568, at+0.16, 0.9, vol*0.45); tone(2093, at+0.16, 0.6, vol*0.12); }
 }
 // 미리보기/샘플 재생용
@@ -66017,7 +66025,7 @@ function composeRaw(shots, vids, music, ttsList, opt){
         else if(hidAt){ t0+=performance.now()-hidAt; hidAt=0; held.forEach(function(el){ try{ var p=el.play(); if(p&&p.catch) p.catch(function(){}); }catch(e){} }); held=[]; try{ if(rec.state==='paused') rec.resume(); }catch(e){} raf=requestAnimationFrame(frame); } }catch(e){} }
       document.addEventListener('visibilitychange', onVis);
       rec.onstop=function(){ document.removeEventListener('visibilitychange', onVis); try{ ac.close(); }catch(e){} if(encDead){ var er=new Error('ENC_DEAD'); er.encDead=true; reject(er); return; } resolve(new Blob(ch,{type:(mime||'video/webm').split(';')[0]})); };
-      ac.resume().then(function(){ rec.start(500); t0=performance.now(); if(M){ try{ M.play(); }catch(e){} } try{ var _a0=ac.currentTime, _sv=0.5*vv('music'); (vids||[]).forEach(function(u,i){ if(u && u.seq && u.seq.length>1 && starts[i]!=null){ var c=starts[i]; u.seq.forEach(function(z,k){ if(k>0 && c<total) _shortsSfx(ac, dest, 'whoosh', _a0+Math.max(0,c-0.1), Math.max(0.15,_sv)); c+=(+z.dur||0); }); } }); }catch(_se){ console.warn('[빠른 컷 효과음] 건너뜀', _se); } /* 2026-11-14 요청: 공사 현장을 빠르게 지나가는 휙 효과음 — 빠른 컷이 바뀔 때마다 */ frame(); if(document.hidden) onVis(); }).catch(reject);
+      ac.resume().then(function(){ rec.start(500); t0=performance.now(); if(M){ try{ M.play(); }catch(e){} } try{ var _a0=ac.currentTime, _sv=0.5*vv('music'); (vids||[]).forEach(function(u,i){ if(u && u.seq && u.seq.length>1 && starts[i]!=null){ var c=starts[i]; u.seq.forEach(function(z,k){ if(k>0 && c<total) _shortsSfx(ac, dest, 'seqwhoosh', _a0+Math.max(0,c-0.23), Math.max(0.15,_sv)); c+=(+z.dur||0); }); } }); }catch(_se){ console.warn('[빠른 컷 효과음] 건너뜀', _se); } /* 2026-11-14 요청: 공사 현장을 빠르게 지나가는 휙 효과음 — 빠른 컷이 바뀔 때마다 */ frame(); if(document.hidden) onVis(); }).catch(reject);
     });
   });
 }
@@ -67532,7 +67540,7 @@ function previewBrand(r){
   function txt(tt, yf, fs, wgt, a){ if(!tt||a<=0) return; x.save(); x.globalAlpha=a; x.font=stuF(wgt, fs); x.textAlign='center'; x.textBaseline='middle'; x.shadowColor='rgba(0,0,0,.6)'; x.shadowBlur=fs*0.6; x.fillStyle='#fff'; x.fillText(tt, W/2, H*yf); x.restore(); }
   var t0=0;
   function frame(){ if(!alive) return; var now=(performance.now()-t0)/1000; x.fillStyle='#000'; x.fillRect(0,0,W,H);
-    r.shots.forEach(function(s,k){ var st=starts[k], en=st+s.dur; if(now<st||now>en) return; var im=imgs[k], u=(now-st)/s.dur; if(s.seq && s.seq.length){ var _lt=now-st, _ac=0; for(var _q=0;_q<s.seq.length;_q++){ var _z=s.seq[_q]; if(_lt<_ac+_z.dur || _q===s.seq.length-1){ im=seqIm[_z.img]||im; u=(_lt-_ac)/Math.max(0.1,_z.dur); if(_q>0 && window._pvSeqKey!==t0+':'+k+':'+_q){ window._pvSeqKey=t0+':'+k+':'+_q; try{ _shortsSfxPreview('whoosh'); }catch(_e){} } break; } _ac+=_z.dur; } } if(!im||!im.naturalWidth) return; var a=(k>0&&now<st+0.5)?(now-st)/0.5:1;
+    r.shots.forEach(function(s,k){ var st=starts[k], en=st+s.dur; if(now<st||now>en) return; var im=imgs[k], u=(now-st)/s.dur; if(s.seq && s.seq.length){ var _lt=now-st, _ac=0; for(var _q=0;_q<s.seq.length;_q++){ var _z=s.seq[_q]; if(_lt<_ac+_z.dur || _q===s.seq.length-1){ im=seqIm[_z.img]||im; u=(_lt-_ac)/Math.max(0.1,_z.dur); if(_q>0 && window._pvSeqKey!==t0+':'+k+':'+_q){ window._pvSeqKey=t0+':'+k+':'+_q; try{ _shortsSfxPreview('seqwhoosh'); }catch(_e){} } break; } _ac+=_z.dur; } } if(!im||!im.naturalWidth) return; var a=(k>0&&now<st+0.5)?(now-st)/0.5:1;
       var sc=s.kind==='detail'?1.7+0.15*u:(s.kind==='person'?1.15+0.05*u:1.04+0.12*u), dy=(/low-angle|올려다/.test(s.en+s.ko)?(0.06-0.12*u)*H:0);
       var s0=Math.max(W/im.naturalWidth,H/im.naturalHeight)*sc, dw=im.naturalWidth*s0, dh=im.naturalHeight*s0; x.globalAlpha=a; x.drawImage(im,(W-dw)/2+(k%2?-1:1)*W*0.03*(u-0.5),(H-dh)/2+dy,dw,dh); x.globalAlpha=1;
       if(s.kind==='timelapse'){ x.save(); x.globalCompositeOperation='soft-light'; x.fillStyle='rgba(60,90,180,'+(0.35*u)+')'; x.fillRect(0,0,W,H); x.restore(); }
