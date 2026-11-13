@@ -67331,6 +67331,26 @@ function dRebuildSeq(p){ if(!p || !p.brand || !(p.shots||[]).length || p.shots.s
   var tot=seq.reduce(function(a,x){ return a+x.dur; },0), T=Math.ceil(tot-0.05), rem=Math.max(0,T-tot), toLast=Math.min(0.5,rem); seq[seq.length-1].dur=Math.round((seq[seq.length-1].dur+toLast)*10)/10; seq[0].dur=Math.round((seq[0].dur+(rem-toLast))*10)/10; /* 전체를 딱 맞는 초로 — 남는 시간은 완공에 최대 0.5초, 나머지는 첫 장에 */
   var sh={kind:'photo', img:seq[0].img, dur:T, free:true, seq:seq, ko:'⚡ '+seq.map(function(z){ return String(z.ko||'').replace(/^[^가-힣A-Za-z0-9]+/,'').slice(0,10); }).filter(Boolean).join(' → ')+' (빠른 컷 '+seq.length+'장 · 첫 장 '+seq[0].dur+'초, 나머지 0.7초)', en:'fast hard-cut sequence of the transformation: the run-down old building, demolition, construction stages, the completed building', gen_en:'', rev:false};
   p.shots=[sh].concat(S.slice(fin?k+1:k)); try{ if(p.narration && p.narration.length) p.narration=[]; }catch(e){} console.log('[AI 감독] 노후→신축 빠른 컷 묶음 '+seq.length+'장 ('+T+'초)'); }
+/* 2026-11-13 신고(장면 이름이 '카메라가 공간을 우아하게 천천히 지나가요'처럼 전부 같아서 공사 장면을 못 알아봄 — 감독 응답이 실패해 기본 구성으로 나온 경우):
+   사진을 AI가 직접 보고 노후·철거·공사·완공 외관·실내로 나눈 뒤 빠른 컷으로 묶음 (무료, 한 번만) */
+function dRebuildSeqAI(r){ try{ var rk=rRecipe(r); if(!rk || rk.k!=='rebuild' || r._seqAI || (r.shots||[]).some(function(x){ return x.seq; })) return; }catch(e){ return; } r._seqAI=1;
+  var idx=[]; (r.shots||[]).forEach(function(x){ if(x && idx.indexOf(x.img)<0) idx.push(x.img); }); idx=idx.slice(0,20); if(idx.length<3) return;
+  try{ toast('⚡ 공사 과정 사진을 찾아서 빠른 컷으로 묶는 중…'); }catch(e){}
+  Promise.all(idx.map(function(ix){ var src=STU.imgs[ix]; return new Promise(function(res){ if(!src){ res(null); return; } var im=new Image(), dn=false; function end(v){ if(!dn){ dn=true; res(v); } } setTimeout(function(){ end(/^https:/.test(src)?{type:'url',url:src}:null); }, 8000); im.crossOrigin='anonymous';
+      im.onload=function(){ try{ var sc=Math.min(1, 384/Math.max(im.naturalWidth, im.naturalHeight)), c=document.createElement('canvas'); c.width=Math.round(im.naturalWidth*sc); c.height=Math.round(im.naturalHeight*sc); c.getContext('2d').drawImage(im,0,0,c.width,c.height); end({type:'base64', media_type:'image/jpeg', data:c.toDataURL('image/jpeg',0.75).split(',')[1]}); }catch(e){ end(/^https:/.test(src)?{type:'url',url:src}:null); } };
+      im.onerror=function(){ end(/^https:/.test(src)?{type:'url',url:src}:null); }; im.src=src; }); })).then(function(A){ if(A.some(function(x){ return !x; })){ console.warn('[빠른 컷] 사진을 못 읽어서 건너뜀'); return; }
+    var q='These '+A.length+' photos are of ONE building project, in this order. For EACH photo (same order) answer exactly one label: "old" (the run-down old building before the project), "demolition", "construction" (any unfinished stage: foundation, frame, scaffolding, roof going on, exterior not finished), "finished_exterior" (the completed building from outside), "interior" (a finished interior room), "other". Also give "stage" = a short Korean label (e.g. 노후 건물, 철거 중, 공사 1단계 골조, 공사 2단계 지붕, 완공). Answer ONLY JSON: {"items":[{"label":"...","stage":"..."}]}';
+    _scriptAI(q, A.filter(Boolean), 'fast', function(res){ try{ var t=res; if(t && typeof t==='object') t=t.reply||t.text||''; var m=String(t||'').match(/\{[\s\S]*\}/), j=m?JSON.parse(m[0]):null, I=(j&&j.items)||[]; if(I.length!==idx.length){ console.warn('[빠른 컷] 분류 개수가 달라서 건너뜀'); return; }
+        var ord={old:0, demolition:1, construction:2}, lead=[], fin=null; idx.forEach(function(ix,i){ var L=String(I[i].label||''); if(ord[L]!=null) lead.push({img:ix, o:ord[L], i:i, ko:String(I[i].stage||'')}); });
+        lead.sort(function(a,b){ return (a.o-b.o)||(a.i-b.i); }); for(var i=0;i<idx.length;i++){ if(String(I[i].label)==='finished_exterior'){ fin={img:idx[i], ko:String(I[i].stage||'완공')}; break; } }
+        if(lead.length<2){ console.log('[빠른 컷] 공사 과정 사진이 2장 미만이라 그대로 둠'); return; }
+        var used={}, seq=lead.map(function(x,k){ used[x.img]=1; return {img:x.img, dur:(k===0?(x.o===0?1.5:1.0):0.7), ko:x.ko||(x.o===0?'노후 건물':x.o===1?'철거':'공사')}; }); if(fin){ used[fin.img]=1; seq.push({img:fin.img, dur:0.7, ko:fin.ko||'완공'}); }
+        var tot=seq.reduce(function(a,x){ return a+x.dur; },0), T=Math.ceil(tot-0.05), rem=Math.max(0,T-tot), toLast=Math.min(0.5,rem); seq[seq.length-1].dur=Math.round((seq[seq.length-1].dur+toLast)*10)/10; seq[0].dur=Math.round((seq[0].dur+(rem-toLast))*10)/10;
+        var sh={kind:'photo', img:seq[0].img, dur:T, free:true, seq:seq, ko:'⚡ '+seq.map(function(z){ return String(z.ko||'').slice(0,10); }).join(' → ')+' (빠른 컷 '+seq.length+'장 · 첫 장 '+seq[0].dur+'초, 나머지 0.7초)', en:'fast hard-cut sequence of the transformation', gen_en:'', rev:false};
+        var hadN=!!(r.narration&&r.narration.length); r.shots=[sh].concat((r.shots||[]).filter(function(x){ return !used[x.img]; })); try{ dSid(r); }catch(e){} r.narration=[];
+        console.log('[빠른 컷] AI가 사진을 보고 공사 과정 '+seq.length+'장을 묶음'); try{ toast('⚡ 공사 과정 '+seq.length+'장을 빠른 컷('+T+'초)으로 묶었어요'); }catch(e){} try{ refresh(); }catch(e){} if(hadN || STU.D.narAll!==false) setTimeout(function(){ try{ dNarWrite(r, true); }catch(e){} }, 300);
+      }catch(e){ console.warn('[빠른 컷] 분류 실패', e); } }, function(e){ console.warn('[빠른 컷] 분류 요청 실패', e); }); }); }
+window.dRebuildSeqAI=dRebuildSeqAI;
 window.dRebuildSeq=dRebuildSeq; setTimeout(function(){ try{ window._dNarWrite=dNarWrite; window._dIsFree=dIsFree; window._previewBrand=previewBrand; window._composeRaw=composeRaw; }catch(e){} },0);
 function dTeaser(p){ if(!p || !p.brand || !(p.shots||[]).length) return; try{ var _rk=rRecipe(p); if(_rk && _rk.k==='rebuild') return; }catch(e){} var S=p.shots; if(/^✨ 완성 미리보기/.test(S[0].ko||'')) return;
   if(!D_BEFORE_RE.test((S[0].ko||'')+' '+(S[0].en||''))) return;
@@ -67487,7 +67507,7 @@ function previewBrand(r){
   ov.querySelector('[data-re]').onclick=function(){ cancelAnimationFrame(raf); start(); };
 }
 // 브랜드 필름 장면 목록 UI
-function dShotsHtml(r){ try{ if(r && r.brand && !r._seqTried){ r._seqTried=1; var _hadN=!!(r.narration&&r.narration.length), _n0=(r.shots||[]).length; dRebuildSeq(r); if((r.shots||[]).length!==_n0 && _hadN) setTimeout(function(){ try{ dNarWrite(r, true); }catch(e){} }, 300); } }catch(_se){} /* 2026-11-13: 이미 받은 제안도 공사 장면을 빠른 컷으로 묶음(대사는 새 길이에 맞게 다시 씀) */
+function dShotsHtml(r){ try{ if(r && r.brand && !r._seqTried){ r._seqTried=1; var _hadN=!!(r.narration&&r.narration.length), _n0=(r.shots||[]).length; dRebuildSeq(r); if((r.shots||[]).length!==_n0 && _hadN) setTimeout(function(){ try{ dNarWrite(r, true); }catch(e){} }, 300); else if(!(r.shots||[]).some(function(x){ return x.seq; })) setTimeout(function(){ dRebuildSeqAI(r); }, 50); } }catch(_se){} /* 2026-11-13: 이미 받은 제안도 공사 장면을 빠른 컷으로 묶음(대사는 새 길이에 맞게 다시 씀) */
   dFillApply(r);
   var opts=STU.imgs.map(function(_,i){ return {v:i, t:'사진 '+(i+1)}; });
   var nFree=dEcoCount(r), on=!!r.eco;
