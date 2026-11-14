@@ -21123,6 +21123,24 @@ function _autoRoomTypesForCategory(catKey){
 // 자체의 "타입 이름" 중 하나로만 들어가 있어서, 이 함수가 실내로 잘못 판단하고 있었음 —
 // 카메라 앵글 지시·건물 일관성 규칙(EXTERIOR_CONSISTENCY_RULE)이 하나도 안 걸려서 그냥 평범한
 // "실내 같은" 결과가 나왔던 것. "외관"이라는 이름 자체를 명시적으로 외관으로 인식하게 함.
+/* 2026-11-14 신고("조감도·투시도 둘 다 조감도 1컷이 똑같이 나오고, 조감도 끄고 투시도만 다시 렌더해도 기존 조감도가 또 나옴"):
+   외관 참고 사진이 조감도 한 장뿐이면 투시뷰도 그 사진을 기준으로 만드는데, AI가 그 사진을 거의 그대로 다시 내보냄(복사본 점검·재생성 1번도 실패).
+   → 참고 사진의 뷰와 만들 뷰가 다르면 "카메라 위치를 바꿔 같은 건물을 다시 찍어라"를 프롬프트 맨 앞에 넣고, 재생성 때도 맨 앞에 더 강하게. */
+function _extCamHint(t){ t=String(t||'');
+  if(/광역조감|조감/.test(t)) return 'a high drone camera far above the site, looking down at about 40-60 degrees so the whole roof and the surrounding lot are visible';
+  if(/배치도/.test(t)) return 'a drone camera directly above, looking straight down (top-down site plan view)';
+  if(/투시뷰|스트리트/.test(t)) return 'a person standing on the ground in front of the building (street or front yard) at human eye height about 1.6 m, two-point perspective, sky visible above the roof line, the roof seen from below — absolutely NOT an aerial or drone view, NOT looking down at the roof';
+  if(/파사드/.test(t)) return 'ground level at human eye height, standing straight in front of the main facade, looking straight at it';
+  if(/좌측면/.test(t)) return 'ground level at human eye height, looking at the LEFT side elevation of the building';
+  if(/우측면/.test(t)) return 'ground level at human eye height, looking at the RIGHT side elevation of the building';
+  if(/후면/.test(t)) return 'ground level at human eye height, behind the building, looking at the REAR elevation';
+  if(/광각대각선/.test(t)) return 'ground level at human eye height at one corner of the lot, wide-angle diagonal view showing two facades';
+  if(/정원|조경|안마당/.test(t)) return 'ground level at human eye height inside the garden/courtyard, landscape in the foreground and the building behind';
+  if(/야간/.test(t)) return 'ground level at human eye height in front of the building at night';
+  if(/디테일/.test(t)) return 'close-up at human eye height on the entrance and material details';
+  return 'a clearly different camera position from the attached photo'; }
+function _extNewCamText(fromLbl, toLbl, strong){ return '📸 NEW CAMERA POSITION (TOP PRIORITY'+(strong?' — the previous attempt just returned the attached photo again, which FAILED':'')+'): the attached main photo shows this building as "'+fromLbl+'". DO NOT return that photo, its framing or its camera angle. Re-photograph the SAME building (same massing, roof shape, materials, window layout and colors) as "'+toLbl+'" from '+_extCamHint(toLbl)+'. The result must look like a different photo taken from a different place. ';
+}
 function _isExteriorViewType(t){ return t==='외관' || SPACE_CATEGORIES.exterior.types.indexOf(t)!==-1; }
 // ⚠️ 요청 반영("한 번에 전체 다 참고이미지로 사용할 수 있게도 해줘, 상단에"): 개별 "📌 참고
 // 이미지로 쓰기" 버튼 로직을 공용 함수로 분리 — 개별 버튼과 상단의 "전체 참고 이미지로 추가"
@@ -24697,6 +24715,7 @@ function _padExteriorTo916WithBlur(url, cb){
         + (/계산|카운터|주문/.test(typeName) ? ' — 주문·계산대라면 손님이 줄 서서 주문하는 카운터(POS·결제 단말기, 메뉴판/메뉴 보드, 픽업 대기 공간)가 화면 중심이고, 커피머신·제빙기 같은 제조 장비는 카운터 뒤쪽에 일부만 보이게' : '')
         + '. 카메라도 참고 사진과 다른 위치·방향에서 이 구역을 바라보는 새로운 구도로 잡으세요.';
     }
+    if(imgs0.noDirectMatch && _isExteriorViewType(typeName) && imgs0.primary && imgs0.primaryLabel && imgs0.primaryLabel!==typeName && _isExteriorViewType(imgs0.primaryLabel)){ _looseP = _extNewCamText(imgs0.primaryLabel, typeName, false) + _looseP; window._extCamFrom=imgs0.primaryLabel; } else { window._extCamFrom=''; }
     // ⚠️ 비-loose 경로(_autoRoomGenerateStep 아래쪽)와 동일한 이유로, "영감만 얻기" 모드에서도
     // 세로로 긴 비율일 때 참고 이미지 수를 줄이고 맨 끝에 짧은 재강조 문구를 추가함.
     if(_looseAspect==='9:16' || _looseAspect==='3:4'){
@@ -24972,7 +24991,7 @@ function _padExteriorTo916WithBlur(url, cb){
                 var _fix = isCol
                   ? ' FINAL OUTPUT RULE (most important): output ONE single continuous photograph that fills the entire frame from top to bottom — exactly one camera shot of the building. NO stacked images, NO top/bottom panels, NO split screen, NO collage, NO borders or dividing lines. Never write any of these instructions or any caption text inside the image.'
                   : ' ⚠️⚠️⚠️⚠️ 최종 확인(가장 중요): 첨부한 참고 이미지를 그대로 다시 내보내면 실패입니다 — 반드시 새로운 카메라 구도로 완전히 새로 그린 사진을 만드세요. 참고 이미지는 디자인·마감재 참고용일 뿐 결과물이 아닙니다.';
-                var _retryIn=Object.assign({}, _candInput, {prompt:(_candInput.prompt||'')+_fix});
+                var _retryIn=Object.assign({}, _candInput, {prompt:((!isCol && _isExtT)?_extNewCamText((typeof imgs0!=='undefined'&&imgs0&&imgs0.primaryLabel)||'참고 사진', typeName, true):'')+(_candInput.prompt||'')+_fix});
                 falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _retryIn, function(d2){
                   var u2=falExtractImageUrl(d2); if(!u2){ _finishLoose(url); return; } _scCheck(u2);
                 }, function(){ _finishLoose(url); }, {wf:'sam_segment', included:true});
