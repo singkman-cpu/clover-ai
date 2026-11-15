@@ -57181,6 +57181,13 @@ function admMail(c){
       '<button id="mail-test-btn" style="flex:1;padding:10px;background:var(--c2);border:1px solid var(--bd2);color:var(--t);border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🧪 테스트 (내 계정만)</button>'+
       '<button id="mail-send-btn" style="flex:2;padding:10px;background:linear-gradient(135deg,var(--ac),#00b894);border:none;color:#000;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">📧 전체 발송</button>'+
     '</div>'+
+    /* 2026-11-15 요청: 메일 예약 발송 — 날짜·시간을 정해 두면 그때 서버가 알아서 보냄(브라우저를 꺼도 됨) */
+    '<div style="border:1px solid rgba(251,191,36,.45);background:rgba(251,191,36,.07);border-radius:9px;padding:10px;margin-bottom:10px">'+
+      '<div style="font-size:12px;font-weight:800;color:#fbbf24;margin-bottom:6px">⏰ 예약 발송 <span style="font-weight:400;color:var(--m2);font-size:10.5px">위 대상·제목·내용 그대로 정한 시간에 서버가 보내요 · 컴퓨터를 꺼도 돼요 (5분 단위로 확인)</span></div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="mail-sched-at" type="datetime-local" style="flex:1;min-width:190px;background:var(--c2);border:1px solid var(--bd2);color:var(--t);padding:8px 10px;font-size:12px;border-radius:6px;outline:none;color-scheme:dark">'+
+      '<button id="mail-sched-btn" onclick="admMailSchedule()" style="padding:9px 14px;background:#fbbf24;border:none;color:#111;border-radius:7px;font-size:12px;font-weight:800;cursor:pointer;font-family:inherit">⏰ 이 시간에 예약</button></div>'+
+      '<div id="mail-sched-list" style="margin-top:8px;font-size:11px;color:var(--t2)"></div>'+
+    '</div>'+
     '<div id="mail-result" style="font-size:11px;color:var(--m2);text-align:center;min-height:16px;padding:4px"></div>'+
     '<div style="border-top:1px solid var(--bd);margin-top:14px;padding-top:12px">'+
       '<div style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px">📋 최근 발송 이력</div>'+
@@ -57237,8 +57244,79 @@ function admMail(c){
       admMailSend(false);
     };
     admMailLoadHistory();
+    try{ admMailSchedLoad(); }catch(_e){}
   },100);
 }
+
+// 2026-11-15 요청: 메일 예약 발송
+function _admMailTarget(){ var t=document.querySelector('input[name="mail-target"]:checked'), v=t?t.value:'all';
+  if(v==='manual'){ var raw=(gE('mail-manual-emails')?gE('mail-manual-emails').value:''); return {type:'manual', emails:raw.split('\n').map(function(e){ return e.trim(); }).filter(function(e){ return e && e.indexOf('@')>-1; })}; }
+  if(v==='plan'){ var ps=gE('mail-plan-sel'); return {type:'plan', plan:ps?ps.value:'free'}; }
+  return {type:'all'}; }
+function _admTargetLabel(t){ t=t||{}; return t.type==='manual'?('직접 입력 '+((t.emails||[]).length)+'곳'):t.type==='plan'?(String(t.plan||'')+' 플랜 회원'):'전체 회원'; }
+/* 2026-11-15: 서버 설정(SQL·Secrets)이 어렵다고 해서 → 이 사이트 창을 켜 두면 그 시간에 브라우저가 자동으로 보내는 방식으로 (설정 0) */
+function _admSchedGet(){ try{ return JSON.parse(localStorage.getItem('clover_mail_sched')||'[]'); }catch(e){ return []; } }
+function _admSchedPut(L){ try{ localStorage.setItem('clover_mail_sched', JSON.stringify(L.slice(0,30))); }catch(e){} }
+function _admMailScheduleLocal(){
+  var r=gE('mail-result'); function say(c,m){ if(r){ r.style.color=c; r.textContent=m; } }
+  var from=(gE('mail-from')?gE('mail-from').value.trim():''), subject=(gE('mail-subject')?gE('mail-subject').value.trim():''), body=(gE('mail-body')?gE('mail-body').value.trim():''), at=(gE('mail-sched-at')||{}).value||'';
+  if(!subject){ say('#fca5a5','메일 제목을 입력하세요.'); return; } if(!body){ say('#fca5a5','메일 내용을 입력하세요.'); return; } if(!from){ say('#fca5a5','발신자 이메일을 입력하세요.'); return; }
+  if(!(localStorage.getItem('clover_resend_key')||'')){ say('#fca5a5','Resend API 키가 없습니다. 상단에서 입력 후 저장하세요.'); return; }
+  if(!at){ say('#fca5a5','⏰ 보낼 날짜·시간을 고르세요.'); return; }
+  var when=new Date(at); if(isNaN(when.getTime())){ say('#fca5a5','날짜·시간이 올바르지 않아요.'); return; } if(when.getTime()<Date.now()+30000){ say('#fca5a5','지금보다 뒤의 시간을 골라 주세요.'); return; }
+  var tg=_admMailTarget(); if(tg.type==='manual' && !tg.emails.length){ say('#fca5a5','이메일 주소를 입력하세요.'); return; }
+  var whenTxt=when.toLocaleString('ko-KR',{month:'long',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'});
+  if(!confirm('⏰ '+whenTxt+'에\n「'+subject+'」\n을(를) '+_admTargetLabel(tg)+'에게 보내도록 예약할까요?\n\n※ 그 시간까지 이 컴퓨터에서 CLOVER AI 사이트 창을 켜 두세요(관리자 로그인 상태, 컴퓨터 절전 X).')) return;
+  var L=_admSchedGet(); L.unshift({id:'m'+Date.now(), at:when.getTime(), subject:subject, body:body, from:from, target:tg, status:'pending'}); _admSchedPut(L);
+  say('var(--ac)','⏰ '+whenTxt+' 발송으로 예약됐어요 — 그 시간까지 이 사이트 창을 켜 두세요 (다른 탭이어도 돼요)'); admMailSchedLoad(); _admSchedTick();
+}
+function _admMailSchedLoadLocal(box){ if(!box) return; var L=_admSchedGet();
+  if(!L.length){ box.innerHTML=''; return; }
+  var ST={pending:'⏳ 대기(이 컴퓨터)',sending:'📤 보내는 중',done:'✅ 완료',canceled:'✖ 취소됨',missed:'⚠️ 시간 지남'};
+  box.innerHTML=L.map(function(x){ var w=new Date(x.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'}); return '<div style="display:flex;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bd)"><span style="white-space:nowrap">'+(ST[x.status]||x.status)+'</span><span style="white-space:nowrap;color:#fbbf24">'+w+'</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_admEsc(x.subject||'')+' · '+_admTargetLabel(x.target)+(x.note?(' · '+_admEsc(x.note)):'')+'</span>'+(x.status==='pending'||x.status==='missed'?'<button type="button" data-msc="'+x.id+'" style="padding:3px 8px;border-radius:5px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit">'+(x.status==='missed'?'목록에서 빼기':'예약 취소')+'</button>':'')+(x.status==='missed'?'<button type="button" data-msnow="'+x.id+'" style="padding:3px 8px;border-radius:5px;border:none;background:#fbbf24;color:#111;font-size:10.5px;font-weight:800;cursor:pointer;font-family:inherit">지금 보내기</button>':'')+'</div>'; }).join('');
+  box.querySelectorAll('[data-msc]').forEach(function(bt){ bt.onclick=function(){ if(!confirm('이 예약을 취소할까요?')) return; var L2=_admSchedGet(); L2.forEach(function(x){ if(x.id===bt.getAttribute('data-msc')) x.status='canceled'; }); _admSchedPut(L2); admMailSchedLoad(); }; });
+  box.querySelectorAll('[data-msnow]').forEach(function(bt){ bt.onclick=function(){ var L2=_admSchedGet(); L2.forEach(function(x){ if(x.id===bt.getAttribute('data-msnow')){ x.status='pending'; x.at=Date.now(); x.late=1; } }); _admSchedPut(L2); _admSchedTick(); }; }); }
+/* 2026-11-15 요청("컴퓨터가 꺼져 있어도 돼야지"): 서버 예약(fal-proxy가 저장 → Supabase Cron이 5분마다 확인해서 보냄)이 기본. 서버가 아직 준비 안 됐을 때만 이 컴퓨터 예약으로 */
+function admMailSchedule(){
+  var r=gE('mail-result'); function say(c,m){ if(r){ r.style.color=c; r.textContent=m; } }
+  var from=(gE('mail-from')?gE('mail-from').value.trim():''), subject=(gE('mail-subject')?gE('mail-subject').value.trim():''), body=(gE('mail-body')?gE('mail-body').value.trim():''), at=(gE('mail-sched-at')||{}).value||'';
+  if(!subject){ say('#fca5a5','메일 제목을 입력하세요.'); return; } if(!body){ say('#fca5a5','메일 내용을 입력하세요.'); return; } if(!from){ say('#fca5a5','발신자 이메일을 입력하세요.'); return; }
+  if(!at){ say('#fca5a5','⏰ 보낼 날짜·시간을 고르세요.'); return; }
+  var when=new Date(at); if(isNaN(when.getTime())){ say('#fca5a5','날짜·시간이 올바르지 않아요.'); return; } if(when.getTime()<Date.now()+60000){ say('#fca5a5','지금보다 뒤의 시간을 골라 주세요.'); return; }
+  var tg=_admMailTarget(); if(tg.type==='manual' && !tg.emails.length){ say('#fca5a5','이메일 주소를 입력하세요.'); return; }
+  var whenTxt=when.toLocaleString('ko-KR',{month:'long',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'});
+  if(!confirm('⏰ '+whenTxt+'에\n「'+subject+'」\n을(를) '+_admTargetLabel(tg)+'에게 보내도록 예약할까요?')) return;
+  var bodyHtml=body.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'), html=_cloverMailHtml(subject, bodyHtml);
+  var b=gE('mail-sched-btn'); if(b){ b.disabled=true; b.textContent='예약하는 중…'; }
+  _falProxyCall('mail-schedule', {send_at:when.toISOString(), subject:subject, html:html, from:from, target:tg}, function(d){ if(b){ b.disabled=false; b.textContent='⏰ 이 시간에 예약'; }
+    if(d && d.ready && !d.ready.resend) say('#f5b544','⏰ 예약은 저장됐어요 — 단, 서버에 RESEND_API_KEY가 아직 없어서 그 시간에 못 보내요. Supabase Secrets에 넣어 주세요.');
+    else say('var(--ac)','⏰ '+whenTxt+' 발송으로 서버에 예약됐어요 — 컴퓨터를 꺼도 그 시간에 보내요 (최대 5분 늦을 수 있어요)');
+    admMailSchedLoad(); },
+    function(e){ if(b){ b.disabled=false; b.textContent='⏰ 이 시간에 예약'; }
+      if(confirm('서버 예약이 아직 준비가 안 됐어요('+String(e).slice(0,80)+').\n\n대신 "이 컴퓨터 예약"으로 할까요? (그 시간까지 사이트 창을 켜 둬야 해요)')){ _admMailScheduleLocalNoAsk(when, subject, body, from, tg, whenTxt); } else say('#fca5a5','예약 실패: '+e); });
+}
+function _admMailScheduleLocalNoAsk(when, subject, body, from, tg, whenTxt){ var L=_admSchedGet(); L.unshift({id:'m'+Date.now(), at:when.getTime(), subject:subject, body:body, from:from, target:tg, status:'pending'}); _admSchedPut(L); var r=gE('mail-result'); if(r){ r.style.color='#f5b544'; r.textContent='⏰ '+whenTxt+' — 이 컴퓨터 예약으로 저장됐어요 (사이트 창을 켜 두세요)'; } admMailSchedLoad(); _admSchedTick(); }
+function admMailSchedLoad(){ var box=gE('mail-sched-list'); if(!box) return; box.innerHTML='<div data-srv style="color:var(--m2)">예약 목록 불러오는 중…</div><div data-loc></div>';
+  _admMailSchedLoadLocal(box.querySelector('[data-loc]'));
+  _falProxyCall('mail-schedule-list', {}, function(d){ var sv=box.querySelector('[data-srv]'); if(!sv) return; var L=(d&&d.list)||[];
+    var ST={pending:'⏳ 대기',sending:'📤 보내는 중',done:'✅ 완료',failed:'⚠️ 실패',canceled:'✖ 취소됨'};
+    sv.innerHTML=(d&&d.ready&&!d.ready.resend?'<div style="color:#f5b544;margin-bottom:4px">⚠️ 서버에 RESEND_API_KEY가 없어서 예약 메일이 안 나가요 — Supabase Secrets에 넣어 주세요</div>':'')+(L.length?L.map(function(x){ var w=new Date(x.at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',weekday:'short',hour:'2-digit',minute:'2-digit'}); var tl=x.target&&x.target.type==='manual'?('직접 입력 '+(x.target.n||0)+'곳'):_admTargetLabel(x.target); return '<div style="display:flex;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bd)"><span style="white-space:nowrap">'+(ST[x.status]||x.status)+'</span><span style="white-space:nowrap;color:#fbbf24">'+w+'</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_admEsc(x.subject||'')+' · '+tl+(x.total?(' · '+(x.sent||0)+'/'+x.total+'명'+(x.failed?(' (실패 '+x.failed+')'):'')):'')+(x.note?(' · '+_admEsc(x.note)):'')+'</span>'+(x.status==='pending'?'<button type="button" data-mssc="'+x.id+'" style="padding:3px 8px;border-radius:5px;border:1px solid var(--bd2);background:var(--c2);color:var(--t2);font-size:10.5px;cursor:pointer;font-family:inherit">예약 취소</button>':'')+'</div>'; }).join(''):'<span style="color:var(--m2)">서버에 예약된 메일이 없어요</span>');
+    sv.querySelectorAll('[data-mssc]').forEach(function(bt){ bt.onclick=function(){ if(!confirm('이 예약을 취소할까요?')) return; _falProxyCall('mail-schedule-cancel', {id:bt.getAttribute('data-mssc')}, function(){ admMailSchedLoad(); }, function(e){ alert('취소 실패: '+e); }); }; }); },
+    function(e){ var sv=box.querySelector('[data-srv]'); if(sv) sv.innerHTML='<span style="color:var(--m2)">서버 예약은 아직 준비 전이에요 (fal-proxy 배포 필요)</span>'; }); }
+function _admSchedRun(job){
+  var apiKey=localStorage.getItem('clover_resend_key')||''; var L=_admSchedGet();
+  function mark(st, note){ var L2=_admSchedGet(); L2.forEach(function(x){ if(x.id===job.id){ x.status=st; if(note) x.note=note; } }); _admSchedPut(L2); try{ admMailSchedLoad(); }catch(e){} }
+  if(!apiKey){ mark('missed','Resend 키 없음'); return; }
+  mark('sending');
+  function go(emails){ if(!emails.length){ mark('done','대상 0명'); return; } try{ toast('⏰ 예약 메일 발송 시작 — '+emails.length+'명'); }catch(e){} _admMailDoSend(apiKey, job.from, job.subject, job.body, emails, false); mark('done', emails.length+'명에게 보냄'+(job.late?' (늦게)':'')); }
+  var t=job.target||{};
+  if(t.type==='manual'){ go(t.emails||[]); return; }
+  var req=_supa.from('profiles').select('email,plan').neq('role','admin'); if(t.type==='plan' && t.plan) req=req.eq('plan', t.plan);
+  req.then(function(res){ go((res.data||[]).map(function(u){ return u.email; }).filter(function(e){ return e && e.indexOf('@')>-1; })); }, function(e){ mark('missed','회원 조회 실패'); }); }
+function _admSchedTick(){ try{ if(!window._supa || !window._supaUser || !(G && G.supaRole==='admin')) return; var L=_admSchedGet(), now=Date.now(), ch=false;
+  L.forEach(function(x){ if(x.status==='pending' && now>=x.at){ if(now-x.at>6*3600e3 && !x.late){ x.status='missed'; x.note='창이 꺼져 있어 못 보냄 — [지금 보내기]로 보낼 수 있어요'; ch=true; } } }); if(ch){ _admSchedPut(L); try{ admMailSchedLoad(); }catch(e){} }
+  var due=L.filter(function(x){ return x.status==='pending' && now>=x.at; })[0]; if(due) _admSchedRun(due); }catch(e){ console.warn('[메일 예약] 확인 실패', e); } }
+if(!window._admSchedIv) window._admSchedIv=setInterval(_admSchedTick, 20000);
 
 // 2026-10-13(관리자 요청): 기업(팀) 정기권 문의 답장 템플릿 — 받는 사람 이메일만 바꿔서 보내기
 // 금액은 부가세 포함(사이트 충전 패키지와 같은 기준). 금액·크레딧을 바꾸려면 아래 TEAM_PLANS만 고치면 됨.
