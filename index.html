@@ -67796,6 +67796,7 @@ function _matToGal(wf, url, origUrl, label){
   }catch(e){ console.warn('[소재 만들기] 갤러리 저장 실패', e); }
 }
 window._matToGal=_matToGal;
+var MAT_WINVIEW_REF=' 🏡 SAME HOUSE — VIEW OUTSIDE THE WINDOWS (interiors only): the SECOND attached image is an exterior view (perspective or aerial) of THIS SAME house and its surroundings. Use it only to decide what is seen through the windows and glass doors: the same setting, mountains or hills, trees, neighbouring houses, street and season as in that image, seen from inside at the right floor height and direction, natural and believable. Do not copy that image into the room, do not change anything inside the room, and never show this house itself from outside.';
 function stuMakeMaterial(kind, refresh){
   if(STU._matBusy) return; var src=(STU.imgs||[]).slice(0,maxImgs()); /* 2026-11-16 요청: 넣은 만큼(최대 40장) — 결과가 영상 최대 장수(40)에 차면 거기서 멈춤 */ if(!src.length){ toast('갤러리에서 완성 사진을 먼저 넣어 주세요'); return; }
   if(!confirm('넣어 둔 사진 '+src.length+'장으로 쇼츠 소재를 만들어요.\n'+_matCostTxt(kind, src.length)+'\n지금 사진들은 만든 소재로 바뀌어요. 진행할까요?')) return;
@@ -67809,7 +67810,8 @@ function stuMakeMaterial(kind, refresh){
     if(kind==='cgreal'){
       var _mp=_mpRun;
       return _matRun(_mp[1]+MAT_MODEL_SIMPLE+MAT_MODEL_REAL_UI, [s0], '3D 모델').then(function(model){
-        return _matRun(hqPt+(typeof REALISM_WHITE_KEEP==='string'?REALISM_WHITE_KEEP:'')+(typeof REALISM_FRAME_KEEP==='string'?REALISM_FRAME_KEEP:''), [model], '실사화').then(function(real){
+        var _xr=(extRef && !isExt[idx] && extRef!==s0) ? extRef : null; /* 2026-11-17 요청: 같은 집이면 투시도·조감도를 보고 창밖 풍경을 자연스럽게 */
+        return _matRun(hqPt+(typeof REALISM_WHITE_KEEP==='string'?REALISM_WHITE_KEEP:'')+(typeof REALISM_FRAME_KEEP==='string'?REALISM_FRAME_KEEP:'')+(_xr?MAT_WINVIEW_REF:''), _xr?[model,_xr]:[model], '실사화').then(function(real){
           items.push([model,'3D 모델 ('+_mp[0]+' 화면 캡처) '+n0]); items.push([real,'3D 렌더 실사화 결과 '+n0]); _matToGal('render', model, s0, '3D 모델 캡처 ('+_mp[0]+')'); _matToGal('render', real, model, '3D 렌더 실사화 (쇼츠 소재)');
           return items; /* 2026-11-17 요청: 렌더 실사화 영상 소재에 재질 변경·업스케일(확대) 넣지 않음 */
         });
@@ -67823,13 +67825,16 @@ function stuMakeMaterial(kind, refresh){
       });
     });
   }
+  var isExt=[], extRef=null;
   function pump(){
     if(STU._matStop){ if(running===0) finish(); return; } /* 2026-11-17 요청: 중간에 멈추기 — 지금 만드는 장만 끝내고 멈춤 */
     while(running<PAR && i<src.length){ (function(idx){ running++; i++; msg();
       one(idx).then(function(items){ slots[idx]=items; try{ (items||[]).forEach(function(it){ STU._matPrev.push(it); }); }catch(_p){} }).catch(function(e){ fails++; console.warn('[소재 만들기]', e); }).then(function(){ running--; done++; msg(); if(done>=src.length || (STU._matStop && running===0)) finish(); else pump(); });
     })(i); }
   }
-  pump();
+  if(kind==='cgreal'){ STU._matMsg='사진 '+src.length+'장 살펴보는 중 (외관·실내 구분)…'; try{ refresh(); }catch(e){}
+    Promise.all(src.map(function(x){ return _matIsExt(x).catch(function(){ return false; }); })).then(function(R){ isExt=R; for(var q=0;q<R.length;q++){ if(R[q]){ extRef=src[q]; break; } } pump(); });
+  } else pump();
 }
 window.stuMakeMaterial=stuMakeMaterial; window._matBlockHtml=_matBlockHtml;
 function _matIdea(t){ t=t||''; try{ var tg=STU.aiTag||{}, L=[]; (STU.imgs||[]).forEach(function(u,k){ var v=tg[imgId(k)]; if(v && /3D 모델|실사화 결과|재질만|확대 디테일|참고 이미지|현장 사진|현장사진 디자인 결과/.test(v)) L.push('사진 '+(k+1)+'번 = '+v); }); if(L.length) t=(t?t+'\n':'')+'[사진 역할 — 같은 숫자끼리 짝: 원본(3D 모델·현장 사진) 바로 다음에 그 결과] '+L.join(' / '); }catch(e){} return t; }
