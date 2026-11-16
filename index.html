@@ -44209,9 +44209,16 @@ function _editGlobalWB(origSrc, resSrc, cb){
       for(var i=0;i<d.length;i+=4){ var L=d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11; if(L<25||L>235) continue; m[0]+=d[i]; m[1]+=d[i+1]; m[2]+=d[i+2]; n++; }
       return n>100 ? [m[0]/n,m[1]/n,m[2]/n] : null; }
     var so=st(o), sr=st(r); if(!so||!sr){ fin(null); return; }
+    /* 2026-11-16 신고("회원 결과에 붉은기가 아직 있네"): 재질을 바꾸는 편집은 건물 색이 바뀌는 게 정상이라 사진 전체 평균으로 재면 붉은기를 못 잡았음
+       → 원본과 결과에서 '안 바뀐 곳'(하늘·주변 건물·풀·도로 등 밝기가 거의 같은 곳)만 골라 색 비율을 재서 보정 */
+    try{ var _S=192, _ow=o.naturalWidth||o.width, _oh=o.naturalHeight||o.height, _w=Math.max(16,Math.round(_S*_ow/Math.max(_ow,_oh))), _h=Math.max(16,Math.round(_S*_oh/Math.max(_ow,_oh)));
+      function _px(img){ var c=document.createElement('canvas'); c.width=_w; c.height=_h; var x=c.getContext('2d',{willReadFrequently:true}); x.filter='blur(1px)'; x.drawImage(img,0,0,_w,_h); return x.getImageData(0,0,_w,_h).data; }
+      var _a=_px(o), _b=_px(r), _m1=[0,0,0], _m2=[0,0,0], _n=0;
+      for(var _i=0;_i<_a.length;_i+=4){ var _La=_a[_i]*0.3+_a[_i+1]*0.59+_a[_i+2]*0.11, _Lb=_b[_i]*0.3+_b[_i+1]*0.59+_b[_i+2]*0.11; if(_La<20||_La>240||Math.abs(_La-_Lb)>10) continue; var _ca=Math.abs(_a[_i]-_a[_i+1])+Math.abs(_a[_i+2]-_a[_i+1]), _cb=Math.abs(_b[_i]-_b[_i+1])+Math.abs(_b[_i+2]-_b[_i+1]); if(Math.abs(_ca-_cb)>40) continue; for(var _k=0;_k<3;_k++){ _m1[_k]+=_a[_i+_k]; _m2[_k]+=_b[_i+_k]; } _n++; }
+      if(_n > (_a.length/4)*0.08){ so=[_m1[0]/_n,_m1[1]/_n,_m1[2]/_n]; sr=[_m2[0]/_n,_m2[1]/_n,_m2[2]/_n]; console.log('[편집 색 유지] 안 바뀐 곳 '+Math.round(_n*100/(_a.length/4))+'%로 색 비율 측정'); } }catch(_eu){}
     var gR=(so[0]/so[1])/(sr[0]/sr[1]), gB=(so[2]/so[1])/(sr[2]/sr[1]);
     gR=Math.max(0.9,Math.min(1.1,gR)); gB=Math.max(0.9,Math.min(1.1,gB));
-    if(Math.abs(gR-1)<0.012 && Math.abs(gB-1)<0.012){ fin(null); return; }
+    if(Math.abs(gR-1)<0.008 && Math.abs(gB-1)<0.008){ fin(null); return; }
     var W=r.naturalWidth||r.width, H=r.naturalHeight||r.height, c=document.createElement('canvas'); c.width=W; c.height=H; var x=c.getContext('2d',{willReadFrequently:true}); x.drawImage(r,0,0,W,H);
     var stp=Math.max(1, Math.floor(1500000/W));
     for(var y=0;y<H;y+=stp){ var hh=Math.min(stp,H-y), id=x.getImageData(0,y,W,hh), d=id.data; for(var q=0;q<d.length;q+=4){ d[q]=Math.min(255,d[q]*gR); d[q+2]=Math.min(255,d[q+2]*gB); } x.putImageData(id,0,y); }
@@ -52603,6 +52610,9 @@ function procImgWithTask(task, onDone, onErr){
   // 2026-10-26 요청("모든 야간씬에 달 넣지 마 — 프롬프트에 넣어달라고 쓰기 전까지는", "달 보여주려고 카메라를 밑으로 내렸나?"):
   // 밤·블루아워·황혼 장면이면 달을 그리지 말고, 하늘을 더 보여주려고 구도를 바꾸지 말라는 규칙을 붙임(회원이 추가 요청에 달을 적으면 제외)
   try{ if(_isNightTask(task, prompt)){ prompt+=NIGHT_COMMON_TAIL; if(!/(보름달|초승달|반달|그믐달|달을|달이|달도|달 넣|달빛|\bmoon)/i.test(String(task.userExtra||''))) prompt+=NO_MOON_TAIL; else prompt+=' 🌕 USER REQUEST OVERRIDE: the user explicitly asked for a visible moon — show the moon naturally inside the sky area that is already visible (ignore any earlier "no moon" rule), and do NOT tilt, lower, zoom or reframe the camera to make room for it.'; } }catch(_nm){}
+  /* 2026-11-16 신고(회원이 "원본의 모든 것을 유지한 채로 상층부 검은 외장재와 하단부 콘크리트 재질을 고급스러운 재료로 바꿔줘" → 재질이 거의 안 바뀜):
+     '원본 유지'를 '아무것도 바꾸지 말라'로 받아들인 것 → 글로 쓴 편집(프리셋·칠하기 없음)에 바꿔 달라는 말이 있으면, 요청한 부분은 눈에 띄게 바꾸라고 맨 앞에 못 박음 */
+  try{ var _ut=String(task.userExtra||task.userText||''); if(task.wf==='edit' && !task.selK && /(바꿔|바꾸|변경|교체|재질|재료|마감|외장|색상|컬러|톤|으로 해|change|replace|swap)/i.test(_ut)){ prompt='🎯 REQUESTED CHANGE — MUST BE CLEARLY VISIBLE: apply exactly what the user asked ('+_ut.slice(0,400).replace(/[\r\n]+/g,' ')+'). Words like "keep everything from the original" mean: keep the composition, camera, building massing, window layout, surroundings and sky unchanged — they do NOT mean keep the parts the user asked to change. The parts the user named (e.g. a cladding, a facade material, a color) MUST come out obviously different in material, color and texture so the change is unmistakable at a glance; returning them unchanged or only slightly tinted is a FAILURE. ' + prompt; } }catch(_eRC){}
   var eng     = task.eng || 'nano2';
   var scale   = task.scale || '2x';
   var resolution = task.resolution || '1K';
