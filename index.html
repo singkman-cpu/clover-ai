@@ -24466,6 +24466,14 @@ function _autoRoomSaveProgress(st, allTypes, isApt, resumeIdx){
 function _arAppendTail(task, prompt){
   try{ var t=(window._arTailMap||{})[prompt]; if(t && task && typeof task.prompt==='string' && task.prompt.indexOf('FINAL DESIGN DIRECTION (repeated last')===-1) task.prompt += ' ⏬ FINAL DESIGN DIRECTION (repeated last on purpose — this is what the user chose):'+t; }catch(e){}
 }
+/* 2026-11-16 요청("가로로 넓은 거실 참고 이미지를 넣어도 항상 세로로 좁게 나온다 — 넓은 거실을 보여주고 싶다, 카메라를 틀어서 찍어도 된다"):
+   출력 비율이 '자동'이면 세로 3:4 고정 대신 참고 사진 비율을 따름(가로 사진 → 가로), 참고 사진이 없으면 가로 4:3 */
+window._ssAspCache=window._ssAspCache||{};
+function _ssAutoAspect(src){ try{ if(src && window._ssAspCache[src]) return window._ssAspCache[src]; }catch(e){} return '4:3'; }
+function _ssAspNeedLoad(spTab, src){ return !!(src && (!spTab.forcedAspect || spTab.forcedAspect==='auto') && !window._ssAspCache[src] && typeof loadImgSafe==='function'); }
+function _ssAspLoad(src, cb){ var fin=false; function go(){ if(fin) return; fin=true; cb(); } setTimeout(go, 8000);
+  loadImgSafe(src, function(im){ try{ var w=im.naturalWidth, h=im.naturalHeight; window._ssAspCache[src]= (w&&h) ? _nearestAspectRatioStr(w,h) : '4:3'; }catch(e){ window._ssAspCache[src]='4:3'; } go(); }, function(){ window._ssAspCache[src]='4:3'; go(); }); }
+var SS_WIDE_CAM=' 📐 CAMERA FOR A WIDE FRAME (interiors): this is a horizontal frame meant to show how wide and open the space is. Shoot it like professional Korean apartment / interior photography — the camera may stand in a corner or at the edge of the room and look diagonally across it (two-point perspective), showing the depth and width of the room with natural wide-lens framing. It does NOT need to fit every wall and every piece of furniture into the frame; a natural, attractive angle on the main part of the space is better than a forced, squeezed view of everything.';
 function _autoRoomGenerateStep(idx, isApt){
   var spTab=getTab('spaceset');
   /* 2026-11-15 신고("미래형 스마트 기술 켜고 렌더했다가 싫어서 끄고 다시 렌더했는데 그래도 AI(미래형) 디자인이 나온다"): 앞에서 만든 결과들이 '같은 집 일관성' 참고 사진으로 다음 생성에 계속 붙어서, 문구를 꺼도 그 스타일이 따라왔음 → 요청 문구가 바뀌면 일관성 참고(이전 결과·창호 기준)를 새로 시작 */
@@ -24498,6 +24506,7 @@ function _autoRoomGenerateStep(idx, isApt){
   // 새로 생성(text-to-image)하는 방식으로 완전히 분리함 — 참고할 이미지 자체가 없으니 시각적으로
   // 끌려갈 대상이 원천적으로 사라짐.
   var imgs0 = _autoRoomImagesFor(typeName, isApt);
+  if(_ssAspNeedLoad(spTab, imgs0.primary)){ _ssAspLoad(imgs0.primary, function(){ _autoRoomGenerateStep(idx, isApt); }); return; }
   // ⚠️ 요청 반영(근본 원인 수정): "욕실·아이방·서재가 거실로 나오는 경우가 많다" — 자기 앵커
   // 사진이 없는 방 타입은 지금까지 "같은 종류 앵커 중 첫 번째"(흔히 거실)를 편집 기준(주 이미지)
   // 으로 써왔는데, 이미지 편집 모델은 기준 이미지의 구조·형태를 강하게 유지하려는 경향이 있어서
@@ -24567,7 +24576,7 @@ function _padExteriorTo916WithBlur(url, cb){
     // 무관하게 9:16을 고르면 전부 3:4로 안전하게 생성하도록 범위를 넓힘.
     // ⚠️ 요청 반영("임의로 넓히지 마, 그냥 9:16으로 해"): 3:4로 다운그레이드하던 안전장치를 완전히
     // 제거함 — 선택한 비율(9:16 포함)이 그대로 API에 전달됨. 겹침 방지는 아래 프롬프트 지시문으로만 대응.
-    var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? _apiAspect(spTab.forcedAspect) : '3:4';
+    var _looseAspect = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? _apiAspect(spTab.forcedAspect) : _ssAutoAspect(imgs0.primary);
     // ⚠️ 요청 반영(되돌림): 예전엔 "건물이 2개로 겹쳐 나오는" 버그 때문에 건축 외관 뷰일 땐 9:16을
     // 자동으로 3:4로 낮췄는데, 사용자가 선택한 비율과 실제 출력 비율이 달라서 오히려 "비율이
     // 이상하다"는 혼란을 줬음. 사용자가 위험을 감수하고 진짜 9:16을 시도해보길 원해서, 이 강제
@@ -24978,6 +24987,7 @@ function _padExteriorTo916WithBlur(url, cb){
     if(_looseP.indexOf('숲과 나무가 우거진 자연 환경')!==-1) _looseP += SURROUND_FOREST_FINAL;
     if(_looseP.indexOf('깊은 숲 속 한가운데')!==-1) _looseP += SURROUND_DEEPFOREST_FINAL; try{ if(isApt && !_isExteriorViewType(typeName) && _looseP.indexOf('APARTMENT SAFETY RULE')===-1) _looseP += APT_NO_OUT_DOOR; }catch(_e){} if(_looseP.indexOf('숲으로 덮인 산 능선 뷰')!==-1) _looseP += SURROUND_FORESTHILL_FINAL; // 2026-10-05: "숲과 나무 배경 골랐는데 단독주택이 많이 나온다"
     try{ var _arTl=(window._arTailMap||{})[prompt]; if(_arTl) _looseP += ' ⏬ FINAL DESIGN DIRECTION (repeated last on purpose — this is what the user chose):'+_arTl; }catch(e){}
+    if(!_isExteriorViewType(typeName) && /^(4:3|3:2|16:9|21:9|5:4)$/.test(_looseAspect)) _looseP += SS_WIDE_CAM;
     var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 버그 수정: 해상도가 빠져 4K를 골라도 1K(1376×768)로 생성되던 문제
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
     // ⚠️ 치명적 버그 수정(반영도 3단계가 전부 똑같이 나오던 진짜 원인): 'google/nano-banana-2.1'는
@@ -25215,6 +25225,7 @@ function _padExteriorTo916WithBlur(url, cb){
   }
 }
 function _autoRoomRetryOne(idx){
+  try{ var _sp0=getTab('spaceset'), _tn0=(_sp0.autoRoomSelected||[])[idx], _p0=_tn0?(_autoRoomImagesFor(_tn0)||{}).primary:null; if(_ssAspNeedLoad(_sp0,_p0)){ _ssAspLoad(_p0, function(){ _autoRoomRetryOne(idx); }); return; } }catch(_ea){} /* 2026-11-16: 자동 비율 = 참고 사진 비율 */
   var spTab=getTab('spaceset');
   var st=spTab.autoRoomState;
   if(!st) return;
@@ -25237,7 +25248,7 @@ function _autoRoomRetryOne(idx){
   // ⚠️ 요청 반영(최종 확정): "이 뷰만 다시 생성"에도 동일하게 적용 — 세 반영도 전부 이제 순수
   // 생성 경로를 씀(전에는 loose만 이 경로였음).
   {
-    var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? _apiAspect(spTab.forcedAspect) : '3:4';
+    var _looseAspect2 = (spTab.forcedAspect && spTab.forcedAspect!=='auto') ? _apiAspect(spTab.forcedAspect) : _ssAutoAspect(imgs0b.primary);
     // (위 _looseAspect와 동일한 이유로 9:16→3:4 강제 다운그레이드 제거함)
     var _looseP2 = '';
     if(spTab.aptCustomPrompt && spTab.aptCustomPrompt.trim()){
@@ -25432,6 +25443,7 @@ function _autoRoomRetryOne(idx){
       _looseRefs2 = _vert2 ? [_keepRef2] : [_keepRef2].concat(_looseRefs2.filter(function(v){ return v!==_keepRef2; })).slice(0,3); // 세로는 참고 1장만(여러 장이면 콜라주로 나오는 문제)
       _looseP2 += ' 🔁🔁🔁 RE-RENDER OF THE SAME ROOM (read last, overrides the room-variety and ceiling suggestions above): the FIRST attached image is another room of THIS SAME house that defines the approved concept of this set (the user is happy with it). This room is a different room of that house, so its layout and camera are its own — but keep from that image exactly: the ceiling finish and colour (e.g. if it is a white plaster ceiling, it stays white — do NOT turn it into wood slats), the wall, floor and cabinet materials and colours, the overall colour mood and light, and the SAME outside view through the windows (the same place and scenery — e.g. the same lake and mountains; never replace it with a back yard or neighbouring houses). Design this room\'s own layout, furniture and camera freshly so it fits that concept — it must look like the same house, not a different one.';
     }
+    if(!_isExteriorViewType(typeName) && /^(4:3|3:2|16:9|21:9|5:4)$/.test(_looseAspect2)) _looseP2 += SS_WIDE_CAM;
     var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 해상도 누락 수정
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
     // ⚠️ 위 _autoRoomGenerateStep과 동일한 치명적 버그 수정: 참고 사진이 있으면 반드시 /edit
@@ -60604,6 +60616,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'space', t:'▶ 멈춘 자리부터 이어서 생성', h:'공간 컨셉·아파트 컨셉 디자인에서 여러 뷰를 만들다가 ⏹ 정지를 눌렀다면, 바로 아래 "▶ 이어서 생성" 버튼으로 멈춘 뷰부터 남은 뷰를 이어서 만들 수 있어요. 이미 만든 뷰는 그대로 두고 남은 것만 만들어요.'},
   {c:'edit', t:'💙 애니 감성 맑은 하늘(실사)', h:'AI 편집 › 시간/날씨/분위기와 공간 컨셉 디자인 › 날씨·계절 연출에 "애니 감성 맑은 하늘(실사)"이 생겼어요 — 애니 영화 한 장면처럼 진한 파란 하늘·또렷한 뭉게구름·비 갠 뒤 맑은 공기·낮은 옆 햇살·싱그러운 색감으로 바꾸되, 그림이 아니라 진짜 사진처럼. 건물·길·나무 위치와 구도는 그대로예요.'},
   {c:'space', t:'❄️ 계절 연출이 더 다양해졌어요', h:'공간 컨셉 디자인의 날씨·계절 연출에 새 계절이 생겼어요 — ⛄ 눈 그친 뒤 소복한 겨울, 🌨 첫눈 살짝, 🕯 눈 쌓인 겨울밤 불빛, 🧊 서리 낀 맑은 겨울 아침, 🍂 늦가을 낙엽비, 🍁 쨍한 가을 하늘 단풍, 🌿 신록의 늦봄, 🌦 여름 소나기 뒤. 도심 사진도 숲·산을 새로 만들지 않고 가로수·화단·옥상정원·처마 위 눈·길가 낙엽으로 계절이 느껴지게 만들어요.'},
+  {c:'space', t:'📐 공간 컨셉 디자인 — 넓은 공간은 넓게', h:'출력 비율이 자동이면 이제 참고 이미지 비율을 따라가요. 가로로 넓은 거실 사진을 넣으면 가로로 넓게, 세로 사진이면 세로로 나와요. 가로 화면에서는 실제 아파트 인테리어 사진처럼 모서리에서 대각선으로 찍어 공간의 깊이와 폭을 보여줘요(방 전체를 억지로 다 담지 않아요).'},
   {c:'space', t:'🖼 공간 컨셉 디자인 — 같은 액자 반복 안 해요', h:'공간 컨셉 디자인에서 참고 이미지에 걸린 액자·그림을 여러 방에 똑같이 복사하지 않아요. 액자는 필요한 공간에만 0~2개, 그림은 공간마다 다른 새 그림으로 넣어요.'},
   {c:'video', t:'✨ 공사 과정 영상은 완성 장면부터 살짝', h:'AI 감독에 오래된 집·철거·공사 중 사진과 완성 사진을 같이 넣으면, 감독이 맨 앞에 완성 장면을 2초 살짝 보여 주고 → 다시 과거(오래된 집·철거·공사)로 돌아가 → 완성으로 끝나게 짜요. 첫 대사도 "이 집, 원래는 이랬습니다"처럼 과거로 데려가서 끝까지 보게 만들어요. 맨 앞 장면은 무료 효과라 크레딧이 더 들지 않아요.'},
   {c:'video', t:'🪝 첫 3초 멘트가 더 강해졌어요', h:'AI 감독 대사의 첫 줄은 인사·"오늘은" 없이 첫 단어부터 궁금하게 시작해요 — 첫 화면에 보이는 것과 딱 맞고, 끝까지 봐야 풀리는 궁금증(반전·의외의 사실·"이 낡은 집이 어떻게 됐을까요" 같은 약속)을 던져요. 낚시성 말 없이, 영상 안에서 꼭 답을 줘요. 오래된 집·철거·공사 중 장면으로 시작하는 영상은 첫 줄에 변신을 약속하고, 공사 장면은 짧게 지나가요.'},
