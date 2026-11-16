@@ -50240,7 +50240,8 @@ function _runToolWithPrompt(translatedPrompt){
 var BG_KEEP_TAIL=' 🖤 BACKGROUND MODE — KEEP THE ORIGINAL BACKGROUND (user choice, overrides any instruction above to add or invent surroundings): this is a standalone 3D model (for example an exhibition booth, a showroom set, a pavilion or a product) rendered on a plain backdrop. Render ONLY the modeled objects photorealistically — real materials, real light, real reflections. Every area that is plain black (or a plain solid colour) in the input must stay that same plain, clean, even backdrop in the result. Do NOT add an exhibition hall, venue ceiling, roof trusses or lighting rigs that are not modeled, hall walls, carpet beyond the modeled floor, neighbouring booths or stands, crowds or extra people, signage, or any scenery that is not in the 3D model. Keep the modeled floor/platform exactly as modeled — do not extend it to the frame edges. People, screens, logos and objects that ARE modeled stay exactly where they are.';
 function _bgKey(src){ return String(src||'').length+':'+String(src||'').slice(-80); }
 /* 2026-11-16 요청("주변 건물이 반투명 박스면 렌더 전에 그대로 둘지, 실사 건물로 넣을지 물어보자"): 주변 매스 박스 감지 → 렌더 전에 한 번 묻기 */
-var MASS_KEEP_TAIL=' 🧊 SURROUNDING MASSING — KEEP AS BOXES (user choice, final, overrides any instruction above to render neighbours as real buildings): the surrounding buildings in the input are simple massing boxes (plain or semi-transparent placeholder volumes). Keep every one of them exactly as it is: the same simple box shape, position, size, height, colour and the same transparency/translucency — no windows, no facades, no balconies, no signage, no textures, no extra details, no new buildings. Only the MAIN building, the ground, roads, plants and sky become photorealistic.';
+var MASS_KEEP_TAIL=' 🧊 SURROUNDING MASSING — KEEP AS CLEAN MASSING BOXES (user choice, final, overrides any instruction above to render neighbours as real buildings or to add real material texture to them): the surrounding buildings in the input are simple massing boxes (placeholder volumes). Keep every one of them exactly as it is: the same simple box shape, position, size, height and colour — no windows, no facades, no balconies, no signage, no new buildings. Render them as a clean architectural massing model: smooth, flat, matte, perfectly even surfaces with crisp clean edges and only soft light and shadow — NO concrete texture, NO formwork marks, NO stains, streaks, weathering, dirt or noise. Only the MAIN building, the ground, roads, plants and sky become photorealistic.';
+var MASS_TRANSLUCENT_ADD=' 🧊 THE MASSING BOXES ARE SEMI-TRANSPARENT IN THE INPUT — KEEP THEM SEMI-TRANSPARENT: like frosted light grey-white acrylic or glass blocks, see-through, so whatever is behind each box (other boxes, the ground, trees, the sky) stays visible through it exactly as in the input, with the same light tint and the same degree of transparency and clean outlines. Never make them solid, opaque or concrete.';
 var _massCache={};
 function _massBoxCheck(src, cb){
   var done=false; function fin(v){ if(done) return; done=true; cb(!!v); }
@@ -50253,11 +50254,11 @@ function _massBoxCheck(src, cb){
     var _fin0=fin; fin=function(v){ var l=_w[key]||[]; delete _w[key]; l.forEach(function(f){ try{ f(v); }catch(e){} }); };
     _proposalImgToB64(src, function(b64){
       if(!b64){ fin(false); return; }
-      var q='Look at this architectural 3D model image. Apart from the main building, are the surrounding/neighbouring buildings drawn as simple massing boxes (plain untextured or semi-transparent/translucent placeholder volumes without real facades or windows)? Answer with exactly one word: YES or NO. If there are no surrounding buildings, answer NO.';
+      var q='Look at this architectural 3D model image. Apart from the main building, are the surrounding/neighbouring buildings drawn as simple massing boxes (plain untextured or semi-transparent/translucent placeholder volumes without real facades or windows)? Answer with exactly one of: TRANSLUCENT (yes, and they are semi-transparent / see-through), OPAQUE (yes, solid untextured boxes) or NO. If there are no surrounding buildings, answer NO.';
       _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:q}]}]}, function(res){
         var t=res; try{ if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); }catch(e){ t=''; }
-        var yes=/\byes\b/i.test(String(t||'')) && !/\bno\b/i.test(String(t||'').slice(0,4));
-        _massCache[key]=yes; console.log('[실사화] 주변 매스 박스 감지: '+(yes?'예':'아니오')); fin(yes);
+        var _a=String(t||'').toUpperCase(), yes=/TRANSLUCENT|OPAQUE|\bYES\b/.test(_a) && !/^\s*NO\b/.test(_a); var tr=/TRANSLUCENT|TRANSPARENT/.test(_a);
+        _massCache[key]=yes; window._massTrans=window._massTrans||{}; window._massTrans[key]=tr; console.log('[실사화] 주변 매스 박스 감지: '+(yes?(tr?'예(반투명)':'예(불투명)'):'아니오')); fin(yes);
       }, function(){ fin(false); });
     });
   }catch(e){ fin(false); }
@@ -50274,7 +50275,7 @@ function _massAskThen(tab, go){
     ov.innerHTML='<div style="width:100%;max-width:460px;background:var(--card,#16181d);border:1.5px solid var(--ac,#00e5cc);border-radius:16px;padding:20px;color:var(--t,#fff)">'+
       '<div style="font-size:16px;font-weight:900;margin-bottom:6px">🏢 주변 건물을 어떻게 할까요?</div>'+
       '<div style="font-size:12.5px;color:var(--t2,#ccc);line-height:1.6;margin-bottom:14px">메인 건물 말고 주변 건물이 <b>반투명·단색 박스(매스)</b>로 되어 있어요.</div>'+
-      card('keep', true, '🧊', '박스 그대로 두기', '주변은 지금 모양·반투명 그대로, 메인 건물만 실사로')+
+      card('keep', true, '🧊', '박스 그대로 두기', '주변은 지금 모양 그대로 깨끗하게(반투명이면 뒤가 비치게), 메인 건물만 실사로')+
       card('real', false, '🏙', '실제 건물로 바꾸기', '주변 박스를 같은 위치·크기의 실제 건물로 (지금까지 방식)')+
       '<div style="display:flex;margin-top:4px"><button type="button" data-x style="margin-left:auto;border:none;background:none;color:var(--m2,#999);font-size:12px;cursor:pointer;font-family:inherit">취소</button></div></div>';
     document.body.appendChild(ov);
@@ -50509,7 +50510,7 @@ function _runToolWithPromptActual(translatedPrompt){
     camAuto: (CAMPICK_KEYS[tab.selK] && !((typeof _camPickValid==='function') && _camPickValid(tab))) ? 1 : 0, // 2026-11-09: 위치를 안 찍었으면 AI가 평면도를 읽어 자리·좌우를 정함
     textProtect: (G.wf==='render' ? _tpActiveMask(tab) : null), // 2026-10-12 글자 보호 브러시
     toneRef:   (G.wf==='render' ? (tab._matchRef||tab._toneRef||null) : null), // 2026-10-20 여러 장 같은 톤: 기준 이미지(조명·색감만 맞춤) / 2026-10-25 수정 렌더: 납품본
-    _massTail: (G.wf==='render' && tab._massMode==='keep' && tab._massFor===_bgKey(tab.inputImg) && !/^site_context/.test(tab.selK||'')) ? MASS_KEEP_TAIL : '', /* 2026-11-16 주변 매스 박스 그대로 */
+    _massTail: (G.wf==='render' && tab._massMode==='keep' && tab._massFor===_bgKey(tab.inputImg) && !/^site_context/.test(tab.selK||'')) ? (MASS_KEEP_TAIL + (((window._massTrans||{})[_bgKey(tab.inputImg)]) ? MASS_TRANSLUCENT_ADD : '')) : '', /* 2026-11-16 주변 매스 박스 그대로 */
     _bgTail:   (G.wf==='render' && tab._bgMode==='keep' && tab._bgFor===_bgKey(tab.inputImg) && !/^site_context/.test(tab.selK||'')) ? BG_KEEP_TAIL : '', // 2026-10-26 3D만(배경 원본 그대로)
     matchRef:  (G.wf==='render' && tab._matchRef) ? 1 : 0, // 2026-10-25 🔁 납품본과 같은 느낌으로 수정 렌더
     matchOld:  (G.wf==='render' && tab._matchRef) ? (tab._matchOld||null) : null,
@@ -53634,7 +53635,7 @@ function procImgWithTask(task, onDone, onErr){
       else if(task.renderSky==='clear') _sdP += ' Sky: clean, cloudless deep blue.';
     }
     if(task && task.toneRef) _sdP += (task.matchRef ? MATCH_REF_RULE_SHORT : TONE_REF_RULE_SHORT);
-    if(task && task._massTail) _sdP += ' Keep the surrounding massing boxes exactly as simple plain/semi-transparent boxes (same shape, size, colour, transparency) - do not turn them into real buildings.';
+    if(task && task._massTail) _sdP += ' Keep the surrounding massing boxes exactly as clean, smooth, untextured boxes (same shape, size, colour and the same transparency - if they are see-through in the input, keep them see-through) - no concrete texture, no dirt, never real buildings.';
     uploadImgToFal(img, function(imgUrl){
       if(task && task.toneRef){ uploadImgToFal(task.toneRef, function(tu){ _sd5Go([imgUrl, tu]); }, function(){ _sd5Go([imgUrl]); }); } else _sd5Go([imgUrl]);
     function _sd5Go(_urls){
