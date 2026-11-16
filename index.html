@@ -52010,11 +52010,43 @@ function _rqbCrop(url, fr, cb){
     }catch(e){ console.warn('[고품질화] 여백 자르기 실패', e); cb(url); }
   }, function(){ cb(url); });
 }
-function _rqbPost(origSrc, resUrl, onDone){
+/* 2026-11-16 신고("고품질화 하면 화면이 커지고 뷰가 틀어짐"): AI 결과가 확대·이동돼 오면 윤곽선끼리 비교해서 원본 구도에 다시 맞춤.
+   빛이 바뀌어도 맞도록 밝기 대신 윤곽(기울기) 비교, 확대 0.85~1.15·이동 ±10% 범위. 확실히 더 잘 맞을 때만 적용, 빈 가장자리는 원본으로 채움 */
+function _frameAlignCalc(O, R){
+  var lw=160, lh=Math.max(32, Math.round(lw*O.naturalHeight/O.naturalWidth));
+  function edge(img){ var c=document.createElement('canvas'); c.width=lw; c.height=lh; var x=c.getContext('2d'); x.drawImage(img,0,0,lw,lh); var d=x.getImageData(0,0,lw,lh).data, g=new Float32Array(lw*lh), e=new Float32Array(lw*lh);
+    for(var i=0;i<lw*lh;i++) g[i]=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2];
+    for(var y=1;y<lh-1;y++) for(var x2=1;x2<lw-1;x2++){ var k=y*lw+x2; e[k]=Math.abs(g[k+1]-g[k-1])+Math.abs(g[k+lw]-g[k-lw]); } return e; }
+  var A=edge(O), B=edge(R), pts=[];
+  for(var y=3;y<lh-3;y+=2) for(var x=3;x<lw-3;x+=2){ var k=y*lw+x; if(A[k]>18) pts.push(x,y,A[k]); }
+  if(pts.length<240) return {s:1,dx:0,dy:0,why:'윤곽 부족'};
+  var cx=lw/2, cy=lh/2;
+  function cost(s,dx,dy){ var sum=0,n=0; for(var i=0;i<pts.length;i+=3){ var rx=Math.round((pts[i]-cx-dx)/s+cx), ry=Math.round((pts[i+1]-cy-dy)/s+cy); if(rx<1||ry<1||rx>=lw-1||ry>=lh-1) continue; var v=Math.max(B[ry*lw+rx],B[ry*lw+rx+1],B[ry*lw+rx-1],B[(ry+1)*lw+rx],B[(ry-1)*lw+rx]); sum+=Math.min(pts[i+2],v); n++; } return n<pts.length/9*2? -1 : sum/n; }
+  var base=cost(1,0,0), best={s:1,dx:0,dy:0,c:base}, M=Math.round(lw*0.1);
+  for(var s=0.85;s<=1.1501;s+=0.02) for(var dy=-M;dy<=M;dy+=2) for(var dx=-M;dx<=M;dx+=2){ var c=cost(s,dx,dy); if(c>best.c) best={s:s,dx:dx,dy:dy,c:c}; }
+  var b2=best; for(var s2=best.s-0.016;s2<=best.s+0.0161;s2+=0.004) for(var dy2=best.dy-2;dy2<=best.dy+2;dy2+=0.5) for(var dx2=best.dx-2;dx2<=best.dx+2;dx2+=0.5){ var c2=cost(s2,dx2,dy2); if(c2>b2.c) b2={s:s2,dx:dx2,dy:dy2,c:c2}; }
+  if(!(b2.c > base*1.12) || (Math.abs(b2.s-1)<0.006 && Math.abs(b2.dx)<0.6 && Math.abs(b2.dy)<0.6)) return {s:1,dx:0,dy:0,why:'이미 맞음',base:base,best:b2.c};
+  return {s:b2.s, dx:b2.dx/lw, dy:b2.dy/lh, base:base, best:b2.c};
+}
+function _rqbFrameAlign(origSrc, resSrc, cb){
+  var done=false; function fin(x){ if(done) return; done=true; cb(x); }
+  setTimeout(function(){ fin(null); }, 20000);
+  try{ loadImgSafe(origSrc, function(o){ loadImgSafe(resSrc, function(r){ try{
+    var al=_frameAlignCalc(o, r); if(al.s===1&&!al.dx&&!al.dy){ console.log('[고품질화] 구도 맞춤 불필요', al.why||''); fin(null); return; }
+    var W=r.naturalWidth, H=r.naturalHeight, cv=document.createElement('canvas'); cv.width=W; cv.height=H; var x=cv.getContext('2d');
+    x.imageSmoothingEnabled=true; x.imageSmoothingQuality='high'; x.drawImage(o,0,0,W,H);
+    var sw=W*al.s, sh=H*al.s; x.drawImage(r,(W-sw)/2+al.dx*W,(H-sh)/2+al.dy*H,sw,sh);
+    console.log('[고품질화] 구도 원본에 맞춤', 'x'+al.s.toFixed(3), 'dx '+(al.dx*100).toFixed(1)+'%', 'dy '+(al.dy*100).toFixed(1)+'%', (al.base||0).toFixed(1)+'→'+(al.best||0).toFixed(1));
+    fin(cv.toDataURL('image/jpeg',0.96));
+  }catch(e){ console.warn('[고품질화] 구도 맞춤 실패', e); fin(null); } }, function(){ fin(null); }); }, function(){ fin(null); }); }catch(e){ fin(null); }
+}
+window._frameAlignCalc=_frameAlignCalc; window._rqbFrameAlign=_rqbFrameAlign;
+function _rqbPost(origSrc, resUrl0, onDone){
+  _rqbFrameAlign(origSrc, resUrl0, function(al){ var resUrl=al||resUrl0;
   _rqbColorLock(origSrc, resUrl, function(c){
     var base=c||resUrl;
     onDone(base); // 2026-10-12(사용자 요청): 매입등 빛번짐은 후처리 말고 프롬프트(AI 렌더)로만
-  });
+  });  });
 }
 // ══ 2026-10-25 요청("납품한 렌더 실사화에 수정이 나와서 모델링을 고쳐 다시 렌더링할 때, 그 이미지랑 똑같은 느낌·주변 환경 그대로 가능?") ══
 // 🔁 납품본과 같은 느낌으로 수정 렌더:
@@ -52951,7 +52983,7 @@ function procImgWithTask(task, onDone, onErr){
         if(task.selK==='render_quality_boost'){
           if(String(task.userExtra||'').trim()) ap+=' 💡 THE USER NOTE ABOVE IS A LIGHT-AND-ATMOSPHERE REQUEST ONLY (final): achieve it purely with sunlight, shadows, exposure and atmosphere — e.g. tree shadows come from sunlight through the EXISTING windows and fall as soft dappled patterns on the existing floor, walls and objects. Do NOT change anything else to achieve it: every light fixture keeps its exact type and shape (a linear slot light stays a linear slot light — never turn it into track lights or spotlights, never add fixtures), the view outside the windows keeps the same walls, stairs, planters, trees and sculptures in the same places (only their realism may improve), and no object, finish or plant is added, removed or redesigned.';
           ap+=' 🧍 PEOPLE — REPLACE WITH REAL HUMANS (final, overrides the lock for people only): do not try to polish the 3D figures — REPLACE each CG person with a REAL human being photographed on location, as if a real model stood or sat in exactly that spot: same position, size, pose, gesture, gaze direction, same hairstyle, hair length and hair colour (real hair with visible strands and natural shine, never a flat solid shape), same face type and apparent age and gender, same clothing items, colours and fit (real fabric, real folds, real shoes). Real skin, real proportions, natural contact shadows. Never add, remove or move a person. 🌿 PLANTS AND DECOR (final): every existing plant and decor item stays the SAME item in the same place — a vase with branches stays that vase with those branches (only more real), a potted plant stays that plant; NEVER swap one item for another and NEVER add props (no new trays, cups, bowls, books, food, vases, candles or ornaments on tables or counters). 🌳 BACKGROUND BEYOND WINDOWS (final): keep the exact same view — same walls, stairs, planters and the same trees at the SAME size and height; do NOT add new tall trees, forests, hills or buildings behind, keep the same amount of sky, and keep the background scale consistent with the scene.';
-          ap=' ★ MAIN TASK, READ FIRST (2026-11-16): make this CG render look like a REAL PHOTOGRAPH taken with a camera. The three most important visible changes: (1) every CG person is REPLACED by a real human photographed in the same spot with the same pose, hair and clothes — the people must clearly stop looking like 3D figures; (2) every plant and the landscaping become real living plants (same plants, same places); (3) materials and light become photographic — real stone/wood/fabric detail, real soft shadows and light falloff. Nothing else changes: same camera, architecture, furniture, fixtures, decor and view. COLOURS ARE LOCKED: every material keeps its exact colour, hue and lightness from the input — ivory leather stays ivory (never beige or cream), light oak stays light oak (never darker, redder or another wood), white stays white, grey stays the same grey; realism comes from texture, light and shadow, never from recolouring. A result that still shows 3D-looking people or looks nearly identical to the input is a FAILURE. ★ '+ap;
+          ap=' ★ MAIN TASK, READ FIRST (2026-11-16): make this CG render look like a REAL PHOTOGRAPH taken with a camera. The three most important visible changes: (1) every CG person is REPLACED by a real human photographed in the same spot with the same pose, hair and clothes — the people must clearly stop looking like 3D figures; (2) every plant and the landscaping become real living plants (same plants, same places); (3) materials and light become photographic — real stone/wood/fabric detail, real soft shadows and light falloff. Nothing else changes: same camera, architecture, furniture, fixtures, decor and view. FRAME IS LOCKED: the output must overlay the input pixel-for-pixel — no zoom in, no zoom out, no crop, no shift, no rotation, every edge and corner of the room at the same position. OBJECT LIST IS LOCKED: same count of every object — do NOT add any plant, pot, vase, lamp or prop (a corner that is empty in the input stays empty), and do NOT remove anything (every picture frame, artwork, wall decor, cushion and accessory stays exactly where it is). LIGHT FIXTURES ARE LOCKED: each fixture keeps its exact type — a thin black recessed linear slot light stays a thin recessed slot line (never track lights, spotlights or rails), a downlight stays a downlight; never add new fixtures. COLOURS ARE LOCKED: every material keeps its exact colour, hue and lightness from the input — ivory leather stays ivory (never beige or cream), light oak stays light oak (never darker, redder or another wood), white stays white, grey stays the same grey; realism comes from texture, light and shadow, never from recolouring. A result that still shows 3D-looking people or looks nearly identical to the input is a FAILURE. ★ '+ap;
           ap+=' 🎨 COLOUR CHECK (final): compare every surface with the input — leather, fabric, wood, stone, tile, paint, metal and plants must keep the SAME colour, hue and lightness (e.g. ivory leather stays ivory, not beige; light oak stays light oak, not darker or another tone). Do not warm, darken, saturate or tint any material.';
           ap+=' 📸 PHOTO-UPGRADE STRENGTH CHECK (final): the result must be visibly more photographic than the input at first glance — real material micro-detail and reflections, physically correct soft shadows and contact shadows under furniture, natural light falloff and bounce, real camera depth and highlight roll-off. Returning an image that looks almost identical to the input is a failure; changing the design to look different is also a failure — improve ONLY realism.';
         } /* 2026-11-16 신고: 전체 화이트 모델인데 하부 포디움·옹벽이 노출콘크리트로 바뀜 */
