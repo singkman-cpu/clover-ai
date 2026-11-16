@@ -44306,6 +44306,20 @@ function _editDetailRestore(origSrc, resSrc, cb, opt){
     a.src=origSrc; r.src=resSrc;
   }catch(e){ cb(null); }
 }
+/* 2026-11-16: 마스크 편집 결과 위치 맞추기 — 칠하지 않은(그대로 둬야 할) 부분끼리 비교해서 AI 결과의 크기(s)·이동(dx,dy)을 찾음 */
+function _maskAlign(origImg, resImg, maskImg, W, H){
+  var lw=192, lh=Math.max(32, Math.round(lw*H/W));
+  function gray(img){ var c=document.createElement('canvas'); c.width=lw; c.height=lh; var x=c.getContext('2d'); x.drawImage(img,0,0,lw,lh); var d=x.getImageData(0,0,lw,lh).data, g=new Float32Array(lw*lh); for(var i=0,j=0;i<d.length;i+=4,j++) g[j]=d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11; return g; }
+  var A=gray(origImg), R=gray(resImg), M=gray(maskImg);
+  var pts=[]; for(var y=2;y<lh-2;y+=2) for(var x=2;x<lw-2;x+=2){ var k=y*lw+x; if(M[k]<20){ var gx=Math.abs(A[k+1]-A[k-1])+Math.abs(A[k+lw]-A[k-lw]); if(gx>6) pts.push(x,y,A[k]); } }
+  if(pts.length<300) return {s:1,dx:0,dy:0};
+  function cost(s,dx,dy){ var cx=lw/2, cy=lh/2, sum=0, n=0; for(var i=0;i<pts.length;i+=3){ var rx=Math.round((pts[i]-cx-dx)/s+cx), ry=Math.round((pts[i+1]-cy-dy)/s+cy); if(rx<0||ry<0||rx>=lw||ry>=lh) { sum+=40; n++; continue; } sum+=Math.abs(pts[i+2]-R[ry*lw+rx]); n++; } return sum/n; }
+  var best={s:1,dx:0,dy:0,c:cost(1,0,0)}, base=best.c;
+  for(var s=0.94;s<=1.0601;s+=0.01) for(var dy=-8;dy<=8;dy++) for(var dx=-8;dx<=8;dx++){ var c=cost(s,dx,dy); if(c<best.c) best={s:s,dx:dx,dy:dy,c:c}; }
+  var b2=best; for(var s2=best.s-0.008;s2<=best.s+0.0081;s2+=0.002) for(var dy2=best.dy-1;dy2<=best.dy+1;dy2+=0.5) for(var dx2=best.dx-1;dx2<=best.dx+1;dx2+=0.5){ var c2=cost(s2,dx2,dy2); if(c2<b2.c) b2={s:s2,dx:dx2,dy:dy2,c:c2}; }
+  if(!(b2.c < base*0.85)) return {s:1,dx:0,dy:0}; /* 확실히 더 잘 맞을 때만 */
+  return {s:b2.s, dx:b2.dx*(W/lw), dy:b2.dy*(H/lh)};
+}
 function _compositeMaskedResult(origUrl, resultUrl, maskDataUrl, cb){
   try{
     var origImg=null, resImg=null, maskImg=null;
@@ -44323,7 +44337,11 @@ function _compositeMaskedResult(origUrl, resultUrl, maskDataUrl, cb){
         // 1) 결과 이미지를 W×H 캔버스에 그림
         var resCv=document.createElement('canvas'); resCv.width=W; resCv.height=H;
         var rctx=resCv.getContext('2d');
-        rctx.drawImage(resImg,0,0,W,H);
+        /* 2026-11-16 신고("칠한 부분 수정하고 나서 다시 생기면서 틀어진다"): AI가 돌려준 그림이 원본보다 살짝 확대·이동돼 있으면
+           마스크 안쪽만 붙일 때 경계에서 어긋나 보였음 → 칠하지 않은 부분끼리 비교해서 크기·위치를 원본에 맞춘 뒤 붙임 */
+        var _al={s:1,dx:0,dy:0}; try{ _al=_maskAlign(origImg, resImg, maskImg, W, H); }catch(_ea){ console.warn('[마스크 합성] 위치 맞추기 건너뜀', _ea); }
+        if(_al.s!==1||_al.dx||_al.dy){ var _sw=W*_al.s, _sh=H*_al.s; rctx.drawImage(origImg,0,0,W,H); rctx.drawImage(resImg,(W-_sw)/2+_al.dx,(H-_sh)/2+_al.dy,_sw,_sh); console.log('[마스크 합성] AI 결과 위치 맞춤 — 크기 ×'+_al.s.toFixed(3)+', 이동 '+Math.round(_al.dx)+','+Math.round(_al.dy)+'px'); }
+        else rctx.drawImage(resImg,0,0,W,H);
         // 2) 마스크를 같은 크기로 맞춰서, "칠해진 부분만 남기고 나머지는 투명"하게 잘라냄
         var maskCv=document.createElement('canvas'); maskCv.width=W; maskCv.height=H;
         var mctx=maskCv.getContext('2d');
