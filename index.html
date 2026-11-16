@@ -10505,7 +10505,27 @@ function renderMain(callWf, preserveScroll){
 }
 function _fxRowInto(box){ try{ if(!window._fxHomeRow) return; var host=box._fxHost; if(!host){ host=document.createElement('div'); host.className='fx-vrow'; host.style.cssText='width:100%;max-width:100%;box-sizing:border-box;padding:12px 14px 0;flex:0 0 auto;min-width:0;align-self:stretch'; box._fxHost=host; } if(host.parentNode!==box || box.firstChild!==host) box.insertBefore(host, box.firstChild); window._fxHomeRow(host); }catch(e){ console.warn('[템플릿 줄]', e); } }
 
+/* 2026-11-16 요청: 현장사진 디자인에서 왼쪽 프리셋을 고르면, 위쪽 [프리셋 전체보기] 버튼이 반짝이고 손가락이 가리켜서 "여기서 크게 볼 수 있다"를 알려줌 (처음 3번만) */
+function _presetBrowseNudgeCheck(){
+  if(G.wf!=='space') { window._pbLastSel=null; return; }
+  var t=getTab('space'), k=t&&t.selK; if(!k || k===window._pbLastSel) { window._pbLastSel=k||window._pbLastSel; return; }
+  var first=(window._pbLastSel===undefined); window._pbLastSel=k; if(first && !window._pbArmed) { window._pbArmed=true; return; } /* 처음 화면을 열 때 이미 골라져 있던 건 제외 */
+  var n=0; try{ n=+localStorage.getItem('clover_pb_nudge')||0; }catch(e){} if(n>=3) return;
+  try{ localStorage.setItem('clover_pb_nudge', String(n+1)); }catch(e){}
+  setTimeout(_presetBrowseNudge, 250);
+}
+function _presetBrowseNudge(){
+  var b=document.getElementById('btn-preset-browse'); if(!b || !b.offsetParent) return;
+  if(!document.getElementById('pb-nudge-css')){ var st=document.createElement('style'); st.id='pb-nudge-css'; st.textContent='@keyframes pbGlow{0%,100%{box-shadow:0 0 0 0 rgba(0,229,204,.0)}50%{box-shadow:0 0 0 6px rgba(0,229,204,.45),0 0 18px rgba(0,229,204,.8)}}@keyframes pbHand{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}.pb-glow{animation:pbGlow 1s ease-in-out 5}'; document.head.appendChild(st); }
+  b.classList.remove('pb-glow'); void b.offsetWidth; b.classList.add('pb-glow');
+  var r=b.getBoundingClientRect(), tip=document.createElement('div'); tip.id='pb-nudge-tip';
+  tip.style.cssText='position:fixed;z-index:100065;left:'+Math.round(r.left+r.width/2-110)+'px;top:'+Math.round(r.bottom+8)+'px;width:220px;text-align:center;pointer-events:none;font-family:inherit';
+  tip.innerHTML='<div style="font-size:26px;animation:pbHand .7s ease-in-out infinite">👆</div><div style="margin-top:2px;background:rgba(0,0,0,.88);border:1px solid var(--ac,#00e5cc);color:#fff;border-radius:10px;padding:7px 10px;font-size:12px;font-weight:700;line-height:1.45">여기서 프리셋 전체를<br>크게 보면서 고를 수 있어요</div>';
+  var old=document.getElementById('pb-nudge-tip'); if(old) old.remove(); document.body.appendChild(tip);
+  setTimeout(function(){ try{ tip.remove(); b.classList.remove('pb-glow'); }catch(e){} }, 5200);
+}
 function renderSB(){
+  try{ _presetBrowseNudgeCheck(); }catch(_pn){}
   var allS=document.querySelectorAll('#ssets');
   if(!allS.length)return;
   if(!G.wf)return;
@@ -60510,6 +60530,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
+  {c:'space', t:'👆 프리셋 전체보기 안내', h:'현장사진 디자인에서 왼쪽 프리셋을 고르면 위쪽 [프리셋 전체보기] 버튼이 반짝이며 "여기서 프리셋 전체를 크게 보면서 고를 수 있어요"라고 알려줘요(처음 3번만). 프리셋 전체보기에서는 카테고리별로 큰 미리보기로 고를 수 있어요.'},
   {c:'video', t:'🎬 쇼츠 첫 장면을 완성 결과로', h:'영상 스튜디오 AI 감독이 리모델링·공사 단계 영상도 맨 앞 1.6초에 완성된 모습을 먼저 살짝 보여주고 과거(기존 모습)로 돌아가요. 첫 내레이션도 설명 대신 "어쩌다 이렇게 됐을까?" 같은 이야기·반전형으로 시작해서, 첫 1~2초에 넘겨버리는 사람을 줄여요.'},
   {c:'space', t:'📐 기울어진 현장사진 바로잡기 · 참고 이미지 안내', h:'현장사진 디자인에 올린 사진이 많이 기울어져 있으면(세로선이 기울거나 수평이 틀어짐) 렌더 전에 "반듯하게 바로잡아서 / 원래 각도 그대로"를 한 번 물어봐요. 반듯한 사진은 묻지 않고 바로 렌더해요. 프리셋·참고 이미지·글 없이 렌더를 누르면 원하는 스타일의 참고 이미지를 넣을 수 있게 한 번만 안내해요(✕를 누르면 다시 안 떠요).'},
   {c:'common', t:'💳 크레딧이 모자라면 바로 충전 · 다음 단계 안내', h:'작업하다 크레딧이 부족하면 이제 바로 충전 창이 열려요. 처음 결과가 나오면 [쇼츠로 만들기], 공간 컨셉 3컷이 끝나면 다른 공간도 같은 스타일로 이어 만드는 방법을 한 번만 안내해 드려요(✕를 누르면 다시 안 떠요).'},
