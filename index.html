@@ -10729,6 +10729,7 @@ function mkUB(p,lbl,key){
 // 완전 철거(콘크리트 골조 노출) 단계 체크 — 켜면 2단계 처리(구조 정리 → 디자인 적용)로 골조 정확도를 크게 높임. 크레딧 2배.
 function rUB(b,key){
   var v=key==='main'?getTab(G.wf).inputImg:G.tabs.video.endImg;
+  try{ if(v && key==='main' && G.wf==='render' && typeof _massBoxCheck==='function' && /^(hq_real|hq_real_pro|hq_cg|render_quality_boost)$/.test(getTab('render').selK||'hq_real') && _massCache[_bgKey(v)]===undefined && !(window._massWait||{})[_bgKey(v)]) setTimeout(function(){ _massBoxCheck(v, function(){}); }, 300); }catch(_mp){} /* 2026-11-16: 업로드하자마자 주변 매스 확인을 미리 시작 */
   if(v){
     var th=dv('uthumb');var im=mk('img','');im.src=v;var db=mk('button','uth-del');db.textContent='\u2715';
     db.onclick=function(){if(key==='main'){getTab(G.wf).inputImg=null;getTab(G.wf).status='idle';try{ if(G.wf==='budget'){ var _bt=getTab('budget'); clearTimeout(window._budgetImgSaveTimer); if(_bt.budgetImgByMode){ _bt.budgetImgByMode[_bt.budgetModeOverride||'residential']=null; idbSaveDraft('clover_budget_img_by_mode', _bt.budgetImgByMode).catch(function(){}); } else { idbLoadDraft('clover_budget_img_by_mode', 30*24*60*60*1000).then(function(d){ if(d){ d[_bt.budgetModeOverride||'residential']=null; idbSaveDraft('clover_budget_img_by_mode', d).catch(function(){}); } }).catch(function(){}); } } }catch(_bx){}try{_saveMainTabImagesDraft();}catch(e){}}else{G.tabs.video.endImg=null;}rUB(b,key);updBtn();if(G.wf==='world3d')_w3dRefreshButtonStates();};
@@ -50246,8 +50247,10 @@ function _massBoxCheck(src, cb){
   try{
     var key=_bgKey(src); if(_massCache[key]!==undefined){ fin(_massCache[key]); return; }
     if(typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(false); return; }
-    setTimeout(function(){ fin(false); }, 12000);
-    try{ var _ld=gE('ldst'); if(_ld) _ld.textContent='주변 건물 확인 중...'; }catch(_e){}
+    setTimeout(function(){ fin(false); }, 9000);
+    /* 2026-11-16 신고("AI가 파악하는지 버튼이 늦게 뜬다"): 업로드 때 미리 시작한 확인이 있으면 그 결과를 같이 기다림(중복 호출 X) */
+    var _w=(window._massWait=window._massWait||{}); if(_w[key]){ _w[key].push(fin); return; } _w[key]=[fin];
+    var _fin0=fin; fin=function(v){ var l=_w[key]||[]; delete _w[key]; l.forEach(function(f){ try{ f(v); }catch(e){} }); };
     _proposalImgToB64(src, function(b64){
       if(!b64){ fin(false); return; }
       var q='Look at this architectural 3D model image. Apart from the main building, are the surrounding/neighbouring buildings drawn as simple massing boxes (plain untextured or semi-transparent/translucent placeholder volumes without real facades or windows)? Answer with exactly one word: YES or NO. If there are no surrounding buildings, answer NO.';
@@ -50262,7 +50265,8 @@ function _massBoxCheck(src, cb){
 function _massAskThen(tab, go){
   if(G.wf!=='render' || !tab || !tab.inputImg || !/^(hq_real|hq_real_pro|hq_cg|render_quality_boost)$/.test(tab.selK||'') || tab._matchRef){ go(); return; }
   var k=_bgKey(tab.inputImg); if(tab._massFor===k){ go(); return; }
-  _massBoxCheck(tab.inputImg, function(isMass){
+  var _wt=null; if(_massCache[k]===undefined){ _wt=document.createElement('div'); _wt.id='mass-wait'; _wt.style.cssText='position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:100071;background:rgba(0,0,0,.85);color:#fff;border:1px solid var(--ac,#00e5cc);border-radius:20px;padding:9px 16px;font-size:12.5px;font-weight:700;font-family:inherit'; _wt.textContent='🔎 주변 건물 확인 중... (잠깐만요)'; document.body.appendChild(_wt); }
+  _massBoxCheck(tab.inputImg, function(isMass){ if(_wt) _wt.remove();
     if(!isMass){ tab._massFor=k; tab._massMode=''; go(); return; }
     var ov=document.createElement('div'); ov.id='mass-ask-ov';
     ov.style.cssText='position:fixed;inset:0;z-index:100070;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
