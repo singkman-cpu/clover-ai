@@ -19339,7 +19339,7 @@ function _arApplyCloud(spTab, d){ if(!d) return false; if(!(d.ets>0) || d.ets<=(
   spTab._arEts=d.ets; spTab._arSigInit=false; spTab._arCloudApplied=true; spTab._acAppliedTs=Math.max(spTab._acAppliedTs||0, d.ts||0);
   if(d.autoRoomExtAnchors && d.autoRoomExtAnchors.length) spTab.autoRoomExtAnchors=d.autoRoomExtAnchors; if(d.autoRoomIntAnchors && d.autoRoomIntAnchors.length) spTab.autoRoomIntAnchors=d.autoRoomIntAnchors;
   ['autoRoomPrompt','autoRoomPromptByCat','autoRoomCategory','autoRoomFidelity','autoRoomWeather','forcedAspect','autoRoomResolution','autoRoomUrbanMode','autoRoomCurtainBg'].forEach(function(k){ if(d[k]!==undefined && d[k]!==null) spTab[k]=d[k]; });
-  if(d.autoRoomSelected && d.autoRoomSelected.length) spTab.autoRoomSelected=d.autoRoomSelected;
+  if(d.autoRoomSelected && d.autoRoomSelected.length) spTab.autoRoomSelected=_fixAllRoomSel(d.autoRoomCategory||spTab.autoRoomCategory, d.autoRoomSelected);
   if(d.arResults && d.arResults.some(Boolean)) spTab.autoRoomState={results:d.arResults.map(function(r){ return r?{url:r.url, prevUrl:r.prevUrl||null}:null; }), running:false, isApt:false, step:0};
   console.log('[공간 컨셉] 다른 기기에서 하던 작업을 불러왔어요'); try{ toast('☁️ 다른 기기에서 하던 공간 컨셉 작업을 불러왔어요'); }catch(e){} return true; }
 window._arSnapOf=_arSnapOf; window._arApplyCloud=_arApplyCloud;
@@ -19842,7 +19842,7 @@ function mkMultiRoomSpace(p){
     spTab.autoRoomPromptByCat={}; // 전체 리셋 때는 공간 종류별로 보관한 프롬프트도 같이 지움
     spTab.autoRoomExtAnchors=[{img:null,label:'파사드뷰(정면)'}];
     spTab.autoRoomIntAnchors=[{img:null,label:SPACE_CATEGORIES[spTab.autoRoomCategory||'residential'].types[0]}];
-    spTab.autoRoomSelected = _autoRoomTypesForCategory(spTab.autoRoomCategory||'residential').slice();
+    spTab.autoRoomSelected = _defaultRoomSel(spTab.autoRoomCategory||'residential');
     spTab._cloudAnchorSyncTried=true; // 리셋 직후 클라우드에서 다시 복원되지 않도록 막음
     if(_supa && _supaUser) _supa.from('user_workspace_state').delete().eq('user_id',_supaUser.id).eq('tab_key','spaceset_anchors').then(function(){}).catch(function(){});
     idbSaveDraft(_autoRoomDraftKey(), {autoRoomExtAnchors:spTab.autoRoomExtAnchors, autoRoomIntAnchors:spTab.autoRoomIntAnchors, autoRoomPrompt:spTab.autoRoomPrompt, autoRoomCategory:spTab.autoRoomCategory, autoRoomFidelity:spTab.autoRoomFidelity, autoRoomSelected:spTab.autoRoomSelected}).catch(function(){});
@@ -21112,6 +21112,16 @@ function _multiRoomRetryOne(idx){
 // 결과를 뽑을 수 있음. 카테고리(주거공간/오피스/카페 등) 중 아무거나 골라도 건축 외관 뷰가
 // 자동으로 같이 포함됨 — "건축 외관"을 별도 카테고리 버튼으로 또 두면 목록이 거의 똑같은데
 // 버튼만 두 개가 되는 중복이라, 별도 버튼 없이 이렇게 항상 합쳐서 보여주는 방식 하나로 통일함.
+/* 2026-11-16 요청: 회원이 공간 컨셉을 처음 열면 53컷 전부(1590cr)가 선택돼 있어서 시작도 못 하고 나감 → 회원은 기본 3컷만(관리자는 지금처럼 전부) */
+var _ROOM_DEFAULT3={residential:['거실','주방','안방'], cafe:['메인 홀','바·제조공간','창가 좌석'], office:['오픈오피스','라운지','리셉션']};
+function _defaultRoomSel(catKey){
+  var all=_autoRoomTypesForCategory(catKey||'residential').slice();
+  try{ if(G.supaRole==='admin' || G.plan==='admin') return all; }catch(e){}
+  var want=_ROOM_DEFAULT3[catKey||'residential']||[], out=want.filter(function(t){ return all.indexOf(t)>=0; });
+  for(var i=0;i<all.length && out.length<3;i++){ if(out.indexOf(all[i])<0 && !/뷰/.test(all[i])) out.push(all[i]); }
+  return out.length ? out : all.slice(0,3);
+}
+function _fixAllRoomSel(catKey, sel){ try{ if(G.supaRole==='admin' || G.plan==='admin' || !sel) return sel; var all=_autoRoomTypesForCategory(catKey||'residential'); if(sel.length>=all.length && all.length>3) return _defaultRoomSel(catKey); }catch(e){} return sel; }
 function _autoRoomTypesForCategory(catKey){
   var base = SPACE_CATEGORIES[catKey].types;
   var merged = base.slice();
@@ -22332,9 +22342,9 @@ function mkAutoRoomCamera(p){
       var _loadedCat = data.autoRoomCategory || spTab.autoRoomCategory;
       if(_loadedCat !== spTab.autoRoomCategory){
         spTab.autoRoomCategory = _loadedCat;
-        spTab.autoRoomSelected = (data.autoRoomSelected && data.autoRoomSelected.length) ? data.autoRoomSelected : _autoRoomTypesForCategory(_loadedCat).slice();
+        spTab.autoRoomSelected = (data.autoRoomSelected && data.autoRoomSelected.length) ? _fixAllRoomSel(_loadedCat, data.autoRoomSelected) : _defaultRoomSel(_loadedCat);
       } else if(data.autoRoomSelected && data.autoRoomSelected.length){
-        spTab.autoRoomSelected = data.autoRoomSelected;
+        spTab.autoRoomSelected = _fixAllRoomSel(_loadedCat, data.autoRoomSelected);
       }
       spTab.autoRoomFidelity = data.autoRoomFidelity || spTab.autoRoomFidelity;
       spTab.autoRoomWeather = data.autoRoomWeather || spTab.autoRoomWeather || '';
@@ -22359,7 +22369,7 @@ function mkAutoRoomCamera(p){
   // 참고 자료로 다 같이 참고해서 일관성을 높임.
   if(!spTab.autoRoomIntAnchors) spTab.autoRoomIntAnchors=[{img:null,label:currentIntTypes[0]}];
 
-  if(!spTab.autoRoomSelected) spTab.autoRoomSelected=currentTypes.slice();
+  if(!spTab.autoRoomSelected) spTab.autoRoomSelected=_defaultRoomSel(spTab.autoRoomCategory||'residential');
   if(spTab.autoRoomPrompt==null) spTab.autoRoomPrompt='';
 
   // 렌더될 때마다(=뭔가 바뀔 때마다) 자동 저장 — 디바운스 처리(연속 변경 중엔 마지막 것만 저장).
@@ -22401,7 +22411,7 @@ function mkAutoRoomCamera(p){
       spTab.autoRoomCategory=catKey;
       spTab.autoRoomGenExtUrls=[]; spTab.autoRoomGenIntUrls=[]; spTab.autoRoomWindowAnchor=null; spTab.autoRoomStyleAnalysis=null; spTab.autoRoomStyleAnalysisSrc=null; // 카테고리 바꾸면 완전히 다른 공간이니 일관성 기록(창호 기준·스타일 분석 포함)도 초기화
       var newTypes=_autoRoomTypesForCategory(catKey);
-      spTab.autoRoomSelected=newTypes.slice();
+      spTab.autoRoomSelected=_defaultRoomSel(catKey);
       // ⚠️ 버그 수정: 카테고리를 바꾸면 라벨(이름표)만 새 카테고리 타입으로 리셋되고 정작
       // 업로드된 사진(anchor.img)은 그대로 남아있어서, 예를 들어 "주거공간"에 올린 거실·주방
       // 사진이 "식당"으로 바꿔도 라벨만 "출입구"·"홀(좌석)"로 바뀐 채 예전 사진이 계속 남아있는
@@ -60402,6 +60412,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
+  {c:'spaceset', t:'✨ 공간 컨셉, 기본 3컷부터 가볍게', h:'공간 컨셉 디자인을 처음 열면 이제 핵심 공간 3개(주거: 거실·주방·안방)만 골라져 있어요(2K 기준 90cr — 가입 보너스로 바로 해볼 수 있어요). 더 만들고 싶은 공간은 목록에서 체크하거나 [전체 선택]을 누르면 돼요.'},
   {c:'render', t:'🏢 주변 매스 박스 그대로 두기 · 화이트 마감 유지', h:'3D 렌더 실사화에서 주변 건물이 반투명·단색 박스(매스)로 된 모델이면, 렌더 전에 "박스 그대로 두기 / 실제 건물로 바꾸기"를 한 번 물어봐요(왼쪽에서 다시 바꿀 수 있어요). 또 3D에서 칠한 마감 색을 그대로 지켜요 — 전체 화이트 모델이면 하부·포디움·옹벽까지 흰색 그대로, 임의로 노출콘크리트 등으로 바꾸지 않아요.'},
   {c:'common', t:'🔑 로그인·결제가 더 매끄럽게', h:'로그인할 때 약관 체크를 깜빡해도 확인창에서 한 번에 동의하고 바로 이어서 가입·로그인돼요. 크레딧 결제가 안 됐을 때는 카드사가 알려준 이유(한도 초과 등)를 그대로 보여드려요 — 다른 카드로 다시 시도하거나 cloverai.design@gmail.com 으로 알려 주세요.'},
   {c:'video', t:'💬 성우 대사가 더 사람 말처럼', h:'AI 감독의 성우 대사를 쓰는 방식을 바꿨어요 — 규칙을 잔뜩 붙이는 대신, 반응이 좋았던 실제 쇼츠 대본의 말투·호흡("이 집은요, 커튼값부터 걱정되는데요?" 같은)을 본보기로 삼아 이 영상에 맞게 새로 써요. 짧은 한 문장씩, 진짜 사람이 말하듯이.'},
