@@ -55546,8 +55546,8 @@ function admAnalytics(c){
   // auth.users를 참조하고 있어서(profiles가 아니라) 자동 조인이 실패했음(400 에러). SQL을 더
   // 안 건드리고, 두 테이블을 각각 따로 조회해서 코드에서 직접 합치는 방식으로 바꿔 이 문제
   // 자체를 회피함 — 테이블 FK 구조가 어떻든 항상 안전하게 동작함.
-  _supa.from('analytics_events').select('event_type,created_at,user_id,visitor_id').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000)
-    .then(function(res){ if(res && res.error && /visitor_id/i.test(res.error.message||'')){ window._admNoVisitorCol=true; return _supa.from('analytics_events').select('event_type,created_at,user_id').gte('created_at', since.toISOString()).order('created_at',{ascending:false}).limit(20000); } return res; })
+  _admEvAll('event_type,created_at,user_id,visitor_id', since)
+    .then(function(res){ if(res && res.error && /visitor_id/i.test(res.error.message||'')){ window._admNoVisitorCol=true; return _admEvAll('event_type,created_at,user_id', since); } return res; })
     .then(function(res){
       if(res.error){
         c.innerHTML='<div style="color:#fca5a5;font-size:12.5px;line-height:1.7">analytics_events 조회에 실패했어요: <b>'+(res.error.message||'')+'</b><br>테이블이 없다면 Supabase SQL 편집기에서 아래를 한 번 실행해주세요:</div>'+
@@ -55574,6 +55574,11 @@ function _admSecClosed(k){ try{ return localStorage.getItem('clover_adm_sec_'+k)
 function _admSec(k,t){ var cl=_admSecClosed(k); return '<div class="adm-sec" style="margin:12px 0;border:1px solid var(--bd2);border-radius:10px;overflow:hidden"><div onclick="_admSecToggle(this,\''+k+'\')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;background:var(--c2);font-size:13px;font-weight:800;color:var(--t);user-select:none"><span>'+t+'</span><span class="adm-sec-ar" style="font-size:11px;color:var(--ac);font-weight:700;white-space:nowrap">'+(cl?'열기 ▾':'접기 ▴')+'</span></div><div class="adm-sec-b" style="padding:10px 12px;display:'+(cl?'none':'block')+'">'; }
 function _admSecEnd(){ return '</div></div>'; }
 function _admSecToggle(h,k){ var b=h.nextElementSibling; if(!b) return; var open=b.style.display==='none'; b.style.display=open?'block':'none'; var a=h.querySelector('.adm-sec-ar'); if(a) a.textContent=open?'접기 ▴':'열기 ▾'; try{ localStorage.setItem('clover_adm_sec_'+k, open?'1':'0'); }catch(e){} }
+/* 2026-11-17 신고("방문자가 컴퓨터 45명, 휴대폰 56명"): 서버가 한 번에 1000줄까지만 줘서 30일 기록(5천 줄 넘음)이 잘렸음 → 1000줄씩 나눠서 끝까지 받음 */
+function _admEvAll(sel, since){ var all=[], P=1000;
+  function page(from){ return _supa.from('analytics_events').select(sel).gte('created_at', since.toISOString()).order('created_at',{ascending:false}).range(from, from+P-1).then(function(res){
+    if(res && res.error) return res; var d=res.data||[]; all=all.concat(d); if(d.length<P || all.length>=40000) return {data:all, error:null}; return page(from+P); }); }
+  return page(0); }
 function _renderAnalyticsBody(c, rows, emailByUid, EVENT_DEFS){
     // 2026-10-19: 관리자 기기(관리자로 로그인한 적 있는 브라우저)의 기록은 통계에서 뺌(비로그인으로 테스트한 것까지) — 위 버튼으로 켜고 끌 수 있음
     var _isAdmEm=function(uid){ var em=uid&&emailByUid&&emailByUid[uid]; return !!(em && typeof ADMIN_EMAILS!=='undefined' && ADMIN_EMAILS.indexOf(em)>-1); };
