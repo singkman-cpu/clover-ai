@@ -67925,15 +67925,37 @@ var MAT_SITE_PTS=[
 ];
 var MAT_DEMO_PT=MAT_SITE_PTS[2][1];
 var MAT_VARIANT_PT={ext:'Keep everything exactly the same (camera, building shape, lighting, surroundings) and change ONLY the main facade cladding to warm dark brick with fine mortar joints. Photorealistic, same quality.', int:'Keep everything exactly the same (camera, room shape, furniture positions, lighting) and change ONLY the floor to a light oak herringbone wood floor and the main wall to warm limewash plaster. Photorealistic, same quality.'};
+/* 2026-11-17 요청("카카오맵이랑 브이월드 실제로 사용해서 해 — 나만 쓰는 거니까"): 실제 로드뷰·브이월드 캡처를 넣으면 AI가 만든 가짜 캡처 대신 그걸로 현장 합성 (관리자 전용) */
+function _matSiteCapHtml(){ var C=STU.matSiteCap||{}; function row(k, ic, nm, use, open){ var u=C[k];
+    return '<div style="display:flex;align-items:center;gap:7px;margin:5px 0;flex-wrap:wrap">'+(u?'<img src="'+esc(u)+'" style="width:64px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #5eead4">':'<div style="width:64px;height:40px;border-radius:6px;border:1px dashed #555;display:flex;align-items:center;justify-content:center;font-size:10px;color:#777">없음</div>')+
+      '<div style="flex:1;min-width:120px;font-size:11.5px;color:#cfd2d8;line-height:1.4"><b>'+ic+' '+nm+'</b><br><span style="color:#8b909c">'+use+(u?' · ✅ 실제 캡처 사용':' · 없으면 AI가 비슷하게 만들어요')+'</span></div>'+
+      '<button type="button" data-capopen="'+k+'" style="padding:6px 9px;border-radius:7px;border:1px solid #444;background:transparent;color:#e9ebef;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit">'+open+'</button>'+
+      '<button type="button" data-cappaste="'+k+'" title="캡처(Win+Shift+S) 후 눌러요" style="padding:6px 9px;border-radius:7px;border:1px solid #5eead4;background:rgba(0,229,204,.1);color:#5eead4;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit">📋 붙여넣기</button>'+
+      '<button type="button" data-capfile="'+k+'" style="padding:6px 9px;border-radius:7px;border:1px solid #444;background:transparent;color:#e9ebef;font-size:11px;font-weight:800;cursor:pointer;font-family:inherit">📁 파일</button>'+
+      (u?'<button type="button" data-capdel="'+k+'" style="padding:6px 8px;border-radius:7px;border:none;background:transparent;color:#f87171;font-size:12px;cursor:pointer">✕</button>':'')+'</div>'; }
+  return '<div style="margin:0 0 10px;padding:9px 10px;border-radius:10px;background:rgba(0,0,0,.25);border:1px solid #333"><div style="font-size:12px;font-weight:900;color:#fde047;margin-bottom:2px">📍 실제 현장 캡처 (선택)</div><div style="font-size:10.5px;color:#9aa0a6;line-height:1.5">지도를 열어 주소 검색 → 원하는 위치·각도로 맞춘 뒤 <b>Win+Shift+S</b>로 캡처 → [📋 붙여넣기]. 넣으면 모든 건물이 그 현장에 합성돼요.</div>'+
+    row('eye','📷','로드뷰 캡처','투시도 사진에 사용','📍 카카오맵 열기')+row('aerial','🛰','브이월드 캡처','조감도 사진에 사용','🗺 브이월드 열기')+'</div>'; }
+function _matCapSet(k, url, refresh){ STU.matSiteCap=STU.matSiteCap||{}; STU.matSiteCap[k]=url; try{ toast(url?'📍 실제 현장 캡처를 넣었어요':'캡처를 뺐어요'); }catch(e){} try{ refresh(); }catch(e){} }
+function _matCapBind(w, refresh){
+  w.querySelectorAll('[data-capopen]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); try{ if(b.getAttribute('data-capopen')==='aerial') _openVworldModal(); else _openKakaoMapModal(); }catch(er){ alert('지도를 열지 못했어요: '+er.message); } }; });
+  w.querySelectorAll('[data-capdel]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); _matCapSet(b.getAttribute('data-capdel'), null, refresh); }; });
+  w.querySelectorAll('[data-capfile]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); var k=b.getAttribute('data-capfile'), inp=document.createElement('input'); inp.type='file'; inp.accept='image/*'; inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f) return; var r=new FileReader(); r.onload=function(){ _matCapSet(k, r.result, refresh); }; r.readAsDataURL(f); }; inp.click(); }; });
+  w.querySelectorAll('[data-cappaste]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); var k=b.getAttribute('data-cappaste');
+    if(!(navigator.clipboard && navigator.clipboard.read)){ alert('이 브라우저는 붙여넣기 버튼을 지원하지 않아요 — [📁 파일]로 넣어 주세요.'); return; }
+    navigator.clipboard.read().then(function(items){ for(var i=0;i<items.length;i++){ var t=(items[i].types||[]).filter(function(x){ return /^image\//.test(x); })[0]; if(t) return items[i].getType(t); } throw new Error('클립보드에 이미지가 없어요'); })
+      .then(function(blob){ var r=new FileReader(); r.onload=function(){ _matCapSet(k, r.result, refresh); }; r.readAsDataURL(blob); })
+      .catch(function(er){ alert('붙여넣기 실패: '+(er&&er.message||er)+'\n\n먼저 Win+Shift+S로 캡처한 뒤 눌러 주세요. (안 되면 [📁 파일])'); }); }; });
+}
 function _matBlockHtml(cur){ var n=(STU.imgs||[]).length, busy=STU._matBusy; var tx=cur==='sitecomp'?'넣어 둔 <b>외관 완성 사진(투시도·조감도)</b>마다 <b>3D 모델 캡처(렌더 전) + 로드뷰/항공 캡처(빈 대지) → 현장 합성 렌더 → 뷰 변환(투시↔조감) · 계절(가을·겨울 중) · 시간(블루아워·석양 중)</b>을 자동으로 만들어요 — 실내 사진은 건너뛰어요':cur==='cgreal'?'넣어 둔 완성 사진으로 <b>3D 모델 캡처(아래에서 고른 프로그램) → 렌더 실사화</b>을 자동으로 만들어요':'넣어 둔 완성 사진을 <b>고객 참고 이미지</b>로 쓰고 <b>현장 사진(노후·철거 중 랜덤) → 현장사진 디자인 결과</b>를 자동으로 만들어요';
   return '<div style="margin-top:12px;padding:12px;border-radius:12px;border:1px dashed rgba(0,229,204,.5);background:rgba(0,229,204,.05)"><div style="font-size:13px;font-weight:900;color:#5eead4">📦 쇼츠 소재 자동 만들기 <span style="font-size:10.5px;color:#9aa0a6;font-weight:700">(관리자)</span></div><div style="font-size:11.5px;color:#cfd2d8;line-height:1.6;margin:4px 0 8px">'+tx+'. 갤러리에서 완성 사진을 원하는 만큼 넣어 주세요 (외관·조감·실내 섞어도 돼요 · 결과가 40장이 되면 거기서 멈춰요).</div>'+
+    (cur==='sitecomp' && !busy ? _matSiteCapHtml() : '')+
     ((cur==='cgreal'||cur==='sitecomp') && !busy ? '<div style="display:flex;gap:6px;margin-bottom:8px">'+[['su','스케치업'],['max','3ds Max']].map(function(o){ var on=(STU.matProg||'su')===o[0]; return '<button type="button" data-dprog="'+o[0]+'" style="flex:1;padding:8px;border-radius:9px;border:1px solid '+(on?'var(--ac,#00e5cc)':'rgba(255,255,255,.18)')+';background:'+(on?'rgba(0,229,204,.18)':'transparent')+';color:'+(on?'#5eead4':'#cfd2d8')+';font-weight:800;font-size:12.5px;cursor:pointer;font-family:inherit">'+(on?'✔ ':'')+o[1]+'</button>'; }).join('')+'</div>' : '')+
     (busy?'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><div style="font-size:12px;color:#fbbf24;font-weight:800;flex:1">⏳ '+(STU._matMsg||'만드는 중…')+'</div>'+(STU._matStop?'':'<button type="button" data-dmatstop="1" style="padding:6px 12px;border-radius:8px;border:1px solid rgba(248,113,113,.6);background:transparent;color:#f87171;font-weight:800;font-size:12px;cursor:pointer;font-family:inherit">⏹ 멈추기</button>')+'</div>'+((STU._matPrev||[]).length?'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+STU._matPrev.map(function(it,pi){ return '<div data-dmatprev="'+pi+'" title="'+esc(it[1])+' — 클릭하면 크게 보기" style="width:104px;cursor:zoom-in"><img src="'+esc(it[0])+'" style="width:104px;height:72px;object-fit:cover;border-radius:7px;display:block"><div style="font-size:9.5px;color:#9aa0a6;line-height:1.3;margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">'+esc(it[1])+'</div></div>'; }).join('')+'</div>':''):(n?'<div style="font-size:11px;color:#9aa0a6;margin-bottom:6px">💰 '+_matCostTxt(cur,n)+'</div>':'')+'<button type="button" data-dmat="'+cur+'" style="width:100%;padding:10px;border-radius:10px;border:none;background:var(--ac,#00e5cc);color:#000;font-weight:900;font-size:13px;cursor:pointer;font-family:inherit"'+(n?'':' disabled')+'>📦 지금 넣은 사진 '+n+'장으로 소재 만들기</button>')+'</div>'; }
 function _matRun(prompt, imgs, label){ return new Promise(function(res, rej){ try{ falRun('google/nano-banana-2.1/edit', {prompt:prompt, image_urls:imgs, num_images:1, resolution:'1K'} /* 2026-11-17 요청: 비용 절감 — 쇼츠는 세로 1080 화면이라 1K로 충분 */, function(d){ var u=falExtractImageUrl(d); if(!u){ rej(new Error(label+': 결과 없음')); return; } thumb(u, 2048, function(t){ t?res(t):rej(new Error(label+': 이미지 읽기 실패')); }); }, function(e){ rej(new Error(label+': '+(e&&e.message||e))); }, {wf:'studio_mat'}); }catch(e){ rej(e); } }); }
 function _matCrop(src){ return new Promise(function(res){ var im=new Image(); im.crossOrigin='anonymous'; im.onload=function(){ try{ var W=im.naturalWidth, H=im.naturalHeight, cw=Math.round(W*0.45), ch=Math.round(H*0.45), c=document.createElement('canvas'); c.width=Math.round(cw*2); c.height=Math.round(ch*2); var g=c.getContext('2d'); g.imageSmoothingQuality='high'; g.drawImage(im, Math.round((W-cw)/2), Math.round((H-ch)/2), cw, ch, 0, 0, c.width, c.height); res(c.toDataURL('image/jpeg',0.92)); }catch(e){ res(null); } }; im.onerror=function(){ res(null); }; im.src=src; }); }
 function _matIsExt(src){ return new Promise(function(res){ try{ _proposalImgToB64(src, function(b64){ if(!b64){ res(false); return; } _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:'Is this an EXTERIOR view of a building (outside) or an INTERIOR (inside a room)? Answer one word: EXTERIOR or INTERIOR.'}]}]}, function(r){ var t=r; try{ if(t && typeof t==='object') t=t.reply||t.text||t.content||''; }catch(e){} res(/EXTERIOR/i.test(String(t||''))); }, function(){ res(false); }); }); }catch(e){ res(false); } }); }
 /* 2026-11-17 요청("9장 만드는데 19분, 얼마 드는지도 안 보인다"): 사진 3장씩 동시에 만들어 시간 단축 + 작업 수·회원 기준 크레딧 표시 */
-function _matCalls(kind, n){ return kind==='sitecomp' ? n*6 : n*2; }
+function _matCalls(kind, n){ var C=STU.matSiteCap||{}; return kind==='sitecomp' ? n*((C.eye||C.aerial)?5:6) : n*2; }
 function _matCostTxt(kind, n){ var c=_matCalls(kind,n), cr=c*20, mins=Math.max(1, Math.ceil(Math.ceil(n/3)*(kind==='cgreal'?2.2:2.2))); return 'AI 이미지 작업 '+c+'번 · 회원이라면 '+cr.toLocaleString()+'cr(약 '+(cr*11).toLocaleString()+'원) · 관리자는 차감 없음 · 약 '+mins+'분'; }
 window._matCostTxt=_matCostTxt;
 /* 2026-11-17 요청("쇼츠 3D 모델 캡처 만든 거 갤러리 탭에 넣어줘야지"): 소재 만들기 결과도 갤러리에 저장(렌더 실사화 / 현장사진 디자인 탭) */
@@ -67976,15 +67998,16 @@ function stuMakeMaterial(kind, refresh){
       return _matViewKind(s0).then(function(vk){
         if(vk==='interior'){ console.log('[소재 만들기] 실내 사진은 건너뜀 ('+n0+')'); return []; }
         var aer=(vk==='aerial'), mp=_mpRun, ses=MAT_SEASON2[Math.floor(Math.random()*2)], tim=MAT_TIME2[Math.floor(Math.random()*2)];
-        var capTag=aer?'항공 지도 캡처 (빈 대지) ':'로드뷰 캡처 (빈 대지) ', vTag=aer?'뷰 변환 · 조감도 → 투시도 ':'뷰 변환 · 투시도 → 조감도 ';
+        var _realCap=(STU.matSiteCap||{})[aer?'aerial':'eye']||null; /* 실제 카카오맵·브이월드 캡처가 있으면 그걸로 */
+        var capTag=_realCap?(aer?'브이월드 캡처 (실제 현장) ':'카카오맵 로드뷰 캡처 (실제 현장) '):(aer?'항공 지도 캡처 (빈 대지) ':'로드뷰 캡처 (빈 대지) '), vTag=aer?'뷰 변환 · 조감도 → 투시도 ':'뷰 변환 · 투시도 → 조감도 ';
         return Promise.all([
           _matRun(mp[1]+MAT_MODEL_SIMPLE+MAT_MODEL_REAL_UI+MAT_BLDG_ONLY, [s0], '3D 모델'),
-          _matRun(aer?MAT_VWORLD_PT:MAT_ROADVIEW_PT, [s0], aer?'항공 캡처':'로드뷰 캡처')
+          (_realCap ? Promise.resolve(_realCap) : _matRun(aer?MAT_VWORLD_PT:MAT_ROADVIEW_PT, [s0], aer?'항공 캡처':'로드뷰 캡처'))
         ]).then(function(r){ var model=r[0], cap=r[1];
           var cp=_matPS(aer?'site_context_composite_aerial':'site_context_composite_persp', 'Place the building of the MAIN image into the REFERENCE photo of the real site, photorealistic, keeping the main image camera.');
           return _matRun(cp, [model, cap], '현장 합성').then(function(comp){
             items.push([cap, capTag+n0]); items.push([model,'3D 모델 ('+mp[0]+' 화면 캡처 · 렌더 전) '+n0]); items.push([comp,'현장 합성 렌더링 결과 '+n0]);
-            _matToGal('render', model, s0, '3D 모델 캡처 ('+mp[0]+')'); _matToGal('render', cap, s0, capTag.trim()); _matToGal('render', comp, cap, '현장 합성 (쇼츠 소재)');
+            _matToGal('render', model, s0, '3D 모델 캡처 ('+mp[0]+')'); if(!_realCap) _matToGal('render', cap, s0, capTag.trim()); _matToGal('render', comp, cap, '현장 합성 (쇼츠 소재)');
             var vp=aer?_matPS('aerial_to_eye','Convert this aerial view into a realistic eye-level perspective photo of the same building.'):_matPS('eye_to_aerial','Convert this eye-level view into a realistic aerial bird view of the same building and site.');
             return Promise.all([
               _matRun(vp, [comp], '뷰 변환').catch(function(){ return null; }),
@@ -68047,7 +68070,7 @@ function stuMatFix(i, refresh){
 }
 window.stuMatFix=stuMatFix;
 window.stuMakeMaterial=stuMakeMaterial; window._matBlockHtml=_matBlockHtml;
-function _matIdea(t){ t=t||''; try{ var tg=STU.aiTag||{}, L=[]; (STU.imgs||[]).forEach(function(u,k){ var v=tg[imgId(k)]; if(v && /3D 모델|실사화 결과|재질만|확대 디테일|참고 이미지|현장 사진|현장사진 디자인 결과|로드뷰 캡처|항공 캡처|현장 합성|뷰 변환|계절 변환|시간 변환/.test(v)) L.push('사진 '+(k+1)+'번 = '+v); }); if(L.length) t=(t?t+'\n':'')+'[사진 역할 — 같은 숫자끼리 짝: 원본(3D 모델·현장 사진) 바로 다음에 그 결과] '+L.join(' / '); }catch(e){} return t; }
+function _matIdea(t){ t=t||''; try{ var tg=STU.aiTag||{}, L=[]; (STU.imgs||[]).forEach(function(u,k){ var v=tg[imgId(k)]; if(v && /3D 모델|실사화 결과|재질만|확대 디테일|참고 이미지|현장 사진|현장사진 디자인 결과|로드뷰 캡처|항공 지도 캡처|브이월드 캡처|현장 합성|뷰 변환|계절 변환|시간 변환/.test(v)) L.push('사진 '+(k+1)+'번 = '+v); }); if(L.length) t=(t?t+'\n':'')+'[사진 역할 — 같은 숫자끼리 짝: 원본(3D 모델·현장 사진) 바로 다음에 그 결과] '+L.join(' / '); }catch(e){} return t; }
 function dRecipesHtml(){ var cur=dRecipe().k, cats=[], h='';
   D_RECIPES.forEach(function(x){ if(_recOK(x) && cats.indexOf(x.cat)<0) cats.push(x.cat); });
   cats.forEach(function(c){ h+='<div style="font-size:12.5px;font-weight:800;margin:12px 0 6px;color:#cfd2d8">'+c+'</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">'+
@@ -70142,6 +70165,7 @@ function wireDir(w){
   w.querySelectorAll('[data-dtplopen]').forEach(function(dto){ dto.onclick=function(e){ if(e) e.stopPropagation(); D.tplOpen=!D.tplOpen; refresh(); }; }); // 2026-11-03: 위 오른쪽에도 접기 버튼
   w.querySelectorAll('[data-dmatprev]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); var L=(STU._matPrev||[]).map(function(it){ return {result:it[0], tags:[it[1]]}; }); try{ _galleryZoomShow(L, +b.getAttribute('data-dmatprev')||0); }catch(_z){} }; }); /* 2026-11-17 요청: 만드는 중 미리보기 클릭 → 크게 보기 */
   w.querySelectorAll('[data-dmatstop]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); STU._matStop=true; STU._matMsg='멈추는 중… 지금 만드는 장만 끝내고 멈춰요'; refresh(); }; }); /* 2026-11-17 소재 만들기 멈추기 */
+  try{ _matCapBind(w, refresh); }catch(_cb){}
   w.querySelectorAll('[data-dprog]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); STU.matProg=b.getAttribute('data-dprog'); refresh(); }; }); /* 2026-11-17 3D 모델 프로그램 선택 */
   w.querySelectorAll('[data-dmat]').forEach(function(b){ b.onclick=function(e){ if(e) e.stopPropagation(); stuMakeMaterial(b.getAttribute('data-dmat'), refresh); }; }); /* 2026-11-16 쇼츠 소재 자동 만들기(관리자) */
   w.querySelectorAll('[data-drecipe]').forEach(function(b){ b.onclick=function(){ var k=b.getAttribute('data-drecipe'); if(dRecipe().k===k) return; if(D.props && !confirm('템플릿을 바꾸면 감독에게 다시 맡겨야 해요. 바꿀까요?')) return; var rc=D_RECIPES.filter(function(x){ return x.k===k; })[0]; D.recipe=k; D.style=rc.base; dEngFor(rc); if(rc.aspect) STU.aspect=rc.aspect; if(rc.T) D.T=rc.T; D.props=null; D.taste=null; D.tplOpen=false; refresh(); }; });
