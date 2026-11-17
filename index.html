@@ -18709,9 +18709,12 @@ function _visitorId(){
   var id=''; try{ id=(typeof _guestId==='function')?_guestId():''; }catch(e){}
   return id ? ((adm?'admin-':'')+id).slice(0,80) : null;
 }
+/* 2026-11-17 점검: 방문자가 갑자기 49명(사람 6명)이던 원인 — 배포할 때마다 Vercel 미리보기 봇(HeadlessChrome, *.vercel.app)이 사이트를 열어서 방문·오류 기록이 쌓였음 → 봇·미리보기 주소는 기록 안 함 */
+function _isBotEnv(){ try{ var ua=navigator.userAgent||''; return !!(navigator.webdriver || /HeadlessChrome|Headless|bot\b|crawler|spider|Lighthouse|PageSpeed|vercel/i.test(ua) || /\.vercel\.app$/i.test(location.hostname||'')); }catch(e){ return false; } }
 function _trackEvent(eventType){
   try{
     if(!_supa) return;
+    if(_isBotEnv()) return;
     var row={event_type:eventType, user_id:(_supaUser?_supaUser.id:null)};
     var vid=window._noVisitorCol?null:_visitorId();
     if(vid) row.visitor_id=vid;
@@ -64373,6 +64376,7 @@ var _errorLogSeen={}; // 같은 메시지 반복되면 스팸 방지
 function _logErrorToServer(message, stack, source){
   try{
     if(!_supa) return; // Supabase 초기화 전이면(페이지 로드 극초반) 조용히 무시
+    if(typeof _isBotEnv==='function' && _isBotEnv()) return; // 2026-11-17: 미리보기 봇 오류(WebAssembly 등)는 기록 안 함
     if(_errorLogSentCount>=20) return; // 세션당 최대 20건 — 무한루프성 에러가 테이블을 도배하는 것 방지
     var dedupKey=(message||'')+'|'+(source||'');
     if(_errorLogSeen[dedupKey]) return; // 완전히 같은 에러는 세션당 1번만
