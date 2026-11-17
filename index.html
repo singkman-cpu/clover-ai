@@ -50609,6 +50609,34 @@ function _renderEditHintThen(tab, go){
     return true;
   }catch(e){ return false; }
 }
+/* 2026-11-17 요청("회원이 렌더 한 번 걸어보니 배경을 자동으로 채워줘서 좋아서 다른 공간도 넣으면 같은 현장처럼 나와야 한다"):
+   렌더 실사화를 누를 때 최근(24시간 안) 렌더 결과가 있으면 "그 결과와 같은 현장(주변 풍경·하늘·계절·창밖)으로 맞출까요?" 한 번 물어봄 —
+   맞추면 그 결과를 '같은 현장 기준' 참고 이미지로 함께 보냄(톤 맞추기 규칙에 주변 풍경까지). 한 번 고르면 이번 작업 동안은 다시 안 묻고 계속 적용 */
+function _siteRefCand(tab){ var key=_bgKey(tab.inputImg), now=Date.now(), best=null;
+  (G.HIST.render||[]).forEach(function(x){ if(best || !x || x.preview || x.loading || !x.result || String(x.result).indexOf('blob:')===0) return; var t=+x.id||0; if(t<1e12 || now-t>24*3600*1000) return; if(x.orig && _bgKey(x.orig)===key) return; if(/\.(mp4|webm)(\?|$)/i.test(String(x.result))) return; best=x; });
+  return best; }
+function _siteRefAskThen(tab, go){
+  function run(ref){ var prev=tab._toneRef; if(ref){ tab._toneRef=ref; tab._siteRefNow=1; } try{ go(); } finally { if(ref){ tab._toneRef=prev||null; tab._siteRefNow=0; } } }
+  if(G.wf!=='render' || !tab || !tab.inputImg || G._batchRunning || tab._toneRef || tab._matchRef || /^site_context/.test(tab.selK||'') || tab._bgMode==='keep' || !/^hq_/.test(tab.selK||'')){ go(); return; }
+  if(tab._siteRefAuto){ try{ toast('🏞 앞 렌더와 같은 현장 배경으로 맞춰요'); }catch(e){} run(tab._siteRefAuto); return; }
+  var c=_siteRefCand(tab); if(!c || tab._siteRefOff===c.id){ go(); return; }
+  var src=c.cloud_url||c.result;
+  var ov=document.createElement('div'); ov.id='site-ref-ov';
+  ov.style.cssText='position:fixed;inset:0;z-index:100070;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
+  ov.innerHTML='<div style="width:100%;max-width:480px;background:var(--card,#16181d);border:1.5px solid var(--ac,#00e5cc);border-radius:16px;padding:18px;color:var(--t,#fff)">'+
+    '<div style="font-size:16px;font-weight:900;margin-bottom:6px">🏞 같은 현장으로 맞출까요?</div>'+
+    '<div style="font-size:12.5px;color:var(--t2,#ccc);line-height:1.6;margin-bottom:10px">같은 집의 다른 장면이면, 앞에서 만든 이 결과와 <b>주변 풍경·하늘·계절·창밖 경치</b>를 똑같이 맞춰서 한 현장처럼 나오게 해요. (재질·가구·구도는 지금 이미지 그대로)</div>'+
+    '<img src="'+String(src).replace(/"/g,'&quot;')+'" style="width:100%;max-height:34vh;object-fit:contain;border-radius:10px;background:#000;display:block;margin-bottom:12px">'+
+    '<button type="button" data-s="same" style="width:100%;padding:12px;border-radius:11px;border:none;background:var(--ac,#00e5cc);color:#000;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit;margin-bottom:7px">✓ 같은 현장으로 맞추기</button>'+
+    '<div style="display:flex;gap:7px"><button type="button" data-s="pick" style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--bd2,#444);background:var(--c2,#1e2026);color:var(--t,#fff);font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit">🖼 다른 기준 이미지 고르기</button>'+
+    '<button type="button" data-s="new" style="flex:1;padding:11px;border-radius:10px;border:1px solid var(--bd2,#444);background:transparent;color:var(--t2,#ccc);font-size:12.5px;font-weight:800;cursor:pointer;font-family:inherit">다른 현장이에요 (새 배경)</button></div>'+
+    '<div style="font-size:11px;color:var(--m2,#999);margin-top:9px;line-height:1.5">💡 원하는 배경이 따로 있으면 [추가 요청]에 적어 주세요 (예: 뒤에 낮은 산, 늦가을)</div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector('[data-s="same"]').onclick=function(){ ov.remove(); tab._siteRefAuto=src; run(src); };
+  ov.querySelector('[data-s="new"]').onclick=function(){ ov.remove(); tab._siteRefOff=c.id; tab._siteRefAuto=null; go(); };
+  ov.querySelector('[data-s="pick"]').onclick=function(){ ov.remove(); try{ _openGalleryPickerForAnchor(function(u){ if(!u){ go(); return; } tab._siteRefAuto=u; run(u); }); }catch(e){ go(); } };
+  ov.addEventListener('click', function(e){ if(e.target===ov){ ov.remove(); tab._siteAsked1=false; } });
+}
 function _bgAskThen(tab, go){
   // 배경을 지어내는 게 목적인 프리셋(실제 대지 배경 합성)·수정 렌더는 묻지 않음
   if(G.wf!=='render' || !tab || !tab.inputImg || /^site_context/.test(tab.selK||'') || tab._matchRef){ go(); return; }
@@ -50648,7 +50676,7 @@ function _runToolWithPromptActual(translatedPrompt){
   if(G.wf==='edit' && tab.selK==='context_mass_gray_t' && !tab._grayTOk){ _grayTAsk(tab, function(){ tab._grayTOk=true; _runToolWithPromptActual(translatedPrompt); }); return; } // 2026-10-29 요청: ② 반투명은 ① 그레이로 바꾼 이미지에만
   if(G.wf==='space' && !tab._tiltAsked1){ tab._tiltAsked1=true; _tiltAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; }
   if(G.wf==='render' && !tab._massAsked1){ tab._massAsked1=true; _massAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; }
-  if(G.wf==='render' && !tab._bgAsked1){ tab._bgAsked1=true; _bgAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } tab._bgAsked1=false; tab._massAsked1=false; tab._tiltAsked1=false; tab._editHintOk=false; tab._qbHintOk=false; tab._siteMarkOk=false; tab._grayTOk=false; tab._vwPresetOk=false; // 2026-10-26 배경 처리 묻기(한 번 거친 뒤 실제 실행)
+  if(G.wf==='render' && !tab._bgAsked1){ tab._bgAsked1=true; _bgAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } if(G.wf==='render' && !tab._siteAsked1){ tab._siteAsked1=true; _siteRefAskThen(tab, function(){ _runToolWithPromptActual(translatedPrompt); }); return; } /* 2026-11-17 같은 현장 배경(배경 질문 다음, 작업 만들기 직전 — 같은 흐름 안에서 참고 이미지가 작업에 들어감) */ tab._bgAsked1=false; tab._siteAsked1=false; tab._massAsked1=false; tab._tiltAsked1=false; tab._editHintOk=false; tab._qbHintOk=false; tab._siteMarkOk=false; tab._grayTOk=false; tab._vwPresetOk=false; // 2026-10-26 배경 처리 묻기(한 번 거친 뒤 실제 실행)
   try{ if(G.wf==='render' && tab.inputImg) _logoHintCheck(tab.inputImg); }catch(_lh){} // 2026-10-26: 로고 큰 이미지면 안내(렌더와 동시에, 기다리지 않음)
   // 이 사진(=결과)에 예산 정보를 영구히 붙여두기 위한 스냅샷 — 생성 시점에 캡처해야 나중에
   // 사용자가 예산 설정을 바꿔도 "이 결과는 원래 이 예산으로 만든 거였다"가 안 흔들림
@@ -51006,11 +51034,11 @@ function _openBatchReviewModal(newFiles){
 // 일괄 업로드 확인 화면에서 켬. 1번 사진을 먼저 렌더 → (원하면 확인) → 그 결과를 '톤 기준'으로 나머지 사진에 첨부해서
 // 조명·색감·분위기만 맞춤(각 사진의 물건·구도·재질은 그대로). 기준을 직접 고르면 1번부터 바로 그 톤으로 전부 만듦.
 function _batchToneOptions(totalCount, rerender){
-  var T=G._batchTone||(G._batchTone={on:false, mode:'first', confirm:true, pickImg:null});
+  var T=G._batchTone||(G._batchTone={on:true, mode:'first', confirm:true, pickImg:null}); /* 2026-11-17: 여러 장이면 기본으로 같은 톤·같은 현장 */
   var box=document.createElement('div');
   box.style.cssText='padding:14px 15px;border-radius:11px;border:1px solid '+(T.on?'var(--acb)':'var(--bd2)')+';background:'+(T.on?'var(--acg)':'var(--c2)')+';font-size:14px;color:var(--t2);line-height:1.65;text-align:left';
   var row=function(html, on, click, sub){ var l=document.createElement('div'); l.style.cssText='display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:9px'; l.innerHTML='<span style="flex-shrink:0;width:21px;height:21px;margin-top:1px;border-radius:'+(sub?'50%':'5px')+';border:1.5px solid '+(on?'var(--ac)':'var(--m2)')+';background:'+(on?'var(--ac)':'transparent')+';color:#000;font-size:13px;font-weight:900;display:flex;align-items:center;justify-content:center">'+(on?(sub?'●':'✓'):'')+'</span><span>'+html+'</span>'; l.onclick=click; return l; };
-  box.appendChild(row('<b style="color:var(--t);font-size:16.5px">🎨 같은 톤으로 맞추기</b><br><span style="font-size:13.5px;color:var(--t2)">거실·주방·침실처럼 한 프로젝트의 여러 장면을 <b>같은 날 같은 사진가가 찍은 것처럼</b> 조명·색감·분위기를 맞춰요. 각 사진의 가구·구도·재질은 그대로예요.</span>', T.on, function(){ T.on=!T.on; rerender(); }));
+  box.appendChild(row('<b style="color:var(--t);font-size:16.5px">🎨 같은 톤·같은 현장으로 맞추기</b><br><span style="font-size:13.5px;color:var(--t2)">외관·거실·주방·침실처럼 한 프로젝트의 여러 장면을 <b>같은 날 같은 사진가가 같은 현장에서 찍은 것처럼</b> 조명·색감·분위기와 <b>주변 풍경·하늘·계절·창밖 경치</b>까지 맞춰요. 각 사진의 가구·구도·재질은 그대로예요.</span>', T.on, function(){ T.on=!T.on; rerender(); }));
   if(T.on){
     var sub=document.createElement('div'); sub.style.cssText='margin:10px 0 0 31px;padding-top:10px;border-top:1px dashed var(--bd2)';
     sub.appendChild(row('<b>1번 사진 결과를 기준으로</b> <span style="font-size:13px;color:var(--m2)">— 1번을 먼저 만들고, 그 결과의 톤에 나머지를 맞춰요</span>', T.mode==='first', function(){ T.mode='first'; rerender(); }, true));
@@ -52244,8 +52272,8 @@ function _mtRun(){
   finally{ tab._matchRef=null; tab._matchOld=null; tab._matchKeep=false; if(prevEng==='gpt2') G.eng=prevEng; if(!prevSel) {} }
   try{ renderSB(); }catch(e){}
 }
-var TONE_REF_RULE=' 🎨🎨 TONE MATCH ACROSS A SET (very important — this image is one of several views of the SAME project that must look like one consistent photo set): the LAST attached image is a TONE REFERENCE already rendered for ANOTHER view of this same project. This is the ONLY permitted use of an extra image: match ONLY its overall photographic look — colour grading, white balance / colour temperature, time of day, sunlight direction and softness, exposure, contrast, and how real and finished the materials look — so the two images look like they were shot by the same photographer on the same day with the same camera settings. NEVER copy anything else from it: not its objects, furniture, layout, room shape, camera angle, framing, nor the colours or materials of its specific surfaces. Every object, the geometry and every material colour must come ONLY from the main (first) image, and all rules above still apply.';
-var TONE_REF_RULE_SHORT=' The second image is a tone reference from another view of the same project: match only its colour grading, white balance, time of day, sunlight and exposure so both look like one photo set. Do not copy its objects, layout, camera or surface colours.';
+var TONE_REF_RULE=' 🎨🎨 TONE MATCH ACROSS A SET (very important — this image is one of several views of the SAME project that must look like one consistent photo set): the LAST attached image is a TONE REFERENCE already rendered for ANOTHER view of this same project. This is the ONLY permitted use of an extra image: match ONLY its overall photographic look — colour grading, white balance / colour temperature, time of day, sunlight direction and softness, exposure, contrast, and how real and finished the materials look — so the two images look like they were shot by the same photographer on the same day with the same camera settings. NEVER copy anything else from it: not its objects, furniture, layout, room shape, camera angle, framing, nor the colours or materials of its specific surfaces. Every object, the geometry and every material colour must come ONLY from the main (first) image, and all rules above still apply. SAME SITE: it is the same building on the same site, so everything NOT modelled in the main image — sky, weather, season, distant hills or mountains, trees and planting beyond the model, neighbouring buildings and the view through the windows — must match the reference as the same place seen from this camera direction (only what this view would actually see). Anything already modelled in the main image keeps its own shape.';
+var TONE_REF_RULE_SHORT=' The second image is a tone reference from another view of the same project: match only its colour grading, white balance, time of day, sunlight and exposure so both look like one photo set. It is the same site: the sky, season, distant landscape, neighbouring buildings and the view through windows that are not modelled must look like the same place. Do not copy its objects, layout, camera or surface colours.';
 // 야간 장면 판별: 야간 프리셋 키 + 날씨·계절 연출(블루아워/완전 야간) 문구 + 영상→완성영상 환경(야간류) — 낮 프리셋(야간→주간·골든아워 등)은 제외
 var NIGHT_PRESET_KEYS={day_to_night:1, day_to_night_interior:1, blue_hour_dusk:1, early_twilight:1, moonlit_night:1, starry_sky_night:1};
 var NIGHT_PROMPT_MARKS=['블루아워(해 진 직후','완전히 어두워진 밤','blue-hour dusk —','night — dark night sky','evening interior mood —','moonlit night —'];
@@ -60677,6 +60705,7 @@ var CLOVER_NEW_FEATURES=[
   {c:'space', t:'▶ 멈춘 자리부터 이어서 생성', h:'공간 컨셉·아파트 컨셉 디자인에서 여러 뷰를 만들다가 ⏹ 정지를 눌렀다면, 바로 아래 "▶ 이어서 생성" 버튼으로 멈춘 뷰부터 남은 뷰를 이어서 만들 수 있어요. 이미 만든 뷰는 그대로 두고 남은 것만 만들어요.'},
   {c:'edit', t:'💙 애니 감성 맑은 하늘(실사)', h:'AI 편집 › 시간/날씨/분위기와 공간 컨셉 디자인 › 날씨·계절 연출에 "애니 감성 맑은 하늘(실사)"이 생겼어요 — 애니 영화 한 장면처럼 진한 파란 하늘·또렷한 뭉게구름·비 갠 뒤 맑은 공기·낮은 옆 햇살·싱그러운 색감으로 바꾸되, 그림이 아니라 진짜 사진처럼. 건물·길·나무 위치와 구도는 그대로예요.'},
   {c:'space', t:'❄️ 계절 연출이 더 다양해졌어요', h:'공간 컨셉 디자인의 날씨·계절 연출에 새 계절이 생겼어요 — ⛄ 눈 그친 뒤 소복한 겨울, 🌨 첫눈 살짝, 🕯 눈 쌓인 겨울밤 불빛, 🧊 서리 낀 맑은 겨울 아침, 🍂 늦가을 낙엽비, 🍁 쨍한 가을 하늘 단풍, 🌿 신록의 늦봄, 🌦 여름 소나기 뒤. 도심 사진도 숲·산을 새로 만들지 않고 가로수·화단·옥상정원·처마 위 눈·길가 낙엽으로 계절이 느껴지게 만들어요.'},
+  {c:'render', t:'🏞 렌더 실사화 — 같은 집은 같은 현장으로', h:'3D 렌더 실사화를 돌릴 때 최근에 만든 결과가 있으면 "같은 현장으로 맞출까요?"를 한 번 물어봐요. 맞추면 주변 풍경·하늘·계절·창밖 경치가 앞 결과와 같은 현장처럼 나와요(재질·가구·구도는 지금 이미지 그대로). 다른 기준 이미지를 고르거나, 원하는 배경을 [추가 요청]에 적어도 돼요. 📦 일괄 업로드로 여러 장을 돌릴 때는 기본으로 같은 톤·같은 현장으로 맞춰요.'},
   {c:'space', t:'📐 공간 컨셉 디자인 — 넓은 공간은 넓게', h:'출력 비율이 자동이면 이제 참고 이미지 비율을 따라가요. 가로로 넓은 거실 사진을 넣으면 가로로 넓게, 세로 사진이면 세로로 나와요. 가로 화면에서는 실제 아파트 인테리어 사진처럼 모서리에서 대각선으로 찍어 공간의 깊이와 폭을 보여줘요(방 전체를 억지로 다 담지 않아요).'},
   {c:'space', t:'🖼 공간 컨셉 디자인 — 같은 액자 반복 안 해요', h:'공간 컨셉 디자인에서 참고 이미지에 걸린 액자·그림을 여러 방에 똑같이 복사하지 않아요. 액자는 필요한 공간에만 0~2개, 그림은 공간마다 다른 새 그림으로 넣어요.'},
   {c:'video', t:'✨ 공사 과정 영상은 완성 장면부터 살짝', h:'AI 감독에 오래된 집·철거·공사 중 사진과 완성 사진을 같이 넣으면, 감독이 맨 앞에 완성 장면을 2초 살짝 보여 주고 → 다시 과거(오래된 집·철거·공사)로 돌아가 → 완성으로 끝나게 짜요. 첫 대사도 "이 집, 원래는 이랬습니다"처럼 과거로 데려가서 끝까지 보게 만들어요. 맨 앞 장면은 무료 효과라 크레딧이 더 들지 않아요.'},
