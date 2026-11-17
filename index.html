@@ -8604,6 +8604,15 @@ function _psRefreshOpts(light){
 
 // ── 오른쪽 패널(레이어 / 속성 / 필터 / 선택 / 이미지) ──────────────────
 var PS_EYE='<svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+function _psRenameInline(id){
+  var L=_psLayer(id); if(!L) return; var box=PSE.ui&&PSE.ui.side; var el=box?box.querySelector('.ps-lname[data-lid="'+id+'"]'):null; if(!el) return;
+  var inp=document.createElement('input'); inp.type='text'; inp.value=L.name; inp.className='ps-lname-in';
+  inp.style.cssText='flex:1;min-width:0;font-size:12px;padding:2px 5px;border-radius:5px;border:1px solid var(--ac,#00e5cc);background:var(--c2,#1e2026);color:var(--t,#fff);font-family:inherit;outline:none';
+  var done=false; function fin(save){ if(done) return; done=true; var v=inp.value.trim(); if(save && v && v!==L.name){ L.name=v; _psPush('이름 변경'); } _psRefreshSide(); }
+  inp.addEventListener('keydown', function(e){ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); fin(true); } else if(e.key==='Escape'){ e.preventDefault(); fin(false); } });
+  inp.addEventListener('blur', function(){ fin(true); }); ['click','pointerdown','mousedown','dblclick'].forEach(function(t){ inp.addEventListener(t, function(e){ e.stopPropagation(); }); });
+  el.replaceWith(inp); inp.focus(); inp.select();
+}
 function _psRefreshSide(){
   var ui=PSE.ui; if(!ui) return;
   var side=ui.side, keepScroll=side.scrollTop;
@@ -8642,7 +8651,9 @@ function _psLayersSec(){
       var tc=_psCanvas(92,68); ui_thumbReg(L.id,tc);
       tc.onclick=function(e){ e.stopPropagation(); if(e.ctrlKey||e.metaKey){ _psLoadSelFrom(L, 'layer', e); return; } _psSetActive(L.id); if(PSE.maskEdit) _psSetMaskEdit(null); };
       tc.title='클릭: 레이어 선택 · Ctrl+클릭: 이 레이어 모양대로 영역 선택 (Shift 더하기 · Alt 빼기)';
-      var nm=_psEl('div','ps-lname'); nm.textContent=L.name; nm.title='더블클릭해서 이름 바꾸기';
+      var nm=_psEl('div','ps-lname'); nm.textContent=L.name; nm.title='이름을 더블클릭하면 바로 바꿀 수 있어요'; nm.setAttribute('data-lid', L.id);
+      /* 2026-11-17 요청("이미지 말고 이름 쪽을 더블클릭하면 이름 바뀌게"): 이름 글자를 두 번 누르면 그 자리에서 바로 고치기(Enter 저장 · Esc 취소) — 첫 클릭에 목록이 다시 그려져도 되게 클릭 시간을 따로 기억 */
+      nm.addEventListener('click', function(){ var now=Date.now(), last=PSE._nmClick; PSE._nmClick={id:L.id, t:now}; if(last && last.id===L.id && now-last.t<450){ PSE._nmClick=null; setTimeout(function(){ _psRenameInline(L.id); }, 0); } });
       var tag=_psEl('span','ps-ltag',L.type==='text'?'T':L.type==='shape'?'도형':L.type==='adjust'?('조정'+(L.clip?' ↓':'')):('픽셀'));
       var grip=_psEl('span','ps-grip','⋮⋮'); grip.title='끌어서 순서 바꾸기';
       row.appendChild(grip); row.appendChild(eye); row.appendChild(tc);
@@ -8686,7 +8697,6 @@ function _psLayersSec(){
         if(wasActive && PSE.maskEdit) _psSetMaskEdit(null);
         _psRequestRender();
       };
-      row.ondblclick=function(){ var n=prompt('레이어 이름',L.name); if(n!=null && n.trim()){ L.name=n.trim(); _psPush('이름 변경'); } };
       list.appendChild(row);
     })(d.layers[i]);
   }
