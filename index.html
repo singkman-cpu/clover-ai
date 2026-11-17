@@ -6488,8 +6488,22 @@ function _psSelClearPixels(){
   var nc=_psClone(L.canvas), c=nc.getContext('2d'); c.globalCompositeOperation='destination-out'; c.drawImage(d.sel,0,0);
   L.canvas=nc; _psPush('선택 영역 지우기'); _psRequestRender();
 }
+/* 2026-11-17 신고("마스크 클릭하고 단축키로 흑백 칠했는데 마스크가 아니라 메인 화면에 칠해짐"): 마스크 편집 중이면 채우기는 마스크에 — 검정=가림, 흰색=보임, 회색=반투명 (포토샵과 같음) */
+function _psMaskFill(color){
+  var d=PSE.doc, L=_psActive(); if(!d||!L) return;
+  _psCommitPending();
+  if(!L.mask){ var m0=_psCanvas(d.w,d.h), x0=m0.getContext('2d'); x0.fillStyle='#fff'; x0.fillRect(0,0,d.w,d.h); L.mask=m0; }
+  var hex=String(color||'#000000').replace('#',''); if(hex.length===3) hex=hex.split('').map(function(ch){ return ch+ch; }).join('');
+  var r=parseInt(hex.slice(0,2),16)||0, g=parseInt(hex.slice(2,4),16)||0, b=parseInt(hex.slice(4,6),16)||0, lum=(0.299*r+0.587*g+0.114*b)/255;
+  var area=_psCanvas(d.w,d.h), ac=area.getContext('2d'); ac.fillStyle='#fff'; ac.fillRect(0,0,d.w,d.h); if(d.sel){ ac.globalCompositeOperation='destination-in'; ac.drawImage(d.sel,0,0); }
+  var nm=_psClone(L.mask), mc=nm.getContext('2d');
+  mc.globalCompositeOperation='destination-out'; mc.drawImage(area,0,0);
+  if(lum>0.004){ mc.globalCompositeOperation='source-over'; mc.globalAlpha=lum; mc.drawImage(area,0,0); mc.globalAlpha=1; }
+  L.mask=nm; _psPush(lum<0.5?'마스크 채우기(가림)':'마스크 채우기(보임)'); _psRefreshSide(); _psRequestRender(true);
+}
 function _psSelFill(color){
   var d=PSE.doc, L=_psActive(); if(!d||!L) return;
+  if(PSE.maskEdit && PSE.maskEdit===L.id){ _psMaskFill(color||PSE.o.fg); return; }
   if(!_psEnsureRaster(L,'채우기')) return; L=_psActive();
   var f=_psCanvas(d.w,d.h), fc=f.getContext('2d'); fc.fillStyle=color||PSE.o.fg; fc.fillRect(0,0,d.w,d.h);
   if(d.sel){ fc.globalCompositeOperation='destination-in'; fc.drawImage(d.sel,0,0); }
@@ -9096,6 +9110,7 @@ function _psOnKey(e){
   else if(mod && k==='m') _psOpenCurves(); // ⚠️ 포토샵과 동일: Ctrl(⌘)+M = 커브
   else if(mod && k==='u') _psOpenAdjust('hs'); // ⚠️ 포토샵과 동일: Ctrl(⌘)+U = 색조/채도
   else if(mod && k==='b') _psOpenAdjust('cbal'); // ⚠️ 포토샵과 동일: Ctrl(⌘)+B = 색상 균형
+  else if(mod && e.key==='Backspace') _psSelFill(PSE.o.bg); /* 2026-11-17: 포토샵처럼 Ctrl+Backspace = 배경색 채우기(마스크 편집 중이면 마스크에) */
   else if(mod) done=false;
   else if(e.key==='Enter'){
     if(PSE.poly) _psPolyFinish();
@@ -9114,6 +9129,7 @@ function _psOnKey(e){
   }
   else if(e.key==='Delete' || e.key==='Backspace'){
     if(e.altKey) _psSelFill(PSE.o.fg);
+    else if(PSE.maskEdit && PSE.doc && PSE.doc.sel && PSE.maskEdit===(_psActive()||{}).id) _psMaskFill(PSE.o.bg); /* 마스크 편집 중 + 선택 영역 + Del = 포토샵처럼 배경색으로 채움(마스크 통째 삭제 아님) */
     else if(PSE.poly && e.key==='Backspace'){ PSE.poly.pts.pop(); if(!PSE.poly.pts.length) PSE.poly=null; _psRefreshOpts(); _psRequestOverlay(); }
     // ⚠️ 요청 반영("마스크 레이어만 클릭해서 DEL로 삭제할수있게해줘"): 레이어 목록에서 마스크 썸네일을
     // 클릭해 마스크 편집 모드(PSE.maskEdit)에 들어가 있는 상태라면, Del/Backspace를 눌렀을 때 레이어
