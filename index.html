@@ -6489,17 +6489,36 @@ function _psSelClearPixels(){
   L.canvas=nc; _psPush('선택 영역 지우기'); _psRequestRender();
 }
 /* 2026-11-17 신고("마스크 클릭하고 단축키로 흑백 칠했는데 마스크가 아니라 메인 화면에 칠해짐"): 마스크 편집 중이면 채우기는 마스크에 — 검정=가림, 흰색=보임, 회색=반투명 (포토샵과 같음) */
-function _psMaskFill(color){
+/* 2026-11-17 점검(같은 종류 버그): 마스크 편집 중 필터 — 블러(경계 부드럽게)·반전만 마스크에, 나머지는 안내 */
+function _psMaskFilter(key, L){
+  var d=PSE.doc; _psCommitPending();
+  if(!L.mask){ var m0=_psCanvas(d.w,d.h), x0=m0.getContext('2d'); x0.fillStyle='#fff'; x0.fillRect(0,0,d.w,d.h); L.mask=m0; }
+  if(key==='blur'){ var v=prompt('마스크 경계를 부드럽게 — 블러 반경(px)', '6'); var r=Math.max(1,Math.min(60,parseFloat(v)||0)); if(!v) return true;
+    var M=L.mask, W=d.w, H=d.h, g=Math.ceil(r*3), pad=_psCanvas(W+2*g,H+2*g), pc=pad.getContext('2d'); /* 가장자리가 흐려지며 비치지 않게 테두리를 늘려 붙인 뒤 블러 */
+    pc.drawImage(M,g,g); pc.drawImage(M,0,0,1,H,0,g,g,H); pc.drawImage(M,W-1,0,1,H,g+W,g,g,H); pc.drawImage(M,0,0,W,1,g,0,W,g); pc.drawImage(M,0,H-1,W,1,g,g+H,W,g);
+    pc.drawImage(M,0,0,1,1,0,0,g,g); pc.drawImage(M,W-1,0,1,1,g+W,0,g,g); pc.drawImage(M,0,H-1,1,1,0,g+H,g,g); pc.drawImage(M,W-1,H-1,1,1,g+W,g+H,g,g);
+    var nm=_psCanvas(W,H), c=nm.getContext('2d'); c.filter='blur('+r+'px)'; c.drawImage(pad,-g,-g); c.filter='none';
+    if(d.sel){ var keep=_psClone(L.mask), kc=keep.getContext('2d'); kc.globalCompositeOperation='destination-out'; kc.drawImage(d.sel,0,0); c.globalCompositeOperation='destination-in'; c.drawImage(d.sel,0,0); c.globalCompositeOperation='source-over'; c.drawImage(keep,0,0); }
+    L.mask=nm; _psPush('마스크 블러'); _psRefreshSide(); _psRequestRender(true); _psToast('마스크 경계를 부드럽게 했어요 (Ctrl+Z로 되돌리기)'); return true; }
+  if(key==='invert'){ _psMaskInvert(L); return true; }
+  _psToast('마스크 편집 중이에요 — 마스크에는 가우시안 블러·색상 반전만 돼요. 사진에 필터를 걸려면 레이어 이미지 썸네일을 먼저 누르세요'); return true;
+}
+function _psMaskInvert(L){ var d=PSE.doc; _psCommitPending();
+  if(!L.mask){ var m0=_psCanvas(d.w,d.h), x0=m0.getContext('2d'); x0.fillStyle='#fff'; x0.fillRect(0,0,d.w,d.h); L.mask=m0; }
+  var nm=_psCanvas(d.w,d.h), c=nm.getContext('2d'); c.fillStyle='#fff'; c.fillRect(0,0,d.w,d.h); c.globalCompositeOperation='destination-out'; c.drawImage(L.mask,0,0);
+  if(d.sel){ var keep=_psClone(L.mask), kc=keep.getContext('2d'); kc.globalCompositeOperation='destination-out'; kc.drawImage(d.sel,0,0); c.globalCompositeOperation='destination-in'; c.drawImage(d.sel,0,0); c.globalCompositeOperation='source-over'; c.drawImage(keep,0,0); }
+  L.mask=nm; _psPush('마스크 반전'); _psRefreshSide(); _psRequestRender(true); _psToast('마스크를 반전했어요 (가린 곳 ↔ 보이는 곳)'); }
+function _psMaskFill(color, areaIn, label){
   var d=PSE.doc, L=_psActive(); if(!d||!L) return;
   _psCommitPending();
   if(!L.mask){ var m0=_psCanvas(d.w,d.h), x0=m0.getContext('2d'); x0.fillStyle='#fff'; x0.fillRect(0,0,d.w,d.h); L.mask=m0; }
   var hex=String(color||'#000000').replace('#',''); if(hex.length===3) hex=hex.split('').map(function(ch){ return ch+ch; }).join('');
   var r=parseInt(hex.slice(0,2),16)||0, g=parseInt(hex.slice(2,4),16)||0, b=parseInt(hex.slice(4,6),16)||0, lum=(0.299*r+0.587*g+0.114*b)/255;
-  var area=_psCanvas(d.w,d.h), ac=area.getContext('2d'); ac.fillStyle='#fff'; ac.fillRect(0,0,d.w,d.h); if(d.sel){ ac.globalCompositeOperation='destination-in'; ac.drawImage(d.sel,0,0); }
+  var area=_psCanvas(d.w,d.h), ac=area.getContext('2d'); if(areaIn){ ac.drawImage(areaIn,0,0); } else { ac.fillStyle='#fff'; ac.fillRect(0,0,d.w,d.h); } if(d.sel){ ac.globalCompositeOperation='destination-in'; ac.drawImage(d.sel,0,0); }
   var nm=_psClone(L.mask), mc=nm.getContext('2d');
   mc.globalCompositeOperation='destination-out'; mc.drawImage(area,0,0);
   if(lum>0.004){ mc.globalCompositeOperation='source-over'; mc.globalAlpha=lum; mc.drawImage(area,0,0); mc.globalAlpha=1; }
-  L.mask=nm; _psPush(lum<0.5?'마스크 채우기(가림)':'마스크 채우기(보임)'); _psRefreshSide(); _psRequestRender(true);
+  L.mask=nm; _psPush(label||(lum<0.5?'마스크 채우기(가림)':'마스크 채우기(보임)')); _psRefreshSide(); _psRequestRender(true);
 }
 function _psSelFill(color){
   var d=PSE.doc, L=_psActive(); if(!d||!L) return;
@@ -6602,6 +6621,7 @@ function _psWandAt(x,y,e){
 }
 function _psBucketAt(x,y){
   var d=PSE.doc, L=_psActive(); if(!L) return;
+  if(PSE.maskEdit && PSE.maskEdit===L.id){ var mm=_psFloodMask(_psSampleSource(), x, y, PSE.o.tol, PSE.o.contig); if(!mm) return; _psMaskFill(PSE.o.fg, _psMaskArrToCanvas(mm,d.w,d.h), '마스크 페인트통'); return; } /* 2026-11-17: 마스크 편집 중 페인트통은 마스크에 */
   if(!_psEnsureRaster(L,'페인트통')) return; L=_psActive();
   var m=_psFloodMask(_psSampleSource(), x, y, PSE.o.tol, PSE.o.contig); if(!m) return;
   var f=_psMaskArrToCanvas(m,d.w,d.h), fc=f.getContext('2d');
@@ -7357,6 +7377,7 @@ function _psAddAdjustLayer(key, opts){
 }
 function _psFilterStart(key){
   var L=_psActive(); if(!L) return;
+  if(PSE.maskEdit && PSE.maskEdit===L.id){ _psMaskFilter(key, L); return; } /* 2026-11-17: 마스크 편집 중이면 필터는 마스크에 */
   _psCommitPending();
   if(L.type==='adjust'){ _psToast('조정 레이어에는 직접 필터를 걸 수 없어요 — 아래 "조정 레이어 추가"를 쓰거나 픽셀 레이어를 선택하세요'); return; }
   // ⚠️ 버그 수정(위 "필터가 적용 안 된다"와 같은 원인): 비어있는(투명한) 레이어에 필터를 걸면 아무 변화가
@@ -8359,6 +8380,13 @@ function _psBuildUI(){
     e.preventDefault(); e.stopPropagation();
     ui.zoom.zoomBy(e.altKey ? 1/1.5 : 1.5, e.clientX, e.clientY);
   }, true);
+  /* 2026-11-17 요청("사각툴은 이미지 밖에서 드래그를 시작해야 원하는 만큼 잡히는데 밖에서는 안 된다"): 이미지 바깥 회색 바탕에서 눌러도 선택 도구가 시작되게 — 선택은 이미지 안쪽만 남음 */
+  stage.addEventListener('pointerdown', function(e){
+    if(!PSE.doc || e.defaultPrevented) return; if(e.pointerType==='mouse' && e.button!==0) return;
+    if(ov.contains(e.target)) return; if(e.target && e.target.closest && e.target.closest('button,input,select,textarea,a,[contenteditable]')) return;
+    if(!/^(marquee|emarquee|lasso|poly|crop)$/.test(PSE.tool||'')) return;
+    _psDown(e);
+  });
   // 화면 크기가 바뀌면 캔버스를 다시 맞춤
   if(window.ResizeObserver){
     var _rt=null;
@@ -9105,6 +9133,7 @@ function _psOnKey(e){
   else if(mod && k==='a') _psSelAll();
   else if(mod && k==='d') _psSelNone();
   else if(mod && e.shiftKey && k==='i') _psSelInvert();
+  else if(mod && k==='i' && PSE.maskEdit && PSE.maskEdit===(_psActive()||{}).id) _psMaskInvert(_psActive()); /* 2026-11-17: 포토샵처럼 마스크 편집 중 Ctrl+I = 마스크 반전 */
   else if(mod && k==='j') _psSelToLayer(e.shiftKey);
   else if(mod && k==='t') _psSetTool('transform');
   else if(mod && k==='m') _psOpenCurves(); // ⚠️ 포토샵과 동일: Ctrl(⌘)+M = 커브
