@@ -9071,21 +9071,28 @@ function _psFilterSec(){
   if(window._fxList && window._fxGrade){
     var card2=_psEl('div','ps-filtercard adj'); card2.appendChild(_psEl('div','ps-note','<b style="color:var(--t)">🎬 시네마틱 필터</b> — 영상 제작과 같은 색감'));
     var g2=_psEl('div','ps-grid2');
-    window._fxList.forEach(function(f){ g2.appendChild(_psB(f[1],function(){ _psCineFx(f[0], f[1]); },'','지금 보이는 화면에 이 색감을 입힌 새 레이어를 맨 위에 올려요')); });
+    var _cc=_psCineCur(); window._fxList.forEach(function(f){ g2.appendChild(_psB((_cc===f[0]?'✓ ':'')+f[1],function(){ _psCineFx(f[0], f[1]); },_cc===f[0]?'on':'',_cc===f[0]?'다시 누르면 해제':'지금 보이는 화면에 이 색감을 입혀요 (다른 필터를 누르면 바뀌어요)')); });
     card2.appendChild(g2);
-    card2.appendChild(_psEl('div','ps-note','새 레이어로 올라가요 — 눈 아이콘으로 비교, 레이어 불투명도로 강도 조절'+(d.sel?' · 선택 영역에만 적용돼요':'')+'.'));
+    card2.appendChild(_psEl('div','ps-note','한 번 누르면 적용 · 다시 누르면 해제 · 다른 필터를 누르면 바뀌어요(겹쳐 쌓이지 않음) · 레이어 불투명도로 강도 조절'+(d.sel?' · 선택 영역에만 적용돼요':'')+'.'));
     s.appendChild(card2);
   }
   return s;
 }
+/* 2026-11-17 신고("한 번 누르면 적용, 다시 누르면 해제여야 하는데 누를수록 세짐"): 시네마틱 필터 레이어는 하나만 —
+   같은 필터를 다시 누르면 지우고(해제), 다른 필터를 누르면 기존 필터 레이어를 빼고 원본 화면 기준으로 새로 입힘(겹쳐 쌓이지 않음) */
+function _psCineLayers(){ var d=PSE.doc; return d?d.layers.filter(function(L){ return L && (L._cine || /^🎬 /.test(L.name||'')); }):[]; }
+function _psCineCur(){ var c=_psCineLayers(); return c.length?(c[c.length-1]._cine||''):''; }
 function _psCineFx(k, label){
   var d=PSE.doc; if(!d || !window._fxGrade) return; _psCommitPending();
+  var old=_psCineLayers(), same=old.some(function(L){ return L._cine===k; });
+  if(old.length){ d.layers=d.layers.filter(function(L){ return old.indexOf(L)<0; }); if(old.some(function(L){ return L.id===d.activeId; })) d.activeId=(d.layers[d.layers.length-1]||{}).id; }
+  if(same){ _psPush('시네마틱 필터 해제'); _psRefreshSide(); _psRequestRender(true); _psToast('🎬 '+label+' 해제했어요'); return; }
   var flat=_psFlatten(false); if(!flat) return;
   var gc=window._fxGrade(flat, k);
   var c=_psCanvas(d.w,d.h), cx=c.getContext('2d'); cx.drawImage(gc,0,0);
   if(d.sel){ cx.globalCompositeOperation='destination-in'; cx.drawImage(d.sel,0,0); }
-  var L=_psMkRaster('🎬 '+String(label||k).replace(/^\S+\s/,''), c); d.layers.push(L); d.activeId=L.id; if(PSE.maskEdit) PSE.maskEdit=null;
-  _psPush('시네마틱 필터: '+label); _psRefreshSide(); _psRequestRender(true); _psToast('🎬 '+label+' — 새 레이어로 올렸어요 (불투명도로 강도 조절)');
+  var L=_psMkRaster('🎬 '+String(label||k).replace(/^\S+\s/,''), c); L._cine=k; d.layers.push(L); d.activeId=L.id; if(PSE.maskEdit) PSE.maskEdit=null;
+  _psPush('시네마틱 필터: '+label); _psRefreshSide(); _psRequestRender(true); _psToast('🎬 '+label+(old.length?' 로 바꿨어요':' 적용')+' — 다시 누르면 해제 · 레이어 불투명도로 강도 조절');
 }
 function _psSelSec(){
   var d=PSE.doc, s=_psSec('선택 영역'+(d.sel?' ✓':''));
