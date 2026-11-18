@@ -9441,7 +9441,7 @@ function _renderSkyBar(){
       if(!bar){ bar=document.createElement('div'); bar.className='sb-sky-bar'; btm.insertBefore(bar, btm.firstChild); }
       bar.style.cssText='display:flex;align-items:center;gap:5px;margin:0 0 7px';
       bar.innerHTML='<span style="font-size:11px;font-weight:800;color:var(--t);white-space:nowrap;margin-right:2px">☀️ 하늘</span>';
-      [['clear','맑음'],['partly','구름 조금'],['overcast','흐림'],['keep','원본 그대로']].forEach(function(o){
+      [['auto','자동'],['clear','맑음'],['partly','구름 조금'],['overcast','흐림'],['keep','원본 그대로']].forEach(function(o){ /* 2026-11-18 요청: '자동' = AI가 장면에 맞는 낮 하늘(시그니처는 시그니처 빛) */
         var on=_cur===o[0]; var b=document.createElement('button'); b.type='button'; b.textContent=o[1];
         b.style.cssText='flex:1;padding:6px 0;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;border:1.5px solid '+(on?'var(--acb)':'var(--bd2)')+';background:'+(on?'var(--acg)':'var(--card)')+';color:'+(on?'var(--ac)':'var(--t2)');
         b.onclick=function(ev){ ev.stopPropagation(); if(_qb){ t._skyQB=o[0]; } else { G.renderSky=o[0]; try{ localStorage.setItem('clover_render_sky',o[0]); }catch(e){} } _renderSkyBar(); };
@@ -51483,7 +51483,7 @@ function executeSingleRender(task){
       }
       // 2026-10-13(요청): 3D 렌더 실사화 — 어떤 하늘로 렌더했는지 결과 우측 상단에 표시(야간 요청·고품질화는 하늘을 안 바꾸므로 제외)
       if(task.wf==='render' && task.renderSky && task.renderSky!=='keep' && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'')){
-        tags.push(({clear:'☀️ 맑음', partly:'⛅ 구름 조금', overcast:'☁️ 흐림'})[task.renderSky]||'☀️ 맑음');
+        if(task.renderSky!=='auto') tags.push(({clear:'☀️ 맑음', partly:'⛅ 구름 조금', overcast:'☁️ 흐림'})[task.renderSky]||'☀️ 맑음');
       }
       // 크레딧: 영상은 실제 청구(getCost())와 동일한 공식으로 계산
       var cost;
@@ -53366,11 +53366,13 @@ function procImgWithTask(task, onDone, onErr){
     if(task.selK!=='render_quality_boost' && task.selK!=='hq_signature' && task.renderSky!=='keep' && !task._envNoSky && !/야간|밤|저녁|노을|석양|해질|새벽|night|dusk|sunset|evening/i.test(task.userText||'') && !/night|dusk|evening|twilight/i.test(task.selK||'')){ // 2026-10-12: 고품질화는 이미 렌더링된 이미지의 시간대·조명 분위기를 그대로 유지
       var _sky = task.renderSky || 'clear';
       // 2026-10-13(요청): 구름 조금 = 맑은 날에 구름이 조금 / 흐림 = 진짜 흐린 날
-      var _skyTxt = _sky==='partly' ? 'Render a bright, SUNNY CLEAR-WEATHER daytime scene with just a few clouds: a vivid blue sky with a few scattered fluffy white cumulus clouds (mostly blue — clouds only about 15-25% of the sky), direct bright sunshine with crisp daylight shadows — this is a fine sunny day, NOT a grey or overcast day, exterior lights OFF'
+      var _skyTxt = _sky==='auto' ? 'Render a bright, pleasant natural DAYTIME scene with whatever daylight sky suits this image and its location best (clear, or with some soft natural clouds — never grey or gloomy), real sunlight and natural shadows'
+        : _sky==='partly' ? 'Render a bright, SUNNY CLEAR-WEATHER daytime scene with just a few clouds: a vivid blue sky with a few scattered fluffy white cumulus clouds (mostly blue — clouds only about 15-25% of the sky), direct bright sunshine with crisp daylight shadows — this is a fine sunny day, NOT a grey or overcast day, exterior lights OFF'
         : _sky==='overcast' ? 'Render a truly OVERCAST daytime scene: the entire sky is covered by a uniform grey cloud layer (no blue sky at all, no visible sun, no rain), flat soft diffuse daylight with almost no shadows, slightly muted colors like a real cloudy day, exterior lights OFF'
         : 'Render a bright, crisp, perfectly clear sunny daytime scene: a CLOUDLESS, saturated deep-blue sky — NO CLOUDS AT ALL (zero clouds, not even small puffy ones; if the input or any reference shows clouds, remove them and show only clean blue sky, slightly lighter toward the horizon), high visibility, strong bright natural sunlight with crisp daylight shadows, exterior lights OFF';
       ap += ' ⚠️⚠️⚠️ TIME OF DAY = DAYTIME (user rule, overrides anything that looks like night in the input): a black, dark grey or empty background in a 3D capture is just an unrendered CG background — it does NOT mean night. '+_skyTxt+' or barely visible, interiors seen through windows in daylight. Replace the dark background with a realistic daytime sky and surroundings that fit the site. IF THIS IS AN INTERIOR VIEW: the sky only shows through the windows — natural daylight enters through the windows with believable falloff into the room, and keep each interior light fixture exactly as in the input — a fixture that is ON in the input stays on and realistically lights the room, a fixture that is OFF stays off (never switch lights on or off on your own) (do not turn the room into an outdoor scene). Only render night/evening if the user explicitly asked for it.';
-      ap += (_sky==='clear') ? ' FINAL SKY CHECK: the sky must be a clean, cloudless deep blue — remove every cloud.'
+      ap += (_sky==='auto') ? ' FINAL SKY CHECK: a natural daylight sky that suits the scene, with real sunlight — never night, never dull grey.'
+          : (_sky==='clear') ? ' FINAL SKY CHECK: the sky must be a clean, cloudless deep blue — remove every cloud.'
           : (_sky==='partly') ? ' FINAL SKY CHECK: this is a SUNNY, CLEAR-WEATHER day with only a few white clouds — mostly bright blue sky (clouds cover roughly 15-25% of the sky), direct sunshine and clear shadows; never grey, gloomy or overcast.'
           : ' FINAL SKY CHECK: this is a truly OVERCAST day — the whole sky is covered by grey cloud, no blue sky and no visible sun, flat soft light with almost no shadows.';
       // 2026-11-11 신고("창 없는 스케치 실내인데 왼쪽 벽에 창·유리문을 만들어 버림"): 주간 규칙 때문에 햇빛을 넣으려고 없는 창을 만들지 않게
