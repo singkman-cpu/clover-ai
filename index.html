@@ -52019,6 +52019,8 @@ function _lensBloom(src, lv, cb){
   setTimeout(function(){ fin(null); }, 50000);
   /* 2026-11-18 요청("건축 외관 주경·석경이면 빛번짐 = 태양 쪽에서 빛이 퍼지는 느낌"): 먼저 장면을 보고, 낮·해질녘 외관이면 태양 빛 퍼짐(무료 후처리), 아니면 기존 조명 빛번짐 */
   _sunGlowDetect(src, function(sun){
+    window._lbReason='';
+    if(sun && sun.skip){ window._lbReason=sun.skip; fin(null); return; }
     if(sun){ _sunGlowRender(src, lv, sun, function(out){ if(out) fin(out); else _lensBloomDetect(src, function(info){ _lensBloomRender(src, lv, info, fin); }); }); return; }
     _lensBloomDetect(src, function(info){ _lensBloomRender(src, lv, info, fin); });
   });
@@ -52029,14 +52031,15 @@ function _sunGlowDetect(src, cb){
   if(!(typeof _supa!=='undefined' && _supa && _supaUser) || typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(null); return; }
   setTimeout(function(){ fin(null); }, 20000);
   try{ _proposalImgToB64(src, function(b64){ if(!b64){ fin(null); return; }
-    var q='Look at this architectural image. Answer ONLY JSON: {"scene":"exterior_day|exterior_dusk|exterior_night|exterior_overcast|interior","sun":[x,y]}. scene: exterior_day = outside view in daylight with sunshine; exterior_dusk = sunrise/sunset/golden hour; exterior_night = night or blue hour with dark sky; exterior_overcast = grey cloudy sky with no sun direction; interior = indoor view. sun = where the sun is in 0-1000 image coordinates [x from left, y from top]; it is usually outside the frame (use values from -300 to 1300). Work it out step by step from the light in the image: cast shadows point AWAY from the sun; the brightly lit facades and the bright sides of trees FACE the sun; the sky is brightest and warmest toward the sun; a sun behind the camera means the visible facades are evenly front-lit (then put the sun above the top edge, y about -250, on the side the shadows lean away from). Also add "conf":"high|low" — low when the light direction is unclear.';
+    var q='Look at this architectural image. Answer ONLY JSON: {"scene":"exterior_day|exterior_dusk|exterior_night|exterior_overcast|exterior_rain|interior","sun":[x,y]}. scene: exterior_day = outside view in daylight with sunshine; exterior_dusk = sunrise/sunset/golden hour; exterior_night = night or blue hour with dark sky; exterior_overcast = grey cloudy sky with no clear sunshine or sun direction; exterior_rain = rainy or wet stormy weather; interior = indoor view. sun = where the sun is in 0-1000 image coordinates [x from left, y from top]; it is usually outside the frame (use values from -300 to 1300). Work it out step by step from the light in the image: cast shadows point AWAY from the sun; the brightly lit facades and the bright sides of trees FACE the sun; the sky is brightest and warmest toward the sun; a sun behind the camera means the visible facades are evenly front-lit (then put the sun above the top edge, y about -250, on the side the shadows lean away from). Also add "conf":"high|low" — low when the light direction is unclear.';
     _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64}}, {type:'text', text:q}]}]}, function(res){
       try{ var t=res; if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t);
         var m=String(t||'').match(/\{[\s\S]*\}/); if(!m){ fin(null); return; } var j=JSON.parse(m[0]); var sc=String(j.scene||'');
         console.log('[빛번짐] 장면: '+sc, j.sun);
+        if(/^exterior_(overcast|rain)$/.test(sc)){ fin({skip:'overcast'}); return; } /* 2026-11-18 요청: 흐린 날·비 오는 날 외관은 빛번짐을 넣지 말고 안내만 */
         if(!/^exterior_(day|dusk)$/.test(sc) || !Array.isArray(j.sun) || j.sun.length<2){ fin(null); return; }
         var sx0=Math.max(-0.3,Math.min(1.3,Number(j.sun[0])/1000)), sy0=Math.max(-0.3,Math.min(1.3,Number(j.sun[1])/1000)); if(sy0>0.45) sy0=0.45; /* 태양은 지평선 위 — 아래쪽으로 잡히면 위로 올림 */
-        fin({x:sx0, y:sy0, dusk:sc==='exterior_dusk', low:String(j.conf||'')==='low'}); }catch(e){ fin(null); }
+        fin({x:sx0, y:sy0, dusk:sc==='exterior_dusk', low:String(j.conf||'')==='low', over:sc==='exterior_overcast'}); }catch(e){ fin(null); }
     }, function(){ fin(null); }); }); }catch(e){ fin(null); }
 }
 /* 태양 빛 퍼짐: 태양 쪽에서 따뜻한 빛이 넓게 번지고(글로우), 공기 속으로 은은한 빛줄기와 옅은 빛 안개가 퍼짐 — 구도·사물은 그대로 */
@@ -52176,7 +52179,7 @@ function _lensBloomApplyToItem(item, lv, btn){
   function restore(){ if(btn){ btn.disabled=false; btn.innerHTML=label; } }
   _lensBloom(item.result, lv, function(out){
     restore();
-    if(!out){ alert('빛번짐을 넣을 태양 방향·천장 조명·간판 LED를 찾지 못했거나, 이미지를 불러오지 못했어요.'); return; }
+    if(!out){ if(window._lbReason==='overcast'){ alert('☁ 흐린 날·비 오는 날 외관 이미지라서 빛번짐을 넣을 수 없어요.\n햇빛이 있는 맑은 날이나 해 질 녘 이미지에서 다시 눌러 주세요.'); return; } alert('빛번짐을 넣을 태양 방향·천장 조명·간판 LED를 찾지 못했거나, 이미지를 불러오지 못했어요.'); return; }
     try{
       var wf=item.wf||G.wf, id=Date.now();
       var lvKo={soft:'은은하게',mid:'보통',strong:'강하게'}[lv]||'';
