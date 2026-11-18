@@ -19259,10 +19259,15 @@ function _scExtOpenings(spTab, typeName, input, cb){
     if(!_isExteriorViewType(typeName) || typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(); return; }
     var ints=(spTab.autoRoomIntAnchors||[]).filter(function(a){ return a && a.img; });
     if(!ints.length){ fin(); return; }
-    var pri=function(a){ var l=String(a.label||''); return /거실|리빙|living/i.test(l)?0:(/테라스|발코니|베란다|중정|마당|데크|옥상/.test(l)?1:(/주방|다이닝|키친/.test(l)?2:(/현관|복도|계단|홀/.test(l)?3:4))); };
-    var pick=ints.slice().sort(function(a,b){ return pri(a)-pri(b); }).slice(0,6);
+    var _OUT=/수영장|풀장|pool|자쿠지|스파|테라스|발코니|베란다|중정|마당|정원|가든|데크|옥상|루프탑|바비큐|캠핑|야외|썬룸|선룸|온실|주차|차고|카포트|현관|입구|포치/i;
+    var pri=function(a){ var l=String(a.label||''); return _OUT.test(l)?0:(/거실|리빙|living/i.test(l)?1:(/주방|다이닝|키친/.test(l)?2:(/복도|계단|홀/.test(l)?3:4))); };
+    var _srt=ints.slice().sort(function(a,b){ return pri(a)-pri(b); });
+    var pick=_srt.slice(0, Math.max(6, Math.min(8, _srt.filter(function(a){ return _OUT.test(String(a.label||'')); }).length+2))); /* 2026-11-19: 야외수영장·테라스·중정 등 바깥 공간 사진은 빠짐없이 읽음 */
+    var _must=ints.map(function(a){ return String(a.label||'').trim(); }).filter(function(l,i,arr){ return l && arr.indexOf(l)===i && _OUT.test(l); });
+    var _mustTxt=_must.length ? (' 📋 MUST-INCLUDE OUTDOOR SPACES (the user supplied a reference photo for each, so each one must be clearly visible on or around this building in this view, built exactly like its photo — not omitted, not replaced): '+_must.join(', ')+'. If one is on the far side of the building, choose a camera angle (corner / three-quarter or higher) that still shows it, or show its edge clearly.') : '';
     var key=pick.map(function(a){ return String(a.img).slice(-60); }).join('|');
     function apply(d){
+      if(_mustTxt) input.prompt=(input.prompt||'')+_mustTxt;
       if(d && d!=='NONE') input.prompt=(input.prompt||'')+' 🪟🪟🪟 WINDOWS, DOORS AND OUTDOOR SPACES THAT MUST BE VISIBLE ON THIS FACADE (read from the interior photos of this same house — these rooms are inside this building, so their openings must appear on the outside with the SAME shape, proportion, count, grouping and frame colour; this is how people recognise it as the same house — overrides any other window wording): '+d+' Turn the camera so the facade with the living room, terrace / balcony and courtyard openings faces the viewer; keep every window exactly that shape (a tall narrow window stays tall and narrow, a clerestory band stays a band, corner glazing stays corner glazing).';
       fin();
     }
@@ -19274,10 +19279,10 @@ function _scExtOpenings(spTab, typeName, input, cb){
       var content=[];
       pick.forEach(function(a,i){ if(b64s[i]){ content.push({type:'text', text:'Photo '+(i+1)+': '+String(a.label||'room')}); content.push({type:'image', source:{type:'base64', media_type:'image/jpeg', data:b64s[i]}}); } });
       if(!content.length){ fin(); return; }
-      content.push({type:'text', text:'These are interior photos of rooms in ONE house. An architect must now draw the OUTSIDE of this house so that every one of these openings is recognisable on the facade. For each photo write one short line: room name — the windows / glass doors on its outer wall: how many, exact shape and proportion (e.g. three floor-to-ceiling tall narrow vertical windows about 0.7 m wide with wall between them; a long horizontal clerestory strip under the ceiling; a corner glass wall meeting at 90 degrees; full-width sliding glass doors), sill height, grouping, frame colour and thickness; and for outdoor spaces (terrace, balcony, courtyard, deck, entrance) their floor material, railing type, walls, roof overhang and which room they are next to. Also say if a room looks like it is on an upper floor. Plain English, at most 170 words total, no preamble.'});
+      content.push({type:'text', text:'These are interior photos of rooms in ONE house. An architect must now draw the OUTSIDE of this house so that every one of these openings is recognisable on the facade. For each photo write one short line (outdoor spaces such as a pool, terrace, courtyard or deck: also their size, shape, edge and how they attach to the building): room name — the windows / glass doors on its outer wall: how many, exact shape and proportion (e.g. three floor-to-ceiling tall narrow vertical windows about 0.7 m wide with wall between them; a long horizontal clerestory strip under the ceiling; a corner glass wall meeting at 90 degrees; full-width sliding glass doors), sill height, grouping, frame colour and thickness; and for outdoor spaces (terrace, balcony, courtyard, deck, entrance) their floor material, railing type, walls, roof overhang and which room they are next to. Also say if a room looks like it is on an upper floor. Plain English, at most 220 words total, no preamble.'});
       _falProxyCall('chat-assistant', {messages:[{role:'user', content:content}]}, function(res){
         var t=res; try{ if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); if(t && typeof t==='object') t=JSON.stringify(t); }catch(e){ t=''; }
-        t=String(t||'').replace(/\s+/g,' ').trim().slice(0,1400);
+        t=String(t||'').replace(/\s+/g,' ').trim().slice(0,1800);
         var d=t?t:'NONE';
         spTab._extOpKey=key; spTab._extOpDesc=d;
         console.log('[공간컨셉] 외관 — 실내 사진 창·야외공간 모양 읽기: '+d.slice(0,200));
@@ -60963,7 +60968,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
-  {c:'space', t:'🏠 공간 컨셉 투시도 9:16 개선', h:'공간 컨셉 디자인에서 건축 외관(투시뷰 등)을 9:16으로 만들 때 아래에 하늘 띠가 붙거나 두 장이 겹쳐 나오던 문제를 고쳤어요. 이제 건물 전체가 잘 들어간 한 장으로 만든 뒤 진짜 9:16으로 맞춰 줘요. 실내 사진만 넣고 외관을 만들 때 거실 같은 실내가 나오면 AI가 알아보고 1번 자동으로 다시 만들어요(추가 크레딧 없음). 실내 사진 분석도 동시에 해서 기다리는 시간이 줄었어요. 또 실내 사진마다 창·문·테라스·중정 모양(세로로 긴 창, 천장 아래 띠창, 코너 통유리 등)을 AI가 읽어서 외관에 똑같은 모양으로 보이게 해요 — 같은 건물로 보이게. 투시도·조감도는 건물이 화면에서 잘리지 않게 카메라를 뒤로 빼거나 측면 코너에서 찍고, 화면에 꽉 차지 않게 주변 풍경·하늘 여유를 두어요.'},
+  {c:'space', t:'🏠 공간 컨셉 투시도 9:16 개선', h:'공간 컨셉 디자인에서 건축 외관(투시뷰 등)을 9:16으로 만들 때 아래에 하늘 띠가 붙거나 두 장이 겹쳐 나오던 문제를 고쳤어요. 이제 건물 전체가 잘 들어간 한 장으로 만든 뒤 진짜 9:16으로 맞춰 줘요. 실내 사진만 넣고 외관을 만들 때 거실 같은 실내가 나오면 AI가 알아보고 1번 자동으로 다시 만들어요(추가 크레딧 없음). 실내 사진 분석도 동시에 해서 기다리는 시간이 줄었어요. 또 실내 사진마다 창·문·테라스·중정 모양(세로로 긴 창, 천장 아래 띠창, 코너 통유리 등)을 AI가 읽어서 외관에 똑같은 모양으로 보이게 해요 — 같은 건물로 보이게. 투시도·조감도는 건물이 화면에서 잘리지 않게 카메라를 뒤로 빼거나 측면 코너에서 찍고, 화면에 꽉 차지 않게 주변 풍경·하늘 여유를 두어요. 야외수영장·테라스·중정·발코니·데크·마당처럼 바깥 공간 참고 사진을 넣으면 그 공간이 전부 들어간 건물로 만들어요.'},
   {c:'space', t:'📐 공간 컨셉 세로 화면 구도 개선', h:'공간 컨셉 디자인에서 세로(9:16·3:4 등) 실내 뷰가 정면 한가운데서 찍은 듯 밋밋하게 나오던 것을, 건축 사진작가 구도로 바꿨어요(가로·세로 모두). 소실점을 한쪽으로 치우치거나 코너에서 비스듬히 찍고, 카메라는 앉은 눈높이(약 1~1.2m)·광각에 수직선은 곧게, 앞쪽 소파·의자가 화면 끝에 살짝 걸리고 창밖 풍경까지 깊이감 있게 보여요. 방마다 각도도 달라요.'},
   {c:'common', t:'📦 갤러리 선택한 것만 다운로드', h:'갤러리에서 [🔀 비교하기 / 여러 장 선택]을 켜고(또는 Ctrl+클릭·드래그) 사진을 고르면 위에 [📦 선택한 N장 다운로드]가 나타나요. 누르면 고른 사진만 ZIP으로 한 번에 받아요.'},
   {c:'render', t:'🏆 고퀄리티 CG 렌더 새 룩', h:'"고퀄리티 CG 렌더 (V-Ray·코로나 느낌)"가 새로운 클로버 룩으로 바뀌었어요. 모델의 카메라·형태·재질·색은 그대로 두고, 해 질 녘 측광(조명이 켜진 모델은 블루아워)과 태양 쪽 빛 퍼짐, 주인공 건물이 가장 밝고 선명하게, 거리에 따라 옅어지는 공기감, 따뜻한 하이라이트로 마감해요. 하늘 버튼은 구름 양만 정하고, [자동]이면 AI가 알아서 맞춰요.'},
