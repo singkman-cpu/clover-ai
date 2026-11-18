@@ -19345,7 +19345,7 @@ function _scExtScale(spTab, typeName, input, cb){
   }catch(e){ fin(); }
 }
 function _scMaybeSwatch(spTab, typeName, primary, noDirectMatch, input, cb){
-  var _scOrigCb=cb; cb=function(){}; _scPrepExtFromInterior(spTab, typeName, input, function(){ _scExtVisDesc(spTab, typeName, input, function(){ _scExtScale(spTab, typeName, input, function(){ _scMaybeSwatchInner(spTab, typeName, primary, noDirectMatch, input, _scOrigCb); }); }); });
+  var _scOrigCb=cb; cb=function(){}; _scPrepExtFromInterior(spTab, typeName, input, function(){ var _scPar=2; function _scParDone(){ if(--_scPar===0) _scMaybeSwatchInner(spTab, typeName, primary, noDirectMatch, input, _scOrigCb); } _scExtVisDesc(spTab, typeName, input, _scParDone); _scExtScale(spTab, typeName, input, _scParDone); /* 2026-11-19: 두 AI 읽기를 동시에 (예전엔 하나씩 → 최대 70초 대기) */ });
 }
 function _scMaybeSwatchInner(spTab, typeName, primary, noDirectMatch, input, cb){
   if(!SC_SWATCH_ENABLED){ cb(); return; } // 2026-10-04: 너무 다른 공간이 나와서 끔(사용자 기준: 전체 건축 디자인은 따라가고 창호만 다르게)
@@ -19541,6 +19541,33 @@ function _galMaskUpload(task, path, cb){
 // 2026-10-12: 생성 결과가 참고 이미지 중 하나를 거의 그대로 돌려준 것인지 검사(64×64 흑백 비교, 평균 차이가 아주 작으면 복사본)
 // 2026-10-12: 한 장에 여러 장면이 위아래로 이어붙은 콜라주인지 검사 — 가운데 영역에 화면 전체 폭을 가로지르는 이음선이 있으면 콜라주
 // (실측: 콜라주 0.97~1.0 / 정상 사진 0.41~0.66 → 기준 0.88)
+/* 2026-11-19 신고("투시도 2개 뽑는데 거실뷰가 나온다", "9:16 투시도 아래에 하늘 띠가 붙어 나오고 엄청 오래 걸린다") */
+function _scCropTall(url, cb){ /* 3:4로 만든 외관을 가운데 기준 9:16으로 잘라 진짜 9:16 파일로 (늘리거나 블러 채우기 없음) */
+  var done=false; function fin(v){ if(done) return; done=true; cb(v); } setTimeout(function(){ fin(url); }, 20000);
+  loadImgSafe(url, function(im){
+    try{ var W=im.naturalWidth, H=im.naturalHeight, ar=9/16; if(!W||!H||Math.abs(W/H-ar)/ar<0.03){ fin(url); return; }
+      var cw=W, ch=H; if(W/H>ar) cw=Math.round(H*ar); else ch=Math.round(W/ar);
+      var c=document.createElement('canvas'); c.width=cw; c.height=ch; c.getContext('2d').drawImage(im, Math.round((W-cw)/2), Math.round((H-ch)/2), cw, ch, 0, 0, cw, ch);
+      var du=c.toDataURL('image/jpeg',0.94);
+      _uploadDataUrlIfNeeded(du, 'spaceset-916', function(u){ fin(u||du); });
+    }catch(e){ fin(url); }
+  }, function(){ fin(url); });
+}
+function _scIsInteriorShot(url, cb){ /* 외관을 시켰는데 실내 사진이 나왔는지 비전 AI로 빠르게 확인 (실패·시간초과면 false) */
+  var done=false; function fin(v){ if(done) return; done=true; cb(v); } setTimeout(function(){ fin(false); }, 15000);
+  try{
+    if(typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(false); return; }
+    _proposalImgToB64(url, function(b){
+      if(!b){ fin(false); return; }
+      _falProxyCall('chat-assistant', {messages:[{role:'user', content:[{type:'image', source:{type:'base64', media_type:'image/jpeg', data:b}}, {type:'text', text:'Is this photo taken from INSIDE a room (an interior view: walls, ceiling, furniture around the camera)? Answer with exactly one word: INTERIOR or EXTERIOR.'}]}]}, function(r){
+        var t=r; try{ if(t && typeof t==='object') t=t.reply||t.output||t.text||t.content||t.message||''; if(Array.isArray(t)) t=t.map(function(x){return x.text||'';}).join(''); }catch(e){ t=''; }
+        fin(/^\s*INTERIOR/i.test(String(t||'')));
+      }, function(){ fin(false); });
+    });
+  }catch(e){ fin(false); }
+}
+var SC_EXT_ONLY_FINAL=' 🏠 FINAL VIEW RULE (most important): this image must be an EXTERIOR photograph of the whole building, taken from OUTSIDE on the ground — sky, roof, facade, garden or street around it. Attached interior photos are only clues for materials and size; never output an interior room view, never re-draw or edit an attached interior photo.';
+var SC_EXT_TALL_COMP=' 📐 FRAMING (this 3:4 image will be centre-cropped to a tall 9:16 frame): keep the whole building, including both side corners, inside the central 70% of the width, with comfortable ground in front and sky above; nothing important near the left or right edges.';
 function _scIsCollage(url, cb){
   if(!url){ cb(false); return; }
   var done=false; function fin(v){ if(done) return; done=true; cb(v); }
@@ -25081,7 +25108,10 @@ function _padExteriorTo916WithBlur(url, cb){
     try{ var _arTl=(window._arTailMap||{})[prompt]; if(_arTl) _looseP += ' ⏬ FINAL DESIGN DIRECTION (repeated last on purpose — this is what the user chose):'+_arTl; }catch(e){}
     if(!_isExteriorViewType(typeName) && /^(4:3|3:2|16:9|21:9|5:4)$/.test(_looseAspect)) _looseP += SS_WIDE_CAM + SS_PHOTO_COMP;
     else if(!_isExteriorViewType(typeName) && /^(3:4|2:3|9:16|4:5|1:1)$/.test(_looseAspect)) _looseP += SS_TALL_CAM; /* 2026-11-19 세로 화면도 정면 일점투시 말고 비스듬히 */
-    var _looseInput = {prompt:_looseP, aspect_ratio:_looseAspect, num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 버그 수정: 해상도가 빠져 4K를 골라도 1K(1376×768)로 생성되던 문제
+    var _extTall = _isExteriorViewType(typeName) && _looseAspect==='9:16'; /* 2026-11-19: 외관 9:16은 3:4로 한 장 만들고 가운데를 9:16으로 잘라 냄(콜라주·하늘 띠 방지, 재생성 대기 없음) */
+    if(_isExteriorViewType(typeName)) _looseP += SC_EXT_ONLY_FINAL;
+    if(_extTall) _looseP += SC_EXT_TALL_COMP;
+    var _looseInput = {prompt:_looseP, aspect_ratio:(_extTall?'3:4':_looseAspect), num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 버그 수정: 해상도가 빠져 4K를 골라도 1K(1376×768)로 생성되던 문제
     if(_looseRefs.length) _looseInput.image_urls = _looseRefs;
     // ⚠️ 치명적 버그 수정(반영도 3단계가 전부 똑같이 나오던 진짜 원인): 'google/nano-banana-2.1'는
     // (끝에 /edit이 안 붙은) 순수 텍스트→이미지 생성 전용 모델이라, 위에서 image_urls로 넣어준
@@ -25141,6 +25171,7 @@ function _padExteriorTo916WithBlur(url, cb){
           var resultUrl=falExtractImageUrl(d);
           if(!resultUrl){ if(_arCi===0){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1); } _arAfterOneCandidate(); return; }
           function _finishLoose(finalUrl){
+            if(_extTall && !_finishLoose._c){ _finishLoose._c=1; var _stlK=gE('stl'); if(_stlK) _stlK.textContent='9:16으로 맞추는 중… ('+typeName+')'; _scCropTall(finalUrl, function(u){ _finishLoose(u||finalUrl); }); return; }
             var _tagLabel0 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName; // ⚠️ 버그 수정("이미지 위에 room:거실(판상형 특유의...) 처럼 긴 텍스트가 뜬다"): 아파트 간편모드의 typeName은 프롬프트용으로 아주 길고 상세한 설명이라, 그대로 태그(화면 배지)로 쓰면 저렇게 됨 — 태그·배지 표시용으로는 짧은 기본 방 이름만 쓰도록 분리함(실제 생성 프롬프트는 그대로 typeName 전체를 씀, 영향 없음). 요청 반영: 배지에 평수도 같이 보이게 앞에 붙임.
             if(_arCi===0){
               st.results[idx]={url:finalUrl}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1);
@@ -25180,6 +25211,9 @@ function _padExteriorTo916WithBlur(url, cb){
             var _stlC=gE('stl'); if(_stlC) _stlC.textContent='결과 자동 점검 중… ('+typeName+')';
             _scIsCopyOfRefs(url, (_hasOwnRef?[imgs0.primary]:[]).concat(_candInput.image_urls||[]), function(isCopy){ // 원래 올린 참고 사진과도 비교(견본판으로 바꿔 보낸 경우에도 복사본을 잡도록)
               ((_isExtT || _designOn) ? _scIsCollage : function(u,cb){ cb(false); })(url, function(isCol){
+               var _intChk=(_isExtT && !isCopy && !isCol && _scTry<1 && (spTab.autoRoomIntAnchors||[]).some(function(a){ return a && a.img; })) ? _scIsInteriorShot : function(u,cb){ cb(false); };
+               _intChk(url, function(isInt){
+                if(isInt){ isCopy=true; console.warn('[공간컨셉] 외관을 만들었는데 실내 사진이 나옴 → 자동 재생성 ('+typeName+')'); }
                 if((!isCopy && !isCol) || _scTry>=1){ if(isCol||isCopy) console.warn('[공간컨셉] 재생성 1번 후에도 문제 — 마지막 결과 사용'); _finishLoose(url); return; }
                 _scTry++;
                 console.warn('[공간컨셉] '+(isCol?'콜라주(여러 장 합쳐짐)':'참고 이미지 복사본')+' 감지 → 자동 재생성 '+_scTry+'/1 ('+typeName+')'); var _stlR=gE('stl'); if(_stlR) _stlR.textContent='점검에서 '+(isCol?'여러 장이 겹친 결과':'참고 이미지와 거의 같은 결과')+'가 나와 한 번 다시 만드는 중… ('+typeName+')'; // 2026-10-20 속도 문의: 다시 만드는 중인 걸 화면에 표시
@@ -25190,6 +25224,7 @@ function _padExteriorTo916WithBlur(url, cb){
                 falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _retryIn, function(d2){
                   var u2=falExtractImageUrl(d2); if(!u2){ _finishLoose(url); return; } _scCheck(u2);
                 }, function(){ _finishLoose(url); }, {wf:'sam_segment', included:true});
+               });
               });
             });
           })(resultUrl);
@@ -25538,7 +25573,10 @@ function _autoRoomRetryOne(idx){
     }
     if(!_isExteriorViewType(typeName) && /^(4:3|3:2|16:9|21:9|5:4)$/.test(_looseAspect2)) _looseP2 += SS_WIDE_CAM + SS_PHOTO_COMP;
     else if(!_isExteriorViewType(typeName) && /^(3:4|2:3|9:16|4:5|1:1)$/.test(_looseAspect2)) _looseP2 += SS_TALL_CAM; /* 2026-11-19 세로 화면도 정면 일점투시 말고 비스듬히 */
-    var _looseInput2 = {prompt:_looseP2, aspect_ratio:_looseAspect2, num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 해상도 누락 수정
+    var _extTall2 = _isExteriorViewType(typeName) && _looseAspect2==='9:16';
+    if(_isExteriorViewType(typeName)) _looseP2 += SC_EXT_ONLY_FINAL;
+    if(_extTall2) _looseP2 += SC_EXT_TALL_COMP;
+    var _looseInput2 = {prompt:_looseP2, aspect_ratio:(_extTall2?'3:4':_looseAspect2), num_images:1, resolution:(spTab.autoRoomResolution||'1K')}; // 2026-10-12 해상도 누락 수정
     if(_looseRefs2.length) _looseInput2.image_urls = _looseRefs2;
     // ⚠️ 위 _autoRoomGenerateStep과 동일한 치명적 버그 수정: 참고 사진이 있으면 반드시 /edit
     // 모델을 써야 실제로 그 사진을 참고함('/edit' 없는 순수 생성 모델은 image_urls를 무시함).
@@ -25564,7 +25602,7 @@ function _autoRoomRetryOne(idx){
         renderSB();
       }
       // (위와 동일한 이유로) 9:16으로 자르거나 채우지 않고 3:4로 생성된 그대로 씀
-      _finishLoose2(resultUrl);
+      if(_extTall2) _scCropTall(resultUrl, function(u){ _finishLoose2(u||resultUrl); }); else _finishLoose2(resultUrl);
     }, function(err){
       st.results[idx]={error:String(err).slice(0,120)};
       st.running=false;
@@ -60890,6 +60928,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
+  {c:'space', t:'🏠 공간 컨셉 투시도 9:16 개선', h:'공간 컨셉 디자인에서 건축 외관(투시뷰 등)을 9:16으로 만들 때 아래에 하늘 띠가 붙거나 두 장이 겹쳐 나오던 문제를 고쳤어요. 이제 건물 전체가 잘 들어간 한 장으로 만든 뒤 진짜 9:16으로 맞춰 줘요. 실내 사진만 넣고 외관을 만들 때 거실 같은 실내가 나오면 AI가 알아보고 1번 자동으로 다시 만들어요(추가 크레딧 없음). 실내 사진 분석도 동시에 해서 기다리는 시간이 줄었어요.'},
   {c:'space', t:'📐 공간 컨셉 세로 화면 구도 개선', h:'공간 컨셉 디자인에서 세로(9:16·3:4 등) 실내 뷰가 정면 한가운데서 찍은 듯 밋밋하게 나오던 것을, 건축 사진작가 구도로 바꿨어요(가로·세로 모두). 소실점을 한쪽으로 치우치거나 코너에서 비스듬히 찍고, 카메라는 앉은 눈높이(약 1~1.2m)·광각에 수직선은 곧게, 앞쪽 소파·의자가 화면 끝에 살짝 걸리고 창밖 풍경까지 깊이감 있게 보여요. 방마다 각도도 달라요.'},
   {c:'common', t:'📦 갤러리 선택한 것만 다운로드', h:'갤러리에서 [🔀 비교하기 / 여러 장 선택]을 켜고(또는 Ctrl+클릭·드래그) 사진을 고르면 위에 [📦 선택한 N장 다운로드]가 나타나요. 누르면 고른 사진만 ZIP으로 한 번에 받아요.'},
   {c:'render', t:'🏆 고퀄리티 CG 렌더 새 룩', h:'"고퀄리티 CG 렌더 (V-Ray·코로나 느낌)"가 새로운 클로버 룩으로 바뀌었어요. 모델의 카메라·형태·재질·색은 그대로 두고, 해 질 녘 측광(조명이 켜진 모델은 블루아워)과 태양 쪽 빛 퍼짐, 주인공 건물이 가장 밝고 선명하게, 거리에 따라 옅어지는 공기감, 따뜻한 하이라이트로 마감해요. 하늘 버튼은 구름 양만 정하고, [자동]이면 AI가 알아서 맞춰요.'},
