@@ -8,7 +8,7 @@
 
 global CloverAI_UploadUrl = "https://evyraulomxntyhxsivmo.supabase.co/functions/v1/plugin-upload"
 global CloverAI_Ini = (getDir #plugcfg) + "\\CloverAI.ini"
-global CloverAI_GetCode, CloverAI_Post, CloverAI_Send, CloverAI_Field, CloverAI_Pair, CloverAI_WriteB64
+global CloverAI_Open, CloverAI_GetCode, CloverAI_Post, CloverAI_Send, CloverAI_Field, CloverAI_Pair, CloverAI_WriteB64
 global CloverAI_Rollout, CloverAI_Wait, CloverAI_PairInfo, CloverAI_AfterPair
 
 fn CloverAI_WriteB64 path b64 = (
@@ -25,6 +25,18 @@ fn CloverAI_WriteB64 path b64 = (
 	CloverAI_WriteB64 (d + "\\CloverAI_24a.bmp") "Qk32BgAAAAAAADYAAAAoAAAAGAAAABgAAAABABgAAAAAAMAGAADEDgAAxA4AAAAAAAAAAAAAAAAAAAAAAAAA////////////////////////////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAA////////////////////////////////////////////////////////////////////////////////AAAAAAAAAAAA////////////////////////////////////////////////////////////////////////////////////////AAAA////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////AAAA////////////////////////////////////////////////////////////////////////////////////////AAAAAAAAAAAA////////////////////////////////////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAA////////////////////////////////////////////////////////////////////////AAAAAAAAAAAA"
 	CloverAI_WriteB64 (d + "\\CloverAI_logo48.png") "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"
 	try ( colorMan.reInitIcons() ) catch ()
+)
+
+-- 브라우저 열기: 크롬이 깔려 있으면 크롬으로(Clover AI 창을 크롬에서 쓰는 경우가 많아서), 없으면 기본 브라우저
+fn CloverAI_Open url = (
+	local env = dotNetClass "System.Environment"
+	local paths = #()
+	for v in #("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA") do ( local b = env.GetEnvironmentVariable v; if b != undefined then append paths (b + "\\Google\\Chrome\\Application\\chrome.exe") )
+	local done = false
+	for p in paths while not done do (
+		if doesFileExist p then ( try ( shellLaunch p ("\"" + url + "\""); done = true ) catch () )
+	)
+	if not done then shellLaunch url ""
 )
 
 fn CloverAI_GetCode = (
@@ -100,7 +112,7 @@ fn CloverAI_Pair sendAfter = (
 	if not r[1] or url == "" then ( messageBox "연결을 시작하지 못했어요. 인터넷 연결을 확인하고 다시 눌러 주세요." title:"Clover AI"; return false )
 	CloverAI_PairInfo = #(CloverAI_Field r[2] "pair", CloverAI_Field r[2] "secret")
 	CloverAI_AfterPair = sendAfter
-	shellLaunch url ""
+	CloverAI_Open url
 	try (destroyDialog CloverAI_Wait) catch ()
 	createDialog CloverAI_Wait
 	true
@@ -137,7 +149,7 @@ fn CloverAI_Send = (
 			)
 		)
 		if picked then displayTempPrompt "열려 있는 Clover AI 창에 넣었어요. 브라우저를 확인하세요." 4000
-		else if url != "" then shellLaunch url ""
+		else if url != "" then CloverAI_Open url
 		else messageBox "보내기는 됐는데 주소를 못 받았어요. 다시 눌러 주세요." title:"Clover AI"
 	) else (
 		local er = CloverAI_Field r[2] "error"
@@ -157,15 +169,15 @@ rollout CloverAI_Rollout "Clover AI" width:250 (
 	on logo click do CloverAI_Send()
 	on btnRender pressed do CloverAI_Send()
 	on btnRe pressed do ( setINISetting CloverAI_Ini "Clover" "code" ""; CloverAI_Pair false )
-	on btnSite pressed do shellLaunch "https://www.cloverai.kr" ""
+	on btnSite pressed do CloverAI_Open "https://www.cloverai.kr"
 )
 
-macroScript CloverAI_Render category:"Clover AI" buttonText:"Clover AI 렌더" tooltip:"Clover AI 렌더 실사화로 보내기" icon:#("CloverAI", 1) (
+macroScript CloverAI_Render category:"Clover AI" buttonText:"Clover AI 렌더 실사화로 보내기" tooltip:"Clover AI 렌더 실사화로 보내기" icon:#("CloverAI", 1) (
 	if CloverAI_Send == undefined then ( messageBox "Clover AI 스크립트를 한 번 다시 실행해 주세요." title:"Clover AI" ) else CloverAI_Send()
 )
-macroScript CloverAI_Window category:"Clover AI" buttonText:"Clover AI 창" tooltip:"Clover AI 창 열기" icon:#("CloverAI", 1) (
-	if CloverAI_Rollout == undefined then ( messageBox "Clover AI 스크립트를 한 번 다시 실행해 주세요." title:"Clover AI" ) else ( try (destroyDialog CloverAI_Rollout) catch (); createDialog CloverAI_Rollout )
-)
+
+-- 예전 버전의 "Clover AI 창 열기" 버튼은 지움(버튼은 렌더 실사화로 보내기 하나만)
+try ( local oldM = (getDir #userMacros) + "\\Clover AI-CloverAI_Window.mcr"; if doesFileExist oldM then deleteFile oldM ) catch ()
 
 -- 다음에 3ds Max를 켜도 함수가 살아 있게: 이 파일을 사용자 시작 스크립트 폴더에 복사(자동 실행되면 창은 안 띄움)
 (
