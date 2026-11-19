@@ -19235,7 +19235,8 @@ function _scPrepExtFromInterior(spTab, typeName, input, cb){
     // 2026-10-05 사용자 정정: "평수를 임의로 계산하지 말고, 공간마다 그 참고 사진의 실제 크기대로 — 거실이 5평이면 5평, 복도가 길고 넓으면 그쪽 매스가 길고 넓게"
     // → 숫자 추정을 빼고, 각 사진에서 보이는 실제 크기를 읽어서 그대로 담는 외관을 만들라고 지시함
     var _sizeText=' 건물 규모를 정하는 방법(매우 중요): 평수를 임의로 정하지 말고, 첨부한 각 실내 사진에서 보이는 그 공간의 실제 크기(가로 폭, 깊이, 천장 높이, 창문 개수와 크기, 복도의 길이와 폭 등)를 그대로 읽어서, 그 크기의 공간들이 전부 들어가는 건물로 외관을 만드세요 — 사진 속 거실이 넓으면 외관에서도 거실 쪽 매스가 넓어야 하고, 사진 속 복도가 길고 넓으면 그 복도가 지나가는 방향으로 건물이 길게 뻗어야 하며, 천장이 높은(박공·오픈 천장) 공간은 외관에서도 그만큼 높은 매스로 보여야 합니다. 어떤 공간도 사진보다 작게 줄여 넣으면 안 됩니다. ⚠️ 건물의 깊이(뒤쪽 공간): 정면에서 보이는 것은 거실 등 일부 공간일 뿐이고, 나머지 공간들(침실·욕실·복도·주방 등)은 그 뒤쪽과 옆쪽에 있습니다 — 그래서 건물은 정면 폭만큼이나 뒤로도 충분히 깊어야 하고(얇은 판처럼 정면만 있는 건물 금지), 조감뷰·측면뷰·후면뷰에서는 그 뒤쪽 매스·날개·지붕이 실제로 보여야 합니다.';
-    _scBuildInteriorBoard(others, function(board){
+    /* 2026-11-19 신고("투시도 2개씩 자주 나온다"): 격자 참고판(흰 여백으로 나뉜 사진 모음)을 세로 화면에 보내면 AI가 그 격자를 따라 두 장을 위아래로 붙여 그림 → 세로 화면은 참고판 없이(다른 공간 정보는 글로 전달됨) */
+    (/^(3:4|9:16|2:3|4:5)$/.test(String(input.aspect_ratio||'')) ? function(o,cb2){ cb2(null); } : _scBuildInteriorBoard)(others, function(board){
       // 2026-10-05: 이 세트에서 이미 만든 외관 사진이 있으면(예: 투시뷰를 먼저 만들고 지금 조감뷰) 그 사진을 맨 앞에 같이 보내서
       // 같은 건물로 이어지게 함(예전엔 실내 사진으로만 바꿔치기해서 뷰마다 다른 건물이 나올 수 있었음)
       var _prevExt=input._noPrevExt?[]:_scPoolNoSame(spTab, (spTab.autoRoomGenExtUrls||[]), typeName).filter(Boolean); // 후보 여러 장일 땐 서로 다른 건물이어야 하므로 이전 외관을 안 붙임
@@ -19593,6 +19594,15 @@ function _scCropTall(url, cb){ /* 3:4로 만든 외관을 가운데 기준 9:16�
     }catch(e){ fin(url); }
   }, function(){ fin(url); });
 }
+function _scBigPanel(url, y, cb){ /* 두 장이 붙어 나왔을 때 마지막 수단: 이음선 기준 큰 쪽 한 장만 잘라서 씀 (붙은 그림을 그대로 보여주지 않음) */
+  var done=false; function fin(v){ if(done) return; done=true; cb(v); } setTimeout(function(){ fin(url); }, 20000);
+  loadImgSafe(url, function(im){
+    try{ var W=im.naturalWidth, H=im.naturalHeight, sy=Math.round(H*y), top=sy>=H-sy, pad=Math.round(H*0.015), y0=top?0:sy+pad, h=top?sy-pad:H-sy-pad; if(h<H*0.3){ fin(url); return; }
+      var c=document.createElement('canvas'); c.width=W; c.height=h; c.getContext('2d').drawImage(im,0,y0,W,h,0,0,W,h);
+      _uploadDataUrlIfNeeded(c.toDataURL('image/jpeg',0.94), 'spaceset-panel', function(u){ fin(u||url); });
+    }catch(e){ fin(url); }
+  }, function(){ fin(url); });
+}
 function _scIsInteriorShot(url, cb){ /* 외관을 시켰는데 실내 사진이 나왔는지 비전 AI로 빠르게 확인 (실패·시간초과면 false) */
   var done=false; function fin(v){ if(done) return; done=true; cb(v); } setTimeout(function(){ fin(false); }, 15000);
   try{
@@ -19624,6 +19634,7 @@ function _scIsCollage(url, cb){
         var sc=n/W; if(sc>best){ best=sc; by=y/H; }
       }
       if(best>=0.88) console.log('[공간컨셉] 가로 이음선 감지 '+best.toFixed(2)+' @'+Math.round(by*100)+'% → 콜라주로 판단');
+      if(best>=0.88) window._scLastSeam={u:url, y:by};
       fin(best>=0.88);
     }catch(e){ fin(false); }
   }, function(){ fin(false); });
@@ -25254,7 +25265,7 @@ function _padExteriorTo916WithBlur(url, cb){
                var _intChk=(_isExtT && !isCopy && !isCol && _scTry<1 && (spTab.autoRoomIntAnchors||[]).some(function(a){ return a && a.img; })) ? _scIsInteriorShot : function(u,cb){ cb(false); };
                _intChk(url, function(isInt){
                 if(isInt){ isCopy=true; console.warn('[공간컨셉] 외관을 만들었는데 실내 사진이 나옴 → 자동 재생성 ('+typeName+')'); }
-                if((!isCopy && !isCol) || _scTry>=1){ if(isCol||isCopy) console.warn('[공간컨셉] 재생성 1번 후에도 문제 — 마지막 결과 사용'); _finishLoose(url); return; }
+                if((!isCopy && !isCol) || _scTry>=1){ if(isCol||isCopy) console.warn('[공간컨셉] 재생성 1번 후에도 문제 — 마지막 결과 사용'); if(isCol && window._scLastSeam && window._scLastSeam.u===url){ _finishLoose._c=1; _scBigPanel(url, window._scLastSeam.y, _finishLoose); return; } _finishLoose(url); return; }
                 _scTry++;
                 console.warn('[공간컨셉] '+(isCol?'콜라주(여러 장 합쳐짐)':'참고 이미지 복사본')+' 감지 → 자동 재생성 '+_scTry+'/1 ('+typeName+')'); var _stlR=gE('stl'); if(_stlR) _stlR.textContent='점검에서 '+(isCol?'여러 장이 겹친 결과':'참고 이미지와 거의 같은 결과')+'가 나와 한 번 다시 만드는 중… ('+typeName+')'; // 2026-10-20 속도 문의: 다시 만드는 중인 걸 화면에 표시
                 var _fix = isCol
@@ -60968,7 +60979,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
-  {c:'space', t:'🏠 공간 컨셉 투시도 9:16 개선', h:'공간 컨셉 디자인에서 건축 외관(투시뷰 등)을 9:16으로 만들 때 아래에 하늘 띠가 붙거나 두 장이 겹쳐 나오던 문제를 고쳤어요. 이제 건물 전체가 잘 들어간 한 장으로 만든 뒤 진짜 9:16으로 맞춰 줘요. 실내 사진만 넣고 외관을 만들 때 거실 같은 실내가 나오면 AI가 알아보고 1번 자동으로 다시 만들어요(추가 크레딧 없음). 실내 사진 분석도 동시에 해서 기다리는 시간이 줄었어요. 또 실내 사진마다 창·문·테라스·중정 모양(세로로 긴 창, 천장 아래 띠창, 코너 통유리 등)을 AI가 읽어서 외관에 똑같은 모양으로 보이게 해요 — 같은 건물로 보이게. 투시도·조감도는 건물이 화면에서 잘리지 않게 카메라를 뒤로 빼거나 측면 코너에서 찍고, 화면에 꽉 차지 않게 주변 풍경·하늘 여유를 두어요. 야외수영장·테라스·중정·발코니·데크·마당처럼 바깥 공간 참고 사진을 넣으면 그 공간이 전부 들어간 건물로 만들어요.'},
+  {c:'space', t:'🏠 공간 컨셉 투시도 9:16 개선', h:'공간 컨셉 디자인에서 건축 외관(투시뷰 등)을 9:16으로 만들 때 아래에 하늘 띠가 붙거나 두 장이 겹쳐 나오던 문제를 고쳤어요(세로 화면엔 격자 참고판을 보내지 않고, 그래도 두 장이 붙으면 큰 쪽 한 장만 잘라서 보여줘요). 이제 건물 전체가 잘 들어간 한 장으로 만든 뒤 진짜 9:16으로 맞춰 줘요. 실내 사진만 넣고 외관을 만들 때 거실 같은 실내가 나오면 AI가 알아보고 1번 자동으로 다시 만들어요(추가 크레딧 없음). 실내 사진 분석도 동시에 해서 기다리는 시간이 줄었어요. 또 실내 사진마다 창·문·테라스·중정 모양(세로로 긴 창, 천장 아래 띠창, 코너 통유리 등)을 AI가 읽어서 외관에 똑같은 모양으로 보이게 해요 — 같은 건물로 보이게. 투시도·조감도는 건물이 화면에서 잘리지 않게 카메라를 뒤로 빼거나 측면 코너에서 찍고, 화면에 꽉 차지 않게 주변 풍경·하늘 여유를 두어요. 야외수영장·테라스·중정·발코니·데크·마당처럼 바깥 공간 참고 사진을 넣으면 그 공간이 전부 들어간 건물로 만들어요.'},
   {c:'space', t:'📐 공간 컨셉 세로 화면 구도 개선', h:'공간 컨셉 디자인에서 세로(9:16·3:4 등) 실내 뷰가 정면 한가운데서 찍은 듯 밋밋하게 나오던 것을, 건축 사진작가 구도로 바꿨어요(가로·세로 모두). 소실점을 한쪽으로 치우치거나 코너에서 비스듬히 찍고, 카메라는 앉은 눈높이(약 1~1.2m)·광각에 수직선은 곧게, 앞쪽 소파·의자가 화면 끝에 살짝 걸리고 창밖 풍경까지 깊이감 있게 보여요. 방마다 각도도 달라요.'},
   {c:'common', t:'📦 갤러리 선택한 것만 다운로드', h:'갤러리에서 [🔀 비교하기 / 여러 장 선택]을 켜고(또는 Ctrl+클릭·드래그) 사진을 고르면 위에 [📦 선택한 N장 다운로드]가 나타나요. 누르면 고른 사진만 ZIP으로 한 번에 받아요.'},
   {c:'render', t:'🏆 고퀄리티 CG 렌더 새 룩', h:'"고퀄리티 CG 렌더 (V-Ray·코로나 느낌)"가 새로운 클로버 룩으로 바뀌었어요. 모델의 카메라·형태·재질·색은 그대로 두고, 해 질 녘 측광(조명이 켜진 모델은 블루아워)과 태양 쪽 빛 퍼짐, 주인공 건물이 가장 밝고 선명하게, 거리에 따라 옅어지는 공기감, 따뜻한 하이라이트로 마감해요. 하늘 버튼은 구름 양만 정하고, [자동]이면 AI가 알아서 맞춰요.'},
