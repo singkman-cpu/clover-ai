@@ -1195,7 +1195,11 @@ function _leadForm(ctx){
     };
   }catch(e){ console.warn('[상담 신청] 창 열기 실패', e); }
 }
-function _falProxyCall(action, body, cb, errCb){
+/* 2026-11-19 신고(모바일 "렌더 걸고 새로고침하니 '실패: 프록시 요청 실패: Failed to fetch'"): 새로고침하는 순간 브라우저가 진행 중인 요청을 끊으면
+   그 끊김이 '실패'로 기록·저장돼서, 다시 열었을 때 이어서 만들지 않고 실패로 끝나 있었음 → 페이지를 떠나는 중의 끊김은 실패로 치지 않음.
+   또 모바일 통신이 잠깐 끊겨 생긴 같은 오류는 1번 자동 재시도 */
+var _clvLeaving=false; try{ window.addEventListener('pagehide', function(){ _clvLeaving=true; }); window.addEventListener('beforeunload', function(){ _clvLeaving=true; }); window.addEventListener('pageshow', function(){ _clvLeaving=false; }); }catch(e){}
+function _falProxyCall(action, body, cb, errCb, _netTry){
   if(!_supa){ errCb('로그인 시스템이 초기화되지 않았습니다.'); return; }
   _supa.auth.getSession().then(function(r){
     var token = r&&r.data&&r.data.session&&r.data.session.access_token;
@@ -1217,8 +1221,13 @@ function _falProxyCall(action, body, cb, errCb){
         var crn=gE('cr-n'); if(crn) crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
       }
       cb(x.d);
-    }).catch(function(e){ errCb('프록시 요청 실패: '+e.message); });
-  }).catch(function(e){ errCb('세션 확인 실패: '+e.message); });
+    }).catch(function(e){
+      if(_clvLeaving){ console.warn('[프록시] 페이지를 떠나는 중 끊김 — 실패로 기록 안 함', action); return; }
+      var _net=/Failed to fetch|Load failed|NetworkError|network/i.test(String(e&&e.message||''));
+      if(_net && !_netTry){ setTimeout(function(){ if(_clvLeaving) return; _falProxyCall(action, body, cb, errCb, 1); }, 2000); return; }
+      errCb('프록시 요청 실패: '+e.message);
+    });
+  }).catch(function(e){ if(_clvLeaving) return; errCb('세션 확인 실패: '+e.message); });
 }
 
 
