@@ -22348,6 +22348,10 @@ function mkAptSimpleDesign(p){
 function _autoRoomTryResumeInterrupted(spTab, isApt){
   var flagKey = isApt ? '_aptResumeAttempted' : '_genResumeAttempted';
   if(spTab[flagKey]) return;
+  /* 2026-11-19 신고("모바일에서 투시뷰 하나 렌더 걸고 새로고침하니 렌더가 멈췄다"): 새로고침하면 이 화면이 로그인 복원보다 먼저 그려져서
+     '손님' 저장칸을 보고 "이어갈 게 없다"며 다시는 확인 안 했음(그리고 시작 시 확인 쪽은 '이미 그 화면'이라 화면 쪽에 맡기고 끝) → 둘 다 안 해서 멈춤.
+     로그인이 아직 복원 안 됐으면 표시만 남기고 기다렸다가 다시 확인 */
+  if(!(typeof _supaUser!=='undefined' && _supaUser && _supaUser.id)){ var _rk=isApt?'_aptResumeWait':'_genResumeWait'; if(!spTab[_rk]){ spTab[_rk]=1; var _rt=0; (function _w(){ if(typeof _supaUser!=='undefined' && _supaUser && _supaUser.id){ spTab[_rk]=0; _autoRoomTryResumeInterrupted(spTab, isApt); return; } if(++_rt<40) setTimeout(_w, 1500); else spTab[_rk]=0; })(); } return; }
   spTab[flagKey] = true;
   var stateKey = isApt ? 'aptRoomState' : 'autoRoomState';
   if(spTab[stateKey] && spTab[stateKey].running) return; // 이미 진행 중이면(같은 탭 안이면) 손댈 필요 없음
@@ -22492,7 +22496,7 @@ function _arCheckInterruptedOnLoad(tries){
       if(!d || !d.selected || !d.selected.length || d.step==null || d.step>=d.selected.length){ next(k+1); return; }
       var st=spTab[isApt?'aptRoomState':'autoRoomState']; if(st && st.running) return;
       var onIt = G.wf==='spaceset' && !G._siteSetMode && (!!spTab.isAptSimpleMode===isApt);
-      if(onIt) return; // 이미 그 화면이면 화면 쪽 이어서 생성이 처리
+      if(onIt){ try{ _autoRoomTryResumeInterrupted(spTab, isApt); }catch(e){} return; } // 이미 그 화면이면 화면 쪽 이어서 생성(아직 안 했으면 지금 실행)
       try{ _showJobRecoveryBanner('🔄 창을 닫기 전에 진행 중이던 <b>'+(isApt?'아파트 컨셉':'공간 컨셉')+' 렌더링('+d.step+'/'+d.selected.length+')</b>을 이어서 진행할게요.<br><span style="font-size:11px;opacity:.8">남은 '+(d.selected.length-d.step)+'개 뷰를 순서대로 만들어요</span>', false); }catch(e){}
       setTimeout(function(){ try{ if(isApt) selectAptShortcut(); else selectSpaceShortcut('multiRoom'); }catch(e){ console.warn('[이어서 렌더링] 화면 이동 실패', e); } }, 2500);
     }).catch(function(){ next(k+1); });
