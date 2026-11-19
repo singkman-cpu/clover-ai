@@ -19336,7 +19336,8 @@ function _scExtVisDesc(spTab, typeName, input, cb){
 }
 // 2026-10-23 신고("실내 참고 10장 넘게·공간마다 넓고 복층도 있어서 실내는 100평인데, 건축 외관은 40평 정도로 나온다"): 그림 AI는 크기를 못 재므로
 // 비전 AI가 실내 사진마다 바닥 면적(㎡)·복층 여부를 추정 → 합계 연면적·층수·바닥 한 층 크기(가로×세로 m, 주차 차량 몇 대 폭)를 숫자로 계산해서 외관 프롬프트 맨 끝에 못박음(세트당 1번 계산, 캐시)
-var _PY_FALLBACK=[[/야외|옥상|중정|발코니|베란다|테라스|데크|자쿠지|바비큐|수영장/,0],[/거실|리빙/,40],[/주방|키친/,20],[/다이닝|식당/,16],[/안방|마스터|부부/,25],[/드레스|파우더/,8],[/욕실|화장실|욕조/,7],[/현관/,8],[/복도|계단/,12],[/서재|오피스/,14],[/시어터|짐|골프|플레이/,22]];
+var _OUT_FALLBACK=[[/수영장/,45],[/테라스|데크/,25],[/마당|정원|가든/,60],[/중정/,20],[/옥상|루프탑/,40],[/바비큐|야외주방/,15],[/자쿠지|스파/,6],[/발코니|베란다/,6]]; // 2026-11-19: 바깥 공간 보통 크기(대지 크기 계산용)
+var _PY_FALLBACK=[[/실내수영장/,60],[/차고|주차/,30],[/사우나/,8],[/와인|홈바|팬트리|세탁|다용도/,6],[/야외|옥상|중정|발코니|베란다|테라스|데크|자쿠지|바비큐|수영장/,0],[/거실|리빙/,40],[/주방|키친/,20],[/다이닝|식당/,16],[/안방|마스터|부부/,25],[/드레스|파우더/,8],[/욕실|화장실|욕조/,7],[/현관/,8],[/복도|계단/,12],[/서재|오피스/,14],[/시어터|짐|골프|플레이/,22]];
 function _scExtScale(spTab, typeName, input, cb){
   var done=false; function fin(){ if(done) return; done=true; cb(); }
   try{
@@ -19347,14 +19348,14 @@ function _scExtScale(spTab, typeName, input, cb){
     function apply(sc){
       if(sc && sc.m2>0){
         var floors=sc.floors, plate=Math.round(sc.m2/floors), w=Math.round(Math.sqrt(plate*1.5)), d=Math.max(6, Math.round(plate/w)), cars=Math.max(2, Math.round(w/2.6)), py=Math.round(sc.m2/3.3);
-        input.prompt=(input.prompt||'')+' 📏📏📏 BUILDING SIZE — MEASURED FROM THE '+sc.n+' INTERIOR PHOTOS OF THIS SET (final size rule, overrides any smaller impression): the rooms shown in the interior photos add up to about '+sc.m2+' m² of floor area (about '+py+' pyeong) including walls, stairs and corridors, so this house has '+floors+' above-ground storeys'+(sc.dbl?' with a double-height living space':'')+' and each storey is about '+plate+' m² — roughly '+w+' m wide and '+d+' m deep. On the street side the facade is about as wide as '+cars+' cars parked side by side, and the building also extends deep to the back (visible as side and rear wings in aerial and side views). A small '+Math.round(py*0.4)+'-pyeong-looking house is a failure — the building must clearly look this large next to its neighbours and the cars.'+(py>=45?' This is a LARGE house ('+py+' pyeong — far bigger than a typical small detached house): show long facades with many window bays, several connected volumes or wings, and a wide footprint; every room in the interior photos must fit inside it.':'')+' (Any "breathing room" or wider framing comes from moving the camera further away — never from shrinking the building itself.)';
+        input.prompt=(input.prompt||'')+' 📏📏📏 BUILDING SIZE — MEASURED FROM THE '+sc.n+' INTERIOR PHOTOS OF THIS SET (final size rule, overrides any smaller impression): the rooms shown in the interior photos add up to about '+sc.m2+' m² of floor area (about '+py+' pyeong) including walls, stairs and corridors, so this house has '+floors+' above-ground storeys'+(sc.dbl?' with a double-height living space':'')+' and each storey is about '+plate+' m² — roughly '+w+' m wide and '+d+' m deep. On the street side the facade is about as wide as '+cars+' cars parked side by side, and the building also extends deep to the back (visible as side and rear wings in aerial and side views). A small '+Math.round(py*0.4)+'-pyeong-looking house is a failure — the building must clearly look this large next to its neighbours and the cars.'+(py>=45?' This is a LARGE house ('+py+' pyeong — far bigger than a typical small detached house): show long facades with many window bays, several connected volumes or wings, and a wide footprint; every room in the interior photos must fit inside it.':'')+' (Any "breathing room" or wider framing comes from moving the camera further away — never from shrinking the building itself.)'+((sc.outs&&sc.outs.length)?(' 🌳 SITE AND OUTDOOR SPACES (the user gave a photo of each, so each must be built around this house at its real size, matching its photo): '+sc.outs.map(function(x){ return x.l+' about '+x.m2+' m²'; }).join(', ')+' — the whole plot is about '+sc.lot+' m² (about '+Math.round(sc.lot/3.3)+' pyeong), so leave real space for these outdoor areas around the building (front yard, garden and paths too) instead of a tight lot.'):'');
       }
       fin();
     }
     if(spTab._extScaleKey===key && spTab._extScale!==undefined){ apply(spTab._extScale); return; }
     if(typeof _falProxyCall!=='function' || typeof _proposalImgToB64!=='function'){ fin(); return; }
     setTimeout(fin, 40000);
-    var list=ints.slice(0,18), b64s=[], left=list.length; /* 2026-11-19: 12장 → 18장까지 모두 셈 */
+    var list=ints.slice(0,30), b64s=[], left=list.length; /* 2026-11-19: 12장 → 30장까지 모두 셈(공간이 20개 넘는 세트도 있음) */
     list.forEach(function(a,i){ _proposalImgToB64(a.img, function(b){ b64s[i]=b||null; if(--left===0) askAll(); }); });
     function askAll(){
       var batches=[]; for(var i=0;i<list.length;i+=6) batches.push(i);
@@ -19373,14 +19374,14 @@ function _scExtScale(spTab, typeName, input, cb){
         }, function(){ if(--pend===0) finish(); });
       });
       function finish(){
-        var byLabel={}, dbl=false, upper=false, n=0;
+        var byLabel={}, outs={}, dbl=false, upper=false, n=0;
         list.forEach(function(a,k){
           var lab=String(a.label||('r'+k)), o=res[k], m2=o?parseFloat(o.m2):NaN;
           var hit=_PY_FALLBACK.find(function(r){ return r[0].test(lab); }), fb=hit?hit[1]:14;
           if(!(m2>0 && m2<400)) m2=fb;
           else m2=Math.max(m2, fb*0.8); /* 2026-11-19 신고("실내 공간이 50~100평인데 투시도 건물이 너무 작다"): 비전 AI가 방을 작게 어림하는 경향 → 공간 종류별 보통 크기의 80% 밑으로는 안 내려가게 */
           if(o && o.double) dbl=true; if(o && o.upper) upper=true;
-          if(/야외|옥상|중정|발코니|베란다|테라스|데크|자쿠지|바비큐|야외수영장/.test(lab)) m2=0;
+          if(!/실내수영장/.test(lab) && /야외|옥상|중정|발코니|베란다|테라스|데크|자쿠지|바비큐|수영장|마당|정원|가든/.test(lab)){ var _oh=_OUT_FALLBACK.find(function(r){ return r[0].test(lab); }), _om=(o&&parseFloat(o.m2)>0&&parseFloat(o.m2)<1500)?Math.max(parseFloat(o.m2), (_oh?_oh[1]:20)*0.8):(_oh?_oh[1]:20); if(!outs[lab]) outs[lab]=_om; else outs[lab]=Math.max(outs[lab], _om); m2=0; } /* 바깥 공간은 건물 연면적에서 빼고 대지 크기에 더함 */
           var _rep=/침실|방|룸|욕실|화장실|게스트|아이|자녀|서재/.test(lab) && !/거실|주방|다이닝/.test(lab);
           if(byLabel[lab]===undefined) byLabel[lab]=m2; else if(_rep) byLabel[lab]+=m2*0.8; else byLabel[lab]=Math.max(byLabel[lab], m2); /* 같은 이름이라도 침실·욕실처럼 여러 개 있는 공간은 사진마다 더함(예전엔 '침실' 3장도 1개로 셈) */
           n++;
@@ -19390,9 +19391,10 @@ function _scExtScale(spTab, typeName, input, cb){
         if(/계단|2층|이층|다락|복층|로프트|메자닌|엘리베이터/.test(labels)) upper=true;
         var m2=Math.round(sum*1.45); // 벽·복도·계단·사진에 없는 욕실·다용도실 등 여유 (2026-11-19: 1.3 → 1.45, 실제 주택 전용→연면적 비율)
         var floors=Math.min(4, Math.max((upper||dbl)?2:1, Math.ceil(m2/230)));
-        var sc=m2>0?{m2:m2, floors:floors, dbl:dbl, n:n}:null;
+        var _outL=Object.keys(outs).map(function(l){ return {l:l, m2:Math.round(outs[l])}; }), _outSum=_outL.reduce(function(a,x){ return a+x.m2; },0);
+        var sc=m2>0?{m2:m2, floors:floors, dbl:dbl, n:n, outs:_outL, lot:Math.round((m2/floors)*1.7+_outSum*1.3)}:null;
         spTab._extScaleKey=key; spTab._extScale=sc;
-        console.log('[공간컨셉] 외관 규모 — 실내 '+n+'장 기준 연면적 약 '+m2+'㎡('+Math.round(m2/3.3)+'평), '+floors+'층');
+        console.log('[공간컨셉] 외관 규모 — 실내 '+n+'장 기준 연면적 약 '+m2+'㎡('+Math.round(m2/3.3)+'평), '+floors+'층'+(sc&&sc.outs.length?(', 바깥 공간 '+sc.outs.map(function(x){return x.l+' '+x.m2+'㎡';}).join(' · ')+', 대지 약 '+sc.lot+'㎡('+Math.round(sc.lot/3.3)+'평)'):''));
         if(!done) apply(sc);
       }
     }
@@ -61001,7 +61003,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
-  {c:'space', t:'📏 공간 컨셉 외관 규모 더 정확하게', h:'공간 컨셉 디자인에서 실내 참고 사진이 많을수록(50~100평) 투시도·조감도 건물도 그만큼 크게 나오게 고쳤어요. 실내 사진 18장까지 모두 세고, 침실·욕실처럼 여러 개인 공간은 각각 더하고, 방을 너무 작게 어림하지 않게 했어요. 45평 이상이면 "큰 집"으로 긴 외벽·여러 매스로 그려요.'},
+  {c:'space', t:'📏 공간 컨셉 외관 규모 더 정확하게', h:'공간 컨셉 디자인에서 실내 참고 사진이 많을수록(50~100평) 투시도·조감도 건물도 그만큼 크게 나오게 고쳤어요. 실내 사진 18장까지 모두 세고, 침실·욕실처럼 여러 개인 공간은 각각 더하고, 방을 너무 작게 어림하지 않게 했어요. 45평 이상이면 "큰 집"으로 긴 외벽·여러 매스로 그려요. 야외수영장·테라스·마당·중정 같은 바깥 공간 사진은 크기를 따로 재서 대지 크기에 넣고 건물 주변에 실제 크기로 만들어요.'},
   {c:'space', t:'💾 공간 컨셉 결과 새로고침에도 안 사라지게', h:'공간 컨셉 디자인에서 AI 결과를 받은 직후 바로 기록해 둬서, 점검·9:16 맞추는 중에 새로고침해도 결과가 사라지지 않아요. 새로고침 후 받아온 결과도 화면과 갤러리에 저장돼요(크레딧 재차감 없음).'},
   {c:'space', t:'🔄 공간 컨셉 첫 뷰 중 새로고침해도 이어서', h:'공간 컨셉 디자인 렌더링 중 첫 번째 뷰를 만들고 있을 때 새로고침하면 렌더가 끊기던 문제를 고쳤어요(특히 모바일). 이제 새로고침해도 자동으로 공간 컨셉 화면으로 돌아와 만들던 뷰의 결과를 받아오고 이어서 진행해요. 크레딧은 다시 차감되지 않아요.'},
   {c:'space', t:'🏠 공간 컨셉 투시도 9:16 개선', h:'공간 컨셉 디자인에서 건축 외관(투시뷰 등)을 9:16으로 만들 때 아래에 하늘 띠가 붙거나 두 장이 겹쳐 나오던 문제를 고쳤어요(세로 화면엔 격자 참고판을 보내지 않고, 그래도 두 장이 붙으면 큰 쪽 한 장만 잘라서 보여줘요). 이제 건물 전체가 잘 들어간 한 장으로 만든 뒤 진짜 9:16으로 맞춰 줘요. 실내 사진만 넣고 외관을 만들 때 거실 같은 실내가 나오면 AI가 알아보고 1번 자동으로 다시 만들어요(추가 크레딧 없음). 실내 사진 분석도 동시에 해서 기다리는 시간이 줄었어요. 또 실내 사진마다 창·문·테라스·중정 모양(세로로 긴 창, 천장 아래 띠창, 코너 통유리 등)을 AI가 읽어서 외관에 똑같은 모양으로 보이게 해요 — 같은 건물로 보이게. 투시도·조감도는 건물이 화면에서 잘리지 않게 카메라를 뒤로 빼거나 측면 코너에서 찍고, 화면에 꽉 차지 않게 주변 풍경·하늘 여유를 두어요. 야외수영장·테라스·중정·발코니·데크·마당처럼 바깥 공간 참고 사진을 넣으면 그 공간이 전부 들어간 건물로 만들어요.'},
