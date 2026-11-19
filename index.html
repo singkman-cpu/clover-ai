@@ -22392,6 +22392,7 @@ function _arPendingFor(isApt, idx){ var jobs=[]; try{ jobs=JSON.parse(localStora
 function _arResumeFrom(draft, isApt){
   var idx=draft.step, rec=(window._arRecovered||[]).filter(function(r){ return r.url && !!r.ar.isApt===!!isApt && r.ar.idx===idx; })[0];
   if(rec){ _arAdopt(!!isApt, idx, rec.url); return; }
+  var _pd=(draft.results||[])[idx]; if(_pd && _pd.pend){ _arAdopt(!!isApt, idx, _pd.pend); return; } // 받은 결과가 이미 있으면 그걸로
   if(!_arPendingFor(isApt, idx)){ _autoRoomGenerateStep(idx, isApt); return; }
   window._arWaiting={isApt:!!isApt, idx:idx, done:false};
   try{ _agedEnvToast('🔄 창을 닫을 때 만들던 「'+((draft.selected||[])[idx]||'')+'」 결과를 받아오는 중이에요 — 받으면 다음 뷰부터 이어서 만들어요'); }catch(e){}
@@ -22403,7 +22404,9 @@ function _arAdopt(isApt, idx, url){
   st.results=st.results||[]; st.results[idx]={url:url}; _autoRoomSaveProgress(st, sel, isApt, idx+1);
   var tn=sel[idx]||'';
   try{ if(_isExteriorViewType(tn)){ (spTab.autoRoomGenExtUrls=spTab.autoRoomGenExtUrls||[]).push(url); } else { (spTab.autoRoomGenIntUrls=spTab.autoRoomGenIntUrls||[]).push(url); } if(!spTab.autoRoomWindowAnchor) spTab.autoRoomWindowAnchor=url; }catch(e){}
-  try{ _agedEnvToast('✅ 「'+tn+'」 결과를 받아서 세트에 넣었어요 — 다음 뷰부터 이어서 만들어요'); }catch(e){}
+  try{ _showRoomResultInMain(null, url, tn, !!isApt, false); }catch(e){} // 2026-11-19: 받아온 결과를 화면·작업 기록에도 표시
+  try{ _saveResultToCloudGallery('spaceset', Date.now()+'', url, null, 'nano2', '', '', tn); }catch(e){} // 갤러리에도 저장(예전엔 세트에만 넣고 갤러리엔 안 남았음)
+  try{ _agedEnvToast('✅ 「'+tn+'」 결과를 받아서 세트·갤러리에 넣었어요 — 다음 뷰부터 이어서 만들어요'); }catch(e){}
   if(G.wf==='spaceset') renderSB();
   _autoRoomGenerateStep(idx+1, isApt);
 }
@@ -25226,6 +25229,7 @@ function _padExteriorTo916WithBlur(url, cb){
         falRun(_looseRefs.length ? (_looseModelBase+'/edit') : _looseModelBase, _candInput, function(d){
           var resultUrl=falExtractImageUrl(d);
           if(!resultUrl){ if(_arCi===0){ st.results[idx]={error:'이미지 URL을 찾지 못했습니다'}; _autoRoomSaveProgress(st, allTypes, isApt, idx+1); } _arAfterOneCandidate(); return; }
+          if(_arCi===0){ try{ st.results=st.results||[]; if(!(st.results[idx]&&st.results[idx].url)){ st.results[idx]={pend:resultUrl}; _autoRoomSaveProgress(st, allTypes, isApt, idx); } }catch(eP){} } /* 2026-11-19 신고("모바일 투시도 렌더된 게 자료가 안 남아있다"): AI 결과를 받은 직후(점검·9:16 맞추기 전)에 바로 기록 → 그 사이 새로고침해도 이 결과를 살려서 이어감(재차감 없음) */
           function _finishLoose(finalUrl){
             if(_extTall && !_finishLoose._c){ _finishLoose._c=1; var _stlK=gE('stl'); if(_stlK) _stlK.textContent='9:16으로 맞추는 중… ('+typeName+')'; _scCropTall(finalUrl, function(u){ _finishLoose(u||finalUrl); }); return; }
             var _tagLabel0 = _isAptForThisRun ? ((spTab.autoRoomAptPyeong?spTab.autoRoomAptPyeong+'평 ':'')+_aptClassifyRoom(typeName)) : typeName; // ⚠️ 버그 수정("이미지 위에 room:거실(판상형 특유의...) 처럼 긴 텍스트가 뜬다"): 아파트 간편모드의 typeName은 프롬프트용으로 아주 길고 상세한 설명이라, 그대로 태그(화면 배지)로 쓰면 저렇게 됨 — 태그·배지 표시용으로는 짧은 기본 방 이름만 쓰도록 분리함(실제 생성 프롬프트는 그대로 typeName 전체를 씀, 영향 없음). 요청 반영: 배지에 평수도 같이 보이게 앞에 붙임.
@@ -49064,7 +49068,7 @@ function _resumeActiveJobs(){
           G._chained['edit']=true;
           if(G.wf==='edit') renderSB();
         }
-        if(_supa&&_supaUser){
+        if(_supa&&_supaUser&&!j.ar){ // 공간 컨셉 세트 결과(j.ar)는 _arAdopt가 갤러리에 저장(중복 방지)
           try{
             var galleryId=recoveredItem.id+'';
             var filePath=_supaUser.id+'/'+jobWf+'/'+galleryId+'.jpg';
@@ -60984,6 +60988,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
+  {c:'space', t:'💾 공간 컨셉 결과 새로고침에도 안 사라지게', h:'공간 컨셉 디자인에서 AI 결과를 받은 직후 바로 기록해 둬서, 점검·9:16 맞추는 중에 새로고침해도 결과가 사라지지 않아요. 새로고침 후 받아온 결과도 화면과 갤러리에 저장돼요(크레딧 재차감 없음).'},
   {c:'space', t:'🔄 공간 컨셉 첫 뷰 중 새로고침해도 이어서', h:'공간 컨셉 디자인 렌더링 중 첫 번째 뷰를 만들고 있을 때 새로고침하면 렌더가 끊기던 문제를 고쳤어요(특히 모바일). 이제 새로고침해도 자동으로 공간 컨셉 화면으로 돌아와 만들던 뷰의 결과를 받아오고 이어서 진행해요. 크레딧은 다시 차감되지 않아요.'},
   {c:'space', t:'🏠 공간 컨셉 투시도 9:16 개선', h:'공간 컨셉 디자인에서 건축 외관(투시뷰 등)을 9:16으로 만들 때 아래에 하늘 띠가 붙거나 두 장이 겹쳐 나오던 문제를 고쳤어요(세로 화면엔 격자 참고판을 보내지 않고, 그래도 두 장이 붙으면 큰 쪽 한 장만 잘라서 보여줘요). 이제 건물 전체가 잘 들어간 한 장으로 만든 뒤 진짜 9:16으로 맞춰 줘요. 실내 사진만 넣고 외관을 만들 때 거실 같은 실내가 나오면 AI가 알아보고 1번 자동으로 다시 만들어요(추가 크레딧 없음). 실내 사진 분석도 동시에 해서 기다리는 시간이 줄었어요. 또 실내 사진마다 창·문·테라스·중정 모양(세로로 긴 창, 천장 아래 띠창, 코너 통유리 등)을 AI가 읽어서 외관에 똑같은 모양으로 보이게 해요 — 같은 건물로 보이게. 투시도·조감도는 건물이 화면에서 잘리지 않게 카메라를 뒤로 빼거나 측면 코너에서 찍고, 화면에 꽉 차지 않게 주변 풍경·하늘 여유를 두어요. 야외수영장·테라스·중정·발코니·데크·마당처럼 바깥 공간 참고 사진을 넣으면 그 공간이 전부 들어간 건물로 만들어요.'},
   {c:'space', t:'📐 공간 컨셉 세로 화면 구도 개선', h:'공간 컨셉 디자인에서 세로(9:16·3:4 등) 실내 뷰가 정면 한가운데서 찍은 듯 밋밋하게 나오던 것을, 건축 사진작가 구도로 바꿨어요(가로·세로 모두). 소실점을 한쪽으로 치우치거나 코너에서 비스듬히 찍고, 카메라는 앉은 눈높이(약 1~1.2m)·광각에 수직선은 곧게, 앞쪽 소파·의자가 화면 끝에 살짝 걸리고 창밖 풍경까지 깊이감 있게 보여요. 방마다 각도도 달라요.'},
