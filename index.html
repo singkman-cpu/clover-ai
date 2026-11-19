@@ -58256,6 +58256,19 @@ function bypassLogin(){
   if(crn)crn.textContent=(G.supaRole==='admin'?'무제한':G.cr.toLocaleString());
 }
 var _shortsVideosRestored=false;
+/* 2026-11-19 요청("갤러리 사진 비율대로 보여주면 안 되나?"): 4:3 네모로 잘라 보여주던 카드를 실제 사진 비율(9:16·16:9 등)대로.
+   정신없지 않게 핀터레스트처럼 세로 기둥(열)에 차곡차곡 — 순서는 왼쪽→오른쪽으로 번갈아 넣어서 최신이 맨 위 줄에 오게 */
+function _galFitCard(card, w, h){ try{ if(!(w>0&&h>0)) return; var r=Math.max(9/16, Math.min(21/9, w/h)); card.style.aspectRatio=String(r); }catch(e){} }
+function _galMasonry(grid){
+  try{
+    var cards=[].slice.call(grid.children).filter(function(c){ return c.classList && c.classList.contains('gal-card'); });
+    if(cards.length<2) return;
+    var W=grid.clientWidth||800, cw=W<700?150:240, N=Math.max(2, Math.floor((W-16+14)/(cw+14)));
+    grid.style.display='flex'; grid.style.alignItems='flex-start'; grid.style.gap='14px';
+    var cols=[]; for(var i=0;i<N;i++){ var c=document.createElement('div'); c.className='gal-col'; c.style.cssText='flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:14px'; grid.appendChild(c); cols.push(c); }
+    cards.forEach(function(card,i){ cols[i%N].appendChild(card); });
+  }catch(e){ console.warn('[갤러리 비율 배치]', e); }
+}
 function openPanel(id){
   _clearMaskEditOverlay(); // ⚠️ 버그 수정: 갤러리/즐겨찾기 열 때도 AI편집 브러시 오버레이가 화면에 남지 않게 정리
   G._curGalleryId = id; // renderGalleryGrid에서 즐겨찾기/삭제 후 재오픈 시 사용
@@ -58974,7 +58987,7 @@ function renderGalleryGrid(items){
     var isVid=item.wf==='video'||item.wf==='shorts'||String(src).includes('.mp4')||String(src).includes('.webm');
     if(isVid){
       var v=document.createElement('video');
-      v.muted=true;v.preload='none';v.style.cssText='width:100%;height:100%;object-fit:cover';
+      v.muted=true;v.preload='none';v.style.cssText='width:100%;height:100%;object-fit:cover'; v.addEventListener('loadedmetadata', function(){ _galFitCard(card, v.videoWidth, v.videoHeight); });
       // ⚠️ 버그 수정(갤러리 버벅임의 핵심 원인): 사진은 loading='lazy'로 화면에 보일 때만
       // 불러오게 돼있었는데, 영상은 그런 브라우저 기능이 없어서(video엔 loading='lazy'가
       // 안 먹힘) v.src를 카드 만들자마자 즉시 할당해왔음 — 그러면 화면 밖(스크롤 안 한 부분)에
@@ -58992,7 +59005,7 @@ function renderGalleryGrid(items){
     } else {
       var img=document.createElement('img');
       img.src=src;img.loading='lazy';img.decoding='async';img.style.cssText='width:100%;height:100%;object-fit:cover;opacity:0'; // 화면에 보이는 카드만 로드 (최대 200개를 한꺼번에 안 받음)
-      img.onload=function(){ img.style.opacity='1'; };
+      img.onload=function(){ img.style.opacity='1'; _galFitCard(card, img.naturalWidth, img.naturalHeight); };
       img.onerror=function(){
         // 클라우드 URL이 다른 기기에서 안 열리는 경우(주로 Supabase 저장소 버킷이 비공개일 때) —
         // 깨진 이미지 아이콘 대신 원인을 알 수 있는 안내를 보여줌.
@@ -59191,6 +59204,7 @@ function renderGalleryGrid(items){
     grid.appendChild(card);
   });
   hs.appendChild(grid);
+  _galMasonry(grid);
   // ⚠️ 요청 반영: 드래그로 영역을 그려서 그 안에 걸치는 카드들을 한 번에 선택함(마우스를 누른
   // 지점이 카드가 아니라 빈 그리드 배경일 때만 시작 — 카드 위에서 드래그하면 오작동하므로 제외).
   (function(){
@@ -61004,6 +61018,7 @@ var GUIDE_YT_CHANNEL = 'https://www.youtube.com/@cloverai_kr/playlists';
 /* 2026-11-15: adm:1 항목(아직 회원에게 안 연 기능)은 관리자에게만 가이드·AI 상담에 보여 줌 */
 function _cnfList(){ var adm=false; try{ adm=(G.supaRole==='admin'); }catch(e){} return CLOVER_NEW_FEATURES.filter(function(f){ return adm || !f.adm; }); }
 var CLOVER_NEW_FEATURES=[
+  {c:'gallery', t:'🖼 갤러리 사진 비율 그대로', h:'갤러리에서 사진을 네모로 자르지 않고 실제 비율(세로 9:16·가로 16:9 등) 그대로 보여줘요. 핀터레스트처럼 세로 줄에 차곡차곡 쌓이고, 최신 사진이 맨 윗줄에 와요. 모바일은 2줄로 보여요.'},
   {c:'space', t:'📏 공간 컨셉 외관 규모 더 정확하게', h:'공간 컨셉 디자인에서 실내 참고 사진이 많을수록(50~100평) 투시도·조감도 건물도 그만큼 크게 나오게 고쳤어요. 실내 사진 18장까지 모두 세고, 침실·욕실처럼 여러 개인 공간은 각각 더하고, 방을 너무 작게 어림하지 않게 했어요. 45평 이상이면 "큰 집"으로 긴 외벽·여러 매스로 그려요. 야외수영장·테라스·마당·중정 같은 바깥 공간 사진은 크기를 따로 재서 대지 크기에 넣고 건물 주변에 실제 크기로 만들어요.'},
   {c:'space', t:'💾 공간 컨셉 결과 새로고침에도 안 사라지게', h:'공간 컨셉 디자인에서 AI 결과를 받은 직후 바로 기록해 둬서, 점검·9:16 맞추는 중에 새로고침해도 결과가 사라지지 않아요. 새로고침 후 받아온 결과도 화면과 갤러리에 저장돼요(크레딧 재차감 없음).'},
   {c:'space', t:'🔄 공간 컨셉 첫 뷰 중 새로고침해도 이어서', h:'공간 컨셉 디자인 렌더링 중 첫 번째 뷰를 만들고 있을 때 새로고침하면 렌더가 끊기던 문제를 고쳤어요(특히 모바일). 이제 새로고침해도 자동으로 공간 컨셉 화면으로 돌아와 만들던 뷰의 결과를 받아오고 이어서 진행해요. 크레딧은 다시 차감되지 않아요.'},
@@ -63430,7 +63445,8 @@ function renderMobGallery(type){
       (type==='favs'?'⭐ 즐겨찾기한 이미지가 없습니다':'📷 생성된 이미지가 없습니다')+
     '</div>';
   } else {
-    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+    html+='<div style="display:flex;gap:8px;align-items:flex-start">'; var _mgCols=['','']; var _mgI=0; /* 2026-11-19: 사진 비율대로 2열 배치 */
+    var _mgHtml=html; html='';
     items.forEach(function(item){
       var isW3D=item.wf==='world3d';
       // VR 투어 결과(item.result)는 이미지가 아니라 marble.worldlabs.ai 링크라서 그대로 쓰면 깨진다 → 썸네일 사용
@@ -63439,7 +63455,7 @@ function renderMobGallery(type){
       var isFav=item.fav?true:false;
       var isPublic=!!item.communityPostId;
       html+='<div style="position:relative;border-radius:8px;overflow:hidden;background:var(--c2)'+(isPublic?';box-shadow:0 0 0 2px var(--ac,#00e5cc) inset':'')+'" onclick="mobGalleryItem(this.dataset.id)" data-id="'+item.id+'">' +
-        '<img src="'+url+'" style="width:100%;aspect-ratio:1;object-fit:cover;display:block" loading="lazy">'+
+        '<img src="'+url+'" style="width:100%;height:auto;min-height:60px;max-height:520px;object-fit:cover;display:block" loading="lazy">'+
         (isW3D?'<div style="position:absolute;top:4px;left:4px;background:var(--ac);color:#000;font-size:9px;font-weight:800;border-radius:5px;padding:2px 6px;z-index:2;display:flex;align-items:center;gap:2px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:9px;height:9px"><rect x="1" y="6" width="22" height="12" rx="6"/><circle cx="7.5" cy="12" r="2.2"/><circle cx="16.5" cy="12" r="2.2"/><path d="M9.5 12h5"/></svg>VR</div>':'')+
         (isPublic?'<div style="position:absolute;top:4px;right:4px;background:var(--ac);color:#03211d;font-size:8.5px;font-weight:800;border-radius:5px;padding:2px 6px;z-index:2;display:flex;align-items:center;gap:2px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:8px;height:8px"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3c2.5 2.5 4 6 4 9s-1.5 6.5-4 9c-2.5-2.5-4-6-4-9s1.5-6.5 4-9z"/></svg>공개중</div>':'')+
         '<div style="position:absolute;bottom:0;left:0;right:0;padding:4px 6px;background:linear-gradient(transparent,rgba(0,0,0,.7));display:flex;justify-content:space-between;align-items:center">'+
@@ -63452,8 +63468,10 @@ function renderMobGallery(type){
           '</div>'+
         '</div>'+
       '</div>';
+      _mgCols[_mgI++%2]+=html; html='';
     });
-    html+='</div>';
+    var _mgC='<div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:8px">';
+    html=_mgHtml+_mgC+_mgCols[0]+'</div>'+_mgC+_mgCols[1]+'</div></div>';
   }
 
   panel.innerHTML=html;
